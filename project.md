@@ -90,6 +90,8 @@ This consolidates every feature named across the idea note, the three research r
 - Bring-your-own-model, swap freely, route by task type with explicit per-stage policies (planning / coding / review / judge steps).
 - Dynamic routing layer across providers; lets teams keep their existing observability stack rather than forcing migration.
 - Designed to sit above existing agent frameworks/coding agents rather than replace them.
+- To support running locally and only the cloud as orchistrated process.
+- Should be able to use claude code, codex cli, jules cli, antigravity cli, etc
 
 5.2 Durable execution & long-running session management
 - Maintains agent state, memory, and task context across long execution windows (minutes → hours → days → weeks).
@@ -130,6 +132,7 @@ This consolidates every feature named across the idea note, the three research r
 - Drives agents toward shipping entire, production-ready applications — explicitly including brownfield maintenance, multi-repo feature work, migrations, and long-horizon builds, not just greenfield prototypes.
 - Targets the gap none of the three competitor camps own: "did the agent build and ship a maintainable application end-to-end with verified behavior?"
 - Reliable and redundant execution, in case of failure of existing exercise the process can fluently be restarted to continue working on the exercise.
+- Underlying model token awareness and intelligent pace of work assessment, both during project planning AND during execution. Thoughtfully pacing the work is key to ensure an optimal balance between token efficiency, speed, and quality and project completion without unnecessary token waste or redundant work. This can be used to decide how many changes/features to include in a single run, how many tests to run, how many checkpoints to create, etc. This is also important for longer running sessions where the agent can decide to take a break and resume work later without losing progress.
 
 5.9 Orchestrator self-evaluation & process metrics (from the supplementary note)
 - Checkpoint notifications: notify the user to review checkpoints at Agent-as-a-Judge milestones.
