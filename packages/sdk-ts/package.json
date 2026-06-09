@@ -1,0 +1,27 @@
+{
+  "name": "@chikory/sdk",
+  "version": "0.0.1",
+  "description": "Vendor-neutral SDK for long-running software agents with durable execution and Agent-as-a-Judge",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+    }
+  },
+  "scripts": {
+    "build": "tsc",
+    "test": "node --experimental-vm-modules node_modules/.bin/jest",
+    "lint": "eslint src",
+    "typecheck": "tsc --noEmit"
+  },
+  "keywords": ["llm", "agents", "orchestration", "durable-execution", "agent-judge"],
+  "license": "MIT",
+  "devDependencies": {
+    "typescript": "^5.4.0",
+    "@types/node": "^20.0.0"
+  },
+  "dependencies": {}
+}

@@ -1,0 +1,58 @@
+# Dependencies
+node_modules/
+.pnp
+.pnp.js
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.env
+
+# Build output
+dist/
+build/
+*.js.map
+*.d.ts.map
+
+# Environment / secrets
+.env
+.env.local
+.env.*.local
+*.pem
+*.key
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Editors
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# TypeScript
+*.tsbuildinfo
+
+# Python
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+htmlcov/
+.coverage
+
+# Temporal
+.temporal/
+
+# Logs
+*.log
+logs/
+
+# Test artifacts
+test-results/
+coverage/
+
+# Benchmark artifacts
+benchmarks/runs/
+benchmarks/results/*.json
