@@ -20,6 +20,14 @@ export {
   type ProviderRequest,
   type ProviderResponse,
 } from "./providers/index.js";
+export { createRouter, type RetryPolicy, type RouterOptions } from "./router.js";
+export {
+  getTracer,
+  recordLLMCallSpan,
+  SPAN_LLM_CALL,
+  TRACER_NAME,
+  type LLMCallSpanInput,
+} from "./otel.js";
 export {
   DEFAULT_CADENCE,
   DEFAULT_MAX_STEPS,
