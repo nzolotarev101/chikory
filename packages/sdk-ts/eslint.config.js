@@ -2,7 +2,8 @@ import eslint from "@eslint/js";
 import tseslint from "typescript-eslint";
 
 export default tseslint.config(
-  { ignores: ["dist/"] },
+  // fake-bins are executable CommonJS subprocess fixtures, not lib code.
+  { ignores: ["dist/", "test/executors/fake-bins/"] },
   eslint.configs.recommended,
   ...tseslint.configs.recommended,
   {

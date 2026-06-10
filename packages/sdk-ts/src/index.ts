@@ -29,6 +29,20 @@ export {
   type LLMCallSpanInput,
 } from "./otel.js";
 export {
+  createLocalArtifactStore,
+  createMemoryArtifactStore,
+  MAX_SUMMARY_CHARS,
+} from "./artifacts/index.js";
+export {
+  assertGitWorkspace,
+  captureWorkspaceDiff,
+  renderStepPrompt,
+  runCliStep,
+  SPAN_STEP,
+  type CliStepOptions,
+  type ParsedCliResult,
+} from "./executors/index.js";
+export {
   DEFAULT_CADENCE,
   DEFAULT_MAX_STEPS,
   DEFAULT_SCORING_METHOD,

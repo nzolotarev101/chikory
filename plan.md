@@ -121,7 +121,7 @@ Five parallel lanes after WP-002/WP-005 land. Lane docs contain full technical d
 
 | WP | Title | Tag | Depends | Acceptance criteria |
 |---|---|---|---|---|
-| WP-111 | `ExecutorAdapter` interface + step contract | 🔴 | WP-002 | A "step" = one bounded executor invocation producing a `StepRecord` (workspace diff, tool summary, tokens, terminal state). Contract doc-tested; this is the unit the journal and judge operate on. |
+| WP-111 | `ExecutorAdapter` interface + step contract | 🔴 | WP-002 | ✅ **Done** — shared CLI-step machinery (`runCliStep`: bounded subprocess, diff+transcript artifacts, explicit SUCCESS/FAILED, `chikory.step` span), minimal local-FS artifact store (artifacts.md P1 slice), adapter conformance suite (5 properties + span assertion), contract↔doc drift test. |
 | WP-112 | Claude Code headless adapter | 🔴 | WP-111 | Drives `claude -p` with turn caps in a sandboxed workspace; captures diff, cost, transcript pointer; emits StepRecord; handles agent-hang via timeout → FAILED. Integration test: completes a 3-step toy task. |
 | WP-113 | Codex CLI adapter | 🟢 | WP-112 | Same conformance test suite as WP-112 passes (adapter conformance suite is part of WP-111). Stretch goal — may slip to P2 without blocking exit gate. |
 

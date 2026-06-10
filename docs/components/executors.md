@@ -36,6 +36,7 @@ export interface StepRecord {
   toolCalls: number;
   tokens: { input: number; output: number };
   costUsd: number;
+  costEstimated: boolean;          // CLIs without exact cost reporting (ADR-003)
   durationMs: number;
   transcriptRef: ArtifactRef;    // full raw transcript, stored outside context (CM-3 pattern from day 1)
   failure?: { reason: string; retriable: boolean };
@@ -45,6 +46,10 @@ export interface StepRecord {
 ### Conformance suite (part of WP-111)
 
 Every adapter must pass the same suite: (1) completes a 3-step toy task; (2) respects `maxSeconds` (hang → killed → FAILED, workspace intact); (3) never writes outside `workspaceDir`; (4) `StepRecord` fields populated (cost may be estimated; flag `costEstimated`); (5) FAILED on nonzero exit with stderr captured. This is what makes adapters 🟢 mechanical work after the first one.
+
+Implementation: `test/executors/conformance.ts` registers the suite for any adapter, plus a `chikory.step` span assertion (CONTRACTS.md §8) via in-memory exporter. Wire-level behaviors (hang, crash, error events) run against a fake CLI fixture (`test/executors/fake-bins/`) — a transport-level fake like the router's fake HTTP servers, not an LLM mock; each adapter additionally has a gated `@e2e` block driving the **real** binary through the toy task (`CHIKORY_E2E_CLAUDE=1` / `CHIKORY_E2E_CODEX=1`).
+
+`maxSeconds` is enforced as a **wall-clock cap** on the whole invocation (covers both hangs and chatty-but-stuck agents): overrun → SIGTERM, then SIGKILL after a grace window → FAILED(retriable: true). Evidence (diff + transcript artifacts) is captured even on failure — the runner needs the partial diff to decide reset-vs-retry (FA-2).
 
 ## Claude Code adapter (WP-112)
 
