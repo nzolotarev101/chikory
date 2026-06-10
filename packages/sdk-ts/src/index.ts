@@ -13,6 +13,7 @@ export {
   createAnthropicAdapter,
   createGeminiAdapter,
   createOpenAIAdapter,
+  createOpenAICompatAdapter,
   ProviderCallError,
   type AdapterOptions,
   type ProviderAdapter,

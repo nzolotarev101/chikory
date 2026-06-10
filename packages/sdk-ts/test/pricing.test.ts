@@ -4,6 +4,7 @@ import { computeCostUsd, lookupPricing, PRICE_TABLE, PRICING_VERSION } from "../
 import { createAnthropicAdapter } from "../src/providers/anthropic.js";
 import { createGeminiAdapter } from "../src/providers/gemini.js";
 import { createOpenAIAdapter } from "../src/providers/openai.js";
+import { createOpenAICompatAdapter } from "../src/providers/openai-compat.js";
 
 describe("pricing (WP-101)", () => {
   it("is versioned", () => {
@@ -40,5 +41,11 @@ describe("adapter construction (WP-101)", () => {
     expect(() => createAnthropicAdapter({ env: {} })).toThrow(/ANTHROPIC_API_KEY/);
     expect(() => createOpenAIAdapter({ env: {} })).toThrow(/OPENAI_API_KEY/);
     expect(() => createGeminiAdapter({ env: {} })).toThrow(/GEMINI_API_KEY/);
+    expect(() => createOpenAICompatAdapter({ env: {} })).toThrow(/OPENAI_COMPAT_BASE_URL/);
+  });
+
+  it("openai-compat accepts explicit baseUrl without env (WP-102)", () => {
+    const adapter = createOpenAICompatAdapter({ env: {}, baseUrl: "http://localhost:11434" });
+    expect(adapter.provider).toBe("openai-compat");
   });
 });

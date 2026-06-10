@@ -8,6 +8,7 @@ import { describe, expect, it } from "vitest";
 import { createAnthropicAdapter } from "../src/providers/anthropic.js";
 import { createGeminiAdapter } from "../src/providers/gemini.js";
 import { createOpenAIAdapter } from "../src/providers/openai.js";
+import { createOpenAICompatAdapter } from "../src/providers/openai-compat.js";
 import type { ProviderAdapter } from "../src/providers/provider.js";
 import { computeCostUsd, lookupPricing } from "../src/pricing.js";
 
@@ -16,6 +17,8 @@ const CASES: Array<{
   envVar: string;
   model: string;
   make: () => ProviderAdapter;
+  /** Open models (openai-compat) have no static price row — cost may be $0. */
+  pricedModel?: boolean;
 }> = [
   {
     envVar: "ANTHROPIC_API_KEY",
@@ -32,13 +35,26 @@ const CASES: Array<{
     model: "gemini-2.5-flash",
     make: () => createGeminiAdapter(),
   },
+  {
+    // WP-102: same suite against a configurable baseUrl (Ollama/vLLM —
+    // verified manually; set both env vars to run locally).
+    envVar: "OPENAI_COMPAT_BASE_URL",
+    model: process.env.OPENAI_COMPAT_MODEL ?? "llama3.2",
+    make: () => createOpenAICompatAdapter(),
+    pricedModel: false,
+  },
 ];
 
 /**
  * Shared assertions run identically against every adapter — this is the
  * conformance contract new adapters (WP-102, WP-113…) must pass.
  */
-export function conformanceSuite(name: string, model: string, make: () => ProviderAdapter): void {
+export function conformanceSuite(
+  name: string,
+  model: string,
+  make: () => ProviderAdapter,
+  pricedModel = true,
+): void {
   it(`${name}: returns content + token counts @integration`, async () => {
     const adapter = make();
     const result = await adapter.complete({
@@ -50,8 +66,12 @@ export function conformanceSuite(name: string, model: string, make: () => Provid
     expect(result.tokens.input).toBeGreaterThan(0);
     expect(result.tokens.output).toBeGreaterThan(0);
     // Cost mandatory on every call (RT-11 acceptance).
-    expect(lookupPricing(model)).toBeDefined();
-    expect(computeCostUsd(model, result.tokens)).toBeGreaterThan(0);
+    if (pricedModel) {
+      expect(lookupPricing(model)).toBeDefined();
+      expect(computeCostUsd(model, result.tokens)).toBeGreaterThan(0);
+    } else {
+      expect(computeCostUsd(model, result.tokens)).toBeGreaterThanOrEqual(0);
+    }
   }, 60_000);
 
   it(`${name}: structured output returns parseable JSON @integration`, async () => {
@@ -72,8 +92,8 @@ export function conformanceSuite(name: string, model: string, make: () => Provid
   }, 60_000);
 }
 
-for (const { envVar, model, make } of CASES) {
+for (const { envVar, model, make, pricedModel } of CASES) {
   describe.skipIf(!process.env[envVar])(`adapter conformance: ${envVar}`, () => {
-    conformanceSuite(envVar, model, make);
+    conformanceSuite(envVar, model, make, pricedModel);
   });
 }
