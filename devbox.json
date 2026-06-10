@@ -1,0 +1,22 @@
+{
+  "$schema": "https://raw.githubusercontent.com/jetify-com/devbox/0.17.0/.schema/devbox.schema.json",
+  "packages": [
+    "nodejs@22",
+    "pnpm@latest",
+    "python@3.11",
+    "uv@latest",
+    "ruff@latest",
+    "temporal-cli@latest"
+  ],
+  "shell": {
+    "init_hook": [],
+    "scripts": {
+      // Canonical task entry points — all humans, agents, and CI use these.
+      // WP-003 (CI) and WP-004 (dev env) wire the real commands; keep this file the single source.
+      "temporal-dev": "temporal server start-dev",
+      "lint": "echo 'wired in WP-003: pnpm -r lint && ruff check packages/sdk-py'",
+      "test": "echo 'wired in WP-003: pnpm -r test && (cd packages/sdk-py && uv run pytest)'",
+      "smoke": "echo 'wired in WP-004: hello-world Temporal workflow'"
+    }
+  }
+}

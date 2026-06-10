@@ -8,6 +8,16 @@ Chikory is a vendor-neutral orchestration control plane for long-running softwar
 
 Read `project.md` for the full spec. Read `CLAUDE.md` for working conventions.
 
+## Dev environment — devbox ONLY (hard rule)
+
+Every project task runs inside [devbox](https://www.jetify.com/devbox) — build, lint, test, Temporal, benchmarks, everything.
+
+- `devbox shell` to enter, or `devbox run <script>` / `devbox run -- <command>` for one-offs
+- Canonical scripts are defined in `devbox.json` (`devbox run test`, `devbox run lint`, `devbox run temporal-dev`)
+- **Never** call host toolchains directly (`pnpm`, `node`, `python`, `pytest`, `ruff`, `temporal`) — versions are pinned only in `devbox.json`
+- Need a new tool? `devbox add <pkg>` and commit the updated `devbox.json` + `devbox.lock`; no global installs
+- CI runs the same devbox scripts; commands not expressed as devbox scripts are not supported
+
 ## Repo structure
 
 ```
@@ -64,15 +74,24 @@ Example: `feat(router): add Gemini provider with retry backoff`
 4. **Terminal states in tool responses**: every tool must return explicit SUCCESS/FAILED to prevent infinite loops
 5. **No secrets in code**: API keys via env only; never hardcoded
 
-## Architecture decisions in progress
+## Architecture decisions
 
-See `docs/spec/` for ADRs. Open questions:
-- Primary durable execution substrate: Temporal vs. LangGraph checkpointers
-- Judge scoring: pointwise rubric vs. pairwise comparison (default)
+See `docs/spec/` for ADRs. Settled:
+- ADR-001: durable substrate = **Temporal** (behind `DurableRunner` interface)
+- ADR-002: judge = different provider family; pointwise binary rubric + CoT by default
+- ADR-003: MVP executor = wrapped CLI coding agents (Claude Code headless first)
+
+Open:
 - First target segment: indie devs vs. AI-native startups vs. enterprise
 
 ## Reference
 
+- Master plan (what to build, work packages): `plan.md`
+- How to pick up a work package: `docs/TASK-PROTOCOL.md`
+- Requirements traceability: `docs/REQUIREMENTS.md`
+- Architecture: `docs/ARCHITECTURE.md`; component specs: `docs/components/`
+- Frozen interfaces: `docs/spec/CONTRACTS.md`; task.yaml: `docs/spec/task-spec.md`; journal format: `docs/spec/journal-format.md`
+- Threat model: `docs/SECURITY.md`; product/pricing: `docs/PRODUCT.md`; terms: `docs/GLOSSARY.md`
 - Full product spec: `project.md`
 - Working conventions: `CLAUDE.md`
 - Benchmark: `benchmarks/README.md` (to be created in Stage 1)

@@ -1,7 +1,7 @@
 # ADR-001: Durable Execution Substrate
 
-**Status**: Open  
-**Date**: 2026-06-09
+**Status**: Accepted (Temporal)  
+**Date**: 2026-06-09 (accepted 2026-06-09 during master-plan synthesis — see `plan.md` WP-004)
 
 ## Context
 
@@ -17,7 +17,9 @@ Stage 1 requires wrapping the agent loop as a durable, journaled workflow. Two c
 
 ## Decision
 
-TBD. Lean: **Temporal** for Stage 1 (better deterministic replay guarantees, broader production evidence). Evaluate LangGraph checkpointers for Stage 2 if Temporal adds friction for solo-dev users.
+**Temporal** for Stage 1: better deterministic replay guarantees, broader production evidence, and the dev server (`devbox run temporal-dev`, temporal-cli pinned in `devbox.json`) keeps local-first friction acceptable. The substrate hides behind the `DurableRunner` interface (frozen in WP-002) so it can be swapped.
+
+**Revisit trigger**: if dogfood/early-user feedback shows Temporal setup is the top onboarding friction by end of Phase 2, evaluate LangGraph checkpointers or a lighter `DurableRunner` implementation. Avoid the "not another LangChain" perception cost unless the friction evidence is strong.
 
 ## Consequences
 

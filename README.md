@@ -28,7 +28,7 @@ Root causes:
 
 ## Status
 
-Stage 1 — pre-MVP. See [project.md](./project.md) for full spec.
+Stage 1 — pre-MVP. See [project.md](./project.md) for the full spec and **[plan.md](./plan.md) for the master plan** (MVP cutline, phases, work packages).
 
 ## Repo layout
 
@@ -40,8 +40,16 @@ docs/spec/               Architecture decision records
 benchmarks/              DevAI-extended benchmark suite
 ```
 
+## Development
+
+All tasks run via [devbox](https://www.jetify.com/devbox) — the only prerequisite. `devbox shell` to enter the pinned toolchain; canonical scripts: `devbox run test` / `devbox run lint` / `devbox run temporal-dev`. Host-installed toolchains are unsupported.
+
 ## For contributors and AI agents
 
+- Start here: [`plan.md`](./plan.md) (what to build) → [`docs/TASK-PROTOCOL.md`](./docs/TASK-PROTOCOL.md) (how to pick up a work package)
+- [`docs/ARCHITECTURE.md`](./docs/ARCHITECTURE.md) — system shape; [`docs/components/`](./docs/components/) — per-component technical specs
+- [`docs/REQUIREMENTS.md`](./docs/REQUIREMENTS.md) — every spec requirement traced to a work package
+- [`docs/spec/CONTRACTS.md`](./docs/spec/CONTRACTS.md) — frozen core interfaces; [`docs/SECURITY.md`](./docs/SECURITY.md) — threat model; [`docs/PRODUCT.md`](./docs/PRODUCT.md) — pricing/GTM/enterprise readiness; [`docs/GLOSSARY.md`](./docs/GLOSSARY.md) — terms
 - Read `AGENTS.md` for working conventions and invariants
 - Read `CLAUDE.md` for Claude Code–specific guidance
 - Full product spec: `project.md`

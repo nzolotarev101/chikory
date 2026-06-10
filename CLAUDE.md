@@ -44,6 +44,16 @@ benchmarks/     DevAI-extended benchmark suite
 - Judge uses structurally different model family from executor (bias mitigation)
 - Vendor-neutral: no provider lock-in anywhere in core path
 
+## Dev environment — devbox ONLY
+
+All project tasks (build, lint, test, run, Temporal, scripts) run **inside devbox** — never against host-installed toolchains.
+
+- Enter the environment: `devbox shell` — or prefix one-offs: `devbox run <script>` / `devbox run -- <command>`
+- Canonical task entry points live in `devbox.json` `shell.scripts` (e.g., `devbox run test`, `devbox run lint`, `devbox run temporal-dev`)
+- Never invoke `pnpm`, `node`, `python`, `pytest`, `ruff`, `temporal`, etc. directly on the host — toolchain versions are pinned in `devbox.json`, host versions are not supported
+- Adding a tool = `devbox add <pkg>` (updates `devbox.json` + lock), never a global install
+- CI uses the same `devbox run` scripts — if it isn't runnable via devbox, it doesn't exist
+
 ## Working conventions
 
 - TypeScript: strict, ESM, named exports, no default exports in lib code
@@ -62,6 +72,7 @@ benchmarks/     DevAI-extended benchmark suite
 
 ## Do not
 
+- Run project commands outside devbox (no host pnpm/node/python/temporal)
 - Add abstractions beyond current stage requirements
 - Mock the LLM layer in integration tests (masks real failure modes)
 - Hardcode any provider API keys
