@@ -4,7 +4,7 @@
 > This is the single source of truth for **what we build, in what order, and why**.
 > Spec: [`project.md`](project.md) · Requirements matrix: [`docs/REQUIREMENTS.md`](docs/REQUIREMENTS.md) · Architecture: [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) · How to pick up work: [`docs/TASK-PROTOCOL.md`](docs/TASK-PROTOCOL.md)
 
-**Status**: Phase 0 in progress · **Plan date**: 2026-06-09 · **Stage 1 deadline (per spec §10)**: ~2026-09-07 (90 days)
+**Status**: Phase 0 complete (2026-06-10) — P1 lanes unblocked · **Plan date**: 2026-06-09 · **Stage 1 deadline (per spec §10)**: ~2026-09-07 (90 days)
 
 ---
 
@@ -96,10 +96,10 @@ Goal: nothing in P1 is blocked on tooling, contracts, or undecided architecture.
 | WP | Title | Tag | Depends | Deliverable & acceptance criteria |
 |---|---|---|---|---|
 | WP-001 | Repo scaffold | 🟢 | — | ✅ **Done** (`f9bfab9`) |
-| WP-002 | Contracts v1 | 🟡 | — | Transcribe [`docs/spec/CONTRACTS.md`](docs/spec/CONTRACTS.md) into `packages/sdk-ts/src/types.ts` (full interface set is pre-designed there — this WP is transcription + doc-comments + fixtures, downgraded from 🔴). AC: `tsc --noEmit` clean via devbox; contracts fixtures (`CONTRACTS.md §10`) round-trip; reviewed against REQUIREMENTS.md. |
-| WP-003 | CI pipeline | 🟢 | WP-004 | GitHub Actions: TS lint+typecheck+test, Py ruff+pyright+pytest, on PR — **all invoked as `devbox run` scripts** (CI and local run the identical commands). AC: red build blocks merge; wire real commands into `devbox.json` `lint`/`test` scripts. |
-| WP-004 | Dev environment (devbox) + substrate | 🟡 | — | ADR-001 → Temporal (done). `devbox.json` is the **only** supported toolchain (node, pnpm, python, uv, ruff, temporal-cli pinned); all task entry points are devbox scripts. AC: `devbox run smoke` runs a hello-world Temporal workflow (via `devbox run temporal-dev`) on a clean machine with only devbox installed. |
-| WP-005 | Task spec format | 🟢 | WP-002 | Implement [`docs/spec/task-spec.md`](docs/spec/task-spec.md): zod parser + validation rules from `CONTRACTS.md §9` (downgraded from 🟡 — schema pre-designed). AC: valid/invalid fixtures round-trip; each validation rule has a failing fixture. |
+| WP-002 | Contracts v1 | 🟡 | — | ✅ **Done** — CONTRACTS.md transcribed into `types.ts` + strict zod schemas; 25 valid / 14 invalid shared fixtures in `fixtures/contracts/` round-trip byte-identically. |
+| WP-003 | CI pipeline | 🟢 | WP-004 | ✅ **Done** — `.github/workflows/ci.yml` runs `devbox run bootstrap/lint/typecheck/test/smoke` (identical to local); `ci` check required on `main` (red blocks merge). |
+| WP-004 | Dev environment (devbox) + substrate | 🟡 | — | ✅ **Done** — `devbox run smoke` boots an ephemeral Temporal dev server and completes a hello-world workflow (`packages/smoke`); devbox is the only prerequisite (verified in CI on a clean runner). |
+| WP-005 | Task spec format | 🟢 | WP-002 | ✅ **Done** — `parseTaskSpec` (zod + yaml) with all §9 rules; YAML fixtures in `fixtures/taskspec/`, one failing fixture per validation rule. |
 
 ---
 
