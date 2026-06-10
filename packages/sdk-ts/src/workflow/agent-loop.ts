@@ -22,6 +22,7 @@ import {
   SIGNAL_INJECT,
 } from "../runner/api.js";
 import type {
+  Checkpoint,
   ContextBundle,
   JudgeVerdict,
   RunStatus,
@@ -74,6 +75,7 @@ export async function agentLoop(spec: TaskSpec): Promise<RunStatus> {
   let failure: { reason: string; lastCheckpoint: string } | undefined;
   const recentSummaries: string[] = [];
   const pendingInjections: string[] = [];
+  const checkpoints: Checkpoint[] = [];
 
   setHandler(cancelSignal, () => {
     cancelRequested = true;
@@ -87,7 +89,7 @@ export async function agentLoop(spec: TaskSpec): Promise<RunStatus> {
     spentUsd,
     budgetUsd: spec.budgetUsd,
     lastVerdict,
-    checkpoints: [],
+    checkpoints,
     failure,
   }));
 
@@ -97,10 +99,11 @@ export async function agentLoop(spec: TaskSpec): Promise<RunStatus> {
     terminal: "SUCCESS" | "FAILED" | "CANCELLED",
     reason?: string,
   ): Promise<RunStatus> {
+    const lastCheckpoint = checkpoints[checkpoints.length - 1]?.id ?? "";
     if (terminal === "FAILED") {
-      failure = { reason: reason ?? "unknown", lastCheckpoint: "" };
+      failure = { reason: reason ?? "unknown", lastCheckpoint };
     }
-    await activities.sealRun({ runId, status: terminal, reason });
+    await activities.sealRun({ runId, status: terminal, reason, lastCheckpoint });
     status = terminal;
     return status;
   }
@@ -157,6 +160,18 @@ export async function agentLoop(spec: TaskSpec): Promise<RunStatus> {
       spentUsd += verdict.costUsd;
       lastVerdict = { kind: verdict.kind, atStep: stepIndex - 1 };
     }
+
+    // Checkpoint after the (optional) judge pass so the persisted lastGood
+    // flag reflects the verdict that covers exactly this state (WP-122;
+    // WP-132's ROLLBACK restores the latest lastGood checkpoint).
+    const checkpoint = await activities.writeCheckpoint({
+      runId,
+      stepIndex: stepIndex - 1,
+      context,
+      budgetSpentUsd: spentUsd,
+      lastGood: verdict?.kind === "PROCEED",
+    });
+    checkpoints.push(checkpoint);
 
     if (allCriteriaPass(verdict)) return seal("SUCCESS");
   }

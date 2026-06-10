@@ -214,6 +214,18 @@ export class Journal {
     return rows.map(rowToEntry);
   }
 
+  /**
+   * The idx the next append will get. Safe within a run: a run is one
+   * workflow, and Temporal serializes its activities — there is no
+   * concurrent writer (used to self-reference checkpoint entries, WP-122).
+   */
+  nextIdx(): number {
+    const row = this.db
+      .prepare("SELECT COALESCE(MAX(idx), -1) + 1 AS idx FROM journal_entries")
+      .get() as { idx: number };
+    return row.idx;
+  }
+
   /** journal-format.md §4: run cost == Σ costDeltaUsd (cost conservation). */
   totalCostUsd(): number {
     const row = this.db

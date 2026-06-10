@@ -69,6 +69,7 @@ export {
 } from "./journal/journal.js";
 export {
   createRunnerActivities,
+  SPAN_CHECKPOINT,
   type AdapterFactory,
   type AdapterRegistry,
   type RunnerActivities,

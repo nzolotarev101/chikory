@@ -130,7 +130,7 @@ Five parallel lanes after WP-002/WP-005 land. Lane docs contain full technical d
 | WP | Title | Tag | Depends | Acceptance criteria |
 |---|---|---|---|---|
 | WP-121 | Temporal workflow: journaled agent loop | 🔴 | WP-004, WP-111 | ✅ **Done** — deterministic `agentLoop` workflow (zero I/O; every side effect an activity); executor step + judge pass = one activity each, memoized + journaled to per-run SQLite (`node:sqlite`, JIF schema); replay verified via `Worker.runReplayHistory`; judge activity is an auto-PROCEED stub until WP-131/132. |
-| WP-122 | Checkpointer (git + journal) | 🟡 | WP-121 | Every step checkpoints: git commit in workspace + journal row (step, cost, artifacts). `chikory status` lists checkpoints. |
+| WP-122 | Checkpointer (git + journal) | 🟡 | WP-121 | ✅ **Done** — every step: git commit on run-private branch (`chikory: step <n>`, `--allow-empty`) + checkpoint journal row + context-snapshot artifact + `chikory.checkpoint` span; `RunHandle.status()` lists checkpoints (the `chikory status` data source — CLI command itself is WP-141, Lane M5); `lastGood` reflects the covering PROCEED verdict. |
 | WP-123 | Crash recovery | 🟡 | WP-122 | Test: `kill -9` worker mid-run → `chikory resume <run-id>` → run completes; journaled steps are **not** re-executed (assert zero duplicate LLM spend). |
 | WP-124 | Budget gate + terminal states | 🟡 | WP-121 | Per-run `budget_usd` enforced before each step; breach → clean HALT with resumable checkpoint; loop-breaker test: tool returning FAILED 3× → escalate, never spin. |
 

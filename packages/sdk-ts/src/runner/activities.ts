@@ -17,9 +17,11 @@ import { heartbeat } from "@temporalio/activity";
 
 import { createLocalArtifactStore } from "../artifacts/index.js";
 import { Journal } from "../journal/journal.js";
+import { getTracer } from "../otel.js";
 import type {
   AcceptanceCriterion,
   ArtifactStore,
+  Checkpoint,
   ContextBundle,
   ExecutorAdapter,
   JudgeVerdict,
@@ -28,6 +30,9 @@ import type {
   TaskSpec,
 } from "../types.js";
 import { artifactsDir, journalPath, workspaceDir } from "./paths.js";
+
+/** observability.md: one span per checkpoint write (CONTRACTS.md §8). */
+export const SPAN_CHECKPOINT = "chikory.checkpoint";
 
 const execFileAsync = promisify(execFile);
 
@@ -238,6 +243,78 @@ export function createRunnerActivities(deps: RunnerActivityDeps) {
             },
           );
           return verdict;
+        } finally {
+          journal.close();
+        }
+      });
+    },
+
+    /**
+     * Checkpointer (WP-122): every step ends in a git commit on the
+     * run-private branch + a journal checkpoint row + a context snapshot
+     * artifact (the CM-1 co-design point — WP-203 compacts *here*).
+     * Idempotent by stepIndex; a crash between commit and journal write
+     * costs one extra empty commit, never a duplicate journal row.
+     */
+    async writeCheckpoint(input: {
+      runId: string;
+      stepIndex: number;
+      context: ContextBundle;
+      budgetSpentUsd: number;
+      lastGood: boolean;
+    }): Promise<Checkpoint> {
+      return withHeartbeat(async () => {
+        const journal = openJournal(deps, input.runId);
+        try {
+          const existing = journal.findByKey("checkpoint", "stepIndex", input.stepIndex);
+          if (existing) return existing.payload as Checkpoint;
+
+          const spec = requireSpec(journal, input.runId);
+          const repoUrl = spec.repos[0]?.url ?? "unknown";
+          const ws = workspaceDir(deps.dataDir, input.runId);
+          const startTime = Date.now();
+
+          await git(ws, ["add", "-A"]);
+          // --allow-empty: a no-change step still checkpoints (DX-4 holds
+          // for every step, and resume always has a commit to anchor on).
+          await git(ws, ["commit", "--allow-empty", "-m", `chikory: step ${input.stepIndex}`]);
+          const sha = await git(ws, ["rev-parse", "HEAD"]);
+
+          const store = createLocalArtifactStore(artifactsDir(deps.dataDir, input.runId));
+          const contextSnapshotRef = await store.put(JSON.stringify(input.context, null, 2), {
+            kind: "context_snapshot",
+            summary: `context snapshot after step ${input.stepIndex}`,
+          });
+
+          const journalIdx = journal.nextIdx();
+          const checkpoint: Checkpoint = {
+            id: `${input.runId}@${journalIdx}`,
+            journalIdx,
+            gitCommits: { [repoUrl]: sha },
+            contextSnapshotRef,
+            budgetSpentUsd: input.budgetSpentUsd,
+            lastGood: input.lastGood,
+          };
+          journal.appendOnce(
+            { field: "stepIndex", value: input.stepIndex },
+            {
+              kind: "checkpoint",
+              payload: { ...checkpoint, stepIndex: input.stepIndex },
+              costDeltaUsd: 0,
+              artifactRefs: [contextSnapshotRef],
+            },
+          );
+
+          const span = getTracer().startSpan(SPAN_CHECKPOINT, { startTime });
+          span.setAttribute("run.id", input.runId);
+          span.setAttribute("step", input.stepIndex);
+          span.setAttribute("git.commit", sha);
+          span.setAttribute("journal.idx", journalIdx);
+          span.setAttribute("last.good", input.lastGood);
+          span.setAttribute("budget.spent.usd", input.budgetSpentUsd);
+          span.end();
+
+          return checkpoint;
         } finally {
           journal.close();
         }
