@@ -1,0 +1,18 @@
+{
+  "maxTokens": 2048,
+  "messages": [
+    {
+      "content": "You are the judge. Fill the form.",
+      "role": "system"
+    },
+    {
+      "content": "Evidence follows.",
+      "role": "user"
+    }
+  ],
+  "responseSchema": {
+    "type": "object"
+  },
+  "stage": "judge",
+  "temperature": 0
+}

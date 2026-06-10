@@ -1,0 +1,7 @@
+{
+  "cadence": 0,
+  "family": "gemini",
+  "maxCostShare": 0.25,
+  "model": "gemini-2.5-pro",
+  "scoringMethod": "pointwise"
+}

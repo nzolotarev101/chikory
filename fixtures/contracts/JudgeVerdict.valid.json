@@ -1,0 +1,30 @@
+{
+  "costUsd": 0.05,
+  "form": {
+    "concerns": [],
+    "criterionResults": [
+      {
+        "id": "AC-1",
+        "justification": "Store implemented; judge-run tests pass.",
+        "pass": true
+      }
+    ],
+    "rubricResults": [
+      {
+        "id": "RB-no-unrelated-deletions",
+        "justification": "Diff touches only artifact store files.",
+        "pass": true
+      }
+    ]
+  },
+  "judgeModel": {
+    "model": "gemini-2.5-pro",
+    "provider": "gemini"
+  },
+  "kind": "PROCEED",
+  "rationale": "All criteria pass on judge-executed tests; no rubric violations.",
+  "tokens": {
+    "input": 5400,
+    "output": 220
+  }
+}

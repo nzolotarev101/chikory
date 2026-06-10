@@ -1,0 +1,5 @@
+{
+  "check": "devbox run -- pnpm --filter @chikory/sdk test artifacts",
+  "description": "ArtifactStore interface implemented with content-addressed FS backend",
+  "id": "AC-1"
+}

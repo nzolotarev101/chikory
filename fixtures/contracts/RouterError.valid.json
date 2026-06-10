@@ -1,0 +1,7 @@
+{
+  "attempts": 4,
+  "provider": "openai",
+  "reason": "429 rate limited after exhausting retries",
+  "retriable": true,
+  "status": "FAILED"
+}

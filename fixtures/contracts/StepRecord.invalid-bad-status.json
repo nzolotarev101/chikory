@@ -1,0 +1,24 @@
+{
+  "costEstimated": true,
+  "costUsd": 0.42,
+  "diffRef": {
+    "bytes": 4096,
+    "id": "sha256:5e884898da28047151d0e56f8dc6292773603d0d6aabbdd62a11ef721d1542d8",
+    "kind": "diff",
+    "summary": "3 files changed: artifact store put/get/excerpt + tests"
+  },
+  "durationMs": 35000,
+  "status": "DONE",
+  "summary": "Implemented put() with sha256 addressing; added round-trip test",
+  "tokens": {
+    "input": 1200,
+    "output": 350
+  },
+  "toolCalls": 12,
+  "transcriptRef": {
+    "bytes": 181233,
+    "id": "sha256:2c26b46b68ffc68ff99b453c1d30413413422d706483bfa0f98a5e886266e7ae",
+    "kind": "transcript",
+    "summary": "claude-code session transcript, 12 tool calls"
+  }
+}

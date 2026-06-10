@@ -1,0 +1,40 @@
+{
+  "artifacts": [],
+  "criteria": [
+    {
+      "check": "devbox run -- pnpm --filter @chikory/sdk test artifacts",
+      "description": "ArtifactStore interface implemented with content-addressed FS backend",
+      "id": "AC-1"
+    }
+  ],
+  "criteriaHistory": {
+    "AC-1": [
+      false,
+      true
+    ]
+  },
+  "diffRefs": [
+    {
+      "bytes": 4096,
+      "id": "sha256:5e884898da28047151d0e56f8dc6292773603d0d6aabbdd62a11ef721d1542d8",
+      "kind": "diff",
+      "summary": "3 files changed: artifact store put/get/excerpt + tests"
+    }
+  ],
+  "stepSummaries": [
+    "Implemented put() with sha256 addressing; added round-trip test"
+  ],
+  "testResults": {
+    "command": "devbox run test",
+    "durationMs": 8200,
+    "exitCode": 0,
+    "failed": 0,
+    "passed": 14,
+    "ref": {
+      "bytes": 9211,
+      "id": "sha256:fcde2b2edba56bf408601fb721fe9b5c338d10ee429ea04fae5511b68fbf8fb9",
+      "kind": "test_results",
+      "summary": "vitest run: 14 passed, 0 failed"
+    }
+  }
+}

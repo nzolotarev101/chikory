@@ -1,0 +1,7 @@
+{
+  "content": "hi",
+  "costUsd": 0.01,
+  "model": "claude-fable-5",
+  "provider": "anthropic",
+  "status": "SUCCESS"
+}

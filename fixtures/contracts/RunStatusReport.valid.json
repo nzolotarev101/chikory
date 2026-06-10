@@ -1,0 +1,27 @@
+{
+  "budgetUsd": 20,
+  "checkpoints": [
+    {
+      "budgetSpentUsd": 1.23,
+      "contextSnapshotRef": {
+        "bytes": 23001,
+        "id": "sha256:7d793037a0760186574b0282f2f435e7e80fbd6c0a224ed95e3dcd3d3d3d3d3d",
+        "kind": "context_snapshot",
+        "summary": "compacted context after step 4"
+      },
+      "gitCommits": {
+        ".": "9b1dca6c41f8160dbb6d2e6db52f1571f48ed3a1"
+      },
+      "id": "run-7f3a@4",
+      "journalIdx": 4,
+      "lastGood": true
+    }
+  ],
+  "currentStep": 5,
+  "lastVerdict": {
+    "atStep": 3,
+    "kind": "PROCEED"
+  },
+  "spentUsd": 1.65,
+  "status": "RUNNING"
+}

@@ -67,7 +67,7 @@ Every requirement in [`project.md`](../project.md), assigned a stable ID, mapped
 
 | ID | Requirement | WP(s) | Phase | Status |
 |---|---|---|---|---|
-| AR-1 | Repo snapshots, task trees, test results, browser state, PR diffs as first-class runtime objects | WP-002 (`ArtifactRef`), WP-122 (snapshots), WP-131 (diff/test evidence), WP-211 (browser state) | P1→P2 | planned |
+| AR-1 | Repo snapshots, task trees, test results, browser state, PR diffs as first-class runtime objects | WP-002 (`ArtifactRef`), WP-122 (snapshots), WP-131 (diff/test evidence), WP-211 (browser state) | P1→P2 | in-progress (WP-002 contracts done) |
 
 ## OB — Observability (spec §5.7)
 
@@ -102,7 +102,7 @@ Every requirement in [`project.md`](../project.md), assigned a stable ID, mapped
 |---|---|---|---|---|
 | IF-1 | Thin TypeScript SDK | P1 lanes M1–M5 | P1 | planned |
 | IF-2 | Thin Python SDK | WP-201 | P2 | planned |
-| IF-3 | Durable workflows on existing engine (Temporal) — partner, don't rebuild | ADR-001, WP-004, WP-121 | P0–P1 | planned |
+| IF-3 | Durable workflows on existing engine (Temporal) — partner, don't rebuild | ADR-001, WP-004, WP-121 | P0–P1 | in-progress (WP-004 done; WP-121 pending) |
 | IF-4 | CLI surface | WP-141, WP-142 | P1 | planned |
 | IF-5 | Cloud control plane: hosted judges, checkpointers, trace browser | WP-401–408 (full design: components/control-plane.md) | P4 | planned |
 

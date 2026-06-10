@@ -13,15 +13,22 @@
   },
   "scripts": {
     "build": "tsc",
-    "test": "node --experimental-vm-modules node_modules/.bin/jest",
-    "lint": "eslint src",
+    "test": "vitest run",
+    "lint": "eslint .",
     "typecheck": "tsc --noEmit"
   },
   "keywords": ["llm", "agents", "orchestration", "durable-execution", "agent-judge"],
   "license": "MIT",
   "devDependencies": {
+    "@eslint/js": "^9.0.0",
+    "@types/node": "^20.0.0",
+    "eslint": "^9.0.0",
     "typescript": "^5.4.0",
-    "@types/node": "^20.0.0"
+    "typescript-eslint": "^8.0.0",
+    "vitest": "^3.0.0"
   },
-  "dependencies": {}
+  "dependencies": {
+    "yaml": "^2.4.0",
+    "zod": "^3.23.0"
+  }
 }

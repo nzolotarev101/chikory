@@ -22,12 +22,27 @@ export interface RoutingPolicy {
   failover?: Partial<Record<Stage, ModelChoice[]>>; // ordered
 }
 
+export interface Message {
+  role: "user" | "assistant" | "system";
+  content: string;
+}
+
 export interface CompletionRequest {
   stage: Stage;
   messages: Message[];
   maxTokens?: number;
   temperature?: number;
   responseSchema?: object; // JSON Schema; judge form-filling requires it
+}
+
+/** Successful router result. Invariant #4: status is always explicit. */
+export interface LLMCallResult {
+  status: "SUCCESS";
+  content: string;
+  provider: LLMProvider;
+  model: string;
+  tokens: TokenUsage;
+  costUsd: number;
 }
 
 export interface Router {

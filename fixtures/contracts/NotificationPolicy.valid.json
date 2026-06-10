@@ -1,0 +1,7 @@
+{
+  "on": [
+    "escalate",
+    "terminal"
+  ],
+  "slackWebhookEnv": "CHIKORY_SLACK_URL"
+}

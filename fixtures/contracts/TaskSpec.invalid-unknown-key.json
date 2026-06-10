@@ -1,0 +1,64 @@
+{
+  "acceptanceCriteria": [
+    {
+      "check": "devbox run -- pnpm --filter @chikory/sdk test artifacts",
+      "description": "ArtifactStore interface implemented with content-addressed FS backend",
+      "id": "AC-1"
+    },
+    {
+      "description": "excerpt() returns targeted slices by range and query",
+      "id": "AC-2"
+    }
+  ],
+  "budgetUsd": 20,
+  "executor": {
+    "adapter": "claude-code",
+    "family": "anthropic"
+  },
+  "goal": "Implement the ArtifactStore (Memory Pointer pattern): content-addressed local FS backend, put/get/excerpt, applied to tool outputs over 8KB.",
+  "judge": {
+    "cadence": 3,
+    "family": "gemini",
+    "maxCostShare": 0.25,
+    "model": "gemini-2.5-pro",
+    "scoringMethod": "pointwise"
+  },
+  "maxSteps": 60,
+  "name": "memory-pointer-store",
+  "ownerEmail": "a@b.c",
+  "repos": [
+    {
+      "ref": "main",
+      "url": ".",
+      "writable": true
+    }
+  ],
+  "routing": {
+    "failover": {
+      "judge": [
+        {
+          "model": "gpt-5.2",
+          "provider": "openai"
+        }
+      ]
+    },
+    "stages": {
+      "code": {
+        "model": "claude-fable-5",
+        "provider": "anthropic"
+      },
+      "judge": {
+        "model": "gemini-2.5-pro",
+        "provider": "gemini"
+      },
+      "plan": {
+        "model": "claude-haiku-4-5-20251001",
+        "provider": "anthropic"
+      },
+      "review": {
+        "model": "claude-fable-5",
+        "provider": "anthropic"
+      }
+    }
+  }
+}

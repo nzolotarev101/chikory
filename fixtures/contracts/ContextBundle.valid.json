@@ -1,0 +1,19 @@
+{
+  "acceptanceCriteria": [
+    {
+      "check": "devbox run -- pnpm --filter @chikory/sdk test artifacts",
+      "description": "ArtifactStore interface implemented with content-addressed FS backend",
+      "id": "AC-1"
+    }
+  ],
+  "goal": "Implement the ArtifactStore (Memory Pointer pattern): content-addressed local FS backend, put/get/excerpt, applied to tool outputs over 8KB.",
+  "injections": [],
+  "memoryRefs": [],
+  "notes": {
+    "decisions": "local FS backend under .chikory/artifacts, sharded by hash prefix"
+  },
+  "planItem": "Implement put() with sha256 content addressing",
+  "recentSteps": [
+    "step 1: scaffolded ArtifactStore module and test file"
+  ]
+}

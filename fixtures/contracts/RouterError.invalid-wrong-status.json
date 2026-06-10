@@ -1,0 +1,6 @@
+{
+  "attempts": 1,
+  "reason": "not actually a failure",
+  "retriable": false,
+  "status": "SUCCESS"
+}

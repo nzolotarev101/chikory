@@ -1,0 +1,17 @@
+{
+  "concerns": [],
+  "criterionResults": [
+    {
+      "id": "AC-1",
+      "justification": "Store implemented; judge-run tests pass.",
+      "pass": true
+    }
+  ],
+  "rubricResults": [
+    {
+      "id": "RB-no-unrelated-deletions",
+      "justification": "Diff touches only artifact store files.",
+      "pass": true
+    }
+  ]
+}

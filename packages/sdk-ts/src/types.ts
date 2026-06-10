@@ -1,60 +1,373 @@
-export type LLMProvider = "anthropic" | "openai" | "gemini";
+/**
+ * Core contracts v1 (WP-002) — frozen transcription of `docs/spec/CONTRACTS.md`.
+ *
+ * This file and CONTRACTS.md must never diverge; change both in a single
+ * `contracts:` PR per TASK-PROTOCOL.md §4. Python parity (WP-201) mirrors
+ * these 1:1; cross-language conformance is verified against the shared JSON
+ * fixtures in `fixtures/contracts/` (CONTRACTS.md §10).
+ */
+
+// ─── §1 Providers & routing ─────────────────────────────────────────────────
+
+export type LLMProvider = "anthropic" | "openai" | "gemini" | "openai-compat";
+
+export type Stage = "plan" | "code" | "review" | "judge";
+
+export interface ModelChoice {
+  provider: LLMProvider;
+  model: string;
+}
+
+/** RT-4/5/6 — swapping vendors is a config diff, never a code change. */
+export interface RoutingPolicy {
+  stages: Record<Stage, ModelChoice>;
+  /** Ordered fallback list per stage. */
+  failover?: Partial<Record<Stage, ModelChoice[]>>;
+}
 
 export interface Message {
   role: "user" | "assistant" | "system";
   content: string;
 }
 
+export interface CompletionRequest {
+  stage: Stage;
+  messages: Message[];
+  maxTokens?: number;
+  temperature?: number;
+  /** JSON Schema; judge form-filling requires it. */
+  responseSchema?: object;
+}
+
+/** Successful router result. Invariant #4: status is always explicit. */
 export interface LLMCallResult {
+  status: "SUCCESS";
   content: string;
   provider: LLMProvider;
   model: string;
-  inputTokens: number;
-  outputTokens: number;
-  cost?: number;
+  tokens: TokenUsage;
+  costUsd: number;
 }
 
-export interface ToolResult {
-  toolName: string;
-  output: unknown;
-  status: "SUCCESS" | "FAILED";
-  errorMessage?: string;
+export interface Router {
+  complete(req: CompletionRequest): Promise<LLMCallResult | RouterError>;
 }
 
-export interface RouterConfig {
-  providers: Partial<Record<LLMProvider, ProviderConfig>>;
-  defaultProvider: LLMProvider;
-  retries?: number;
+/** Invariant #4 — failures are values, never raw exceptions. */
+export interface RouterError {
+  status: "FAILED";
+  reason: string;
+  retriable: boolean;
+  attempts: number;
+  provider?: LLMProvider;
 }
 
-export interface ProviderConfig {
-  apiKey: string;
-  defaultModel: string;
-  baseUrl?: string;
-}
+// ─── §2 Task specification ──────────────────────────────────────────────────
 
-export interface JudgeConfig {
-  provider: LLMProvider;
-  model: string;
-  evaluateEveryNSteps?: number;
-  scoringMethod?: "pointwise" | "pairwise";
-}
-
-export interface AgentRunConfig {
-  router: RouterConfig;
-  judge: JudgeConfig;
+/**
+ * Canonical user input; YAML form documented in `docs/spec/task-spec.md`,
+ * parse-time validation rules in CONTRACTS.md §9 (WP-005).
+ */
+export interface TaskSpec {
+  name: string;
+  /** OB-3: success criteria upfront. */
+  goal: string;
+  /** 1 repo in P1; N in P2 (WP-214). */
+  repos: RepoSpec[];
+  acceptanceCriteria: AcceptanceCriterion[];
+  /** CG-2 hard cap. */
+  budgetUsd: number;
   maxSteps?: number;
-  budgetUsd?: number;
-  checkpointDir?: string;
+  executor: { adapter: string; family: LLMProvider };
+  judge: JudgePolicy;
+  routing: RoutingPolicy;
+  /** P2 (WP-207); absent = fixed defaults. */
+  pacing?: PacingPolicy;
+  /** P2 (WP-208). */
+  notifications?: NotificationPolicy;
 }
 
-export interface StepTrace {
-  stepIndex: number;
-  timestamp: string;
-  type: "llm_call" | "tool_call" | "judge_eval" | "checkpoint";
-  inputTokens?: number;
-  outputTokens?: number;
-  cost?: number;
-  judgeScore?: number;
-  judgeVerdict?: "continue" | "halt" | "rollback" | "escalate";
+export interface RepoSpec {
+  /** Local path or git URL. */
+  url: string;
+  /** Branch/commit; default = default branch. */
+  ref?: string;
+  /** Read-only mounts allowed (context repos). */
+  writable: boolean;
 }
+
+export interface AcceptanceCriterion {
+  /** Stable, referenced by verdicts ("AC-1"). */
+  id: string;
+  description: string;
+  /** Shell command run by the JUDGE in sandbox; exit 0 = pass (JD-4). */
+  check?: string;
+}
+
+export interface JudgePolicy {
+  /** Must differ from `executor.family` (invariant #2). */
+  family: LLMProvider;
+  /** Default from `routing.stages.judge`. */
+  model?: string;
+  /** Judge every N steps (JD-2), default 3. */
+  cadence: number;
+  /** Explicit opt-in, loud warning (WP-133). */
+  allowSameFamily?: boolean;
+  /** Default pointwise (ADR-002). */
+  scoringMethod?: "pointwise" | "pairwise";
+  /** Warn when judge spend > this fraction of run cost (JD-7). */
+  maxCostShare?: number;
+  /** P2 (WP-215): "security", "architecture". */
+  rubricPacks?: string[];
+}
+
+/** P2 (WP-207) — reserved; shape finalized after dogfood-001 data. */
+export interface PacingPolicy {
+  mode: "auto" | "fixed";
+}
+
+/** P2 (WP-208) — reserved. */
+export interface NotificationPolicy {
+  on: Array<"escalate" | "milestone" | "terminal">;
+  slackWebhookEnv?: string;
+}
+
+// ─── §3 Steps & executors ───────────────────────────────────────────────────
+
+export type TerminalStatus = "SUCCESS" | "FAILED";
+
+export interface ExecutorAdapter {
+  /** "claude-code" | "codex" | "native" | ... */
+  readonly name: string;
+  readonly modelFamily: LLMProvider;
+  runStep(input: StepInput): Promise<StepRecord>;
+}
+
+export interface StepInput {
+  workspaceDir: string;
+  instruction: string;
+  context: ContextBundle;
+  limits: StepLimits;
+}
+
+export interface StepLimits {
+  maxSeconds: number;
+  maxTurns?: number;
+  maxCostUsd?: number;
+}
+
+export interface StepRecord {
+  /** Invariant #4. */
+  status: TerminalStatus;
+  diffRef: ArtifactRef;
+  summary: string;
+  toolCalls: number;
+  tokens: TokenUsage;
+  costUsd: number;
+  /** CLI adapters may estimate (cost-governance.md). */
+  costEstimated: boolean;
+  durationMs: number;
+  transcriptRef: ArtifactRef;
+  failure?: { reason: string; retriable: boolean };
+}
+
+export interface TokenUsage {
+  input: number;
+  output: number;
+}
+
+/** What the runner assembles for each step — the context-tier projection (CM-4). */
+export interface ContextBundle {
+  goal: string;
+  acceptanceCriteria: AcceptanceCriterion[];
+  /** Current task-tree item. */
+  planItem: string;
+  /** Structured notes, survive compaction verbatim (CM-2). */
+  notes: Record<string, string>;
+  /** Recall tier: compacted summaries. */
+  recentSteps: string[];
+  /** Last non-PROCEED rationale. */
+  judgeFeedback?: string;
+  /** WP-212, drained in order. */
+  injections: string[];
+  /** Archival pointers (CM-3). */
+  memoryRefs: ArtifactRef[];
+}
+
+// ─── §4 Judge ───────────────────────────────────────────────────────────────
+
+/** BRANCH active P2+ (WP-205). */
+export type VerdictKind = "PROCEED" | "ROLLBACK" | "HALT" | "ESCALATE" | "BRANCH";
+
+export interface JudgeEvidence {
+  /** Per repo, since last verdict. */
+  diffRefs: ArtifactRef[];
+  /** Judge-executed, never executor-claimed (JD-4). */
+  testResults?: TestResultArtifact;
+  criteria: AcceptanceCriterion[];
+  /** Flip-flop/drift detection (JD-7). */
+  criteriaHistory: Record<string, boolean[]>;
+  stepSummaries: string[];
+  /** Screenshots, scans (P2). */
+  artifacts: ArtifactRef[];
+}
+
+/**
+ * The LLM fills this form; CODE computes the verdict from it
+ * (reward-hacking guard — see judge.md and the deterministic verdict rules
+ * in CONTRACTS.md §4, implemented in `judge/verdict.ts` in P1).
+ */
+export interface JudgeForm {
+  criterionResults: Array<{ id: string; pass: boolean; justification: string }>;
+  rubricResults: Array<{ id: string; pass: boolean; justification: string }>;
+  concerns: string[];
+}
+
+export interface JudgeVerdict {
+  kind: VerdictKind;
+  form: JudgeForm;
+  rationale: string;
+  /** Required when kind=ROLLBACK. */
+  rollbackTo?: CheckpointId;
+  /** Required when kind=ESCALATE. */
+  escalateReason?: string;
+  costUsd: number;
+  tokens: TokenUsage;
+  judgeModel: ModelChoice;
+}
+
+// ─── §5 Artifacts ───────────────────────────────────────────────────────────
+
+export type ArtifactKind =
+  | "repo_snapshot"
+  | "diff"
+  | "test_results"
+  | "task_tree"
+  | "browser_state"
+  | "transcript"
+  | "tool_output"
+  | "context_snapshot";
+
+/** Memory Pointer Pattern (CM-3): big payloads live outside the context. */
+export interface ArtifactRef {
+  /** Content hash (sha256) — stable across resume/branch. */
+  id: string;
+  kind: ArtifactKind;
+  bytes: number;
+  /** ≤200 chars; the only part that enters context by default (CM-3). */
+  summary: string;
+}
+
+export interface ArtifactStore {
+  put(
+    content: Uint8Array | string,
+    meta: { kind: ArtifactKind; summary: string },
+  ): Promise<ArtifactRef>;
+  get(ref: ArtifactRef): Promise<Uint8Array>;
+  excerpt(ref: ArtifactRef, sel: { range?: [number, number]; query?: string }): Promise<string>;
+}
+
+export interface TestResultArtifact {
+  /** Raw output. */
+  ref: ArtifactRef;
+  command: string;
+  exitCode: number;
+  passed: number;
+  failed: number;
+  durationMs: number;
+}
+
+// ─── §6 Journal & checkpoints ───────────────────────────────────────────────
+
+/** `${runId}@${journalIdx}`. */
+export type CheckpointId = string;
+
+export type JournalEntryKind =
+  | "step"
+  | "judge"
+  | "checkpoint"
+  | "verdict"
+  | "injection"
+  | "budget_event"
+  | "compaction"
+  | "pacing"
+  | "terminal";
+
+/** Persisted form specified in `docs/spec/journal-format.md` (JIF). */
+export interface JournalEntry {
+  /** Monotonic per run. */
+  idx: number;
+  /** ISO-8601 UTC. */
+  ts: string;
+  kind: JournalEntryKind;
+  /** Kind-discriminated; see journal-format.md. */
+  payload: unknown;
+  costDeltaUsd: number;
+  tokens?: TokenUsage;
+  artifactRefs: ArtifactRef[];
+}
+
+export interface Checkpoint {
+  id: CheckpointId;
+  journalIdx: number;
+  /** Repo url → commit sha (multi-repo, WP-214). */
+  gitCommits: Record<string, string>;
+  /** Compacted context (CM-1 co-design). */
+  contextSnapshotRef: ArtifactRef;
+  budgetSpentUsd: number;
+  /** Judge PROCEED marker. */
+  lastGood: boolean;
+}
+
+// ─── §7 Durable runner (the substrate seam — ADR-001) ───────────────────────
+
+export type RunStatus =
+  | "RUNNING"
+  | "AWAITING_APPROVAL"
+  | "SUSPENDED"
+  | "SUCCESS"
+  | "FAILED"
+  | "CANCELLED";
+
+export interface RunHandle {
+  runId: string;
+  status(): Promise<RunStatusReport>;
+  /** ESCALATE answer. */
+  approve(decision: { approved: boolean; reason?: string }): Promise<void>;
+  /** WP-212. */
+  inject(guidance: string): Promise<void>;
+  /** Graceful, checkpointed. */
+  cancel(): Promise<void>;
+}
+
+export interface RunStatusReport {
+  status: RunStatus;
+  currentStep: number;
+  spentUsd: number;
+  budgetUsd: number;
+  lastVerdict?: { kind: VerdictKind; atStep: number };
+  checkpoints: Checkpoint[];
+  /** Explicit terminal (CG-1). */
+  failure?: { reason: string; lastCheckpoint: CheckpointId };
+}
+
+/**
+ * Implementations: `TemporalRunner` (P1, the only one). The interface exists
+ * because ADR-001 names a possible second substrate (revisit trigger); do
+ * NOT add abstraction beyond it (NF-1).
+ */
+export interface DurableRunner {
+  start(spec: TaskSpec): Promise<RunHandle>;
+  resume(runId: string, opts?: { addBudgetUsd?: number }): Promise<RunHandle>;
+  /** P2 (WP-205). */
+  branch(from: CheckpointId): Promise<RunHandle>;
+  get(runId: string): Promise<RunHandle>;
+  list(): Promise<RunStatusReport[]>;
+}
+
+// ─── §8 Telemetry ───────────────────────────────────────────────────────────
+// No new interfaces — OTel API types are used directly (observability.md
+// defines span names/attributes). Contract-level rule: every implementation
+// of Router.complete, ExecutorAdapter.runStep, judge pass, and checkpoint
+// write MUST emit its span; conformance suites assert span presence via an
+// in-memory exporter.

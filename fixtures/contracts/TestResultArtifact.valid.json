@@ -1,0 +1,13 @@
+{
+  "command": "devbox run test",
+  "durationMs": 8200,
+  "exitCode": 0,
+  "failed": 0,
+  "passed": 14,
+  "ref": {
+    "bytes": 9211,
+    "id": "sha256:fcde2b2edba56bf408601fb721fe9b5c338d10ee429ea04fae5511b68fbf8fb9",
+    "kind": "test_results",
+    "summary": "vitest run: 14 passed, 0 failed"
+  }
+}

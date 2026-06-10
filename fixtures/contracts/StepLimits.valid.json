@@ -1,0 +1,5 @@
+{
+  "maxCostUsd": 2.5,
+  "maxSeconds": 900,
+  "maxTurns": 30
+}
