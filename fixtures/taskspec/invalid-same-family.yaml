@@ -1,0 +1,15 @@
+# Rule §9.1: judge.family must differ from executor.family without allow_same_family.
+name: same-family
+goal: Judge shares the executor's blind spots.
+repos:
+  - url: .
+    writable: true
+acceptance_criteria:
+  - id: AC-1
+    description: Something checkable
+budget_usd: 5
+executor:
+  adapter: claude-code
+  family: anthropic
+judge:
+  family: anthropic

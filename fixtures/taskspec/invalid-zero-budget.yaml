@@ -1,0 +1,15 @@
+# Rule §9.2: budget_usd must be > 0.
+name: zero-budget
+goal: Free lunch.
+repos:
+  - url: .
+    writable: true
+acceptance_criteria:
+  - id: AC-1
+    description: Something checkable
+budget_usd: 0
+executor:
+  adapter: claude-code
+  family: anthropic
+judge:
+  family: gemini

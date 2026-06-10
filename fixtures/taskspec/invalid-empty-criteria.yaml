@@ -1,0 +1,13 @@
+# Rule §9.4: acceptance_criteria non-empty (OB-3).
+name: no-criteria
+goal: Success undefined.
+repos:
+  - url: .
+    writable: true
+acceptance_criteria: []
+budget_usd: 5
+executor:
+  adapter: claude-code
+  family: anthropic
+judge:
+  family: gemini

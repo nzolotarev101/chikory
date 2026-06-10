@@ -1,0 +1,16 @@
+# Same-family judge requires explicit opt-in and triggers a loud warning (invariant #2 / WP-133).
+name: same-family-optin
+goal: Single-provider mode, explicitly opted in.
+repos:
+  - url: .
+    writable: true
+acceptance_criteria:
+  - id: AC-1
+    description: Something checkable
+budget_usd: 5
+executor:
+  adapter: claude-code
+  family: anthropic
+judge:
+  family: anthropic
+  allow_same_family: true

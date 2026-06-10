@@ -1,0 +1,22 @@
+# Rule §9.3: a stage routed to an unconfigured provider fails fast,
+# naming the missing env var (test env has no OPENAI_COMPAT_BASE_URL).
+name: missing-provider
+goal: Route to a provider with no configuration.
+repos:
+  - url: .
+    writable: true
+acceptance_criteria:
+  - id: AC-1
+    description: Something checkable
+budget_usd: 5
+executor:
+  adapter: claude-code
+  family: anthropic
+judge:
+  family: gemini
+routing:
+  stages:
+    plan:   { provider: openai-compat, model: llama-4-70b }
+    code:   { provider: anthropic, model: claude-fable-5 }
+    review: { provider: anthropic, model: claude-fable-5 }
+    judge:  { provider: gemini, model: gemini-2.5-pro }

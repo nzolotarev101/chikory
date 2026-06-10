@@ -1,0 +1,13 @@
+# Rule §9.2: at least one repo.
+name: no-repos
+goal: Nowhere to work.
+repos: []
+acceptance_criteria:
+  - id: AC-1
+    description: Something checkable
+budget_usd: 5
+executor:
+  adapter: claude-code
+  family: anthropic
+judge:
+  family: gemini

@@ -1,0 +1,44 @@
+# Full annotated example from docs/spec/task-spec.md
+name: memory-pointer-store
+goal: >
+  Implement the ArtifactStore (Memory Pointer pattern) per
+  docs/components/artifacts.md: content-addressed local FS backend,
+  put/get/excerpt, applied to tool outputs over 8KB.
+
+repos:
+  - url: .
+    ref: main
+    writable: true
+
+acceptance_criteria:
+  - id: AC-1
+    description: ArtifactStore interface implemented with content-addressed FS backend
+    check: devbox run -- pnpm --filter @chikory/sdk test artifacts
+  - id: AC-2
+    description: Tool outputs >8KB stored externally; only ArtifactRef enters context
+    check: devbox run -- pnpm --filter @chikory/sdk test memory-pointer
+  - id: AC-3
+    description: excerpt() returns targeted slices by range and query
+
+budget_usd: 20
+max_steps: 60
+
+executor:
+  adapter: claude-code
+  family: anthropic
+
+judge:
+  family: gemini
+  cadence: 3
+  scoring_method: pointwise
+  max_cost_share: 0.25
+
+routing:
+  stages:
+    plan:   { provider: anthropic, model: claude-haiku-4-5-20251001 }
+    code:   { provider: anthropic, model: claude-fable-5 }
+    review: { provider: anthropic, model: claude-fable-5 }
+    judge:  { provider: gemini,   model: gemini-2.5-pro }
+  failover:
+    judge:
+      - { provider: openai, model: gpt-5.2 }

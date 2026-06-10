@@ -1,0 +1,16 @@
+# Minimal spec: routing omitted → defaultPolicy(executor.family) with a
+# different-family judge; cadence/scoring/max_steps take fixed defaults.
+name: minimal-task
+goal: Add a health-check endpoint.
+repos:
+  - url: .
+    writable: true
+acceptance_criteria:
+  - id: AC-1
+    description: GET /healthz returns 200
+budget_usd: 5
+executor:
+  adapter: claude-code
+  family: anthropic
+judge:
+  family: gemini

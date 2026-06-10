@@ -75,7 +75,7 @@ Every requirement in [`project.md`](../project.md), assigned a stable ID, mapped
 |---|---|---|---|---|
 | OB-1 | Observe reasoning; trace decision trees | WP-142 | P1 | planned |
 | OB-2 | Inject corrections mid-run | WP-212 | P2 | planned |
-| OB-3 | Set success criteria upfront | WP-005 (acceptance_criteria in TaskSpec) | P0 | planned |
+| OB-3 | Set success criteria upfront | WP-005 (acceptance_criteria in TaskSpec) | P0 | done |
 | OB-4 | OTel-compliant traces by default | WP-105, WP-134 (invariant #3) | P1 | planned |
 | OB-5 | Trajectory-level forensics, whole path debuggable after the fact | WP-122 (journal), WP-142 (renderer), WP-403 (web) | P1→P4 | planned |
 | OB-6 | Human-observable metrics: tokens, decisions, checks, feedback frequency | WP-142, WP-209 | P1→P2 | planned |

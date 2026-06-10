@@ -1,0 +1,16 @@
+# Unknown keys are spec violations (strict schema).
+name: unknown-key
+goal: Typo'd field should not pass silently.
+repos:
+  - url: .
+    writable: true
+acceptance_criteria:
+  - id: AC-1
+    description: Something checkable
+budget_usd: 5
+max_stepz: 10
+executor:
+  adapter: claude-code
+  family: anthropic
+judge:
+  family: gemini

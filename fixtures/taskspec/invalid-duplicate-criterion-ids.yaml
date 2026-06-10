@@ -1,0 +1,17 @@
+# Rule §9.4: criterion ids unique.
+name: duplicate-ids
+goal: Ambiguous verdict references.
+repos:
+  - url: .
+    writable: true
+acceptance_criteria:
+  - id: AC-1
+    description: First criterion
+  - id: AC-1
+    description: Second criterion with the same id
+budget_usd: 5
+executor:
+  adapter: claude-code
+  family: anthropic
+judge:
+  family: gemini
