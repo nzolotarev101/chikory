@@ -28,7 +28,7 @@ Every requirement in [`project.md`](../project.md), assigned a stable ID, mapped
 |---|---|---|---|---|
 | DX-1 | State, memory, task context across minutes → weeks | WP-121, WP-122; cross-session memory WP-204 | P1→P2 | in-progress |
 | DX-2 | Journal/replay: each LLM/tool call a deterministic journaled step | WP-121 | P1 | done |
-| DX-3 | Crash → resurrect from point of failure via memoized results | WP-123 | P1 | planned |
+| DX-3 | Crash → resurrect from point of failure via memoized results | WP-123 | P1 | done |
 | DX-4 | Checkpoint per LLM/tool call; pause, inspect, resume | WP-122, WP-141 | P1 | in-progress |
 | DX-5 | Branching of execution paths as first-class op | WP-205 | P2 | planned |
 | DX-6 | Rollback as first-class op | WP-132 (judge-triggered), WP-205 (manual) | P1→P2 | planned |
@@ -85,7 +85,7 @@ Every requirement in [`project.md`](../project.md), assigned a stable ID, mapped
 | ID | Requirement | WP(s) | Phase | Status |
 |---|---|---|---|---|
 | FA-1 | Entire production-ready apps: brownfield, multi-repo, migrations, long-horizon | ADR-003 (capability via wrapped agents); WP-214 (multi-repo); P3 brownfield benchmark proves it | P1→P3 | planned |
-| FA-2 | Reliable, redundant execution; fluent restart on failure | WP-123 | P1 | planned |
+| FA-2 | Reliable, redundant execution; fluent restart on failure | WP-123 | P1 | done |
 | FA-3 | Token awareness + intelligent pacing during planning AND execution (batch size, test count, checkpoint cadence, breaks) | WP-207; inputs from WP-105 accounting | P2 | planned |
 
 ## SE — Orchestrator self-evaluation (spec §5.9)
