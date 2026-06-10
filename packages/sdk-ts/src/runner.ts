@@ -13,7 +13,14 @@ import { join } from "node:path";
 import { Client, Connection } from "@temporalio/client";
 
 import { Journal, reportFromJournal } from "./journal/journal.js";
-import { QUERY_STATUS, SIGNAL_CANCEL, SIGNAL_INJECT, TASK_QUEUE_DEFAULT } from "./runner/api.js";
+import {
+  QUERY_STATUS,
+  SIGNAL_APPROVE,
+  SIGNAL_CANCEL,
+  SIGNAL_INJECT,
+  SIGNAL_TOP_UP,
+  TASK_QUEUE_DEFAULT,
+} from "./runner/api.js";
 import { DEFAULT_DATA_DIR, journalPath } from "./runner/paths.js";
 import type { DurableRunner, RunHandle, RunStatusReport, TaskSpec } from "./types.js";
 
@@ -69,9 +76,7 @@ export function createTemporalRunner(opts: TemporalRunnerOptions = {}): Temporal
       },
       async approve(decision) {
         const client = await getClient();
-        // Signal name kept in runner/api.ts; handler lands with the
-        // escalate path (WP-124) and judge gating (WP-132).
-        await client.workflow.getHandle(runId).signal("approve", decision);
+        await client.workflow.getHandle(runId).signal(SIGNAL_APPROVE, decision);
       },
       async inject(guidance) {
         const client = await getClient();
@@ -97,11 +102,15 @@ export function createTemporalRunner(opts: TemporalRunnerOptions = {}): Temporal
     },
 
     async resume(runId, runOpts): Promise<RunHandle> {
-      if (runOpts?.addBudgetUsd !== undefined) {
-        throw new Error("resume --add-budget lands with the budget gate (WP-124)");
-      }
       // The workflow lives in Temporal; resuming = reattaching a handle
       // (and the caller ensuring a worker is up — WP-141 owns that UX).
+      // A budget-halted run additionally needs funds to clear the gate.
+      if (runOpts?.addBudgetUsd !== undefined) {
+        const client = await getClient();
+        await client.workflow
+          .getHandle(runId)
+          .signal(SIGNAL_TOP_UP, { amountUsd: runOpts.addBudgetUsd });
+      }
       return makeHandle(runId);
     },
 

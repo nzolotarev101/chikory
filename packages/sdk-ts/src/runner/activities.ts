@@ -350,6 +350,71 @@ export function createRunnerActivities(deps: RunnerActivityDeps) {
     },
 
     /**
+     * Budget ledger events (WP-124, CG-2): `halt` when the pre-step gate
+     * trips, `top_up` when `chikory resume --add-budget` adds funds. The
+     * journal makes spend governance auditable (exit-gate #4).
+     */
+    async recordBudgetEvent(input: {
+      runId: string;
+      budgetEventIndex: number;
+      event: "halt" | "top_up";
+      remainingUsd: number;
+      details: Record<string, number>;
+    }): Promise<void> {
+      const journal = openJournal(deps, input.runId);
+      try {
+        journal.appendOnce(
+          { field: "budgetEventIndex", value: input.budgetEventIndex },
+          {
+            kind: "budget_event",
+            payload: {
+              budgetEventIndex: input.budgetEventIndex,
+              event: input.event,
+              remainingUsd: input.remainingUsd,
+              details: input.details,
+            },
+            costDeltaUsd: 0,
+            artifactRefs: [],
+          },
+        );
+      } finally {
+        journal.close();
+      }
+    },
+
+    /**
+     * Runner-sourced ESCALATE (WP-124 loop-breaker, CG-1). Journaled as a
+     * `verdict` entry with `source: "runner"` — no JudgeForm/judgeModel,
+     * because no judge ran (journal-format.md §3 documents both shapes).
+     */
+    async recordEscalation(input: {
+      runId: string;
+      escalationIndex: number;
+      atStep: number;
+      reason: string;
+    }): Promise<void> {
+      const journal = openJournal(deps, input.runId);
+      try {
+        journal.appendOnce(
+          { field: "escalationIndex", value: input.escalationIndex },
+          {
+            kind: "verdict",
+            payload: {
+              escalationIndex: input.escalationIndex,
+              source: "runner",
+              atStep: input.atStep,
+              verdict: { kind: "ESCALATE", rationale: input.reason, escalateReason: input.reason },
+            },
+            costDeltaUsd: 0,
+            artifactRefs: [],
+          },
+        );
+      } finally {
+        journal.close();
+      }
+    },
+
+    /**
      * Terminal seal — every run ends with an explicit journal terminal
      * entry; runs never end ambiguously (CG-1, durable-runner.md).
      */

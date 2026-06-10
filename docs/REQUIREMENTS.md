@@ -32,7 +32,7 @@ Every requirement in [`project.md`](../project.md), assigned a stable ID, mapped
 | DX-4 | Checkpoint per LLM/tool call; pause, inspect, resume | WP-122, WP-141 | P1 | in-progress |
 | DX-5 | Branching of execution paths as first-class op | WP-205 | P2 | planned |
 | DX-6 | Rollback as first-class op | WP-132 (judge-triggered), WP-205 (manual) | P1→P2 | planned |
-| DX-7 | Budget-aware continuation | WP-124 (hard gate), WP-207 (reasoned continuation) | P1→P2 | planned |
+| DX-7 | Budget-aware continuation | WP-124 (hard gate), WP-207 (reasoned continuation) | P1→P2 | in-progress (hard gate done; reasoned continuation P2) |
 | DX-8 | Suspend/resume for HITL; sleep hours/days, resume on approval | WP-206 (full); WP-132 ESCALATE is the P1 stopgap | P2 | planned |
 
 ## JD — Agent-as-a-Judge (spec §5.3)
@@ -60,8 +60,8 @@ Every requirement in [`project.md`](../project.md), assigned a stable ID, mapped
 
 | ID | Requirement | WP(s) | Phase | Status |
 |---|---|---|---|---|
-| CG-1 | Terminal states / deterministic exits break retry loops | WP-103, WP-124 (invariant #4) | P1 | in-progress |
-| CG-2 | Spend controls; transparent, predictable, checkpoint-aware budget governance | WP-124, WP-105; dashboards in WP-407 | P1→P4 | planned |
+| CG-1 | Terminal states / deterministic exits break retry loops | WP-103, WP-124 (invariant #4) | P1 | done |
+| CG-2 | Spend controls; transparent, predictable, checkpoint-aware budget governance | WP-124, WP-105; dashboards in WP-407 | P1→P4 | in-progress (P1 gate done; dashboards P4) |
 
 ## AR — Artifact-centric state (spec §5.6)
 

@@ -27,23 +27,28 @@ Local dev: `devbox run temporal-dev` (temporal-cli is pinned in `devbox.json`; n
 
 ```
 while (true) {
-  if (budgetLedger.remaining < estimateNextStep())        → halt(BUDGET)        // CG-2, resumable
+  if (budgetLedger.remaining < estimateNextStep()) {                             // CG-2
+    journal(budget_event: halt); status = SUSPENDED                              // resumable
+    await signal(topUp); journal(budget_event: top_up); continue                 // resume --add-budget
+  }
   instruction = nextPlanItem()                                                   // P2: paced batch (WP-207)
   record = activity.executeStep(adapter, instruction, ctx)                       // journaled
-  checkpoint = activity.checkpoint(record)                                       // git commit + journal row
-  if (record.status == FAILED) { failures++; if (failures >= 3) → escalate() }   // CG-1: no loops
   if (stepIndex % judgeCadence == 0 || planMilestone()) {
     verdict = activity.judge(evidenceSince(lastVerdict))                         // journaled
     switch (verdict) {
-      PROCEED  → lastGoodCheckpoint = checkpoint
-      ROLLBACK → activity.restore(lastGoodCheckpoint); ctx.addJudgeFeedback(verdict)
-      HALT     → halt(JUDGE)                                                     // terminal, resumable
-      ESCALATE → await signal(approve|reject)                                    // DX-8
+      PROCEED  → (checkpoint below is written lastGood)
+      ROLLBACK → activity.restore(lastGoodCheckpoint); ctx.addJudgeFeedback(verdict)  // WP-132
+      HALT     → halt(JUDGE)                                                     // terminal, resumable (WP-132)
+      ESCALATE → await signal(approve|reject)                                    // DX-8 (WP-132)
     }
   }
+  checkpoint = activity.checkpoint(record, lastGood = verdict==PROCEED)          // git commit + journal row
   if (allAcceptanceCriteriaMet(verdict)) → succeed()                             // explicit terminal
+  if (record.status == FAILED) { failures++; if (failures >= 3) → escalate() }   // CG-1: no loops
 }
 ```
+
+The checkpoint is written **after** the (optional) judge pass so the persisted `lastGood` flag reflects the verdict that covers exactly that state — WP-132's ROLLBACK restores the latest `lastGood` checkpoint. The WP-124 loop-breaker escalation is runner-sourced: it journals a `verdict` entry with `source: "runner"` and no JudgeForm (journal-format.md §3), then awaits `approve` (status `AWAITING_APPROVAL`); rejection seals an explicit FAILED terminal.
 
 Every terminal is an explicit `SUCCESS` or `FAILED(reason, lastCheckpoint)` journal seal — runs never end ambiguously.
 

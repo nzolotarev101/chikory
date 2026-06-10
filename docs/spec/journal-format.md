@@ -38,7 +38,7 @@ The persisted/exported form of a run's journal. Single format consumed by: `chik
 |---|---|
 | `step` | `StepRecord` (refs only, no bulk) + `instruction`, `planItem` |
 | `judge` | `JudgeEvidence` refs + `JudgeForm` + model + cost |
-| `verdict` | `JudgeVerdict` (kind, rationale, rollbackTo?) |
+| `verdict` | `{ judgeIndex, atStep, verdict: JudgeVerdict }` (judge-sourced), or the runner-sourced loop-breaker escalation `{ escalationIndex, source: "runner", atStep, verdict: { kind: "ESCALATE", rationale, escalateReason } }` — no JudgeForm/judgeModel because no judge ran (WP-124) |
 | `checkpoint` | `Checkpoint` |
 | `injection` | `{ source: "human", text, atStep }` |
 | `budget_event` | `{ event: "estimate"\|"halt"\|"top_up", remainingUsd, details }` |
