@@ -10,17 +10,17 @@ Every requirement in [`project.md`](../project.md), assigned a stable ID, mapped
 
 | ID | Requirement | WP(s) | Phase | Status |
 |---|---|---|---|---|
-| RT-1 | Sits in front of one or many LLMs; routes tasks | WP-101 | P1 | planned |
-| RT-2 | Manages retries, handles failures | WP-103 | P1 | planned |
+| RT-1 | Sits in front of one or many LLMs; routes tasks | WP-101 | P1 | done |
+| RT-2 | Manages retries, handles failures | WP-103 | P1 | done |
 | RT-3 | Coordinates multi-agent workflows | WP-121, WP-132 (executor+judge coordination); richer multi-agent in WP-203 sub-agents | P1→P2 | planned |
-| RT-4 | Bring-your-own-model, swap freely | WP-101, WP-104 | P1 | planned |
-| RT-5 | Explicit per-stage policies (planning/coding/review/judge) | WP-104 | P1 | planned |
-| RT-6 | Dynamic routing layer across providers | WP-103 (failover), WP-104 | P1 | planned |
-| RT-7 | Teams keep existing observability stack | WP-105 (OTel/OTLP, no proprietary sink) | P1 | planned |
+| RT-4 | Bring-your-own-model, swap freely | WP-101, WP-104 | P1 | done |
+| RT-5 | Explicit per-stage policies (planning/coding/review/judge) | WP-104 | P1 | done |
+| RT-6 | Dynamic routing layer across providers | WP-103 (failover), WP-104 | P1 | done |
+| RT-7 | Teams keep existing observability stack | WP-105 (OTel/OTLP, no proprietary sink) | P1 | done |
 | RT-8 | Sits above existing frameworks/coding agents, not replacing them | ADR-003, WP-111, WP-112 | P1 | planned |
 | RT-9 | Runs locally; cloud only as orchestrated process | WP-004 (local Temporal), constraint on all P4 WPs | P1 | planned |
 | RT-10 | Drive CLI coding agents: Claude Code, Codex, Jules, Antigravity | WP-112, WP-113, WP-216 | P1→P2 | planned |
-| RT-11 | Launch providers: Anthropic, OpenAI, Gemini, open models (OpenAI-compat) | WP-101, WP-102 | P1 | planned |
+| RT-11 | Launch providers: Anthropic, OpenAI, Gemini, open models (OpenAI-compat) | WP-101, WP-102 | P1 | done |
 
 ## DX — Durable execution (spec §5.2)
 
@@ -60,7 +60,7 @@ Every requirement in [`project.md`](../project.md), assigned a stable ID, mapped
 
 | ID | Requirement | WP(s) | Phase | Status |
 |---|---|---|---|---|
-| CG-1 | Terminal states / deterministic exits break retry loops | WP-103, WP-124 (invariant #4) | P1 | planned |
+| CG-1 | Terminal states / deterministic exits break retry loops | WP-103, WP-124 (invariant #4) | P1 | in-progress |
 | CG-2 | Spend controls; transparent, predictable, checkpoint-aware budget governance | WP-124, WP-105; dashboards in WP-407 | P1→P4 | planned |
 
 ## AR — Artifact-centric state (spec §5.6)
@@ -76,7 +76,7 @@ Every requirement in [`project.md`](../project.md), assigned a stable ID, mapped
 | OB-1 | Observe reasoning; trace decision trees | WP-142 | P1 | planned |
 | OB-2 | Inject corrections mid-run | WP-212 | P2 | planned |
 | OB-3 | Set success criteria upfront | WP-005 (acceptance_criteria in TaskSpec) | P0 | done |
-| OB-4 | OTel-compliant traces by default | WP-105, WP-134 (invariant #3) | P1 | planned |
+| OB-4 | OTel-compliant traces by default | WP-105, WP-134 (invariant #3) | P1 | in-progress |
 | OB-5 | Trajectory-level forensics, whole path debuggable after the fact | WP-122 (journal), WP-142 (renderer), WP-403 (web) | P1→P4 | planned |
 | OB-6 | Human-observable metrics: tokens, decisions, checks, feedback frequency | WP-142, WP-209 | P1→P2 | planned |
 

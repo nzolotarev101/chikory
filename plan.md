@@ -111,11 +111,11 @@ Five parallel lanes after WP-002/WP-005 land. Lane docs contain full technical d
 
 | WP | Title | Tag | Depends | Acceptance criteria |
 |---|---|---|---|---|
-| WP-101 | Provider adapters: Anthropic, OpenAI, Gemini | 🟡 | WP-002 | One `complete()` interface, three adapters; real-call integration tests (no LLM mocks — CLAUDE.md rule); token counts + cost returned on every call. |
-| WP-102 | OpenAI-compat adapter (open models) | 🟢 | WP-101 | Same tests pass against a configurable `baseUrl` (Ollama/vLLM verified manually). |
-| WP-103 | Retry & failure policy | 🟡 | WP-101 | Exponential backoff, provider-failover option, every result normalized to explicit SUCCESS/FAILED (invariant #4); chaos test with injected 429/500/timeout. |
-| WP-104 | Per-stage routing policy | 🟡 | WP-101 | `RoutingPolicy` maps stage (plan/code/review/judge) → provider+model; swap via config only; test proves zero code change between two policies. |
-| WP-105 | OTel spans + accounting | 🟡 | WP-101 | Every LLM call emits an OTel span (provider, model, tokens, cost, latency, stage); spans visible in any OTLP collector. |
+| WP-101 | Provider adapters: Anthropic, OpenAI, Gemini | 🟡 | WP-002 | ✅ **Done** — one `complete()` interface, three adapters; real-call integration tests (no LLM mocks — CLAUDE.md rule), skipped when key absent; token counts + cost on every call. |
+| WP-102 | OpenAI-compat adapter (open models) | 🟢 | WP-101 | ✅ **Done** — same conformance tests run against `OPENAI_COMPAT_BASE_URL` (Ollama/vLLM verified manually). |
+| WP-103 | Retry & failure policy | 🟡 | WP-101 | ✅ **Done** — exponential backoff, per-stage failover, every result normalized to explicit SUCCESS/FAILED (invariant #4); chaos tests with injected 429/500/timeout/4xx via local fake HTTP servers. |
+| WP-104 | Per-stage routing policy | 🟡 | WP-101 | ✅ **Done** — `RoutingPolicy` maps stage (plan/code/review/judge) → provider+model; test runs identical task code under two policies, zero code change. |
+| WP-105 | OTel spans + accounting | 🟡 | WP-101 | ✅ **Done** — every `complete()` emits `chikory.llm.call` (stage, provider, model, tokens, cost, latency, retries, outcome); asserted via in-memory exporter; OTLP export via standard env config. |
 
 ### Lane M2 — Executors (`docs/components/executors.md`, ADR-003)
 

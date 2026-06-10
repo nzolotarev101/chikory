@@ -38,9 +38,9 @@ export interface Router {
 ## Provider adapters (WP-101, WP-102)
 
 - One file per provider: `providers/anthropic.ts`, `providers/openai.ts`, `providers/gemini.ts`, `providers/openai-compat.ts`.
-- Each adapter: translate `Message[]` → provider wire format, call official SDK/HTTP, normalize to `LLMCallResult` with **mandatory** `inputTokens`, `outputTokens`, computed `cost` (static price table, versioned in `pricing.ts`, overridable for open models).
-- API keys from env only (`ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `GEMINI_API_KEY`); construction fails fast with a clear message naming the missing var.
-- Structured output: use native JSON/schema modes where available; fallback = prompt-embedded schema + parse-with-retry (1 retry, then FAILED).
+- Each adapter: translate `Message[]` → provider wire format over raw HTTP (uniform transport keeps retry classification and transport-fake testing identical across providers; no provider SDK deps), normalize to `LLMCallResult` with **mandatory** `inputTokens`, `outputTokens`, computed `cost` (static price table, versioned in `pricing.ts`, overridable for open models — unknown models cost $0 unless overridden).
+- API keys from env only (`ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `GEMINI_API_KEY`; openai-compat: `OPENAI_COMPAT_BASE_URL` required, `OPENAI_COMPAT_API_KEY` optional); construction fails fast with a clear message naming the missing var.
+- Structured output: native JSON-schema modes on Anthropic (`output_config.format`) and OpenAI (`response_format`); Gemini and openai-compat use the fallback = prompt-embedded schema (+ JSON response mime type on Gemini) + parse-with-retry (1 re-ask, then FAILED). Markdown code fences around JSON are stripped before parsing.
 
 ## Failure & retry policy (WP-103)
 
