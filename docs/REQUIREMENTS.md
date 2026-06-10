@@ -26,8 +26,8 @@ Every requirement in [`project.md`](../project.md), assigned a stable ID, mapped
 
 | ID | Requirement | WP(s) | Phase | Status |
 |---|---|---|---|---|
-| DX-1 | State, memory, task context across minutes → weeks | WP-121, WP-122; cross-session memory WP-204 | P1→P2 | planned |
-| DX-2 | Journal/replay: each LLM/tool call a deterministic journaled step | WP-121 | P1 | planned |
+| DX-1 | State, memory, task context across minutes → weeks | WP-121, WP-122; cross-session memory WP-204 | P1→P2 | in-progress |
+| DX-2 | Journal/replay: each LLM/tool call a deterministic journaled step | WP-121 | P1 | done |
 | DX-3 | Crash → resurrect from point of failure via memoized results | WP-123 | P1 | planned |
 | DX-4 | Checkpoint per LLM/tool call; pause, inspect, resume | WP-122, WP-141 | P1 | planned |
 | DX-5 | Branching of execution paths as first-class op | WP-205 | P2 | planned |

@@ -1,0 +1,182 @@
+/**
+ * WP-121 — journaled agent loop on a real Temporal dev server.
+ * Asserts: one journal entry per executor step, judge pass per cadence as
+ * its own activity, explicit terminal seal, and deterministic replay of the
+ * complete event history.
+ */
+import { randomUUID } from "node:crypto";
+import { mkdtemp, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+
+import { Client, Connection } from "@temporalio/client";
+import { Worker } from "@temporalio/worker";
+import { afterEach, describe, expect, inject, test } from "vitest";
+
+import {
+  createRunnerWorker,
+  createTemporalRunner,
+  Journal,
+  journalPath,
+  type JudgeVerdict,
+  type RunnerActivities,
+  type RunStatusReport,
+  type StepPayload,
+} from "../../src/index.js";
+import { initSourceRepo, makeSpec, scriptedRegistry, TERMINAL_STATUSES, waitFor } from "./helpers.js";
+
+const address = inject("temporalAddress");
+const bundlePath = inject("workflowBundlePath");
+
+describe.skipIf(address === null)("agent loop (WP-121)", () => {
+  const cleanups: Array<() => Promise<void>> = [];
+  afterEach(async () => {
+    while (cleanups.length > 0) await cleanups.pop()!();
+  });
+
+  async function setup(opts: { specOverrides?: object; judgeOverride?: RunnerActivities["judgeStep"] }) {
+    const tmp = await mkdtemp(join(tmpdir(), "chikory-runner-"));
+    cleanups.push(() => rm(tmp, { recursive: true, force: true }));
+    const repoUrl = await initSourceRepo(join(tmp, "src"));
+    const dataDir = join(tmp, "data");
+    const taskQueue = `tq-${randomUUID()}`;
+
+    const worker = await createRunnerWorker({
+      adapters: scriptedRegistry,
+      address: address!,
+      taskQueue,
+      dataDir,
+      workflowBundlePath: bundlePath!,
+      ...(opts.judgeOverride ? { activitiesOverride: { judgeStep: opts.judgeOverride } } : {}),
+    });
+    const workerDone = worker.run();
+    const runner = createTemporalRunner({ address: address!, taskQueue, dataDir });
+    cleanups.push(async () => {
+      worker.shutdown();
+      await workerDone;
+      await runner.close();
+    });
+    return { repoUrl, dataDir, taskQueue, runner };
+  }
+
+  async function awaitTerminal(
+    handle: { status(): Promise<RunStatusReport> },
+  ): Promise<RunStatusReport> {
+    return waitFor(
+      async () => {
+        const report = await handle.status();
+        return TERMINAL_STATUSES.includes(report.status) ? report : undefined;
+      },
+      { what: "run to reach a terminal status" },
+    );
+  }
+
+  test("journals one step entry per executor step, judge pass per cadence, terminal seal; replays deterministically", async () => {
+    const { repoUrl, dataDir, runner } = await setup({});
+    const spec = makeSpec({ repoUrl, maxSteps: 4, judge: { family: "gemini", cadence: 2 } });
+
+    const handle = await runner.start(spec);
+    const report = await awaitTerminal(handle);
+
+    // Stub judge never confirms criteria → loop must end at maxSteps, FAILED.
+    expect(report.status).toBe("FAILED");
+    expect(report.failure?.reason).toContain("maxSteps");
+    expect(report.currentStep).toBe(4);
+
+    const journal = new Journal(journalPath(dataDir, handle.runId));
+    try {
+      const steps = journal.entries("step");
+      expect(steps).toHaveLength(4);
+      expect(steps.map((e) => (e.payload as StepPayload).stepIndex)).toEqual([0, 1, 2, 3]);
+
+      const all = journal.entries();
+      const idxs = all.map((e) => e.idx);
+      expect(idxs).toEqual([...idxs].sort((a, b) => a - b));
+      expect(new Set(idxs).size).toBe(idxs.length);
+
+      // cadence=2 over 4 steps → exactly 2 judge passes, journaled as verdicts.
+      expect(journal.entries("verdict")).toHaveLength(2);
+
+      const terminal = journal.entries("terminal");
+      expect(terminal).toHaveLength(1);
+      expect((terminal[0]!.payload as { status: string }).status).toBe("FAILED");
+      expect(journal.getRun()?.status).toBe("FAILED");
+
+      // 4 steps × $0.01; stub judge is free.
+      expect(journal.totalCostUsd()).toBeCloseTo(0.04, 10);
+    } finally {
+      journal.close();
+    }
+
+    // Deterministic replay (WP-121 acceptance): full history replays clean.
+    const connection = await Connection.connect({ address: address! });
+    try {
+      const client = new Client({ connection });
+      const history = await client.workflow.getHandle(handle.runId).fetchHistory();
+      await Worker.runReplayHistory({ workflowBundle: { codePath: bundlePath! } }, history);
+    } finally {
+      await connection.close();
+    }
+  });
+
+  test("run succeeds when the judge confirms every acceptance criterion", async () => {
+    let dataDirRef = "";
+    const decidingJudge: RunnerActivities["judgeStep"] = async (input) => {
+      const verdict: JudgeVerdict = {
+        kind: "PROCEED",
+        form: {
+          criterionResults: input.criteria.map((c) => ({
+            id: c.id,
+            pass: true,
+            justification: "test judge: confirmed",
+          })),
+          rubricResults: [],
+          concerns: [],
+        },
+        rationale: "test judge: all criteria met",
+        costUsd: 0.001,
+        tokens: { input: 10, output: 5 },
+        judgeModel: { provider: "gemini", model: "test-judge" },
+      };
+      const journal = new Journal(journalPath(dataDirRef, input.runId));
+      try {
+        journal.appendOnce(
+          { field: "judgeIndex", value: input.judgeIndex },
+          {
+            kind: "verdict",
+            payload: { judgeIndex: input.judgeIndex, atStep: input.atStep, verdict },
+            costDeltaUsd: verdict.costUsd,
+            tokens: verdict.tokens,
+            artifactRefs: [],
+          },
+        );
+      } finally {
+        journal.close();
+      }
+      return verdict;
+    };
+
+    const { repoUrl, dataDir, runner } = await setup({ judgeOverride: decidingJudge });
+    dataDirRef = dataDir;
+    const spec = makeSpec({ repoUrl, maxSteps: 10, judge: { family: "gemini", cadence: 2 } });
+
+    const handle = await runner.start(spec);
+    const report = await awaitTerminal(handle);
+
+    expect(report.status).toBe("SUCCESS");
+    expect(report.lastVerdict).toEqual({ kind: "PROCEED", atStep: 1 });
+
+    const journal = new Journal(journalPath(dataDir, handle.runId));
+    try {
+      // Judge confirmed at the cadence boundary (after step 2) — no extra steps.
+      expect(journal.entries("step")).toHaveLength(2);
+      expect((journal.entries("terminal")[0]!.payload as { status: string }).status).toBe(
+        "SUCCESS",
+      );
+      // Cost conservation includes judge spend (JD-7 visibility).
+      expect(journal.totalCostUsd()).toBeCloseTo(0.021, 10);
+    } finally {
+      journal.close();
+    }
+  });
+});

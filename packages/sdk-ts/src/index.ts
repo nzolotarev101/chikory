@@ -60,3 +60,46 @@ export {
   TaskSpecValidationError,
   type ParseTaskSpecOptions,
 } from "./taskspec.js";
+export {
+  Journal,
+  MAX_PAYLOAD_BYTES,
+  reportFromJournal,
+  type AppendInput,
+  type RunRow,
+} from "./journal/journal.js";
+export {
+  createRunnerActivities,
+  type AdapterFactory,
+  type AdapterRegistry,
+  type RunnerActivities,
+  type RunnerActivityDeps,
+  type StepPayload,
+  type VerdictPayload,
+} from "./runner/activities.js";
+export {
+  QUERY_STATUS,
+  SIGNAL_APPROVE,
+  SIGNAL_CANCEL,
+  SIGNAL_INJECT,
+  SIGNAL_TOP_UP,
+  TASK_QUEUE_DEFAULT,
+  type ApproveDecision,
+} from "./runner/api.js";
+export {
+  artifactsDir,
+  DEFAULT_DATA_DIR,
+  journalPath,
+  runDir,
+  workspaceDir,
+} from "./runner/paths.js";
+export {
+  createRunnerWorker,
+  resolveWorkflowsPath,
+  type RunnerWorker,
+  type RunnerWorkerOptions,
+} from "./runner/worker.js";
+export {
+  createTemporalRunner,
+  type TemporalRunner,
+  type TemporalRunnerOptions,
+} from "./runner.js";
