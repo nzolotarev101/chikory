@@ -66,6 +66,8 @@ Implementation: `test/executors/conformance.ts` registers the suite for any adap
 
 Same pattern: headless/non-interactive mode, JSON output where available, conformance suite green. Spec lives in each adapter file header; these are 🟢 tasks — the design questions are already answered by WP-111/112.
 
+Codex specifics (WP-113, done): `codex exec --json --ephemeral --ignore-user-config -s workspace-write -C <workspaceDir>` — sandbox `workspace-write` gives deny-by-default outside the workspace natively. Usage parsed from `turn.completed`; Codex reports no dollar cost, so cost is estimated from the pricing table when the model is known (`costEstimated: true`). No `--max-turns` equivalent: `limits.maxTurns` is not enforceable; steps are bounded by `maxSeconds` + instruction scope. `modelFamily = "openai"`.
+
 ## Native loop executor (WP-213, P2)
 
 Router-driven plan→act loop with a minimal tool set (read/write/edit/bash/test) where every tool returns explicit SUCCESS/FAILED. Exists so (a) benchmarks can isolate Chikory's contribution from CLI-agent quality, (b) open-model-only environments work. Not an agent framework — one loop, no graph DSL (NF-1).

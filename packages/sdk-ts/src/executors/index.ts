@@ -10,3 +10,4 @@ export {
   parseClaudeCodeOutput,
   type ClaudeCodeAdapterOptions,
 } from "./claude-code.js";
+export { createCodexAdapter, parseCodexOutput, type CodexAdapterOptions } from "./codex.js";

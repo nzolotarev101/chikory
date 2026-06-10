@@ -123,7 +123,7 @@ Five parallel lanes after WP-002/WP-005 land. Lane docs contain full technical d
 |---|---|---|---|---|
 | WP-111 | `ExecutorAdapter` interface + step contract | 🔴 | WP-002 | ✅ **Done** — shared CLI-step machinery (`runCliStep`: bounded subprocess, diff+transcript artifacts, explicit SUCCESS/FAILED, `chikory.step` span), minimal local-FS artifact store (artifacts.md P1 slice), adapter conformance suite (5 properties + span assertion), contract↔doc drift test. |
 | WP-112 | Claude Code headless adapter | 🔴 | WP-111 | ✅ **Done** — drives `claude -p` (stream-json, turn caps, user settings isolated, file-ops-only tool allowlist); exact cost from result event; conformance suite green on fake wire; real-CLI e2e completes the 3-step toy task (gated `CHIKORY_E2E_CLAUDE=1`, verified locally). |
-| WP-113 | Codex CLI adapter | 🟢 | WP-112 | Same conformance test suite as WP-112 passes (adapter conformance suite is part of WP-111). Stretch goal — may slip to P2 without blocking exit gate. |
+| WP-113 | Codex CLI adapter | 🟢 | WP-112 | ✅ **Done** — `codex exec --json` (workspace-write sandbox, user config isolated); same conformance suite as WP-112 green; cost estimated from pricing table (`costEstimated: true` — no cost on the wire); real-CLI e2e completes the 3-step toy task (gated `CHIKORY_E2E_CODEX=1`, verified locally). |
 
 ### Lane M3 — Durable runner (`docs/components/durable-runner.md`)
 
