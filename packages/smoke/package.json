@@ -1,0 +1,21 @@
+{
+  "name": "@chikory/smoke",
+  "version": "0.0.1",
+  "private": true,
+  "description": "WP-004 smoke check: hello-world Temporal workflow proving the devbox substrate works end-to-end",
+  "type": "module",
+  "scripts": {
+    "smoke": "tsx src/run-smoke.ts",
+    "typecheck": "tsc --noEmit"
+  },
+  "license": "MIT",
+  "devDependencies": {
+    "@temporalio/activity": "^1.13.0",
+    "@temporalio/client": "^1.13.0",
+    "@temporalio/worker": "^1.13.0",
+    "@temporalio/workflow": "^1.13.0",
+    "@types/node": "^20.0.0",
+    "tsx": "^4.19.0",
+    "typescript": "^5.4.0"
+  }
+}
