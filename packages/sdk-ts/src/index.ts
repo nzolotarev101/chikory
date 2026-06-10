@@ -2,6 +2,24 @@ export type * from "./types.js";
 export * from "./schemas.js";
 export { canonicalJson } from "./canonical-json.js";
 export {
+  computeCostUsd,
+  lookupPricing,
+  PRICE_TABLE,
+  PRICING_VERSION,
+  type ModelPricing,
+} from "./pricing.js";
+export {
+  createAdapter,
+  createAnthropicAdapter,
+  createGeminiAdapter,
+  createOpenAIAdapter,
+  ProviderCallError,
+  type AdapterOptions,
+  type ProviderAdapter,
+  type ProviderRequest,
+  type ProviderResponse,
+} from "./providers/index.js";
+export {
   DEFAULT_CADENCE,
   DEFAULT_MAX_STEPS,
   DEFAULT_SCORING_METHOD,
