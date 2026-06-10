@@ -2,8 +2,9 @@ from __future__ import annotations
 
 import warnings
 from typing import Literal
-from .types import JudgeConfig, StepTrace, LLMProvider, RouterConfig
+
 from .router import Router
+from .types import JudgeConfig, LLMProvider, RouterConfig, StepTrace
 
 
 class JudgeEvalResult:

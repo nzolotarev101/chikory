@@ -14,13 +14,15 @@ dependencies = [
   "pydantic>=2.7.0",
 ]
 
-[project.optional-dependencies]
+[dependency-groups]
 dev = [
-  "ruff>=0.4.0",
   "pytest>=8.2.0",
   "pytest-asyncio>=0.23.0",
-  "mypy>=1.10.0",
+  "pyright>=1.1.390",
 ]
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/chikory"]
 
 [tool.ruff]
 target-version = "py311"
@@ -28,11 +30,11 @@ line-length = 100
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "UP", "ANN", "ASYNC"]
-ignore = ["ANN101", "ANN102"]
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
+testpaths = ["tests"]
 
-[tool.mypy]
-python_version = "3.11"
-strict = true
+[tool.pyright]
+include = ["src", "tests"]
+pythonVersion = "3.11"

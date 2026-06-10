@@ -1,8 +1,8 @@
 from __future__ import annotations
 
 from typing import Literal
-from pydantic import BaseModel
 
+from pydantic import BaseModel
 
 LLMProvider = Literal["anthropic", "openai", "gemini"]
 

@@ -1,10 +1,11 @@
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Literal, Protocol
-from .types import AgentRunConfig, StepTrace, ToolResult
-from .router import Router
+
 from .judge import Judge
+from .router import Router
+from .types import AgentRunConfig, StepTrace, ToolResult
 
 
 class AgentStep(Protocol):
@@ -40,7 +41,10 @@ class AgentRunner:
         judge_interval = self._config.judge.evaluate_every_n_steps
 
         for i, step in enumerate(steps):
-            if self._config.budget_usd is not None and self._total_cost_usd >= self._config.budget_usd:
+            if (
+                self._config.budget_usd is not None
+                and self._total_cost_usd >= self._config.budget_usd
+            ):
                 return self._build_result("BUDGET_EXCEEDED")
 
             tool_results = await step.execute()
@@ -64,7 +68,7 @@ class AgentRunner:
         self._step_traces.append(
             StepTrace(
                 step_index=index,
-                timestamp=datetime.now(timezone.utc).isoformat(),
+                timestamp=datetime.now(UTC).isoformat(),
                 type="tool_call",
             )
         )

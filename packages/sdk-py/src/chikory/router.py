@@ -1,7 +1,6 @@
 from __future__ import annotations
 
-import httpx
-from .types import LLMProvider, RouterConfig, ToolResult
+from .types import LLMProvider, RouterConfig
 
 
 class LLMCallResult:
@@ -41,7 +40,9 @@ class Router:
 
         match target:
             case "anthropic":
-                return await self._call_anthropic(messages, effective_model, provider_config.api_key)
+                return await self._call_anthropic(
+                    messages, effective_model, provider_config.api_key
+                )
             case "openai":
                 return await self._call_openai(messages, effective_model, provider_config.api_key)
             case "gemini":
@@ -49,14 +50,20 @@ class Router:
             case _:
                 raise ValueError(f"Unknown provider: {target}")
 
-    async def _call_anthropic(self, messages: list[dict[str, str]], model: str, api_key: str) -> LLMCallResult:
+    async def _call_anthropic(
+        self, messages: list[dict[str, str]], model: str, api_key: str
+    ) -> LLMCallResult:
         # TODO: implement Anthropic provider
         raise NotImplementedError("Anthropic provider not yet implemented")
 
-    async def _call_openai(self, messages: list[dict[str, str]], model: str, api_key: str) -> LLMCallResult:
+    async def _call_openai(
+        self, messages: list[dict[str, str]], model: str, api_key: str
+    ) -> LLMCallResult:
         # TODO: implement OpenAI provider
         raise NotImplementedError("OpenAI provider not yet implemented")
 
-    async def _call_gemini(self, messages: list[dict[str, str]], model: str, api_key: str) -> LLMCallResult:
+    async def _call_gemini(
+        self, messages: list[dict[str, str]], model: str, api_key: str
+    ) -> LLMCallResult:
         # TODO: implement Gemini provider
         raise NotImplementedError("Gemini provider not yet implemented")
