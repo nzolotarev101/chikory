@@ -36,9 +36,14 @@ export {
 export {
   assertGitWorkspace,
   captureWorkspaceDiff,
+  CLAUDE_CODE_DEFAULT_ALLOWED_TOOLS,
+  CLAUDE_CODE_DEFAULT_MAX_TURNS,
+  createClaudeCodeAdapter,
+  parseClaudeCodeOutput,
   renderStepPrompt,
   runCliStep,
   SPAN_STEP,
+  type ClaudeCodeAdapterOptions,
   type CliStepOptions,
   type ParsedCliResult,
 } from "./executors/index.js";

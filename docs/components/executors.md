@@ -53,10 +53,13 @@ Implementation: `test/executors/conformance.ts` registers the suite for any adap
 
 ## Claude Code adapter (WP-112)
 
-- Invocation: `claude -p "<instruction+context>" --output-format stream-json --max-turns <n>` with `cwd=workspaceDir`; deny-by-default permissions outside the workspace.
-- Cost/tokens parsed from result JSON; transcript stream captured to blob → `transcriptRef`.
-- Diff: `git diff` against step-start commit (workspace is always a git worktree; uncommitted changes are committed by the checkpointer, not the agent).
-- Hang handling: no output for `maxSeconds` → SIGTERM, then SIGKILL → FAILED(retriable: true).
+- Invocation: `claude -p "<rendered step prompt>" --output-format stream-json --verbose --max-turns <n> --setting-sources project --permission-mode acceptEdits --allowedTools <list>` with `cwd=workspaceDir`.
+  - `--setting-sources project`: user-level settings (hooks, plugins) must never leak into runs — reproducibility.
+  - Default `allowedTools` is file-ops only (`Read,Edit,Write,Glob,Grep`): with `cwd=workspaceDir` that is deny-by-default outside the workspace. Adding `Bash` widens capability but escapes the path sandbox — explicit opt-in via adapter options.
+- Cost/tokens parsed from the final `result` event (`total_cost_usd` exact → `costEstimated: false`; input tokens include cache read/creation); transcript stream captured to blob → `transcriptRef`; `tool_use` blocks counted across assistant events → `toolCalls`.
+- `error_max_turns` is a **successful** bounded invocation — the turn cap is the step contract working as designed; the diff is real and the judge gates it. Only execution errors (`is_error`, other error subtypes) → FAILED.
+- Diff: `git diff` against step-start state, untracked files included via `git add -N` (workspace is always a git worktree; commits belong to the checkpointer, not the agent).
+- Hang handling (shared WP-111 machinery): wall-clock `maxSeconds` overrun → SIGTERM, then SIGKILL → FAILED(retriable: true).
 - Model choice flows from `RoutingPolicy.stages.code` → `--model` flag; `modelFamily = "anthropic"` feeds judge-diversity check.
 
 ## Codex / Jules / Antigravity adapters (WP-113, WP-216)

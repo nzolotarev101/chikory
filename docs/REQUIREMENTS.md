@@ -17,7 +17,7 @@ Every requirement in [`project.md`](../project.md), assigned a stable ID, mapped
 | RT-5 | Explicit per-stage policies (planning/coding/review/judge) | WP-104 | P1 | done |
 | RT-6 | Dynamic routing layer across providers | WP-103 (failover), WP-104 | P1 | done |
 | RT-7 | Teams keep existing observability stack | WP-105 (OTel/OTLP, no proprietary sink) | P1 | done |
-| RT-8 | Sits above existing frameworks/coding agents, not replacing them | ADR-003, WP-111, WP-112 | P1 | planned |
+| RT-8 | Sits above existing frameworks/coding agents, not replacing them | ADR-003, WP-111, WP-112 | P1 | done |
 | RT-9 | Runs locally; cloud only as orchestrated process | WP-004 (local Temporal), constraint on all P4 WPs | P1 | planned |
 | RT-10 | Drive CLI coding agents: Claude Code, Codex, Jules, Antigravity | WP-112, WP-113, WP-216 | P1→P2 | planned |
 | RT-11 | Launch providers: Anthropic, OpenAI, Gemini, open models (OpenAI-compat) | WP-101, WP-102 | P1 | done |
