@@ -23,9 +23,12 @@ export {
 export { createRouter, type RetryPolicy, type RouterOptions } from "./router.js";
 export {
   getTracer,
+  recordJudgePassSpan,
   recordLLMCallSpan,
+  SPAN_JUDGE_PASS,
   SPAN_LLM_CALL,
   TRACER_NAME,
+  type JudgePassSpanInput,
   type LLMCallSpanInput,
 } from "./otel.js";
 export {
@@ -65,8 +68,10 @@ export {
   Journal,
   MAX_PAYLOAD_BYTES,
   reportFromJournal,
+  runTotals,
   type AppendInput,
   type RunRow,
+  type RunTotals,
 } from "./journal/journal.js";
 export {
   createRunnerActivities,

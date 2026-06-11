@@ -291,3 +291,42 @@ export function reportFromJournal(journal: Journal): RunStatusReport | undefined
   }
   return report;
 }
+
+/** JIF §2 `run.totals` (journal-format.md) — the `chikory trace` footer data. */
+export interface RunTotals {
+  steps: number;
+  judgePasses: number;
+  rollbacks: number;
+  escalations: number;
+  costUsd: number;
+  /** Judge spend, absolute (Σ `judge` entry cost deltas). */
+  judgeCostUsd: number;
+  /** Judge spend as a fraction of run spend (JD-7 cost transparency). */
+  judgeCostShare: number;
+  tokens: TokenUsage;
+}
+
+/** Aggregates derived purely from journal entries (WP-134, OB-6). */
+export function runTotals(journal: Journal): RunTotals {
+  const verdictKinds = journal
+    .entries("verdict")
+    .map((e) => (e.payload as VerdictPayload).verdict.kind);
+  const judgeEntries = journal.entries("judge");
+  const tokens: TokenUsage = { input: 0, output: 0 };
+  for (const entry of journal.entries()) {
+    tokens.input += entry.tokens?.input ?? 0;
+    tokens.output += entry.tokens?.output ?? 0;
+  }
+  const costUsd = journal.totalCostUsd();
+  const judgeCostUsd = judgeEntries.reduce((sum, e) => sum + e.costDeltaUsd, 0);
+  return {
+    steps: journal.entries("step").length,
+    judgePasses: judgeEntries.length,
+    rollbacks: verdictKinds.filter((k) => k === "ROLLBACK").length,
+    escalations: verdictKinds.filter((k) => k === "ESCALATE").length,
+    costUsd,
+    judgeCostUsd,
+    judgeCostShare: costUsd > 0 ? judgeCostUsd / costUsd : 0,
+    tokens,
+  };
+}

@@ -17,8 +17,8 @@ import { heartbeat } from "@temporalio/activity";
 
 import { createLocalArtifactStore } from "../artifacts/index.js";
 import { buildVerdict, enforceFamilyDiversity, runJudgePass } from "../judge/index.js";
-import { Journal } from "../journal/journal.js";
-import { getTracer } from "../otel.js";
+import { Journal, runTotals } from "../journal/journal.js";
+import { getTracer, recordJudgePassSpan } from "../otel.js";
 import { createRouter, type RouterOptions } from "../router.js";
 import type {
   AcceptanceCriterion,
@@ -391,6 +391,30 @@ export function createRunnerActivities(deps: RunnerActivityDeps) {
             { field: "judgeIndex", value: input.judgeIndex },
             { kind: "verdict", payload, costDeltaUsd: 0, artifactRefs: [] },
           );
+
+          // Judge telemetry (WP-134): span per pass + JD-7 cost-share warning.
+          const totals = runTotals(writer);
+          if (
+            spec.judge.maxCostShare !== undefined &&
+            totals.judgeCostShare > spec.judge.maxCostShare
+          ) {
+            console.warn(
+              `[chikory] WARNING: judge spend is ${(totals.judgeCostShare * 100).toFixed(1)}% ` +
+                `of run cost ($${totals.judgeCostUsd.toFixed(4)} of $${totals.costUsd.toFixed(4)}), ` +
+                `above judge.maxCostShare=${spec.judge.maxCostShare}. Consider a larger cadence (JD-7).`,
+            );
+          }
+          const source = judgePayload ?? journaledForm;
+          recordJudgePassSpan({
+            runId: input.runId,
+            judgeIndex: input.judgeIndex,
+            atStep: input.atStep,
+            verdict,
+            evidenceBytes: source?.evidenceBytes ?? 0,
+            latencyMs: source?.durationMs ?? 0,
+            judgeCostShare: totals.judgeCostShare,
+            maxCostShare: spec.judge.maxCostShare,
+          });
           return verdict;
         } finally {
           writer.close();
