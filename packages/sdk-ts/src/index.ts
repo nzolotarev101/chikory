@@ -60,6 +60,7 @@ export {
   TaskSpecValidationError,
   type ParseTaskSpecOptions,
 } from "./taskspec.js";
+export * from "./judge/index.js";
 export {
   Journal,
   MAX_PAYLOAD_BYTES,
