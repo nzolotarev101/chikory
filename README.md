@@ -40,6 +40,37 @@ docs/spec/               Architecture decision records
 benchmarks/              DevAI-extended benchmark suite
 ```
 
+## Quickstart — first gated run in <10 minutes
+
+Prerequisites: [devbox](https://www.jetify.com/devbox) (the only toolchain prerequisite — it pulls pinned node/pnpm/temporal-cli), the [Claude Code CLI](https://claude.com/claude-code) on your PATH (the example executor drives `claude -p`), and API keys for **two different model families** — the judge must come from a structurally different family than the executor (invariant #2).
+
+```sh
+# 1. toolchain + build (terminal 1)
+devbox shell
+devbox run bootstrap && devbox run build
+
+# 2. durable-execution substrate — leave running
+devbox run temporal-dev
+
+# 3. keys + sample repos (terminal 2, inside `devbox shell`)
+export ANTHROPIC_API_KEY=…   # executor family
+export GEMINI_API_KEY=…      # judge family
+bash scripts/examples-setup.sh
+
+# 4. a gated run: executor fixes a planted bug, the judge gates every step
+pnpm chikory run examples/fix-failing-test.yaml --watch
+```
+
+The run streams journal entries live (steps, judge verdicts, checkpoints) and exits 0/1 with the run's terminal status. Afterwards:
+
+```sh
+pnpm chikory trace <run-id>     # trajectory forensics: per-step cost, verdicts, rationales
+pnpm chikory status             # list local runs
+pnpm chikory --help             # run / resume / status / approve / cancel / trace
+```
+
+Two examples ship in [`examples/`](./examples): `hello-greenfield.yaml` (build a toy module + tests from scratch) and `fix-failing-test.yaml` (brownfield bug-fix on a real sample repo).
+
 ## Development
 
 All tasks run via [devbox](https://www.jetify.com/devbox) — the only prerequisite. `devbox shell` to enter the pinned toolchain; canonical scripts: `devbox run test` / `devbox run lint` / `devbox run temporal-dev`. Host-installed toolchains are unsupported.

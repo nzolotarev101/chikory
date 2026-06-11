@@ -1,0 +1,10 @@
+{
+  "name": "chikory-workspace",
+  "private": true,
+  "scripts": {
+    "chikory": "chikory"
+  },
+  "dependencies": {
+    "@chikory/sdk": "workspace:*"
+  }
+}

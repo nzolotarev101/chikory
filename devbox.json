@@ -13,6 +13,7 @@
     "scripts": {
       // Canonical task entry points — all humans, agents, and CI use these.
       "bootstrap": "pnpm install && uv --directory packages/sdk-py sync",
+      "build": "pnpm -r build",
       "temporal-dev": "temporal server start-dev",
       "lint": "pnpm -r lint && ruff check packages/sdk-py && ruff format --check packages/sdk-py",
       "typecheck": "pnpm -r typecheck && (cd packages/sdk-py && uv run pyright)",

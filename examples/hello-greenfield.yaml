@@ -1,0 +1,25 @@
+# Greenfield toy example (WP-144): build a small module + tests from scratch.
+# Setup: bash scripts/examples-setup.sh   (creates .chikory-examples/)
+# Run (from the repo root): devbox run chikory -- run examples/hello-greenfield.yaml --watch
+# Keys required: ANTHROPIC_API_KEY (executor) + GEMINI_API_KEY (judge — different family, invariant #2).
+name: hello-greenfield
+goal: >
+  Create fizzbuzz.mjs exporting a function fizzbuzz(n) that returns "Fizz" for
+  multiples of 3, "Buzz" for multiples of 5, "FizzBuzz" for multiples of both,
+  and String(n) otherwise. Add a node:test suite in fizzbuzz.test.mjs covering
+  all four cases.
+repos:
+  - url: .chikory-examples/hello-greenfield
+    writable: true
+acceptance_criteria:
+  - id: AC-1
+    description: fizzbuzz.mjs exports a correct fizzbuzz(n) and the test suite passes
+    check: node --test
+budget_usd: 2
+max_steps: 6
+executor:
+  adapter: claude-code
+  family: anthropic
+judge:
+  family: gemini
+  cadence: 1

@@ -6,6 +6,12 @@ settings:
 
 importers:
 
+  .:
+    dependencies:
+      '@chikory/sdk':
+        specifier: workspace:*
+        version: link:packages/sdk-ts
+
   packages/sdk-ts:
     dependencies:
       '@opentelemetry/api':

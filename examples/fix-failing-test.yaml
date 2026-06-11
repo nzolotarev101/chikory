@@ -1,0 +1,24 @@
+# Brownfield example (WP-144): fix a planted bug in a real (sample) repo.
+# Setup: bash scripts/examples-setup.sh   (creates .chikory-examples/)
+# Run (from the repo root): devbox run chikory -- run examples/fix-failing-test.yaml --watch
+# Keys required: ANTHROPIC_API_KEY (executor) + GEMINI_API_KEY (judge — different family, invariant #2).
+name: fix-failing-test
+goal: >
+  The test suite in this repo fails (`node --test`). Find the bug in
+  lib/stats.js and fix it without changing the tests; keep the public API
+  exactly as it is.
+repos:
+  - url: .chikory-examples/fix-failing-test
+    writable: true
+acceptance_criteria:
+  - id: AC-1
+    description: the full test suite passes
+    check: node --test
+budget_usd: 2
+max_steps: 6
+executor:
+  adapter: claude-code
+  family: anthropic
+judge:
+  family: gemini
+  cadence: 1

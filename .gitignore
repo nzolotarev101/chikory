@@ -45,6 +45,10 @@ htmlcov/
 # Temporal
 .temporal/
 
+# Chikory local run data + generated example repos
+.chikory/
+.chikory-examples/
+
 # Logs
 *.log
 logs/
