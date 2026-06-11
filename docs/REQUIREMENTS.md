@@ -29,7 +29,7 @@ Every requirement in [`project.md`](../project.md), assigned a stable ID, mapped
 | DX-1 | State, memory, task context across minutes → weeks | WP-121, WP-122; cross-session memory WP-204 | P1→P2 | in-progress |
 | DX-2 | Journal/replay: each LLM/tool call a deterministic journaled step | WP-121 | P1 | done |
 | DX-3 | Crash → resurrect from point of failure via memoized results | WP-123 | P1 | done |
-| DX-4 | Checkpoint per LLM/tool call; pause, inspect, resume | WP-122, WP-141 | P1 | in-progress |
+| DX-4 | Checkpoint per LLM/tool call; pause, inspect, resume | WP-122, WP-141 | P1 | done |
 | DX-5 | Branching of execution paths as first-class op | WP-205 | P2 | planned |
 | DX-6 | Rollback as first-class op | WP-132 (judge-triggered), WP-205 (manual) | P1→P2 | in-progress (judge-triggered done; manual `chikory branch` P2) |
 | DX-7 | Budget-aware continuation | WP-124 (hard gate), WP-207 (reasoned continuation) | P1→P2 | in-progress (hard gate done; reasoned continuation P2) |
@@ -73,12 +73,12 @@ Every requirement in [`project.md`](../project.md), assigned a stable ID, mapped
 
 | ID | Requirement | WP(s) | Phase | Status |
 |---|---|---|---|---|
-| OB-1 | Observe reasoning; trace decision trees | WP-142 | P1 | planned |
+| OB-1 | Observe reasoning; trace decision trees | WP-142 | P1 | done |
 | OB-2 | Inject corrections mid-run | WP-212 | P2 | planned |
 | OB-3 | Set success criteria upfront | WP-005 (acceptance_criteria in TaskSpec) | P0 | done |
 | OB-4 | OTel-compliant traces by default | WP-105, WP-134 (invariant #3) | P1 | in-progress |
-| OB-5 | Trajectory-level forensics, whole path debuggable after the fact | WP-122 (journal), WP-142 (renderer), WP-403 (web) | P1→P4 | planned |
-| OB-6 | Human-observable metrics: tokens, decisions, checks, feedback frequency | WP-142, WP-209 | P1→P2 | planned |
+| OB-5 | Trajectory-level forensics, whole path debuggable after the fact | WP-122 (journal), WP-142 (renderer), WP-403 (web) | P1→P4 | in-progress (P1 journal + renderer done; web browser P4) |
+| OB-6 | Human-observable metrics: tokens, decisions, checks, feedback frequency | WP-142, WP-209 | P1→P2 | in-progress (trace totals/footer done; process metrics WP-209 P2) |
 
 ## FA — Full-application scope (spec §5.8)
 
@@ -102,8 +102,8 @@ Every requirement in [`project.md`](../project.md), assigned a stable ID, mapped
 |---|---|---|---|---|
 | IF-1 | Thin TypeScript SDK | P1 lanes M1–M5 | P1 | planned |
 | IF-2 | Thin Python SDK | WP-201 | P2 | planned |
-| IF-3 | Durable workflows on existing engine (Temporal) — partner, don't rebuild | ADR-001, WP-004, WP-121 | P0–P1 | in-progress (WP-004 done; WP-121 pending) |
-| IF-4 | CLI surface | WP-141, WP-142 | P1 | planned |
+| IF-3 | Durable workflows on existing engine (Temporal) — partner, don't rebuild | ADR-001, WP-004, WP-121 | P0–P1 | done |
+| IF-4 | CLI surface | WP-141, WP-142 | P1 | done |
 | IF-5 | Cloud control plane: hosted judges, checkpointers, trace browser | WP-401–408 (full design: components/control-plane.md) | P4 | planned |
 
 ## ST — Strategy, moat, business (spec §6, §9, §10)

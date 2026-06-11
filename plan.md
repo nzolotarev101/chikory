@@ -4,7 +4,7 @@
 > This is the single source of truth for **what we build, in what order, and why**.
 > Spec: [`project.md`](project.md) · Requirements matrix: [`docs/REQUIREMENTS.md`](docs/REQUIREMENTS.md) · Architecture: [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) · How to pick up work: [`docs/TASK-PROTOCOL.md`](docs/TASK-PROTOCOL.md)
 
-**Status**: Phase 0 complete (2026-06-10); P1 lanes M1–M4 done (2026-06-11) — M5 (CLI & dogfood) remaining · **Plan date**: 2026-06-09 · **Stage 1 deadline (per spec §10)**: ~2026-09-07 (90 days)
+**Status**: Phase 0 complete (2026-06-10); **Phase 1 complete (2026-06-11)** — all lanes M1–M5 done, dogfood-001 SUCCESS (`docs/reports/dogfood-001.md`) · **Plan date**: 2026-06-09 · **Stage 1 deadline (per spec §10)**: ~2026-09-07 (90 days)
 
 ---
 
@@ -48,11 +48,11 @@ chikory trace <run-id>         # → full human-readable trajectory: every step,
 
 ### 1.4 MVP exit gate (all must pass)
 
-1. **Dogfood proof**: Chikory v0.1 implements one real Phase 2 work package (target: WP-202 Memory Pointer store) end-to-end, with the judge catching at least one genuine issue before it landed.
-2. **Durability proof**: `kill -9` mid-run, then `chikory resume` completes the task with no repeated LLM calls for journaled steps.
-3. **Neutrality proof**: same task runs with executor=Anthropic/judge=Gemini and executor=OpenAI/judge=Anthropic by changing only config.
-4. **Governance proof**: run halts cleanly at budget cap with a resumable checkpoint; no infinite-loop trace exists for terminal-state-returning tools.
-5. **Forensics proof**: a person who did not run the task can answer "what happened, what did it cost, why did the judge intervene" from `chikory trace` alone.
+1. **Dogfood proof**: Chikory v0.1 implements one real Phase 2 work package (target: WP-202 Memory Pointer store) end-to-end, with the judge catching at least one genuine issue before it landed. — ✅ **passed 2026-06-11**: dogfood-001 run 4 SUCCESS; run 1's judge made a true-positive catch (missing JSDoc) on real code (`docs/reports/dogfood-001.md`).
+2. **Durability proof**: `kill -9` mid-run, then `chikory resume` completes the task with no repeated LLM calls for journaled steps. — ✅ **passed**: WP-123 automated test (journal holds exactly one entry per step; cost == Σ unique steps).
+3. **Neutrality proof**: same task runs with executor=Anthropic/judge=Gemini and executor=OpenAI/judge=Anthropic by changing only config. — ✅ **passed**: dogfood-001 swapped executor claude(anthropic)/judge GPT → executor codex(openai)/judge Gemini editing only the TaskSpec; WP-104 tests prove zero-code-change policy swaps.
+4. **Governance proof**: run halts cleanly at budget cap with a resumable checkpoint; no infinite-loop trace exists for terminal-state-returning tools. — ✅ **passed**: WP-124 tests (halt → `resume --add-budget` → continue; loop-breaker never spins) + dogfood run 3 (judge HALT on stuck criterion at $0.00 burned).
+5. **Forensics proof**: a person who did not run the task can answer "what happened, what did it cost, why did the judge intervene" from `chikory trace` alone. — ✅ **passed**: the dogfood-001 report's run reconstructions are raw `chikory trace` output (per-step cost, judge form, rationales, checkpoints).
 
 ---
 
@@ -147,10 +147,10 @@ Five parallel lanes after WP-002/WP-005 land. Lane docs contain full technical d
 
 | WP | Title | Tag | Depends | Acceptance criteria |
 |---|---|---|---|---|
-| WP-141 | CLI: `run` / `resume` / `status` / `approve` / `cancel` | 🟡 | WP-005, WP-121 | Each command works against a live local run; `--help` complete. |
-| WP-142 | Trajectory renderer: `chikory trace <run-id>` | 🟡 | WP-122, WP-134 | Human-readable forensics from the journal: per-step tokens/cost/duration, decisions count, judge verdicts + rationales, checkpoints. Satisfies exit-gate #5. |
-| WP-143 | **Dogfood run** | 🔴 | all P1 | Run WP-202 (P2) through Chikory itself; write `docs/reports/dogfood-001.md`: what worked, judge interventions, cost, friction list → feeds P2 priorities. |
-| WP-144 | Quickstart + examples | 🟢 | WP-141 | README quickstart: install devbox → `devbox shell` → first gated run in <10 min on a clean machine (devbox is the only prerequisite); `examples/` with 2 task.yaml files. |
+| WP-141 | CLI: `run` / `resume` / `status` / `approve` / `cancel` | 🟡 | WP-005, WP-121 | ✅ **Done** — `chikory` bin (`src/cli/`, node:util parseArgs — no CLI framework); run/resume host the worker in-process and follow to the terminal state (exit code mirrors it); status = workflow query with journal-first fast path for sealed runs (offline-capable); `--json` everywhere; actionable errors; every command integration-tested against a live local run (SUCCESS, escalate+reject, budget halt+top-up, cancel). |
+| WP-142 | Trajectory renderer: `chikory trace <run-id>` | 🟡 | WP-122, WP-134 | ✅ **Done** — header (status/steps/spend/duration/families), per-step tokens+cost+verdict rows with non-PROCEED rationales inline, JIF totals footer; `--step <n>` drill-down (diff/transcript refs, judge form booleans + justifications, checkpoint); `--json` raw journal. Exit-gate #5 demonstrated in dogfood-001 (the report's run reconstructions are trace output). |
+| WP-143 | **Dogfood run** | 🔴 | all P1 | ✅ **Done** — WP-202's P1 slice implemented through Chikory itself (run 4: SUCCESS, 2 steps, 1 judge pass, 3/3 judge-executed checks); 4 runs exercised every gate live (ESCALATE→reject, loop-breaker→cancel, deterministic HALT at $0 waste, PROCEED→SUCCESS); judge made a true-positive catch across model families; 2 real bugs found+fixed; zero-secrets CLI-auth setup (codex/gemini OAuth via `scripts/cli-judge-proxy.mjs`). Report: `docs/reports/dogfood-001.md` (7-item friction list → P2). |
+| WP-144 | Quickstart + examples | 🟢 | WP-141 | ✅ **Done** — README quickstart (devbox → bootstrap/build → temporal-dev → keys → `pnpm chikory run examples/fix-failing-test.yaml --watch`); `examples/hello-greenfield.yaml` + `examples/fix-failing-test.yaml` with `scripts/examples-setup.sh` generating the sample repos (planted bug verified failing). |
 
 ---
 
