@@ -52,4 +52,4 @@ If you stop before done (context limit, session end, blocked):
 
 ## 7. Dogfood etiquette (P2+)
 
-When a WP is run *through Chikory itself*: task.yaml lives in `examples/dogfood/wp-<n>.yaml`; the run journal is kept as an artifact; friction observed goes into `docs/reports/` — dogfood reports are first-class plan inputs (they drive reprioritization at phase boundaries).
+When a WP is run *through Chikory itself* (full guide: [`DOGFOODING.md`](DOGFOODING.md)): task.yaml lives in `examples/dogfood/wp-<n>.yaml`; the run journal is kept as an artifact; friction observed goes into `docs/reports/` — dogfood reports are first-class plan inputs (they drive reprioritization at phase boundaries).

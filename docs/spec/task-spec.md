@@ -60,7 +60,7 @@ routing:
 
 ## Rules of note
 
-- `check` commands run **by the judge** in a sandbox against the current workspace — never trusted from executor claims (JD-4). All checks must be devbox invocations for this repo's own tasks.
+- `check` commands run **by the judge** in a sandbox against the current workspace — never trusted from executor claims (JD-4). Checks inherit the worker's environment (already the devbox env when the CLI is launched via devbox), so call toolchain binaries directly (`pnpm`, `pytest`); `devbox run` inside a fresh workspace clone pays ~80s of env init against the 120s per-check cap (dogfood-001 F-3, `docs/DOGFOODING.md` §3.4).
 - Provider API keys are resolved from env at parse time; a stage routed to an unconfigured provider fails validation immediately, naming the variable.
 - Defaults: `cadence: 3`, `scoring_method: pointwise`, `max_steps: 100`, routing falls back to `defaultPolicy(executor.family)` which auto-picks a different-family judge.
 - Criteria with no `check` are judged from evidence only — prefer machine-checkable criteria wherever possible (OB-3); the benchmark requires them.

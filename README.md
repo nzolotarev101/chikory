@@ -77,7 +77,7 @@ All tasks run via [devbox](https://www.jetify.com/devbox) — the only prerequis
 
 ## For contributors and AI agents
 
-- Start here: [`plan.md`](./plan.md) (what to build) → [`docs/TASK-PROTOCOL.md`](./docs/TASK-PROTOCOL.md) (how to pick up a work package)
+- Start here: [`plan.md`](./plan.md) (what to build) → [`docs/TASK-PROTOCOL.md`](./docs/TASK-PROTOCOL.md) (how to pick up a work package) → [`docs/DOGFOODING.md`](./docs/DOGFOODING.md) (how to run a P2+ work package *through Chikory itself*)
 - [`docs/ARCHITECTURE.md`](./docs/ARCHITECTURE.md) — system shape; [`docs/components/`](./docs/components/) — per-component technical specs
 - [`docs/REQUIREMENTS.md`](./docs/REQUIREMENTS.md) — every spec requirement traced to a work package
 - [`docs/spec/CONTRACTS.md`](./docs/spec/CONTRACTS.md) — frozen core interfaces; [`docs/SECURITY.md`](./docs/SECURITY.md) — threat model; [`docs/PRODUCT.md`](./docs/PRODUCT.md) — pricing/GTM/enterprise readiness; [`docs/GLOSSARY.md`](./docs/GLOSSARY.md) — terms

@@ -258,4 +258,5 @@ Stage-3 exit = the enterprise-product bar: ≥1 pack GA with contractual SLOs; s
 | `docs/PRODUCT.md` | Personas, pricing, GTM, success metrics, enterprise-readiness checklist |
 | `docs/GLOSSARY.md` | Canonical terms |
 | `docs/TASK-PROTOCOL.md` | How any human/agent picks up, verifies, and hands off a WP |
+| `docs/DOGFOODING.md` | **How to run a P2+ WP through Chikory itself** — setup, task.yaml field-by-field, supervision, harvesting the result |
 | `docs/spec/ADR-00*.md` | Decisions: 001 Temporal · 002 judge model/scoring · 003 MVP executor strategy · 004 vertical selection (P5, reserved) |

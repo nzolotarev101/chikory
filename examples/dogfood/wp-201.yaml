@@ -1,0 +1,67 @@
+# Dogfood spec for WP-201, slice 1 of Python SDK parity (plan.md §6).
+# Full how-to (every field explained): docs/DOGFOODING.md
+#
+# Zero-secrets launch (locally-authenticated CLIs; see DOGFOODING.md §2.2/§3.8):
+#   node scripts/cli-judge-proxy.mjs 8787 gemini &
+#   export OPENAI_COMPAT_BASE_URL=http://127.0.0.1:8787
+#   pnpm chikory run examples/dogfood/wp-201.yaml --watch
+#
+# With API keys instead: delete the routing block, set judge.family to a
+# configured family (e.g. gemini), export that key + the executor's.
+name: wp-201-python-contracts-parity
+goal: >
+  Port the frozen Chikory core contracts to the Python SDK (plan.md WP-201,
+  first slice). Rewrite packages/sdk-py/src/chikory/types.py so its pydantic
+  models mirror docs/spec/CONTRACTS.md sections 1 through 7 exactly as
+  frozen in packages/sdk-ts/src/types.ts: LLMProvider (including
+  "openai-compat"), Stage, ModelChoice, RoutingPolicy, Message,
+  CompletionRequest, LLMCallResult, RouterError, TaskSpec, RepoSpec,
+  AcceptanceCriterion, JudgePolicy, StepRecord, StepInput, StepLimits,
+  TokenUsage, ContextBundle, VerdictKind, JudgeEvidence, JudgeForm,
+  JudgeVerdict, ArtifactKind, ArtifactRef, TestResultArtifact,
+  JournalEntryKind, JournalEntry, Checkpoint, RunStatus, RunStatusReport.
+  Field names stay camelCase on the wire (use pydantic field aliases or
+  ConfigDict(populate_by_name=True) with alias generators) so the shared
+  JSON fixtures parse unchanged. Update the existing stub modules
+  (__init__.py, router.py, judge.py, runner.py) only as far as needed to
+  keep imports, ruff, and pyright green — do not implement new runtime
+  behavior in this slice. Add packages/sdk-py/tests/test_contracts.py that
+  loads every fixture in fixtures/contracts/ (paths relative to the repo
+  root): each *.valid.json must validate into its model (the fixture
+  filename prefix names the type) and round-trip back to the same JSON
+  semantically; each *.invalid-*.json must raise a pydantic
+  ValidationError. Follow AGENTS.md conventions: Python 3.11+, fully
+  type-annotated, async-first, ruff-clean, no new dependencies.
+repos:
+  - url: /Users/nikitazolotarev/repos/chikory
+    writable: true
+acceptance_criteria:
+  # Checks run by the judge inside the run workspace (fresh clone) under the
+  # worker's devbox env — call uv/ruff directly, 120s cap per check.
+  - id: AC-1
+    description: contract fixture round-trip tests pass (valid parse + round-trip, invalid raise)
+    check: cd packages/sdk-py && uv sync --quiet && uv run pytest tests/ -q
+  - id: AC-2
+    description: pyright is clean
+    check: cd packages/sdk-py && uv run pyright
+  - id: AC-3
+    description: ruff lint and format are clean
+    check: ruff check packages/sdk-py && ruff format --check packages/sdk-py
+budget_usd: 5
+max_steps: 8
+executor:
+  adapter: codex
+  family: openai
+judge:
+  # openai-compat = the keyless shim seam; real family = the shim backend
+  # (gemini here) — structurally different from the openai executor.
+  family: openai-compat
+  cadence: 2
+  max_cost_share: 0.5
+routing:
+  stages:
+    # plan/review unused by CLI executors in P1; code.model feeds `codex -m`.
+    plan: { provider: openai-compat, model: gpt-5.5 }
+    code: { provider: openai-compat, model: gpt-5.5 }
+    review: { provider: openai-compat, model: gpt-5.5 }
+    judge: { provider: openai-compat, model: gemini-3.1-pro-preview }
