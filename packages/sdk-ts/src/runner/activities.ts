@@ -16,7 +16,7 @@ import { promisify } from "node:util";
 import { heartbeat } from "@temporalio/activity";
 
 import { createLocalArtifactStore } from "../artifacts/index.js";
-import { buildVerdict, runJudgePass } from "../judge/index.js";
+import { buildVerdict, enforceFamilyDiversity, runJudgePass } from "../judge/index.js";
 import { Journal } from "../journal/journal.js";
 import { getTracer } from "../otel.js";
 import { createRouter, type RouterOptions } from "../router.js";
@@ -79,6 +79,8 @@ export interface JudgePayload {
   costUsd: number;
   tokens: TokenUsage;
   durationMs: number;
+  /** Same-family opt-in warnings (WP-133) — journaled for the audit trail. */
+  warnings?: string[];
 }
 
 async function git(dir: string, args: string[]): Promise<string> {
@@ -316,6 +318,15 @@ export function createRunnerActivities(deps: RunnerActivityDeps) {
             provider: spec.routing.stages.judge.provider,
             model: spec.judge.model ?? spec.routing.stages.judge.model,
           };
+          // Invariant #2 (WP-133): refuse a same-family judge unless the
+          // spec opted in — and then warn loudly on EVERY pass, journaled.
+          const { warnings } = enforceFamilyDiversity({
+            executorFamily: spec.executor.family,
+            judgeFamily: spec.judge.family,
+            judgeProvider: judgeModel.provider,
+            allowSameFamily: spec.judge.allowSameFamily,
+          });
+          for (const warning of warnings) console.warn(warning);
           // Single-stage routing: only the judge provider's adapter is
           // constructed, so executor-stage env keys are not required here.
           const routing: RoutingPolicy = {
@@ -350,6 +361,7 @@ export function createRunnerActivities(deps: RunnerActivityDeps) {
             costUsd: verdict.costUsd,
             tokens: verdict.tokens,
             durationMs: pass.durationMs,
+            ...(warnings.length > 0 ? { warnings } : {}),
           };
         }
 

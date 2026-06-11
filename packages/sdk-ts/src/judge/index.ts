@@ -1,4 +1,10 @@
 export {
+  enforceFamilyDiversity,
+  FamilyDiversityError,
+  type FamilyDiversityInput,
+  type FamilyDiversityResult,
+} from "./family.js";
+export {
   collectEvidence,
   DEFAULT_CHECK_TIMEOUT_MS,
   MAX_CHECK_OUTPUT_CHARS,
