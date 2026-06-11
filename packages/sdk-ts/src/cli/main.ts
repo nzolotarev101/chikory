@@ -3,6 +3,7 @@
  * no CLI framework (NF-1: minimal abstraction). The bin entry is `bin.ts`;
  * `main` is directly invokable (and is how the CLI tests drive commands).
  */
+import { resolve } from "node:path";
 import { parseArgs } from "node:util";
 
 import { DEFAULT_DATA_DIR } from "../runner/paths.js";
@@ -82,7 +83,11 @@ function parseCommand(
   });
   const flags: CommonFlags = {
     json: values["json"] === true,
-    dataDir: typeof values["data-dir"] === "string" ? values["data-dir"] : DEFAULT_DATA_DIR,
+    // Absolute: workspace paths flow into executor CLI flags (codex -C) that
+    // must not re-resolve against their own cwd (caught by dogfood-001).
+    dataDir: resolve(
+      typeof values["data-dir"] === "string" ? values["data-dir"] : DEFAULT_DATA_DIR,
+    ),
   };
   if (typeof values["address"] === "string") flags.address = values["address"];
   return { flags, positionals, values: values as ParsedCommon["values"] };
