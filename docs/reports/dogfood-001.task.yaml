@@ -1,0 +1,68 @@
+# Dogfood-001 (WP-143): run WP-202's P1 slice — the Memory Pointer store —
+# through Chikory itself. MVP exit-gate #1: the judge must gate real work on
+# this repo. Zero-secrets setup (locally-authenticated CLIs only):
+#   node scripts/cli-judge-proxy.mjs 8787 gemini &   # judge: Gemini via gemini CLI (Google OAuth)
+#   export OPENAI_COMPAT_BASE_URL=http://127.0.0.1:8787
+#   pnpm chikory run docs/reports/dogfood-001.task.yaml --watch
+# Executor: codex CLI on ChatGPT OAuth (run 1 used claude-code until its
+# subscription session limit hit — see the report). NOTE the routing block
+# labels the executor stages openai-compat — a workaround for the §9.3
+# provider-env check, which assumes every routed provider needs an API key.
+# Friction item F-1 in the report; P2 should make CLI-authenticated stages
+# first-class.
+# Report: docs/reports/dogfood-001.md
+name: dogfood-001-memory-pointer-store
+goal: >
+  Implement the first slice of the Memory Pointer Pattern (CM-3, plan.md
+  WP-202) in the TypeScript SDK. Create
+  packages/sdk-ts/src/memory/pointer-store.ts exporting
+  createMemoryPointerStore(store, opts) where store is an ArtifactStore and
+  opts is optional { inlineMaxBytes?: number } (default 2048). It returns a
+  MemoryPointerStore with two methods: remember(content, meta) takes string or
+  Uint8Array content plus { kind, summary } meta and returns a MemoryPointer —
+  { inline: string } when the content is at most inlineMaxBytes bytes,
+  otherwise { ref: ArtifactRef } with the content stored via the
+  ArtifactStore; recall(pointer) returns the original content as a string for
+  both pointer shapes. Export the new module from
+  packages/sdk-ts/src/index.ts. Add a vitest suite at
+  packages/sdk-ts/test/memory/pointer-store.test.ts covering both shapes, the
+  boundary at inlineMaxBytes, and remember/recall round-trips, using
+  createMemoryArtifactStore from src/artifacts/index.ts. Follow AGENTS.md
+  conventions: strict TypeScript, ESM imports with .js extensions, named
+  exports only, no new dependencies, JSDoc on exported symbols.
+repos:
+  - url: /Users/nikitazolotarev/repos/chikory
+    writable: true
+acceptance_criteria:
+  # Checks run bare pnpm: the judge executes them inside the worker's devbox
+  # environment (the toolchain is already pinned); `devbox run` in a fresh
+  # workspace clone would pay ~80s of env init against the 120s check cap.
+  - id: AC-1
+    description: the new pointer-store vitest suite passes
+    check: pnpm install --prefer-offline --silent && pnpm --filter @chikory/sdk exec vitest run test/memory/pointer-store.test.ts
+  - id: AC-2
+    description: the SDK still typechecks (strict mode)
+    check: pnpm --filter @chikory/sdk typecheck
+  - id: AC-3
+    description: lint is clean
+    check: pnpm --filter @chikory/sdk lint
+budget_usd: 5
+max_steps: 8
+executor:
+  adapter: codex
+  family: openai
+judge:
+  # Label is openai-compat (the keyless router seam); the model behind the
+  # shim is Gemini — real family diversity vs the GPT executor (invariant #2).
+  family: openai-compat
+  cadence: 2
+  max_cost_share: 0.5
+routing:
+  stages:
+    # plan/review are unused in P1 (CLI executors); code.model feeds the
+    # codex CLI. The openai-compat labels dodge the per-provider env check
+    # for stages that never touch the router (friction F-1).
+    plan: { provider: openai-compat, model: gpt-5.5 }
+    code: { provider: openai-compat, model: gpt-5.5 }
+    review: { provider: openai-compat, model: gpt-5.5 }
+    judge: { provider: openai-compat, model: gemini-3.1-pro-preview }
