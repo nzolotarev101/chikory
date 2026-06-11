@@ -80,6 +80,9 @@ export class Journal {
   constructor(dbPath: string) {
     mkdirSync(dirname(dbPath), { recursive: true });
     this.db = new DatabaseSync(dbPath);
+    // Concurrent readers (status polling, `chikory trace`) must wait out a
+    // writer instead of failing with SQLITE_BUSY.
+    this.db.exec("PRAGMA busy_timeout = 5000;");
     // WAL survives kill -9 mid-transaction (WP-123).
     this.db.exec("PRAGMA journal_mode = WAL;");
     this.db.exec(`

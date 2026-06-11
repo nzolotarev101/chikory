@@ -24,7 +24,14 @@ import {
   journalPath,
   type StepPayload,
 } from "../../src/index.js";
-import { initSourceRepo, makeSpec, TERMINAL_STATUSES, waitFor } from "./helpers.js";
+import {
+  initSourceRepo,
+  judgeForm,
+  makeJudgedSpec,
+  startFakeJudgeWire,
+  TERMINAL_STATUSES,
+  waitFor,
+} from "./helpers.js";
 
 const address = inject("temporalAddress");
 const bundlePath = inject("workflowBundlePath");
@@ -64,11 +71,17 @@ describe.skipIf(address === null)("crash recovery (WP-123)", () => {
     const repoUrl = await initSourceRepo(join(tmp, "src"), { delayMs: 800 });
     const dataDir = join(tmp, "data");
     const taskQueue = `tq-${randomUUID()}`;
+    // Real judgeStep in the worker subprocess: the openai-compat adapter
+    // resolves the fake wire from OPENAI_COMPAT_BASE_URL. The judge never
+    // confirms AC-1 → deterministic FAILED at maxSteps.
+    const wire = await startFakeJudgeWire([judgeForm({ criteria: { "AC-1": false } })]);
+    cleanups.push(() => wire.close());
     const workerEnv = {
       CHIKORY_TEST_ADDRESS: address!,
       CHIKORY_TEST_TASK_QUEUE: taskQueue,
       CHIKORY_TEST_DATA_DIR: dataDir,
       CHIKORY_TEST_WF_BUNDLE: bundlePath!,
+      OPENAI_COMPAT_BASE_URL: wire.url,
     };
 
     const firstWorker = await spawnWorker(workerEnv);
@@ -79,7 +92,7 @@ describe.skipIf(address === null)("crash recovery (WP-123)", () => {
     const runner = createTemporalRunner({ address: address!, taskQueue, dataDir });
     cleanups.push(() => runner.close());
 
-    const spec = makeSpec({ repoUrl, maxSteps: 4, judge: { family: "gemini", cadence: 2 } });
+    const spec = makeJudgedSpec({ repoUrl, maxSteps: 4, cadence: 2 });
     const handle = await runner.start(spec);
     const dbPath = journalPath(dataDir, handle.runId);
 
@@ -103,8 +116,8 @@ describe.skipIf(address === null)("crash recovery (WP-123)", () => {
       secondWorker.kill("SIGKILL");
     });
 
-    // Run completes on the fresh worker (stub judge → FAILED at maxSteps —
-    // a deterministic, explicit terminal).
+    // Run completes on the fresh worker (judge never confirms → FAILED at
+    // maxSteps — a deterministic, explicit terminal).
     const report = await waitFor(
       async () => {
         const r = await handle.status();

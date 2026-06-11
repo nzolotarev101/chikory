@@ -86,6 +86,8 @@ export async function agentLoop(spec: TaskSpec): Promise<RunStatus> {
   let consecutiveFailures = 0;
   let cancelRequested = false;
   let lastVerdict: { kind: JudgeVerdict["kind"]; atStep: number } | undefined;
+  let lastGoodCheckpointId: string | undefined;
+  let judgeFeedback: string | undefined;
   let failure: { reason: string; lastCheckpoint: string } | undefined;
   const recentSummaries: string[] = [];
   const stepCosts: number[] = [];
@@ -131,7 +133,9 @@ export async function agentLoop(spec: TaskSpec): Promise<RunStatus> {
     return status;
   }
 
-  await activities.prepareRun({ runId, spec });
+  const { baseCommit } = await activities.prepareRun({ runId, spec });
+  // Judge diffs cover everything since the last verdict (or the run base).
+  let sinceCommit = baseCommit;
 
   for (;;) {
     if (cancelRequested) return seal("CANCELLED", "cancelled by user");
@@ -184,6 +188,7 @@ export async function agentLoop(spec: TaskSpec): Promise<RunStatus> {
       planItem: spec.goal,
       notes: {},
       recentSteps: recentSummaries.slice(-RECENT_STEPS_WINDOW),
+      judgeFeedback,
       injections,
       memoryRefs: [],
     };
@@ -201,7 +206,7 @@ export async function agentLoop(spec: TaskSpec): Promise<RunStatus> {
     stepIndex += 1;
     consecutiveFailures = record.status === "FAILED" ? consecutiveFailures + 1 : 0;
 
-    // Judge every N steps (JD-2); each pass is one activity (WP-121).
+    // Judge every N steps (JD-2); each pass is one activity (WP-121/131).
     let verdict: JudgeVerdict | undefined;
     if (stepIndex % spec.judge.cadence === 0) {
       verdict = await activities.judgeStep({
@@ -209,14 +214,23 @@ export async function agentLoop(spec: TaskSpec): Promise<RunStatus> {
         judgeIndex: judgeIndex++,
         atStep: stepIndex - 1,
         criteria: spec.acceptanceCriteria,
+        sinceCommit,
+        lastGoodCheckpointId,
       });
       spentUsd += verdict.costUsd;
       lastVerdict = { kind: verdict.kind, atStep: stepIndex - 1 };
+
+      // ROLLBACK restores BEFORE the covering checkpoint commits, so the
+      // checkpoint captures the restored tree and the run resumes from a
+      // verified-good state (judge.md verdict table).
+      if (verdict.kind === "ROLLBACK") {
+        await activities.restoreCheckpoint({ runId, checkpointId: verdict.rollbackTo! });
+        judgeFeedback = verdict.rationale;
+      }
     }
 
     // Checkpoint after the (optional) judge pass so the persisted lastGood
-    // flag reflects the verdict that covers exactly this state (WP-122;
-    // WP-132's ROLLBACK restores the latest lastGood checkpoint).
+    // flag reflects the verdict that covers exactly this state (WP-122).
     const checkpoint = await activities.writeCheckpoint({
       runId,
       stepIndex: stepIndex - 1,
@@ -226,7 +240,35 @@ export async function agentLoop(spec: TaskSpec): Promise<RunStatus> {
     });
     checkpoints.push(checkpoint);
 
-    if (allCriteriaPass(verdict)) return seal("SUCCESS");
+    // Verdict gating (WP-132). PROCEED advances the diff base and the
+    // rollback anchor; HALT seals a resumable FAILED; ESCALATE parks the run
+    // for `chikory approve` (CONTRACTS.md §4, durable-runner.md).
+    if (verdict !== undefined) {
+      sinceCommit = Object.values(checkpoint.gitCommits)[0] ?? sinceCommit;
+      if (verdict.kind === "PROCEED") {
+        lastGoodCheckpointId = checkpoint.id;
+        judgeFeedback = undefined;
+        // Run-level SUCCESS needs PROCEED *and* every criterion passing — a
+        // non-PROCEED verdict with passing criteria (e.g. a secret in the
+        // diff) must never seal SUCCESS.
+        if (allCriteriaPass(verdict)) return seal("SUCCESS");
+      } else if (verdict.kind === "HALT") {
+        return seal("FAILED", `judge HALT: ${verdict.rationale}`);
+      } else if (verdict.kind === "ESCALATE") {
+        judgeFeedback = verdict.rationale;
+        status = "AWAITING_APPROVAL";
+        await condition(() => pendingApprovals.length > 0 || cancelRequested);
+        if (cancelRequested) return seal("CANCELLED", "cancelled while awaiting approval");
+        const decision = pendingApprovals.splice(0).pop()!;
+        if (!decision.approved) {
+          return seal(
+            "FAILED",
+            `judge escalation rejected${decision.reason ? `: ${decision.reason}` : ""} — ${verdict.escalateReason ?? verdict.rationale}`,
+          );
+        }
+        status = "RUNNING";
+      }
+    }
 
     // Loop-breaker (WP-124, CG-1): a step that keeps FAILing must never
     // spin — escalate to a human (DX-8 P1 stopgap; `chikory approve`).

@@ -9,6 +9,7 @@ import { fileURLToPath } from "node:url";
 
 import { NativeConnection, Worker } from "@temporalio/worker";
 
+import type { RouterOptions } from "../router.js";
 import {
   createRunnerActivities,
   type AdapterRegistry,
@@ -25,6 +26,8 @@ export interface RunnerWorkerOptions {
   dataDir?: string;
   /** Pre-bundled workflow code (tests bundle once in global setup). */
   workflowBundlePath?: string;
+  /** Router construction options for judge passes (test seam: env/baseUrls). */
+  routerOptions?: RouterOptions;
   /** Test seam: swap individual activities (e.g. a deciding judge). */
   activitiesOverride?: Partial<RunnerActivities>;
 }
@@ -57,6 +60,7 @@ export async function createRunnerWorker(opts: RunnerWorkerOptions): Promise<Run
     ...createRunnerActivities({
       dataDir: opts.dataDir ?? DEFAULT_DATA_DIR,
       adapters: opts.adapters,
+      routerOptions: opts.routerOptions,
     }),
     ...opts.activitiesOverride,
   };

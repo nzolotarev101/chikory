@@ -7,15 +7,19 @@
 import { execFile } from "node:child_process";
 import { existsSync } from "node:fs";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { createServer, type Server } from "node:http";
+import type { AddressInfo } from "node:net";
 import { join } from "node:path";
 import { promisify } from "node:util";
 
 import { DefaultLogger, Runtime } from "@temporalio/worker";
 
+import { STANDING_RUBRIC } from "../../src/index.js";
 import type {
   AdapterRegistry,
   ArtifactStore,
   ExecutorAdapter,
+  JudgeForm,
   RunStatus,
   StepRecord,
   TaskSpec,
@@ -156,6 +160,90 @@ export function makeSpec(overrides: { repoUrl: string } & Partial<TaskSpec>): Ta
 }
 
 export const TERMINAL_STATUSES: RunStatus[] = ["SUCCESS", "FAILED", "CANCELLED"];
+
+// ─── Fake judge wire (WP-131/132) ───────────────────────────────────────────
+// Faking the transport, not the LLM (router.md Testing): a local HTTP server
+// speaks the openai-compat chat-completions format and serves scripted
+// `JudgeForm`s, so the REAL judgeStep activity (evidence collection, JD-4
+// overrides, deterministic verdict) runs end-to-end in integration tests.
+
+export interface FakeJudgeWire {
+  url: string;
+  /** Completed judge LLM calls so far. */
+  hits: number;
+  close(): Promise<void>;
+}
+
+/** Serves `forms[hit-1]` per call; the last form repeats once exhausted. */
+export async function startFakeJudgeWire(forms: JudgeForm[]): Promise<FakeJudgeWire> {
+  const server: Server = createServer((req, res) => {
+    let body = "";
+    req.on("data", (chunk: Buffer) => (body += chunk.toString()));
+    req.on("end", () => {
+      const form = forms[Math.min(wire.hits, forms.length - 1)];
+      wire.hits++;
+      res.setHeader("content-type", "application/json");
+      res.end(
+        JSON.stringify({
+          choices: [{ message: { content: JSON.stringify(form) } }],
+          usage: { prompt_tokens: 100, completion_tokens: 50 },
+        }),
+      );
+    });
+  });
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+  const { port } = server.address() as AddressInfo;
+  const wire: FakeJudgeWire = {
+    url: `http://127.0.0.1:${port}`,
+    hits: 0,
+    close: () =>
+      new Promise<void>((resolve) => {
+        server.closeAllConnections();
+        server.close(() => resolve());
+      }),
+  };
+  return wire;
+}
+
+/** Scripted `JudgeForm`: criteria verdicts + optional rubric fails/concerns. */
+export function judgeForm(opts: {
+  criteria: Record<string, boolean>;
+  rubricFails?: string[];
+  concerns?: string[];
+}): JudgeForm {
+  return {
+    criterionResults: Object.entries(opts.criteria).map(([id, pass]) => ({
+      id,
+      pass,
+      justification: pass ? "scripted judge: confirmed" : "scripted judge: not met yet",
+    })),
+    rubricResults: STANDING_RUBRIC.map((r) => ({
+      id: r.id,
+      pass: !(opts.rubricFails ?? []).includes(r.id),
+      justification: "scripted judge",
+    })),
+    concerns: opts.concerns ?? [],
+  };
+}
+
+/** TaskSpec routing its judge stage at the fake wire (openai-compat family). */
+export function makeJudgedSpec(
+  overrides: { repoUrl: string; cadence?: number } & Partial<TaskSpec>,
+): TaskSpec {
+  const { cadence, ...rest } = overrides;
+  return makeSpec({
+    judge: { family: "openai-compat", cadence: cadence ?? 2 },
+    routing: {
+      stages: {
+        plan: { provider: "anthropic", model: "claude-fable-5" },
+        code: { provider: "anthropic", model: "claude-fable-5" },
+        review: { provider: "anthropic", model: "claude-fable-5" },
+        judge: { provider: "openai-compat", model: "fake-judge" },
+      },
+    },
+    ...rest,
+  });
+}
 
 export async function waitFor<T>(
   fn: () => Promise<T | undefined>,

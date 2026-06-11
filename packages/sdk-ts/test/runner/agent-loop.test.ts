@@ -23,7 +23,16 @@ import {
   type RunStatusReport,
   type StepPayload,
 } from "../../src/index.js";
-import { initSourceRepo, makeSpec, scriptedRegistry, TERMINAL_STATUSES, waitFor } from "./helpers.js";
+import {
+  initSourceRepo,
+  judgeForm,
+  makeJudgedSpec,
+  makeSpec,
+  scriptedRegistry,
+  startFakeJudgeWire,
+  TERMINAL_STATUSES,
+  waitFor,
+} from "./helpers.js";
 
 const address = inject("temporalAddress");
 const bundlePath = inject("workflowBundlePath");
@@ -34,7 +43,10 @@ describe.skipIf(address === null)("agent loop (WP-121)", () => {
     while (cleanups.length > 0) await cleanups.pop()!();
   });
 
-  async function setup(opts: { specOverrides?: object; judgeOverride?: RunnerActivities["judgeStep"] }) {
+  async function setup(opts: {
+    judgeOverride?: RunnerActivities["judgeStep"];
+    judgeWireUrl?: string;
+  }) {
     const tmp = await mkdtemp(join(tmpdir(), "chikory-runner-"));
     cleanups.push(() => rm(tmp, { recursive: true, force: true }));
     const repoUrl = await initSourceRepo(join(tmp, "src"));
@@ -47,6 +59,9 @@ describe.skipIf(address === null)("agent loop (WP-121)", () => {
       taskQueue,
       dataDir,
       workflowBundlePath: bundlePath!,
+      ...(opts.judgeWireUrl
+        ? { routerOptions: { baseUrls: { "openai-compat": opts.judgeWireUrl } } }
+        : {}),
       ...(opts.judgeOverride ? { activitiesOverride: { judgeStep: opts.judgeOverride } } : {}),
     });
     const workerDone = worker.run();
@@ -72,13 +87,16 @@ describe.skipIf(address === null)("agent loop (WP-121)", () => {
   }
 
   test("journals one step entry per executor step, judge pass per cadence, terminal seal; replays deterministically", async () => {
-    const { repoUrl, dataDir, runner } = await setup({});
-    const spec = makeSpec({ repoUrl, maxSteps: 4, judge: { family: "gemini", cadence: 2 } });
+    // Real judgeStep over a fake wire: the judge never confirms AC-1, every
+    // verdict is a work-in-progress PROCEED → loop ends at maxSteps, FAILED.
+    const wire = await startFakeJudgeWire([judgeForm({ criteria: { "AC-1": false } })]);
+    cleanups.push(() => wire.close());
+    const { repoUrl, dataDir, runner } = await setup({ judgeWireUrl: wire.url });
+    const spec = makeJudgedSpec({ repoUrl, maxSteps: 4, cadence: 2 });
 
     const handle = await runner.start(spec);
     const report = await awaitTerminal(handle);
 
-    // Stub judge never confirms criteria → loop must end at maxSteps, FAILED.
     expect(report.status).toBe("FAILED");
     expect(report.failure?.reason).toContain("maxSteps");
     expect(report.currentStep).toBe(4);
@@ -94,15 +112,18 @@ describe.skipIf(address === null)("agent loop (WP-121)", () => {
       expect(idxs).toEqual([...idxs].sort((a, b) => a - b));
       expect(new Set(idxs).size).toBe(idxs.length);
 
-      // cadence=2 over 4 steps → exactly 2 judge passes, journaled as verdicts.
+      // cadence=2 over 4 steps → exactly 2 judge passes, each journaled as a
+      // `judge` entry (form + evidence refs) plus a `verdict` entry.
+      expect(journal.entries("judge")).toHaveLength(2);
       expect(journal.entries("verdict")).toHaveLength(2);
+      expect(wire.hits).toBe(2);
 
       const terminal = journal.entries("terminal");
       expect(terminal).toHaveLength(1);
       expect((terminal[0]!.payload as { status: string }).status).toBe("FAILED");
       expect(journal.getRun()?.status).toBe("FAILED");
 
-      // 4 steps × $0.01; stub judge is free.
+      // 4 steps × $0.01; the fake judge model has no price row → $0.
       expect(journal.totalCostUsd()).toBeCloseTo(0.04, 10);
     } finally {
       journal.close();

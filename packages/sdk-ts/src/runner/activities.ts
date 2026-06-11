@@ -16,18 +16,26 @@ import { promisify } from "node:util";
 import { heartbeat } from "@temporalio/activity";
 
 import { createLocalArtifactStore } from "../artifacts/index.js";
+import { buildVerdict, runJudgePass } from "../judge/index.js";
 import { Journal } from "../journal/journal.js";
 import { getTracer } from "../otel.js";
+import { createRouter, type RouterOptions } from "../router.js";
 import type {
   AcceptanceCriterion,
+  ArtifactRef,
   ArtifactStore,
   Checkpoint,
+  CheckpointId,
   ContextBundle,
   ExecutorAdapter,
+  JudgeForm,
   JudgeVerdict,
+  ModelChoice,
+  RoutingPolicy,
   StepLimits,
   StepRecord,
   TaskSpec,
+  TokenUsage,
 } from "../types.js";
 import { artifactsDir, journalPath, workspaceDir } from "./paths.js";
 
@@ -43,6 +51,8 @@ export type AdapterRegistry = Record<string, AdapterFactory>;
 export interface RunnerActivityDeps {
   dataDir: string;
   adapters: AdapterRegistry;
+  /** Router construction options for judge passes (test seam: env/baseUrls). */
+  routerOptions?: RouterOptions;
 }
 
 export interface StepPayload {
@@ -56,6 +66,19 @@ export interface VerdictPayload {
   judgeIndex: number;
   atStep: number;
   verdict: JudgeVerdict;
+}
+
+/** journal-format.md §3 `judge` entry: evidence refs + form + model + cost. */
+export interface JudgePayload {
+  judgeIndex: number;
+  atStep: number;
+  form: JudgeForm;
+  evidenceRefs: ArtifactRef[];
+  evidenceBytes: number;
+  judgeModel: ModelChoice;
+  costUsd: number;
+  tokens: TokenUsage;
+  durationMs: number;
 }
 
 async function git(dir: string, args: string[]): Promise<string> {
@@ -95,9 +118,40 @@ function requireSpec(journal: Journal, runId: string): TaskSpec {
   return run.task;
 }
 
-/** Stub until WP-131 (Lane M4) ships the real harness — see judgeStep. */
-const JUDGE_STUB_RATIONALE =
-  "auto-PROCEED stub: judge harness lands in WP-131 (Lane M4); criteria intentionally unconfirmed";
+/** Git tag marking the workspace state right after prepareRun (= `<runId>@base`). */
+const BASE_TAG = "chikory-base";
+
+/**
+ * Per-criterion pass booleans from previous JUDGE verdicts, oldest first
+ * (rule 3/5 inputs). Runner-sourced loop-breaker escalations carry no form
+ * and are skipped.
+ */
+function criteriaHistoryFromJournal(journal: Journal): Record<string, boolean[]> {
+  const history: Record<string, boolean[]> = {};
+  for (const entry of journal.entries("verdict")) {
+    const payload = entry.payload as VerdictPayload & { source?: string };
+    if (payload.source === "runner") continue;
+    for (const r of payload.verdict.form.criterionResults) {
+      (history[r.id] ??= []).push(r.pass);
+    }
+  }
+  return history;
+}
+
+/** Executor step summaries the previous verdict has not already covered. */
+function summariesSinceLastVerdict(journal: Journal, atStep: number): string[] {
+  let lastJudgedStep = -1;
+  for (const entry of journal.entries("verdict")) {
+    const payload = entry.payload as VerdictPayload & { source?: string };
+    if (payload.source === "runner") continue;
+    lastJudgedStep = Math.max(lastJudgedStep, payload.atStep);
+  }
+  return journal
+    .entries("step")
+    .map((e) => e.payload as StepPayload)
+    .filter((p) => p.stepIndex > lastJudgedStep && p.stepIndex <= atStep)
+    .map((p) => p.record.summary);
+}
 
 export type RunnerActivities = ReturnType<typeof createRunnerActivities>;
 
@@ -108,7 +162,10 @@ export function createRunnerActivities(deps: RunnerActivityDeps) {
      * clone of the task repo on a run-private branch `chikory/run-<id>` —
      * user repos never see step commits (durable-runner.md §Checkpoints).
      */
-    async prepareRun(input: { runId: string; spec: TaskSpec }): Promise<{ workspaceDir: string }> {
+    async prepareRun(input: {
+      runId: string;
+      spec: TaskSpec;
+    }): Promise<{ workspaceDir: string; baseCommit: string }> {
       return withHeartbeat(async () => {
         const ws = workspaceDir(deps.dataDir, input.runId);
         const repo = input.spec.repos[0];
@@ -121,13 +178,23 @@ export function createRunnerActivities(deps: RunnerActivityDeps) {
           await git(ws, ["config", "user.name", "chikory"]);
           await git(ws, ["config", "user.email", "runner@chikory.local"]);
         }
+        // Tag the run's base state — `<runId>@base` rollbacks resolve to it
+        // (WP-132). Steps only run after prepareRun completes, so on a crashed
+        // retry HEAD is still the base commit and tagging stays correct.
+        let baseCommit: string;
+        try {
+          baseCommit = await git(ws, ["rev-parse", `${BASE_TAG}^{commit}`]);
+        } catch {
+          await git(ws, ["tag", BASE_TAG]);
+          baseCommit = await git(ws, ["rev-parse", `${BASE_TAG}^{commit}`]);
+        }
         const journal = openJournal(deps, input.runId);
         try {
           journal.createRun(input.runId, input.spec);
         } finally {
           journal.close();
         }
-        return { workspaceDir: ws };
+        return { workspaceDir: ws, baseCommit };
       });
     },
 
@@ -192,60 +259,165 @@ export function createRunnerActivities(deps: RunnerActivityDeps) {
     },
 
     /**
-     * One judge pass = one activity (journaled as a `verdict` entry).
-     * WP-121 ships an auto-PROCEED stub so the loop shape (cadence, verdict
-     * journaling, activity-per-pass) is real; WP-131/132 (Lane M4) replace
-     * the body with the evidence → rubric → verdict harness and wire
-     * ROLLBACK/HALT/ESCALATE gating into the workflow.
+     * One judge pass = one activity (WP-131/132): evidence → form → verdict
+     * via the judge harness, journaled as a `judge` entry (form + cost) and a
+     * `verdict` entry. Two-stage memoization keeps crashes spend-free: an
+     * existing `verdict` entry is returned as-is; an existing `judge` entry
+     * without its `verdict` (crash between the two writes) reuses the
+     * persisted form and recomputes the verdict deterministically — the LLM
+     * is never re-asked (WP-123 discipline).
      */
     async judgeStep(input: {
       runId: string;
       judgeIndex: number;
       atStep: number;
       criteria: AcceptanceCriterion[];
+      /** Diff base: checkpoint commit covering the previous verdict (or run base). */
+      sinceCommit: string;
+      /** ROLLBACK target; absent → `<runId>@base`. */
+      lastGoodCheckpointId?: CheckpointId;
     }): Promise<JudgeVerdict> {
       return withHeartbeat(async () => {
-        const journal = openJournal(deps, input.runId);
+        // Read phase — the journal handle is NOT held across the judge pass
+        // (an LLM call + git work); long-held writers starve status pollers.
+        const reader = openJournal(deps, input.runId);
+        let spec: TaskSpec;
+        let criteriaHistory: Record<string, boolean[]>;
+        let stepSummaries: string[];
+        let journaledForm: JudgePayload | undefined;
         try {
-          const existing = journal.findByKey("verdict", "judgeIndex", input.judgeIndex);
+          const existing = reader.findByKey("verdict", "judgeIndex", input.judgeIndex);
           if (existing) return (existing.payload as VerdictPayload).verdict;
+          spec = requireSpec(reader, input.runId);
+          criteriaHistory = criteriaHistoryFromJournal(reader);
+          stepSummaries = summariesSinceLastVerdict(reader, input.atStep);
+          journaledForm = reader.findByKey("judge", "judgeIndex", input.judgeIndex)?.payload as
+            | JudgePayload
+            | undefined;
+        } finally {
+          reader.close();
+        }
 
-          const spec = requireSpec(journal, input.runId);
-          const verdict: JudgeVerdict = {
-            kind: "PROCEED",
-            form: {
-              criterionResults: input.criteria.map((c) => ({
-                id: c.id,
-                pass: false,
-                justification: JUDGE_STUB_RATIONALE,
-              })),
-              rubricResults: [],
-              concerns: [],
-            },
-            rationale: JUDGE_STUB_RATIONALE,
-            costUsd: 0,
-            tokens: { input: 0, output: 0 },
-            judgeModel: spec.routing.stages.judge,
+        let verdict: JudgeVerdict;
+        let artifactRefs: ArtifactRef[] = [];
+        let judgePayload: JudgePayload | undefined;
+        if (journaledForm) {
+          // Crash window: form persisted, verdict not yet — recompute
+          // deterministically, never re-ask the LLM (zero duplicate spend).
+          verdict = buildVerdict(journaledForm.form, criteriaHistory, {
+            runId: input.runId,
+            judgeModel: journaledForm.judgeModel,
+            costUsd: journaledForm.costUsd,
+            tokens: journaledForm.tokens,
+            lastGoodCheckpointId: input.lastGoodCheckpointId,
+          });
+        } else {
+          const judgeModel: ModelChoice = {
+            provider: spec.routing.stages.judge.provider,
+            model: spec.judge.model ?? spec.routing.stages.judge.model,
           };
+          // Single-stage routing: only the judge provider's adapter is
+          // constructed, so executor-stage env keys are not required here.
+          const routing: RoutingPolicy = {
+            stages: { plan: judgeModel, code: judgeModel, review: judgeModel, judge: judgeModel },
+            ...(spec.routing.failover?.judge
+              ? { failover: { judge: spec.routing.failover.judge } }
+              : {}),
+          };
+          const pass = await runJudgePass({
+            runId: input.runId,
+            router: createRouter(routing, deps.routerOptions),
+            judgeModel,
+            workspaceDir: workspaceDir(deps.dataDir, input.runId),
+            store: createLocalArtifactStore(artifactsDir(deps.dataDir, input.runId)),
+            goal: spec.goal,
+            criteria: input.criteria,
+            sinceCommit: input.sinceCommit,
+            criteriaHistory,
+            stepSummaries,
+            lastGoodCheckpointId: input.lastGoodCheckpointId,
+          });
+          verdict = pass.verdict;
+          const testRef = pass.collected.evidence.testResults?.ref;
+          artifactRefs = [...pass.collected.evidence.diffRefs, ...(testRef ? [testRef] : [])];
+          judgePayload = {
+            judgeIndex: input.judgeIndex,
+            atStep: input.atStep,
+            form: verdict.form,
+            evidenceRefs: artifactRefs,
+            evidenceBytes: pass.collected.evidenceBytes,
+            judgeModel,
+            costUsd: verdict.costUsd,
+            tokens: verdict.tokens,
+            durationMs: pass.durationMs,
+          };
+        }
+
+        // Write phase: `judge` entry carries the spend, once — the paired
+        // `verdict` entry is cost-free, so a crash between the two writes
+        // can never double-count (journal-format.md §4 cost conservation).
+        const writer = openJournal(deps, input.runId);
+        try {
+          if (judgePayload) {
+            writer.appendOnce(
+              { field: "judgeIndex", value: input.judgeIndex },
+              {
+                kind: "judge",
+                payload: judgePayload,
+                costDeltaUsd: verdict.costUsd,
+                tokens: verdict.tokens,
+                artifactRefs,
+              },
+            );
+          }
           const payload: VerdictPayload = {
             judgeIndex: input.judgeIndex,
             atStep: input.atStep,
             verdict,
           };
-          journal.appendOnce(
+          writer.appendOnce(
             { field: "judgeIndex", value: input.judgeIndex },
-            {
-              kind: "verdict",
-              payload,
-              costDeltaUsd: verdict.costUsd,
-              tokens: verdict.tokens,
-              artifactRefs: [],
-            },
+            { kind: "verdict", payload, costDeltaUsd: 0, artifactRefs: [] },
           );
           return verdict;
         } finally {
-          journal.close();
+          writer.close();
         }
+      });
+    },
+
+    /**
+     * ROLLBACK restore (WP-132): hard-reset the run workspace to the commit
+     * a checkpoint captured. Naturally idempotent; no journal entry of its
+     * own — the verdict's `rollbackTo` plus the next checkpoint's commit are
+     * the audit trail.
+     */
+    async restoreCheckpoint(input: { runId: string; checkpointId: string }): Promise<void> {
+      return withHeartbeat(async () => {
+        const ws = workspaceDir(deps.dataDir, input.runId);
+        let sha: string;
+        if (input.checkpointId === `${input.runId}@base`) {
+          sha = await git(ws, ["rev-parse", `${BASE_TAG}^{commit}`]);
+        } else {
+          const journal = openJournal(deps, input.runId);
+          try {
+            const entry = journal
+              .entries("checkpoint")
+              .find((e) => (e.payload as Checkpoint).id === input.checkpointId);
+            if (!entry) {
+              throw new Error(`rollback target checkpoint not found: ${input.checkpointId}`);
+            }
+            const commits = Object.values((entry.payload as Checkpoint).gitCommits);
+            if (commits.length === 0 || !commits[0]) {
+              throw new Error(`checkpoint ${input.checkpointId} has no git commit recorded`);
+            }
+            sha = commits[0];
+          } finally {
+            journal.close();
+          }
+        }
+        await git(ws, ["reset", "--hard", sha]);
+        await git(ws, ["clean", "-fd"]);
       });
     },
 

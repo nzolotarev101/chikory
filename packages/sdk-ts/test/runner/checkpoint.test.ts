@@ -31,7 +31,15 @@ import {
   type Checkpoint,
   type RunStatusReport,
 } from "../../src/index.js";
-import { initSourceRepo, makeSpec, scriptedRegistry, TERMINAL_STATUSES, waitFor } from "./helpers.js";
+import {
+  initSourceRepo,
+  judgeForm,
+  makeJudgedSpec,
+  scriptedRegistry,
+  startFakeJudgeWire,
+  TERMINAL_STATUSES,
+  waitFor,
+} from "./helpers.js";
 
 const address = inject("temporalAddress");
 const bundlePath = inject("workflowBundlePath");
@@ -57,12 +65,17 @@ describe.skipIf(address === null)("checkpointer (WP-122)", () => {
     const dataDir = join(tmp, "data");
     const taskQueue = `tq-${randomUUID()}`;
 
+    // Real judgeStep over a fake wire; the judge never confirms AC-1, so the
+    // run ends at maxSteps with PROCEED verdicts marking lastGood checkpoints.
+    const wire = await startFakeJudgeWire([judgeForm({ criteria: { "AC-1": false } })]);
+    cleanups.push(() => wire.close());
     const worker = await createRunnerWorker({
       adapters: scriptedRegistry,
       address: address!,
       taskQueue,
       dataDir,
       workflowBundlePath: bundlePath!,
+      routerOptions: { baseUrls: { "openai-compat": wire.url } },
     });
     const workerDone = worker.run();
     const runner = createTemporalRunner({ address: address!, taskQueue, dataDir });
@@ -72,7 +85,7 @@ describe.skipIf(address === null)("checkpointer (WP-122)", () => {
       await runner.close();
     });
 
-    const spec = makeSpec({ repoUrl, maxSteps: 4, judge: { family: "gemini", cadence: 2 } });
+    const spec = makeJudgedSpec({ repoUrl, maxSteps: 4, cadence: 2 });
     const handle = await runner.start(spec);
     const report = await waitFor<RunStatusReport>(
       async () => {

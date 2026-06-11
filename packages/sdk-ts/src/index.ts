@@ -73,6 +73,7 @@ export {
   SPAN_CHECKPOINT,
   type AdapterFactory,
   type AdapterRegistry,
+  type JudgePayload,
   type RunnerActivities,
   type RunnerActivityDeps,
   type StepPayload,
