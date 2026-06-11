@@ -3,6 +3,9 @@
   "version": "0.0.1",
   "description": "Vendor-neutral SDK for long-running software agents with durable execution and Agent-as-a-Judge",
   "type": "module",
+  "bin": {
+    "chikory": "./dist/cli/bin.js"
+  },
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
   "exports": {
