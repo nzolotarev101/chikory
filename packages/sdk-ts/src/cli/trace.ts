@@ -53,8 +53,14 @@ export function formatDuration(ms: number): string {
   return `${Math.floor(m / 60)}h ${m % 60}m`;
 }
 
+/** Table cells are one line: collapse newlines/runs of whitespace. */
+function oneLine(text: string): string {
+  return text.replace(/\s+/g, " ").trim();
+}
+
 function truncate(text: string, width: number): string {
-  return text.length <= width ? text : `${text.slice(0, width - 1)}…`;
+  const flat = oneLine(text);
+  return flat.length <= width ? flat : `${flat.slice(0, width - 1)}…`;
 }
 
 /** Wrap a rationale into indented `judge: "…"` continuation lines. */
@@ -273,7 +279,7 @@ export function formatEntryLine(entry: JournalEntry): string {
       const payload = entry.payload as StepPayload;
       return (
         `[${ts}] step ${payload.stepIndex + 1} ${payload.record.status} ` +
-        `$${payload.record.costUsd.toFixed(4)} — ${payload.record.summary}`
+        `$${payload.record.costUsd.toFixed(4)} — ${oneLine(payload.record.summary)}`
       );
     }
     case "verdict": {

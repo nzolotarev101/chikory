@@ -181,6 +181,15 @@ describe("renderTrace (WP-142)", () => {
     expect(text).toContain("⟲ ROLLBACK → run-x@4");
   });
 
+  test("multi-line summaries collapse to one table row (dogfood-001 catch)", () => {
+    const multiline = renderTrace(
+      run,
+      [step(0, 0, "Implemented Memory Pointer Store:\n\n- remember()\n- recall()")],
+      totals,
+    );
+    expect(multiline).toContain(" 1   Implemented Memory Pointer Store: -…");
+  });
+
   test("non-PROCEED rationale rides under the row", () => {
     expect(text).toContain('judge: "transcriptRef writes bypass the store API;');
   });
