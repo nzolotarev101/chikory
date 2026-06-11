@@ -1,7 +1,7 @@
 # Component: Agent-as-a-Judge
 
 **Phase**: P1 (lane M4), extended P2 · **WPs**: WP-131..134, WP-210, WP-211, WP-215 · **Requirements**: JD-1..7 · **ADR**: 002
-**Code**: `packages/sdk-ts/src/judge.ts`, `packages/sdk-ts/src/judge/`
+**Code**: `packages/sdk-ts/src/judge/` (`evidence.ts`, `rubric.ts`, `prompt.ts`, `verdict.ts`, `harness.ts`, `family.ts`); runner wiring in `runner/activities.ts` (`judgeStep`, `restoreCheckpoint`) + `workflow/agent-loop.ts`
 
 ## Purpose
 
@@ -9,7 +9,7 @@ The core differentiator (spec §6 vector 1). An inner-loop, software-native eval
 
 ## Position in the loop (JD-2/3)
 
-Runs as a journaled activity every `judgeCadence` steps (default 3) and at plan milestones. Its verdict is binding on the runner:
+Runs as a journaled activity every `judgeCadence` steps (default 3); plan-milestone triggers land with the task tree (P2). Its verdict is binding on the runner:
 
 | Verdict | Runner behavior | When the judge should issue it |
 |---|---|---|
@@ -53,4 +53,8 @@ Every judge pass is journaled with tokens/cost; `chikory trace` shows judge cost
 
 ## Testing
 
-Fixture-driven verdict suite: curated evidence bundles (good step, broken-tests step, scope-creep diff, secret-introducing diff, deleted-critical-code diff) with expected verdict classes. Run against two judge families in CI (real calls, `@integration`) — disagreement between families on fixtures is tracked as a metric, not hidden.
+Three layers (P1, `test/judge/`):
+
+- **Deterministic rules** (`verdict.test.ts`): CONTRACTS §4 rules 1–5 + precedence, pure unit — the LLM never chooses the verdict, so the verdict logic needs no LLM to test.
+- **Harness over a fake wire** (`harness.test.ts`, `runner/verdict-gating.test.ts`): transport faked (local HTTP server, real openai-compat wire format), never the LLM layer — JD-4 check overrides, failure-as-ESCALATE, and all four runner gating paths end-to-end.
+- **Fixture-driven verdict suite** (`fixtures.integration.test.ts`, real calls, key-gated `@integration`): curated workspaces (good step, secret-introducing diff, deleted-test reward hack) with expected verdict classes, run against every judge family whose key is present. Broken-tests and scope-creep fixtures plus the cross-family disagreement metric extend in P3 (WP-306) alongside drift monitoring.

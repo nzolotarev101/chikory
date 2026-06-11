@@ -12,7 +12,7 @@ Every requirement in [`project.md`](../project.md), assigned a stable ID, mapped
 |---|---|---|---|---|
 | RT-1 | Sits in front of one or many LLMs; routes tasks | WP-101 | P1 | done |
 | RT-2 | Manages retries, handles failures | WP-103 | P1 | done |
-| RT-3 | Coordinates multi-agent workflows | WP-121, WP-132 (executor+judge coordination); richer multi-agent in WP-203 sub-agents | P1→P2 | planned |
+| RT-3 | Coordinates multi-agent workflows | WP-121, WP-132 (executor+judge coordination); richer multi-agent in WP-203 sub-agents | P1→P2 | in-progress (executor+judge coordination done; sub-agents P2) |
 | RT-4 | Bring-your-own-model, swap freely | WP-101, WP-104 | P1 | done |
 | RT-5 | Explicit per-stage policies (planning/coding/review/judge) | WP-104 | P1 | done |
 | RT-6 | Dynamic routing layer across providers | WP-103 (failover), WP-104 | P1 | done |
@@ -31,7 +31,7 @@ Every requirement in [`project.md`](../project.md), assigned a stable ID, mapped
 | DX-3 | Crash → resurrect from point of failure via memoized results | WP-123 | P1 | done |
 | DX-4 | Checkpoint per LLM/tool call; pause, inspect, resume | WP-122, WP-141 | P1 | in-progress |
 | DX-5 | Branching of execution paths as first-class op | WP-205 | P2 | planned |
-| DX-6 | Rollback as first-class op | WP-132 (judge-triggered), WP-205 (manual) | P1→P2 | planned |
+| DX-6 | Rollback as first-class op | WP-132 (judge-triggered), WP-205 (manual) | P1→P2 | in-progress (judge-triggered done; manual `chikory branch` P2) |
 | DX-7 | Budget-aware continuation | WP-124 (hard gate), WP-207 (reasoned continuation) | P1→P2 | in-progress (hard gate done; reasoned continuation P2) |
 | DX-8 | Suspend/resume for HITL; sleep hours/days, resume on approval | WP-206 (full); WP-132 ESCALATE is the P1 stopgap | P2 | planned |
 
@@ -39,13 +39,13 @@ Every requirement in [`project.md`](../project.md), assigned a stable ID, mapped
 
 | ID | Requirement | WP(s) | Phase | Status |
 |---|---|---|---|---|
-| JD-1 | Built-in eval layer: one agent validates another's work | WP-131 | P1 | planned |
-| JD-2 | Inner loop: evaluates every N actions / at milestones | WP-132 | P1 | planned |
-| JD-3 | Gates next action: halt/rollback/branch/escalate before bad change lands | WP-132 (halt/rollback/escalate); branch verdict WP-205 | P1→P2 | planned |
-| JD-4 | Software-native: PR diffs, tests, UI snapshots, acceptance criteria, security posture, architecture rubric | WP-131 (diffs+tests+criteria); WP-211 (UI); WP-215 (security+architecture) | P1→P2 | planned |
-| JD-5 | Structurally diversified: different model family / prompt regime / memory than executor | WP-133, ADR-002 | P1 | planned |
-| JD-6 | Scoring: pointwise + pairwise; CoT/G-Eval; optional debate/specialized evaluator | WP-131 (pointwise+CoT); WP-210 (pairwise+G-Eval); debate deferred (cost — ADR-002) | P1→P2 | planned |
-| JD-7 | Judge guardrails: binary/low-precision scores, explicit rubrics, drift/reward-hacking awareness, visible latency/cost overhead | WP-131 (binary rubric), WP-134 (cost visibility); drift monitoring extends in WP-306 | P1→P3 | planned |
+| JD-1 | Built-in eval layer: one agent validates another's work | WP-131 | P1 | done |
+| JD-2 | Inner loop: evaluates every N actions / at milestones | WP-132 | P1 | done |
+| JD-3 | Gates next action: halt/rollback/branch/escalate before bad change lands | WP-132 (halt/rollback/escalate); branch verdict WP-205 | P1→P2 | in-progress (halt/rollback/escalate done; branch verdict P2) |
+| JD-4 | Software-native: PR diffs, tests, UI snapshots, acceptance criteria, security posture, architecture rubric | WP-131 (diffs+tests+criteria); WP-211 (UI); WP-215 (security+architecture) | P1→P2 | in-progress (diffs+tests+criteria done; UI/security/architecture P2) |
+| JD-5 | Structurally diversified: different model family / prompt regime / memory than executor | WP-133, ADR-002 | P1 | done |
+| JD-6 | Scoring: pointwise + pairwise; CoT/G-Eval; optional debate/specialized evaluator | WP-131 (pointwise+CoT); WP-210 (pairwise+G-Eval); debate deferred (cost — ADR-002) | P1→P2 | in-progress (pointwise+CoT done; pairwise+G-Eval P2) |
+| JD-7 | Judge guardrails: binary/low-precision scores, explicit rubrics, drift/reward-hacking awareness, visible latency/cost overhead | WP-131 (binary rubric), WP-134 (cost visibility); drift monitoring extends in WP-306 | P1→P3 | in-progress (binary rubric + cost visibility done; drift monitoring P3) |
 
 ## CM — Context & memory (spec §5.4)
 
@@ -67,7 +67,7 @@ Every requirement in [`project.md`](../project.md), assigned a stable ID, mapped
 
 | ID | Requirement | WP(s) | Phase | Status |
 |---|---|---|---|---|
-| AR-1 | Repo snapshots, task trees, test results, browser state, PR diffs as first-class runtime objects | WP-002 (`ArtifactRef`), WP-122 (snapshots), WP-131 (diff/test evidence), WP-211 (browser state) | P1→P2 | in-progress (WP-002 contracts done) |
+| AR-1 | Repo snapshots, task trees, test results, browser state, PR diffs as first-class runtime objects | WP-002 (`ArtifactRef`), WP-122 (snapshots), WP-131 (diff/test evidence), WP-211 (browser state) | P1→P2 | in-progress (contracts, snapshots, diff/test evidence done; browser state P2) |
 
 ## OB — Observability (spec §5.7)
 

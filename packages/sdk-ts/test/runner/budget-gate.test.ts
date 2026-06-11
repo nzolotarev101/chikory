@@ -137,7 +137,7 @@ describe.skipIf(address === null)("budget gate + terminal states (WP-124)", () =
       (r) => TERMINAL_STATUSES.includes(r.status),
       "run end after top-up",
     );
-    expect(finished.status).toBe("FAILED"); // stub judge → maxSteps terminal
+    expect(finished.status).toBe("FAILED"); // judge never fires (cadence 50) → maxSteps terminal
     expect(finished.budgetUsd).toBeCloseTo(0.075, 10);
     expect(finished.currentStep).toBe(4);
 

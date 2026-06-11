@@ -4,7 +4,7 @@
 > This is the single source of truth for **what we build, in what order, and why**.
 > Spec: [`project.md`](project.md) · Requirements matrix: [`docs/REQUIREMENTS.md`](docs/REQUIREMENTS.md) · Architecture: [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) · How to pick up work: [`docs/TASK-PROTOCOL.md`](docs/TASK-PROTOCOL.md)
 
-**Status**: Phase 0 complete (2026-06-10) — P1 lanes unblocked · **Plan date**: 2026-06-09 · **Stage 1 deadline (per spec §10)**: ~2026-09-07 (90 days)
+**Status**: Phase 0 complete (2026-06-10); P1 lanes M1–M4 done (2026-06-11) — M5 (CLI & dogfood) remaining · **Plan date**: 2026-06-09 · **Stage 1 deadline (per spec §10)**: ~2026-09-07 (90 days)
 
 ---
 
@@ -129,7 +129,7 @@ Five parallel lanes after WP-002/WP-005 land. Lane docs contain full technical d
 
 | WP | Title | Tag | Depends | Acceptance criteria |
 |---|---|---|---|---|
-| WP-121 | Temporal workflow: journaled agent loop | 🔴 | WP-004, WP-111 | ✅ **Done** — deterministic `agentLoop` workflow (zero I/O; every side effect an activity); executor step + judge pass = one activity each, memoized + journaled to per-run SQLite (`node:sqlite`, JIF schema); replay verified via `Worker.runReplayHistory`; judge activity is an auto-PROCEED stub until WP-131/132. |
+| WP-121 | Temporal workflow: journaled agent loop | 🔴 | WP-004, WP-111 | ✅ **Done** — deterministic `agentLoop` workflow (zero I/O; every side effect an activity); executor step + judge pass = one activity each, memoized + journaled to per-run SQLite (`node:sqlite`, JIF schema); replay verified via `Worker.runReplayHistory`; judge activity stub replaced by the real harness in WP-131/132. |
 | WP-122 | Checkpointer (git + journal) | 🟡 | WP-121 | ✅ **Done** — every step: git commit on run-private branch (`chikory: step <n>`, `--allow-empty`) + checkpoint journal row + context-snapshot artifact + `chikory.checkpoint` span; `RunHandle.status()` lists checkpoints (the `chikory status` data source — CLI command itself is WP-141, Lane M5); `lastGood` reflects the covering PROCEED verdict. |
 | WP-123 | Crash recovery | 🟡 | WP-122 | ✅ **Done** — automated test: worker subprocess `kill -9`'d mid-run → fresh worker → run completes via deterministic replay; journal holds exactly one entry per step, checkpoint, terminal; cost total == Σ unique steps (zero duplicate LLM spend). 1s activity heartbeats + 15s heartbeatTimeout give fast dead-worker detection. |
 | WP-124 | Budget gate + terminal states | 🟡 | WP-121 | ✅ **Done** — pre-step gate (rolling mean of last 5 step costs ×1.5, judge spend counted); breach → journaled `budget_event` halt, SUSPENDED on the last checkpoint, `resume --add-budget` signals top-up and continues; loop-breaker: 3 consecutive FAILED steps → runner-sourced ESCALATE awaiting `approve` (approve continues, reject seals explicit FAILED) — tested to never spin. |
@@ -138,10 +138,10 @@ Five parallel lanes after WP-002/WP-005 land. Lane docs contain full technical d
 
 | WP | Title | Tag | Depends | Acceptance criteria |
 |---|---|---|---|---|
-| WP-131 | Judge harness: evidence → rubric → verdict | 🔴 | WP-002 | Collects `JudgeEvidence` (workspace diff, test run output, acceptance criteria, step history summary); binary per-criterion rubric (pointwise, CoT); outputs `JudgeVerdict ∈ {PROCEED, HALT, ROLLBACK, ESCALATE}` + per-criterion booleans + rationale. Fixture suite: known-bad diffs get non-PROCEED. |
-| WP-132 | Verdict gating in runner | 🔴 | WP-121, WP-131 | Judge runs every N steps (config); ROLLBACK restores last PROCEED-ed git checkpoint; HALT stops with resumable state; ESCALATE pauses for human `chikory approve`. Integration test for each verdict path. |
-| WP-133 | Family-diversity enforcement | 🟢 | WP-131 | Judge provider family ≠ executor family by default; same-family requires `allow_same_family: true` + loud warning (invariant #2). Unit tested. |
-| WP-134 | Judge telemetry | 🟢 | WP-131, WP-105 | Judge passes emit spans; verdict history, judge cost as % of run cost in `chikory trace`. |
+| WP-131 | Judge harness: evidence → rubric → verdict | 🔴 | WP-002 | ✅ **Done** — `judge/` module: `collectEvidence` (git diff since last verdict; criterion `check` commands executed BY the judge, JD-4), standing binary rubric with destructive-item flags, judge-only prompt regime (JD-5), deterministic `computeVerdict` per CONTRACTS §4 (LLM fills the form, code decides — JD-7); router failure / invalid form → ESCALATE verdict, never a throw. Fixture suite (key-gated `@integration`): secret-introducing and test-deleting diffs must get non-PROCEED across judge families. |
+| WP-132 | Verdict gating in runner | 🔴 | WP-121, WP-131 | ✅ **Done** — `judgeStep` is the real harness (stub gone), journaled as `judge` + `verdict` entries with crash-window form-reuse (zero duplicate judge spend); ROLLBACK hard-resets to the last PROCEED-ed checkpoint (or the `chikory-base`-tagged run base) via the `restoreCheckpoint` activity; HALT seals resumable FAILED; ESCALATE parks AWAITING_APPROVAL for `chikory approve`; SUCCESS requires PROCEED **and** all criteria passing; non-PROCEED rationale rides into the next step as `judgeFeedback`. All four paths integration-tested through the real activity over a fake openai-compat wire, incl. git-restore proofs. |
+| WP-133 | Family-diversity enforcement | 🟢 | WP-131 | ✅ **Done** — `enforceFamilyDiversity` re-checked at the judge boundary (parse-time check already in WP-005's `parseTaskSpec`); catches paper-only diversity (judge stage routed back at the executor's provider); same-family without `allow_same_family` throws; opt-in warns loudly on every pass AND journals the warning. Unit + direct-activity tested. |
+| WP-134 | Judge telemetry | 🟢 | WP-131, WP-105 | ✅ **Done** — `chikory.judge.pass` span per pass (verdict, criteria/rubric pass-fail counts, tokens, cost absolute + share, evidence bytes); `runTotals()` derives JIF §2 totals (verdict mix, judgeCostUsd, judgeCostShare) from the journal — the WP-142 `chikory trace` footer data source; `judge.maxCostShare` breach warns + flags the span. |
 
 ### Lane M5 — CLI & dogfood (`docs/components/cli.md`)
 
