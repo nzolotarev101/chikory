@@ -81,8 +81,12 @@ executor → `codex` or `gemini`. Path B has one routing quirk — see §3.8.
 ## 3. Writing the task spec — every field
 
 Convention (TASK-PROTOCOL §7): the spec lives at
-`examples/dogfood/wp-<n>.yaml`. A ready-to-run example ships at
-[`examples/dogfood/wp-201.yaml`](../examples/dogfood/wp-201.yaml). Schema
+`examples/dogfood/dogfood-<NNN>.yaml`, numbered sequentially and paired 1:1
+with its report `docs/reports/dogfood-<NNN>.md` (index + full naming rules:
+[`examples/dogfood/README.md`](../examples/dogfood/README.md)). Ready-to-run
+examples: [`dogfood-002.yaml`](../examples/dogfood/dogfood-002.yaml) (ran
+SUCCESS), [`dogfood-003.yaml`](../examples/dogfood/dogfood-003.yaml) (next
+up). Schema
 reference with all validation rules: [`docs/spec/task-spec.md`](spec/task-spec.md).
 
 ### 3.1 `name` (required)
@@ -244,7 +248,7 @@ devbox run temporal-dev     # running in its own terminal
 node scripts/cli-judge-proxy.mjs 8787 gemini &   # zero-secrets path only
 
 # 1. launch (from the repo root; --watch streams journal entries live)
-OPENAI_COMPAT_BASE_URL=http://127.0.0.1:8787 pnpm chikory run examples/dogfood/wp-201.yaml --watch
+OPENAI_COMPAT_BASE_URL=http://127.0.0.1:8787 pnpm chikory run examples/dogfood/dogfood-003.yaml --watch
 ```
 
 `run` validates the spec (actionable errors: missing env vars are named),

@@ -1,6 +1,6 @@
 # Dogfood-002 — WP-201 first slice (Python contracts parity) through Chikory
 
-**WP**: WP-201 (slice 1) · **Date**: 2026-06-11 · **Task spec**: [`examples/dogfood/wp-201.yaml`](../../examples/dogfood/wp-201.yaml) · **Run**: `run-2899005b-24b6-41a4-8bde-32e5b9e9354d` · **Landed**: `eb5c57e`
+**WP**: WP-201 (slice 1) · **Date**: 2026-06-11 · **Task spec**: [`examples/dogfood/dogfood-002.yaml`](../../examples/dogfood/dogfood-002.yaml) · **Run**: `run-2899005b-24b6-41a4-8bde-32e5b9e9354d` · **Landed**: `eb5c57e`
 
 > Second dogfood, first *routine* one: no new harness code, no babysitting a
 > broken gate — the spec was written per DOGFOODING.md and the run went

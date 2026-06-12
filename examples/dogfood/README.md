@@ -1,0 +1,27 @@
+# Dogfood task specs
+
+One file per dogfood campaign — the TaskSpec that ran (or will run) a
+plan.md work-package slice through Chikory itself. Full operating manual:
+[`docs/DOGFOODING.md`](../../docs/DOGFOODING.md).
+
+## Convention
+
+- **Path**: `examples/dogfood/dogfood-<NNN>.yaml` — `NNN` is the campaign
+  number, allocated sequentially. The paired report lives at
+  `docs/reports/dogfood-<NNN>.md` (same number; the report is mandatory —
+  TASK-PROTOCOL §7).
+- **`name:` field**: `dogfood-<NNN>-<short-slug>` (e.g.
+  `dogfood-001-memory-pointer-store`).
+- **Header comment**: which WP/slice it implements, the launch command, and
+  — once it has run — the run-id, outcome, landed commit, and report link.
+- Specs are kept after the run (they're the reproducible half of the
+  report); never rewrite the `goal`/criteria of a spec that already ran —
+  a new attempt or next slice is a new `dogfood-<NNN+1>.yaml`.
+
+## Index
+
+| Spec | WP / slice | Outcome | Report |
+|---|---|---|---|
+| [`dogfood-001.yaml`](dogfood-001.yaml) | WP-202 slice 1 — Memory Pointer store | SUCCESS (run 4 of 4; landed `e267e28`) | [`dogfood-001.md`](../../docs/reports/dogfood-001.md) |
+| [`dogfood-002.yaml`](dogfood-002.yaml) | WP-201 slice 1 — Python contracts parity | SUCCESS (run-2899005b; landed `eb5c57e`) | [`dogfood-002.md`](../../docs/reports/dogfood-002.md) |
+| [`dogfood-003.yaml`](dogfood-003.yaml) | WP-217 — completion signal → off-cadence judge pass | not yet run | — |

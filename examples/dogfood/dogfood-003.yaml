@@ -1,0 +1,77 @@
+# Dogfood-003: WP-217 — completion signal → off-cadence judge pass
+# (plan.md §6, queued from dogfood-002 finding F-8: an executor that
+# finishes early burns filler steps until the next cadence boundary).
+# This slice is pure runner logic — no contracts/types.ts change, so it is
+# dogfoodable without an architect-reviewed contracts PR (TASK-PROTOCOL §4).
+# Full how-to (every field explained): docs/DOGFOODING.md
+#
+# Zero-secrets launch (locally-authenticated CLIs; see DOGFOODING.md §2.2/§3.8):
+#   node scripts/cli-judge-proxy.mjs 8787 gemini &
+#   OPENAI_COMPAT_BASE_URL=http://127.0.0.1:8787 pnpm chikory run examples/dogfood/dogfood-003.yaml --watch
+#
+# With API keys instead: delete the routing block, set judge.family to a
+# configured family (e.g. gemini), export that key + the executor's.
+name: dogfood-003-wp-217-judge-on-completion
+goal: >
+  Implement WP-217 (plan.md §6): trigger an immediate, off-cadence judge
+  pass when a step completes with nothing left to do. In
+  packages/sdk-ts/src/workflow/agent-loop.ts the judge currently fires only
+  on the cadence boundary (`stepIndex % spec.judge.cadence === 0`). Extend
+  the trigger so a judge pass ALSO fires when the just-finished step has
+  record.status === "SUCCESS" and an empty diff
+  (record.diffRef.bytes === 0) — the executor produced no changes, meaning
+  it considers the goal complete, so the run must not burn further steps
+  waiting for the cadence boundary. Keep the existing cadence trigger
+  unchanged and keep the workflow deterministic (the new condition must be
+  a pure function of the StepRecord already returned by the executeStep
+  activity — no new activities, no I/O, no contracts or journal-schema
+  changes, no changes to packages/sdk-ts/src/types.ts or schemas.ts).
+  Update the comment above the trigger to name both conditions (JD-2:
+  cadence + completion milestone). Add tests in
+  packages/sdk-ts/test/runner/agent-loop.test.ts following that file's
+  existing patterns and helpers (helpers.ts, fixtures, startFakeJudgeWire,
+  makeJudgedSpec): (1) with a cadence larger than the step count, a step
+  that returns SUCCESS with an empty diff triggers a judge pass on that
+  step, and a PROCEED verdict with every criterion passing seals run-level
+  SUCCESS right there — exactly one `judge` journal entry; (2) the same
+  empty-diff trigger with a verdict whose criteria do NOT all pass leaves
+  the run RUNNING (no SUCCESS seal) and the judge rationale rides into the
+  next step as judgeFeedback. Make sure the existing runner suites
+  (agent-loop, budget-gate, checkpoint, crash-recovery, verdict-gating)
+  still pass unchanged. Follow AGENTS.md conventions: strict TypeScript,
+  ESM imports with .js extensions, named exports only, JSDoc on exported
+  symbols, no new dependencies.
+repos:
+  - url: /Users/nikitazolotarev/repos/chikory
+    writable: true
+acceptance_criteria:
+  # Checks run by the judge inside the run workspace (fresh clone) under the
+  # worker's devbox env — bare pnpm, 120s cap per check. Runner suites boot
+  # an ephemeral Temporal dev server via global-setup (~4s/file measured).
+  - id: AC-1
+    description: agent-loop runner suite passes, including the two new completion-trigger tests
+    check: pnpm install --prefer-offline --silent && pnpm --filter @chikory/sdk exec vitest run test/runner/agent-loop.test.ts
+  - id: AC-2
+    description: remaining runner suites still pass (no cadence/gating regressions)
+    check: pnpm --filter @chikory/sdk exec vitest run test/runner/budget-gate.test.ts test/runner/checkpoint.test.ts test/runner/crash-recovery.test.ts test/runner/verdict-gating.test.ts
+  - id: AC-3
+    description: strict typecheck and lint are clean
+    check: pnpm --filter @chikory/sdk typecheck && pnpm --filter @chikory/sdk lint
+budget_usd: 5
+max_steps: 8
+executor:
+  adapter: codex
+  family: openai
+judge:
+  # openai-compat = the keyless shim seam; real family = the shim backend
+  # (gemini here) — structurally different from the openai executor.
+  family: openai-compat
+  cadence: 2
+  max_cost_share: 0.5
+routing:
+  stages:
+    # plan/review unused by CLI executors in P1; code.model feeds `codex -m`.
+    plan: { provider: openai-compat, model: gpt-5.5 }
+    code: { provider: openai-compat, model: gpt-5.5 }
+    review: { provider: openai-compat, model: gpt-5.5 }
+    judge: { provider: openai-compat, model: gemini-3.1-pro-preview }

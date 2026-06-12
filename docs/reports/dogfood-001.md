@@ -1,6 +1,6 @@
 # Dogfood-001 — WP-202 (Memory Pointer store) through Chikory itself
 
-**WP**: WP-143 · **Date**: 2026-06-11 · **Task spec**: [`dogfood-001.task.yaml`](./dogfood-001.task.yaml)
+**WP**: WP-143 · **Date**: 2026-06-11 · **Task spec**: [`examples/dogfood/dogfood-001.yaml`](../../examples/dogfood/dogfood-001.yaml)
 
 > MVP exit-gate #1: Chikory v0.1 implements one real Phase 2 work package
 > end-to-end, with the judge gating intermediate steps. This report records
@@ -28,7 +28,7 @@ locally-authenticated CLIs only:
 ```sh
 node scripts/cli-judge-proxy.mjs 8787 gemini &
 devbox run temporal-dev &
-OPENAI_COMPAT_BASE_URL=http://127.0.0.1:8787 pnpm chikory run docs/reports/dogfood-001.task.yaml --watch
+OPENAI_COMPAT_BASE_URL=http://127.0.0.1:8787 pnpm chikory run examples/dogfood/dogfood-001.yaml --watch
 ```
 
 ## The task
