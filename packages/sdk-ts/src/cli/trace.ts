@@ -117,14 +117,26 @@ function runDurationMs(run: RunRow, entries: JournalEntry[]): number {
   return Math.max(0, end - start);
 }
 
+function isUnpricedStep(record: StepPayload["record"]): boolean {
+  return (
+    record.costEstimated &&
+    record.costUsd === 0 &&
+    record.tokens.input + record.tokens.output > 0
+  );
+}
+
 /** The `chikory trace <run-id>` body (cli.md WP-142 format). */
 export function renderTrace(run: RunRow, entries: JournalEntry[], totals: RunTotals): string {
   const lines: string[] = [];
   const duration = formatDuration(runDurationMs(run, entries));
+  const hasUnpricedStep = entries.some(
+    (entry) => entry.kind === "step" && isUnpricedStep((entry.payload as StepPayload).record),
+  );
   lines.push(
     `run ${run.runId} · ${run.status} · ${totals.steps} steps · ` +
       `$${totals.costUsd.toFixed(2)} / $${run.task.budgetUsd.toFixed(2)} · ${duration} · ` +
-      `executor ${run.task.executor.adapter}(${run.task.executor.family}) · judge ${run.task.judge.family}`,
+      `executor ${run.task.executor.adapter}(${run.task.executor.family}) · judge ${run.task.judge.family}` +
+      `${hasUnpricedStep ? " · ⚠ cost meter blind (unpriced tokens)" : ""}`,
   );
   lines.push("─".repeat(RULE_WIDTH));
   lines.push(` #   ${"step".padEnd(SUMMARY_WIDTH)} tokens(in/out)   cost     verdict`);
@@ -198,9 +210,14 @@ export function renderStepDetail(entries: JournalEntry[], displayStep: number): 
   const payload = stepEntry.payload as StepPayload;
   const { record } = payload;
   const lines: string[] = [];
+  const costAnnotation = isUnpricedStep(record)
+    ? ` (estimated — UNPRICED: ${record.tokens.input + record.tokens.output} tokens metered)`
+    : record.costEstimated
+      ? " (estimated)"
+      : "";
   lines.push(
     `step ${displayStep} · ${record.status} · $${record.costUsd.toFixed(4)}` +
-      `${record.costEstimated ? " (estimated)" : ""} · ` +
+      `${costAnnotation} · ` +
       `${formatTokens(record.tokens.input)}/${formatTokens(record.tokens.output)} tokens · ` +
       `${formatDuration(record.durationMs)} · ${record.toolCalls} tool calls`,
   );

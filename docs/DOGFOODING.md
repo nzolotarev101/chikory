@@ -11,7 +11,11 @@ SUCCESS in 4 minutes. Dogfood-002 (`docs/reports/dogfood-002.md`) repeated it
 for WP-201 slice 1 — first-attempt SUCCESS, zero new harness code.
 Dogfood-003 (`docs/reports/dogfood-003.md`) had the engine modify its own
 runner loop (WP-217) — third first-attempt SUCCESS, and the landed trigger
-fired in the run that delivered it.
+fired in the run that delivered it. Dogfood-004
+(`docs/reports/dogfood-004.md`) landed WP-218 slice 1 (honest cost meter) —
+fourth first-attempt SUCCESS, the first spec designed to *falsify* the old
+behavior (cadence > max_steps, so only the WP-217 milestone trigger could
+seal), and the delivered warning now flags that very run's trace.
 
 Related docs: [`docs/spec/task-spec.md`](spec/task-spec.md) (schema
 reference) · [`docs/TASK-PROTOCOL.md`](TASK-PROTOCOL.md) (WP etiquette, §7 is
@@ -343,9 +347,11 @@ and produced three plan-changing findings (F-8…F-10 → WP-217…WP-220).
 | Steps fail with a session/usage-limit message | Subscription executor ran dry (dogfood run 1). Reject the escalation, switch `executor` to the other CLI (or API-key auth), relaunch. |
 | Judge checks time out | 120 s/check cap. Bare `pnpm` not `devbox run` (§3.4); split slow suites into a focused test file per criterion. |
 | Judge verdict is ESCALATE with `judge raised concerns` | The rubric/concerns fired (e.g. scope creep, deleted tests). `trace --step <n>` shows the full form; approve or reject deliberately. |
-| CLI behaves like yesterday's code | Stale `dist/`. `devbox run build`. |
+| CLI behaves like yesterday’s code (e.g. a just-harvested trace feature missing from `chikory trace`) | Stale `dist/`. `devbox run build`. `harvest.sh` now rebuilds before verification (dogfood-004 F-16); the dogfood script builds *pre-run*, so post-harvest forensics always need the rebuild. |
 | `pnpm chikory: command not found` | Bin link lost: `rm node_modules/.pnpm-workspace-state-v1.json && devbox run -- pnpm install`. |
 | Proxy run dies with router FAILED on judge pass | Shim not running / wrong port — restart `cli-judge-proxy.mjs` and check `OPENAI_COMPAT_BASE_URL`. |
+| `[cli-judge:…] FAILED … 404 "Requested entity was not found"` *during executor steps* | Not the judge: the executor inherited `OPENAI_COMPAT_BASE_URL` and its in-workspace test run un-skipped `providers.integration.test.ts`, which pings the live shim with a model the backend doesn't have (dogfood-004 F-14). Harmless to the run but burns judge-backend quota; fix is WP-222 (executor env allowlist). |
+| `devbox run harvest` fails on a test unrelated to the run's diff | Likely the flaky `cli.test.ts > budget halt` watch race (dogfood-004 F-15, fix WP-223). Re-run the file in isolation; if it passes and the diff can't plausibly affect it, proceed to commit and note the flake. Harvest aborts pre-commit by design — verify before overriding. |
 
 ## 8. Known P1 limitations (so you don't fight them)
 
@@ -354,11 +360,14 @@ and produced three plan-changing findings (F-8…F-10 → WP-217…WP-220).
   goals accordingly (§3.2).
 - **Single repo**, no `inject`, no `branch`, no suspend-for-days HITL UX, no
   pacing — all P2 (WP-214, -212, -205, -206, -207).
-- **Subscription-auth runs report $0.00 cost** → budget gate inert; rely on
-  `max_steps` and the HALT guard instead. The zero-secrets routing path is
-  $0 even with the codex estimator (openai-compat defaults to $0; unknown
-  models price at $0) — dogfood-002 F-9; token-denominated budgets are
-  WP-218.
+- **Subscription-auth runs can report $0.00 cost** → rely on `max_steps`
+  and the HALT guard when the meter is blind. WP-218 slice 1 (dogfood-004)
+  prices the documented zero-secrets path (`gpt-5.5`,
+  `gemini-3.1-pro-preview`, …) and makes blindness loud: `chikory trace`
+  flags `UNPRICED` steps and appends `⚠ cost meter blind (unpriced
+  tokens)` to the run header whenever `costEstimated` ∧ cost=$0 ∧
+  tokens>0. Token-denominated budgets (`budget_tokens`) remain — the
+  contracts slice of WP-218.
 - **Completion still costs one probe step** — WP-217 (landed `ef4b16f`)
   fires the judge as soon as a step returns SUCCESS with an empty diff, so
   a finished run no longer waits for the cadence boundary. But the trigger

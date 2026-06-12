@@ -7,7 +7,7 @@
  */
 import type { TokenUsage } from "./types.js";
 
-export const PRICING_VERSION = "2026-06-10";
+export const PRICING_VERSION = "2026-06-12";
 
 /** USD per 1M tokens. */
 export interface ModelPricing {
@@ -28,9 +28,13 @@ export const PRICE_TABLE: Record<string, ModelPricing> = {
   "claude-sonnet-4-6": { inputPerMTok: 3, outputPerMTok: 15 },
   "claude-haiku-4-5": { inputPerMTok: 1, outputPerMTok: 5 },
   // OpenAI
+  "gpt-5.5": { inputPerMTok: 1.25, outputPerMTok: 10 },
+  "gpt-5.5-mini": { inputPerMTok: 0.25, outputPerMTok: 2 },
   "gpt-5.2": { inputPerMTok: 1.25, outputPerMTok: 10 },
   "gpt-5.2-mini": { inputPerMTok: 0.25, outputPerMTok: 2 },
   // Gemini
+  "gemini-3.1-pro-preview": { inputPerMTok: 1.25, outputPerMTok: 10 },
+  "gemini-3.1-flash": { inputPerMTok: 0.3, outputPerMTok: 2.5 },
   "gemini-2.5-pro": { inputPerMTok: 1.25, outputPerMTok: 10 },
   "gemini-2.5-flash": { inputPerMTok: 0.3, outputPerMTok: 2.5 },
 };

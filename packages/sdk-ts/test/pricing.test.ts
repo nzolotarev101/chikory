@@ -9,6 +9,7 @@ import { createOpenAICompatAdapter } from "../src/providers/openai-compat.js";
 describe("pricing (WP-101)", () => {
   it("is versioned", () => {
     expect(PRICING_VERSION).toMatch(/^\d{4}-\d{2}-\d{2}$/);
+    expect(PRICING_VERSION).toBe("2026-06-12");
   });
 
   it("computes cost from the static table", () => {
@@ -18,10 +19,15 @@ describe("pricing (WP-101)", () => {
       0.003 + 0.03,
       10,
     );
+    expect(computeCostUsd("gpt-5.5", { input: 1000, output: 2000 })).toBeGreaterThan(0);
+    expect(
+      computeCostUsd("gemini-3.1-pro-preview", { input: 1000, output: 2000 }),
+    ).toBeGreaterThan(0);
   });
 
   it("resolves date-suffixed model ids via longest prefix", () => {
     expect(lookupPricing("claude-haiku-4-5-20251001")).toEqual(PRICE_TABLE["claude-haiku-4-5"]);
+    expect(lookupPricing("gpt-5.5-2026-01-15")).toEqual(PRICE_TABLE["gpt-5.5"]);
   });
 
   it("unknown (open) models cost 0 unless overridden", () => {

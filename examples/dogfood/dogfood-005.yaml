@@ -1,0 +1,95 @@
+# Dogfood-005: WP-220 — `chikory land <run-id>` (plan.md §6, queued from
+# dogfood-002 F-10b; urgency reproven by dogfood-003 F-13 — hand-harvest
+# contaminated commit ef4b16f — and dogfood-004 F-15/F-16 — harvest aborted
+# pre-commit on a flake and verified against a stale build).
+# No-contracts slice: new CLI command + wiring + tests; pure git mechanics,
+# no TaskSpec/schemas/journal changes. The `--pr` half (gh) is deferred —
+# this slice must work offline. Full how-to: docs/DOGFOODING.md.
+#
+# Zero-secrets launch (locally-authenticated CLIs; see DOGFOODING.md §2.2/§3.8):
+#   node scripts/cli-judge-proxy.mjs 8787 gemini &
+#   OPENAI_COMPAT_BASE_URL=http://127.0.0.1:8787 pnpm chikory run examples/dogfood/dogfood-005.yaml --watch
+#
+# ⚠ Commit everything before launching — the run workspace clones HEAD.
+# ⚠ Known F-14 noise: the executor inherits OPENAI_COMPAT_BASE_URL and its
+#   in-workspace test runs may ping the judge shim (harmless 404 lines)
+#   until WP-222 lands.
+name: dogfood-005-wp-220-chikory-land
+goal: >
+  Implement WP-220 (plan.md §6): a `chikory land <run-id>` command that
+  turns a finished run's workspace into a clean, auditable commit on the
+  host repository — automating docs/DOGFOODING.md §6 and replacing
+  scripts/harvest.sh's apply-and-commit half. Three files; no other
+  changes — in particular DO NOT touch packages/sdk-ts/src/types.ts,
+  schemas.ts, or anything under src/runner/ except read-only imports.
+  (1) New file packages/sdk-ts/src/cli/land.ts: export a `cmdLand`
+  function following the signature and style of `cmdTrace` in
+  packages/sdk-ts/src/cli/commands.ts (CliDeps + CommonFlags seams,
+  output via the deps out/err writers, no direct console). Behavior:
+  resolve the run workspace with `workspaceDir(flags.dataDir, runId)`
+  from src/runner/paths.js; accept `--branch <name>` (default
+  `land-<run-id>`) and `--repo <dir>` (default process.cwd()). Fail with
+  exit code 1 and one actionable error line (match the existing CLI error
+  style in main.ts) when: the workspace does not exist, the target repo
+  has a dirty working tree, or the workspace diff (`git diff
+  chikory-base..HEAD` inside the workspace, falling back to
+  `git diff main..HEAD` when the chikory-base ref is absent) is empty.
+  On success: create-or-checkout the branch in the target repo, apply the
+  diff, stage everything, and create ONE squashed commit whose subject is
+  `feat: land <run-id>` and whose body cites the run-id, the source
+  workspace path, and the standard verification commands (`devbox run
+  build && devbox run lint && devbox run typecheck && devbox run test`).
+  Never push, never call gh, never touch the network. Print the branch,
+  commit sha, and a `forensics: chikory trace <run-id>` line. Use
+  node:child_process via execFileSync for git (no new dependencies).
+  (2) Wire the command into packages/sdk-ts/src/cli/main.ts: a `land`
+  case in both the flag-parsing and dispatch switches, plus a help-text
+  entry alongside the existing commands.
+  (3) New test file packages/sdk-ts/test/cli/land.test.ts following
+  test/cli/cli.test.ts's temp-dir and cli() fixture conventions where
+  applicable, but WITHOUT Temporal: build the fixtures directly — a temp
+  host git repo (init, one base commit) and a temp dataDir containing a
+  fake run workspace (clone of the host repo with a `chikory-base` tag/
+  branch at the base commit plus one committed file change). Assert:
+  successful land creates the branch and exactly one new commit whose
+  message contains the run-id, the working tree is clean afterward, and
+  the diff content matches the workspace change; `--branch` overrides the
+  branch name; each failure mode (missing workspace, dirty target repo,
+  empty diff) exits 1 with its actionable message and creates no commit.
+  Keep every existing test passing unchanged. Follow AGENTS.md
+  conventions: strict TypeScript, ESM imports with .js extensions, named
+  exports only, JSDoc on exported symbols, no new dependencies.
+repos:
+  - url: /Users/nikitazolotarev/repos/chikory
+    writable: true
+acceptance_criteria:
+  # Judge-executed in the run workspace (fresh clone), bare pnpm, 120 s cap
+  # per check. cli.test.ts is deliberately excluded (needs Temporal, and
+  # F-15 flake); trace.test.ts guards the main.ts wiring stays intact.
+  - id: AC-1
+    description: new land suite passes — happy path, --branch override, and all three failure modes
+    check: pnpm install --prefer-offline --silent && pnpm --filter @chikory/sdk exec vitest run test/cli/land.test.ts
+  - id: AC-2
+    description: existing CLI trace suite still passes (main.ts wiring untouched for other commands)
+    check: pnpm --filter @chikory/sdk exec vitest run test/cli/trace.test.ts
+  - id: AC-3
+    description: strict typecheck and lint are clean
+    check: pnpm --filter @chikory/sdk typecheck && pnpm --filter @chikory/sdk lint
+budget_usd: 5
+max_steps: 4
+executor:
+  adapter: codex
+  family: openai
+judge:
+  # openai-compat = the keyless shim seam; real family = the shim backend
+  # (gemini) — structurally different from the openai executor.
+  family: openai-compat
+  cadence: 2
+  max_cost_share: 0.5
+routing:
+  stages:
+    # plan/review unused by CLI executors in P1; code.model feeds `codex -m`.
+    plan: { provider: openai-compat, model: gpt-5.5 }
+    code: { provider: openai-compat, model: gpt-5.5 }
+    review: { provider: openai-compat, model: gpt-5.5 }
+    judge: { provider: openai-compat, model: gemini-3.1-pro-preview }

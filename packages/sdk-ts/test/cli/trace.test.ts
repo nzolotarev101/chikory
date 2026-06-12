@@ -84,6 +84,21 @@ function step(idx: number, stepIndex: number, summary: string, failed = false): 
   return { ...entry(idx, "step", payload, 0.21), tokens: { input: 12_000, output: 3100 } };
 }
 
+function withCost(
+  stepEntry: JournalEntry,
+  costUsd: number,
+  costEstimated: boolean,
+): JournalEntry {
+  const payload = stepEntry.payload as StepPayload;
+  return {
+    ...stepEntry,
+    payload: {
+      ...payload,
+      record: { ...payload.record, costUsd, costEstimated },
+    },
+  };
+}
+
 const form: JudgeForm = {
   criterionResults: [{ id: "AC-1", pass: true, justification: "verified by check" }],
   rubricResults: [{ id: "R1", pass: true, justification: "no secrets" }],
@@ -198,6 +213,25 @@ describe("renderTrace (WP-142)", () => {
     expect(text).toContain("totals: decisions 3 · judge passes 2 ($0.10, 13.7%) · rollbacks 1 · escalations 0");
     expect(text).toContain("injections 1 · checkpoints 1");
     expect(text).toContain("failed: judge HALT: gave up (last checkpoint run-x@4)");
+  });
+
+  test("warns when metered tokens have an estimated zero cost", () => {
+    const unpricedEntries = [withCost(step(0, 0, "unpriced model"), 0, true)];
+    const trace = renderTrace(run, unpricedEntries, totals);
+    const detail = renderStepDetail(unpricedEntries, 1);
+
+    expect(trace).toContain("⚠ cost meter blind (unpriced tokens)");
+    expect(detail).toContain("$0.0000 (estimated — UNPRICED: 15100 tokens metered)");
+  });
+
+  test("does not warn for priced or non-estimated steps", () => {
+    const pricedEntries = [withCost(step(0, 0, "priced model"), 0.21, true)];
+    const exactEntries = [withCost(step(0, 0, "exact zero"), 0, false)];
+
+    expect(renderTrace(run, pricedEntries, totals)).not.toContain("cost meter blind");
+    expect(renderStepDetail(pricedEntries, 1)).not.toContain("UNPRICED");
+    expect(renderTrace(run, exactEntries, totals)).not.toContain("cost meter blind");
+    expect(renderStepDetail(exactEntries, 1)).not.toContain("UNPRICED");
   });
 });
 

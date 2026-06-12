@@ -43,7 +43,7 @@ Every requirement in [`project.md`](../project.md), assigned a stable ID, mapped
 | JD-2 | Inner loop: evaluates every N actions / at milestones | WP-132 (every N); WP-217 (empty-diff completion milestone — landed `ef4b16f`, dogfood-003); WP-221 (explicit `claimsComplete` signal, dogfood-003 F-11) | P1→P2 | in-progress (cadence + empty-diff milestone triggers done; explicit completion claim WP-221 — inference still costs one probe step) |
 | JD-3 | Gates next action: halt/rollback/branch/escalate before bad change lands | WP-132 (halt/rollback/escalate); branch verdict WP-205 | P1→P2 | in-progress (halt/rollback/escalate done; branch verdict P2) |
 | JD-4 | Software-native: PR diffs, tests, UI snapshots, acceptance criteria, security posture, architecture rubric | WP-131 (diffs+tests+criteria); WP-211 (UI); WP-215 (security+architecture) | P1→P2 | in-progress (diffs+tests+criteria done; UI/security/architecture P2) |
-| JD-5 | Structurally diversified: different model family / prompt regime / memory than executor | WP-133, ADR-002 | P1 | done |
+| JD-5 | Structurally diversified: different model family / prompt regime / memory than executor | WP-133, ADR-002; WP-222 (executor env allowlist — judge-shim env leaked into executor, dogfood-004 F-14) | P1→P2 | done (declared-family check); seam hardening WP-222 queued — executor traffic reached the judge backend via inherited `OPENAI_COMPAT_BASE_URL` |
 | JD-6 | Scoring: pointwise + pairwise; CoT/G-Eval; optional debate/specialized evaluator | WP-131 (pointwise+CoT); WP-210 (pairwise+G-Eval); debate deferred (cost — ADR-002) | P1→P2 | in-progress (pointwise+CoT done; pairwise+G-Eval P2) |
 | JD-7 | Judge guardrails: binary/low-precision scores, explicit rubrics, drift/reward-hacking awareness, visible latency/cost overhead | WP-131 (binary rubric), WP-134 (cost visibility); drift monitoring extends in WP-306 | P1→P3 | in-progress (binary rubric + cost visibility done; drift monitoring P3) |
 
@@ -61,7 +61,7 @@ Every requirement in [`project.md`](../project.md), assigned a stable ID, mapped
 | ID | Requirement | WP(s) | Phase | Status |
 |---|---|---|---|---|
 | CG-1 | Terminal states / deterministic exits break retry loops | WP-103, WP-124 (invariant #4) | P1 | done |
-| CG-2 | Spend controls; transparent, predictable, checkpoint-aware budget governance | WP-124, WP-105; WP-218 (token-denominated budgets — USD gate inert on $0-metered runs, dogfood-002 F-9; recurred dogfood-003: $0.00 for 1.39M tokens, `gpt-5.5` + `gemini-3.1-pro-preview` both unpriced); dashboards in WP-407 | P1→P4 | in-progress (P1 USD gate done; WP-218 pricing/warning slice = dogfood-004; dashboards P4) |
+| CG-2 | Spend controls; transparent, predictable, checkpoint-aware budget governance | WP-124, WP-105; WP-218 (token-denominated budgets — USD gate inert on $0-metered runs, dogfood-002 F-9); WP-223 (watch can drop the SUSPENDED-at-cap transition, dogfood-004 F-15); dashboards in WP-407 | P1→P4 | in-progress (P1 USD gate done; WP-218 pricing/blind-meter-warning slice landed via dogfood-004 `run-9edbcd28`, commit pending; `budget_tokens` slice rides next contracts PR; dashboards P4) |
 
 ## AR — Artifact-centric state (spec §5.6)
 
@@ -103,7 +103,7 @@ Every requirement in [`project.md`](../project.md), assigned a stable ID, mapped
 | IF-1 | Thin TypeScript SDK | P1 lanes M1–M5 | P1 | planned |
 | IF-2 | Thin Python SDK | WP-201 | P2 | in-progress (slice 1 — contracts + shared conformance suite — landed `eb5c57e` via dogfood-002) |
 | IF-3 | Durable workflows on existing engine (Temporal) — partner, don't rebuild | ADR-001, WP-004, WP-121 | P0–P1 | done |
-| IF-4 | CLI surface | WP-141, WP-142 | P1 | done |
+| IF-4 | CLI surface | WP-141, WP-142; WP-223 (watch transition fidelity, dogfood-004 F-15) | P1→P2 | reopened (`run --watch` can miss a SUSPENDED→RUNNING transition between polls — dogfood-004 F-15; fix is WP-223) |
 | IF-5 | Cloud control plane: hosted judges, checkpointers, trace browser | WP-401–408 (full design: components/control-plane.md) | P4 | planned |
 
 ## ST — Strategy, moat, business (spec §6, §9, §10)

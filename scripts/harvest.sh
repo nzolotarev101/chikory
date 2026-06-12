@@ -85,7 +85,11 @@ else
 fi
 
 # 4. Verify the changes (lint, typecheck, tests)
-echo "Running verification checks: lint, typecheck, test..."
+# Build first: the chikory bin runs from dist/, and the dogfood script's
+# build predates the run — without this, post-harvest forensics render with
+# yesterday's code (dogfood-004 F-16).
+echo "Running verification checks: build, lint, typecheck, test..."
+devbox run build
 devbox run lint
 devbox run typecheck
 devbox run test
