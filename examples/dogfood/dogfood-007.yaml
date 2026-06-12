@@ -1,0 +1,94 @@
+# Dogfood-007: WP-223 — watch renders journal transitions, never sampled
+# state (plan.md §6, queued from dogfood-004 F-15; recurred twice in
+# dogfood-006 — the executor's workspace full-suite run flaked the
+# AWAITING_APPROVAL line and the host review flaked the budget-halt line).
+# No-contracts slice: `budget_event` halt entries and ESCALATE verdict
+# entries are already durably journaled — this is pure CLI-side rework of
+# followRun in src/cli/commands.ts.
+# Self-falsifying by nature: the deliverable de-flakes the very
+# cli.test.ts race that has bitten a harvest (dogfood-004), an executor
+# workspace (dogfood-006), and a human review (dogfood-006).
+#
+# Zero-secrets launch (locally-authenticated CLIs; see DOGFOODING.md §2.2/§3.8):
+#   node scripts/cli-judge-proxy.mjs 8787 gemini &
+#   OPENAI_COMPAT_BASE_URL=http://127.0.0.1:8787 pnpm chikory run examples/dogfood/dogfood-007.yaml --watch
+#
+# ⚠ Commit everything before launching — the run workspace clones HEAD.
+name: dogfood-007-wp-223-watch-journal-transitions
+goal: >
+  Implement WP-223 (plan.md §6): the CLI's run follower must derive state-
+  transition lines from durable journal entries instead of sampled status,
+  so a transition can never vanish between polls (dogfood-004 F-15). Two
+  files changed, nothing else — in particular DO NOT touch
+  packages/sdk-ts/src/types.ts, schemas.ts, src/runner/, src/workflow/,
+  src/executors/, or src/cli/trace.ts.
+  (1) packages/sdk-ts/src/cli/commands.ts — rework followRun only. Today
+  it prints "run is AWAITING_APPROVAL — answer with: …" and "run is
+  SUSPENDED at the budget cap (… ) — top up with: …" inside the
+  `report.status !== lastStatus` block, which misses any transition that
+  starts and ends between two 1-second polls. Change followRun so that on
+  EVERY poll iteration (no longer only when opts.watch is true) it opens
+  the journal when the file exists and consumes entries from nextEntryIdx
+  exactly as the watch branch does now. For each newly seen entry: when
+  opts.watch is true, print formatEntryLine(entry) exactly as today;
+  additionally — watch or not — derive transition lines from the entry
+  itself: a kind === "budget_event" entry whose payload event is "halt"
+  prints the existing SUSPENDED message verbatim, taking the dollar
+  amounts from the entry payload's details.spentUsd and details.budgetUsd
+  (same wording: `run is SUSPENDED at the budget cap ($<spent> of
+  $<budget>) — top up with: chikory resume <runId> --add-budget <usd>`
+  with both amounts rendered via toFixed(2)); a kind === "verdict" entry
+  whose payload verdict.kind is "ESCALATE" prints the existing
+  AWAITING_APPROVAL message verbatim. "top_up" budget events print
+  nothing. Delete the status-sampled AWAITING_APPROVAL/SUSPENDED prints
+  (and the now-unused lastStatus tracking) so each transition prints
+  exactly once per follower; keep the status poll itself — it still
+  detects TERMINAL states and returns the final report unchanged. Narrow
+  the unknown entry payloads with local casts following the pattern of the
+  "budget_event" and "verdict" cases in src/cli/trace.ts. Journal replay
+  on reattach (resume re-printing past transitions from idx 0) is
+  acceptable — it matches --watch's existing replay semantics.
+  (2) packages/sdk-ts/test/cli/cli.test.ts — strengthen the two racy
+  assertions, change nothing else: in "budget halt → resume --add-budget
+  continues to SUCCESS", additionally assert the line containing
+  "SUSPENDED at the budget cap" occurs exactly once in run.out; in
+  "loop-breaker escalation → approve --reject seals FAILED (exit 1)",
+  additionally assert the line containing "AWAITING_APPROVAL — answer
+  with" occurs exactly once in that test's run output. Keep every existing
+  test and assertion passing unchanged. Follow AGENTS.md conventions:
+  strict TypeScript, ESM imports with .js extensions, named exports only,
+  no new dependencies.
+repos:
+  - url: /Users/nikitazolotarev/repos/chikory
+    writable: true
+acceptance_criteria:
+  # Judge-executed in the run workspace (fresh clone), bare pnpm, 120 s cap
+  # per check. Timed on host 2026-06-12: AC-1 ≈ 6 s + install, AC-2 ≈ 12 s,
+  # AC-3 ≈ 10 s.
+  - id: AC-1
+    description: CLI suite passes with the new exactly-once transition assertions
+    check: pnpm install --prefer-offline --silent && pnpm --filter @chikory/sdk exec vitest run test/cli/cli.test.ts
+  - id: AC-2
+    description: runner loop and trace renderer untouched in behavior
+    check: pnpm --filter @chikory/sdk exec vitest run test/runner/budget-gate.test.ts test/runner/agent-loop.test.ts test/cli/trace.test.ts
+  - id: AC-3
+    description: strict typecheck and lint are clean
+    check: pnpm --filter @chikory/sdk typecheck && pnpm --filter @chikory/sdk lint
+budget_usd: 5
+max_steps: 4
+executor:
+  adapter: codex
+  family: openai
+judge:
+  # openai-compat = the keyless shim seam; real family = the shim backend
+  # (gemini) — structurally different from the openai executor.
+  family: openai-compat
+  cadence: 2
+  max_cost_share: 0.5
+routing:
+  stages:
+    # plan/review unused by CLI executors in P1; code.model feeds `codex -m`.
+    plan: { provider: openai-compat, model: gpt-5.5 }
+    code: { provider: openai-compat, model: gpt-5.5 }
+    review: { provider: openai-compat, model: gpt-5.5 }
+    judge: { provider: openai-compat, model: gemini-3.1-pro-preview }

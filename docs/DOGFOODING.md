@@ -19,7 +19,11 @@ seal), and the delivered warning now flags that very run's trace.
 Dogfood-005 (`docs/reports/dogfood-005.md`) delivered WP-220
 (`chikory land`) — fifth first-attempt SUCCESS, the first fully *priced*
 campaign ($2.14/$5.00 metered by the WP-218 table), and the deliverable
-was verified by landing its own run into a clean clone.
+was verified by landing its own run into a clean clone. Dogfood-006
+(`docs/reports/dogfood-006.md`) delivered WP-222 slice 1 (executor env
+scrub) — sixth first-attempt SUCCESS, the first campaign with **no new
+friction numbers**, and the bug being fixed fired inside the run's own
+executor steps exactly as the spec predicted.
 
 Related docs: [`docs/spec/task-spec.md`](spec/task-spec.md) (schema
 reference) · [`docs/TASK-PROTOCOL.md`](TASK-PROTOCOL.md) (WP etiquette, §7 is
@@ -366,8 +370,8 @@ and produced three plan-changing findings (F-8…F-10 → WP-217…WP-220).
 | `chikory land` succeeded but the landed feature is invisible / verification not run | By design (dogfood-005 F-17, fix WP-224): `land` only applies + commits — it never rebuilds or verifies. Run `devbox run build && devbox run lint && devbox run typecheck && devbox run test` on the fresh branch. Stray `Switched to a new branch …` lines in its output are git stderr passing through (F-18, cosmetic). |
 | `pnpm chikory: command not found` | Bin link lost: `rm node_modules/.pnpm-workspace-state-v1.json && devbox run -- pnpm install`. |
 | Proxy run dies with router FAILED on judge pass | Shim not running / wrong port — restart `cli-judge-proxy.mjs` and check `OPENAI_COMPAT_BASE_URL`. |
-| `[cli-judge:…] FAILED … 404 "Requested entity was not found"` *during executor steps* | Not the judge: the executor inherited `OPENAI_COMPAT_BASE_URL` and its in-workspace test run un-skipped `providers.integration.test.ts`, which pings the live shim with a model the backend doesn't have (dogfood-004 F-14). Harmless to the run but burns judge-backend quota; fix is WP-222 (executor env allowlist). |
-| `devbox run harvest` fails on a test unrelated to the run's diff | Likely the flaky `cli.test.ts > budget halt` watch race (dogfood-004 F-15, fix WP-223). Re-run the file in isolation; if it passes and the diff can't plausibly affect it, proceed to commit and note the flake. Harvest aborts pre-commit by design — verify before overriding. |
+| `[cli-judge:…] FAILED … 404/500` *during executor steps* | Not the judge: the executor inherited `OPENAI_COMPAT_BASE_URL` and its in-workspace test run un-skipped `providers.integration.test.ts`, which pings the live shim (dogfood-004 F-14; recurred dogfood-005/006). **Fixed by WP-222 slice 1** (dogfood-006, commit pending review): executor children now see only their own family key. Seeing this symptom on a post-WP-222 run is a regression — file it. |
+| `devbox run harvest` (or a full-suite run) fails on a `cli.test.ts` test unrelated to the run's diff | The watch race flake (dogfood-004 F-15, fix WP-223 — dogfood-007 targets it). Two flavors seen: `budget halt` misses the `SUSPENDED at the budget cap` line, `loop-breaker escalation` misses the `AWAITING_APPROVAL` line (dogfood-006). Re-run the file in isolation; if it passes and the diff can't plausibly affect it, proceed and note the flake. Harvest aborts pre-commit by design — verify before overriding. |
 
 ## 8. Known P1 limitations (so you don't fight them)
 
@@ -388,8 +392,8 @@ and produced three plan-changing findings (F-8…F-10 → WP-217…WP-220).
   fires the judge as soon as a step returns SUCCESS with an empty diff, so
   a finished run no longer waits for the cadence boundary. But the trigger
   is *inference*: the executor must spend one empty-diff step (~155–245k
-  input tokens observed across dogfood-002…005; the dogfood-005 probe was
-  the first priced one — $0.33, 15.3% of that run's cost) rediscovering
+  input tokens observed across dogfood-002…006; the priced probes —
+  $0.33/15.3% in dogfood-005, $0.21/14.8% in dogfood-006) rediscovering
   "nothing to do" before the judge can seal. The explicit `claimsComplete`
   signal that judges the productive step directly is WP-221.
 - Executor tool sandboxes are real but different: claude-code is

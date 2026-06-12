@@ -16,6 +16,13 @@ const path = require("node:path");
 
 const dialect = process.env.FAKE_DIALECT || "claude";
 const mode = process.env.FAKE_MODE || "ok";
+const providerEnvVars = [
+  "ANTHROPIC_API_KEY",
+  "OPENAI_API_KEY",
+  "GEMINI_API_KEY",
+  "OPENAI_COMPAT_BASE_URL",
+  "OPENAI_COMPAT_API_KEY",
+];
 
 function prompt() {
   const args = process.argv.slice(2);
@@ -42,6 +49,12 @@ function emit(obj) {
   process.stdout.write(JSON.stringify(obj) + "\n");
 }
 
+function withEnvSummary(summary) {
+  if (process.env.FAKE_ECHO_ENV !== "1") return summary;
+  const present = providerEnvVars.filter((name) => process.env[name] !== undefined);
+  return `${summary}; provider_env=${present.length > 0 ? present.join(",") : "none"}`;
+}
+
 if (mode === "hang") {
   if (process.env.FAKE_TRAP_TERM === "1") {
     process.on("SIGTERM", () => {});
@@ -53,7 +66,7 @@ if (mode === "hang") {
   process.exit(2);
 } else if (dialect === "claude") {
   emit({ type: "system", subtype: "init", cwd: process.cwd() });
-  const summary = mode === "ok" ? doWork() : "did nothing";
+  const summary = withEnvSummary(mode === "ok" ? doWork() : "did nothing");
   emit({
     type: "assistant",
     message: { content: [{ type: "tool_use" }, { type: "text", text: summary }] },
@@ -88,7 +101,7 @@ if (mode === "hang") {
   // codex dialect
   emit({ type: "thread.started", thread_id: "fake-thread" });
   emit({ type: "turn.started" });
-  const summary = mode === "ok" ? doWork() : "did nothing";
+  const summary = withEnvSummary(mode === "ok" ? doWork() : "did nothing");
   emit({ type: "item.completed", item: { id: "item_0", type: "command_execution" } });
   emit({ type: "item.completed", item: { id: "item_1", type: "agent_message", text: summary } });
   if (mode === "error-result") {

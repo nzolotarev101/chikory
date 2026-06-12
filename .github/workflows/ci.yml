@@ -15,13 +15,23 @@ jobs:
   ci:
     runs-on: ubuntu-latest
     timeout-minutes: 30
+    permissions:
+      id-token: write
+      contents: read
     steps:
       - uses: actions/checkout@v4
 
+      - name: Install Nix
+        uses: DeterminateSystems/determinate-nix-action@v3
+
+      - name: Enable Magic Nix Cache
+        uses: DeterminateSystems/magic-nix-cache-action@v8
+
       - name: Install devbox
-        uses: jetify-com/devbox-install-action@v0.13.0
+        uses: jetify-com/devbox-install-action@v0.15.0
         with:
-          enable-cache: "true"
+          enable-cache: "false"
+          skip-nix-installation: "true"
 
       - name: Bootstrap (pnpm install + uv sync)
         run: devbox run bootstrap

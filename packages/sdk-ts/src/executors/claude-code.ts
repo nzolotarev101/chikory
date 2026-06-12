@@ -6,6 +6,7 @@
  */
 import type { ExecutorAdapter, StepInput, StepRecord, TokenUsage } from "../types.js";
 import type { ArtifactStore } from "../types.js";
+import { scrubExecutorEnv } from "./env.js";
 import { renderStepPrompt } from "./prompt.js";
 import { runCliStep, type ParsedCliResult } from "./step.js";
 
@@ -156,7 +157,7 @@ export function createClaudeCodeAdapter(opts: ClaudeCodeAdapterOptions): Executo
         input,
         bin,
         args,
-        env: opts.env ?? process.env,
+        env: scrubExecutorEnv(opts.env ?? process.env, ["ANTHROPIC_API_KEY"]),
         killGraceMs: opts.killGraceMs,
         parse: parseClaudeCodeOutput,
       });
