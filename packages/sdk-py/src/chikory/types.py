@@ -1,52 +1,303 @@
 from __future__ import annotations
 
-from typing import Literal
+from typing import Literal, Self
 
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
-LLMProvider = Literal["anthropic", "openai", "gemini"]
+LLMProvider = Literal["anthropic", "openai", "gemini", "openai-compat"]
+Stage = Literal["plan", "code", "review", "judge"]
+TerminalStatus = Literal["SUCCESS", "FAILED"]
+VerdictKind = Literal["PROCEED", "ROLLBACK", "HALT", "ESCALATE", "BRANCH"]
+ArtifactKind = Literal[
+    "repo_snapshot",
+    "diff",
+    "test_results",
+    "task_tree",
+    "browser_state",
+    "transcript",
+    "tool_output",
+    "context_snapshot",
+]
+JournalEntryKind = Literal[
+    "step",
+    "judge",
+    "checkpoint",
+    "verdict",
+    "injection",
+    "budget_event",
+    "compaction",
+    "pacing",
+    "terminal",
+]
+CheckpointId = str
+RunStatus = Literal[
+    "RUNNING",
+    "AWAITING_APPROVAL",
+    "SUSPENDED",
+    "SUCCESS",
+    "FAILED",
+    "CANCELLED",
+]
 
 
-class ProviderConfig(BaseModel):
-    api_key: str
-    default_model: str
-    base_url: str | None = None
+def _to_camel(name: str) -> str:
+    first, *rest = name.split("_")
+    return first + "".join(part.capitalize() for part in rest)
 
 
-class RouterConfig(BaseModel):
-    providers: dict[LLMProvider, ProviderConfig]
-    default_provider: LLMProvider
-    retries: int = 3
+class ContractModel(BaseModel):
+    model_config = ConfigDict(
+        alias_generator=_to_camel,
+        extra="forbid",
+        populate_by_name=True,
+    )
 
 
-class JudgeConfig(BaseModel):
+class ModelChoice(ContractModel):
     provider: LLMProvider
     model: str
-    evaluate_every_n_steps: int = 5
-    scoring_method: Literal["pointwise", "pairwise"] = "pointwise"
 
 
-class AgentRunConfig(BaseModel):
-    router: RouterConfig
-    judge: JudgeConfig
+class RoutingPolicy(ContractModel):
+    stages: dict[Stage, ModelChoice]
+    failover: dict[Stage, list[ModelChoice]] | None = None
+
+    @model_validator(mode="after")
+    def require_all_stages(self) -> Self:
+        required_stages = {"plan", "code", "review", "judge"}
+        if set(self.stages) != required_stages:
+            raise ValueError("stages must define plan, code, review, and judge")
+        return self
+
+
+class Message(ContractModel):
+    role: Literal["user", "assistant", "system"]
+    content: str
+
+
+class CompletionRequest(ContractModel):
+    stage: Stage
+    messages: list[Message]
+    max_tokens: int | None = None
+    temperature: float | None = None
+    response_schema: dict[str, object] | None = None
+
+
+class TokenUsage(ContractModel):
+    input: int
+    output: int
+
+
+class LLMCallResult(ContractModel):
+    status: Literal["SUCCESS"]
+    content: str
+    provider: LLMProvider
+    model: str
+    tokens: TokenUsage
+    cost_usd: float
+
+
+class RouterError(ContractModel):
+    status: Literal["FAILED"]
+    reason: str
+    retriable: bool
+    attempts: int
+    provider: LLMProvider | None = None
+
+
+class RepoSpec(ContractModel):
+    url: str
+    ref: str | None = None
+    writable: bool
+
+
+class AcceptanceCriterion(ContractModel):
+    id: str
+    description: str
+    check: str | None = None
+
+
+class JudgePolicy(ContractModel):
+    family: LLMProvider
+    model: str | None = None
+    cadence: int = Field(ge=1)
+    allow_same_family: bool | None = None
+    scoring_method: Literal["pointwise", "pairwise"] | None = None
+    max_cost_share: float | None = None
+    rubric_packs: list[str] | None = None
+
+
+class PacingPolicy(ContractModel):
+    mode: Literal["auto", "fixed"]
+
+
+class NotificationPolicy(ContractModel):
+    on: list[Literal["escalate", "milestone", "terminal"]]
+    slack_webhook_env: str | None = None
+
+
+class ExecutorConfig(ContractModel):
+    adapter: str
+    family: LLMProvider
+
+
+class TaskSpec(ContractModel):
+    name: str
+    goal: str
+    repos: list[RepoSpec] = Field(min_length=1)
+    acceptance_criteria: list[AcceptanceCriterion] = Field(min_length=1)
+    budget_usd: float = Field(gt=0)
     max_steps: int | None = None
-    budget_usd: float | None = None
-    checkpoint_dir: str | None = None
+    executor: ExecutorConfig
+    judge: JudgePolicy
+    routing: RoutingPolicy
+    pacing: PacingPolicy | None = None
+    notifications: NotificationPolicy | None = None
+
+    @model_validator(mode="after")
+    def validate_task(self) -> Self:
+        if not any(repo.writable for repo in self.repos):
+            raise ValueError("at least one repository must be writable")
+        criterion_ids = [criterion.id for criterion in self.acceptance_criteria]
+        if len(criterion_ids) != len(set(criterion_ids)):
+            raise ValueError("acceptance criterion ids must be unique")
+        if self.judge.family == self.executor.family and not self.judge.allow_same_family:
+            raise ValueError("judge family must differ from executor family")
+        return self
 
 
-class ToolResult(BaseModel):
-    tool_name: str
-    output: object
-    status: Literal["SUCCESS", "FAILED"]
-    error_message: str | None = None
+class StepLimits(ContractModel):
+    max_seconds: int
+    max_turns: int | None = None
+    max_cost_usd: float | None = None
 
 
-class StepTrace(BaseModel):
-    step_index: int
-    timestamp: str
-    type: Literal["llm_call", "tool_call", "judge_eval", "checkpoint"]
-    input_tokens: int | None = None
-    output_tokens: int | None = None
-    cost: float | None = None
-    judge_score: float | None = None
-    judge_verdict: Literal["continue", "halt", "rollback", "escalate"] | None = None
+class ArtifactRef(ContractModel):
+    id: str
+    kind: ArtifactKind
+    bytes: int
+    summary: str = Field(max_length=200)
+
+
+class ContextBundle(ContractModel):
+    goal: str
+    acceptance_criteria: list[AcceptanceCriterion]
+    plan_item: str
+    notes: dict[str, str]
+    recent_steps: list[str]
+    judge_feedback: str | None = None
+    injections: list[str]
+    memory_refs: list[ArtifactRef]
+
+
+class StepInput(ContractModel):
+    workspace_dir: str
+    instruction: str
+    context: ContextBundle
+    limits: StepLimits
+
+
+class StepFailure(ContractModel):
+    reason: str
+    retriable: bool
+
+
+class StepRecord(ContractModel):
+    status: TerminalStatus
+    diff_ref: ArtifactRef
+    summary: str
+    tool_calls: int
+    tokens: TokenUsage
+    cost_usd: float
+    cost_estimated: bool
+    duration_ms: int
+    transcript_ref: ArtifactRef
+    failure: StepFailure | None = None
+
+
+class TestResultArtifact(ContractModel):
+    ref: ArtifactRef
+    command: str
+    exit_code: int
+    passed: int
+    failed: int
+    duration_ms: int
+
+
+class JudgeEvidence(ContractModel):
+    diff_refs: list[ArtifactRef]
+    test_results: TestResultArtifact | None = None
+    criteria: list[AcceptanceCriterion]
+    criteria_history: dict[str, list[bool]]
+    step_summaries: list[str]
+    artifacts: list[ArtifactRef]
+
+
+class JudgeFormResult(ContractModel):
+    id: str
+    pass_: bool = Field(alias="pass")
+    justification: str
+
+
+class JudgeForm(ContractModel):
+    criterion_results: list[JudgeFormResult]
+    rubric_results: list[JudgeFormResult]
+    concerns: list[str]
+
+
+class JudgeVerdict(ContractModel):
+    kind: VerdictKind
+    form: JudgeForm
+    rationale: str
+    rollback_to: CheckpointId | None = None
+    escalate_reason: str | None = None
+    cost_usd: float
+    tokens: TokenUsage
+    judge_model: ModelChoice
+
+    @model_validator(mode="after")
+    def require_conditional_fields(self) -> Self:
+        if self.kind == "ROLLBACK" and self.rollback_to is None:
+            raise ValueError("rollbackTo is required for ROLLBACK verdicts")
+        if self.kind == "ESCALATE" and self.escalate_reason is None:
+            raise ValueError("escalateReason is required for ESCALATE verdicts")
+        return self
+
+
+class JournalEntry(ContractModel):
+    idx: int
+    ts: str
+    kind: JournalEntryKind
+    payload: object
+    cost_delta_usd: float
+    tokens: TokenUsage | None = None
+    artifact_refs: list[ArtifactRef]
+
+
+class Checkpoint(ContractModel):
+    id: CheckpointId
+    journal_idx: int
+    git_commits: dict[str, str]
+    context_snapshot_ref: ArtifactRef
+    budget_spent_usd: float
+    last_good: bool
+
+
+class LastVerdict(ContractModel):
+    kind: VerdictKind
+    at_step: int
+
+
+class RunFailure(ContractModel):
+    reason: str
+    last_checkpoint: CheckpointId
+
+
+class RunStatusReport(ContractModel):
+    status: RunStatus
+    current_step: int
+    spent_usd: float
+    budget_usd: float
+    last_verdict: LastVerdict | None = None
+    checkpoints: list[Checkpoint]
+    failure: RunFailure | None = None
