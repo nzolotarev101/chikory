@@ -6,6 +6,11 @@
 # no TaskSpec/schemas/journal changes. The `--pr` half (gh) is deferred —
 # this slice must work offline. Full how-to: docs/DOGFOODING.md.
 #
+# OUTCOME: SUCCESS — run-34926e85-ac66-4a71-b2c5-e9bb1607c63e, 2 steps,
+# $2.14/$5.00 (first fully priced campaign), PROCEED 3/3. Diff verified +
+# applied on wp-220-chikory-land. Report: docs/reports/dogfood-005.md
+# (F-17/F-18 → WP-224).
+#
 # Zero-secrets launch (locally-authenticated CLIs; see DOGFOODING.md §2.2/§3.8):
 #   node scripts/cli-judge-proxy.mjs 8787 gemini &
 #   OPENAI_COMPAT_BASE_URL=http://127.0.0.1:8787 pnpm chikory run examples/dogfood/dogfood-005.yaml --watch

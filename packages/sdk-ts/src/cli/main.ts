@@ -17,6 +17,7 @@ import {
   type CliDeps,
   type CommonFlags,
 } from "./commands.js";
+import { cmdLand } from "./land.js";
 
 export const HELP = `chikory — vendor-neutral control plane for long-running, self-correcting agents
 
@@ -34,6 +35,7 @@ commands:
                       checkpoint is written)
   trace <run-id>      trajectory forensics from the journal: per-step
                       tokens/cost, judge verdicts + rationales, totals
+  land <run-id>       apply a finished run's workspace diff as one commit
 
 options (every command):
   --json                machine-readable output
@@ -53,6 +55,10 @@ approve options:
 
 trace options:
   --step <n>            per-step drill-down: diff/transcript refs, judge form
+
+land options:
+  --branch <name>       target branch (default: land-<run-id>)
+  --repo <dir>          target repository (default: current directory)
 
 exit codes:
   0  command succeeded; run/resume: run sealed SUCCESS
@@ -133,6 +139,12 @@ export async function main(argv: string[], deps: CliDeps = {}): Promise<number> 
       case "trace":
         parsed = parseCommand(rest, { step: { type: "string" } });
         break;
+      case "land":
+        parsed = parseCommand(rest, {
+          branch: { type: "string" },
+          repo: { type: "string" },
+        });
+        break;
       case "status":
       case "cancel":
         parsed = parseCommand(rest, {});
@@ -196,6 +208,13 @@ export async function main(argv: string[], deps: CliDeps = {}): Promise<number> 
         }
       }
       return cmdTrace({ runId, step, ...flags }, deps);
+    }
+    case "land": {
+      const runId = requireArg(positionals, "run-id", io);
+      if (runId === undefined) return 1;
+      const branch = typeof values["branch"] === "string" ? values["branch"] : undefined;
+      const repo = typeof values["repo"] === "string" ? values["repo"] : undefined;
+      return cmdLand({ runId, branch, repo, ...flags }, { ...deps, out: io.out, err: io.err });
     }
     /* v8 ignore next 2 — unreachable: unknown commands return above */
     default:

@@ -16,6 +16,10 @@ fired in the run that delivered it. Dogfood-004
 fourth first-attempt SUCCESS, the first spec designed to *falsify* the old
 behavior (cadence > max_steps, so only the WP-217 milestone trigger could
 seal), and the delivered warning now flags that very run's trace.
+Dogfood-005 (`docs/reports/dogfood-005.md`) delivered WP-220
+(`chikory land`) — fifth first-attempt SUCCESS, the first fully *priced*
+campaign ($2.14/$5.00 metered by the WP-218 table), and the deliverable
+was verified by landing its own run into a clean clone.
 
 Related docs: [`docs/spec/task-spec.md`](spec/task-spec.md) (schema
 reference) · [`docs/TASK-PROTOCOL.md`](TASK-PROTOCOL.md) (WP etiquette, §7 is
@@ -178,8 +182,10 @@ How checks behave — this is the heart of the gate (JD-4):
   1.5× the rolling mean of the last 5 step costs; a breach **suspends** the
   run on its last checkpoint (zero compute) until
   `chikory resume <run-id> --add-budget <usd>`. Subscription-auth runs
-  report $0.00 on the wire, so the gate is inert there; with API keys, $5–20
-  fits a 1–3-step WP slice (dogfood: $1.86 total across four runs).
+  report $0.00 on the wire, so the gate is inert there; estimated-cost runs
+  meter against the pricing table since WP-218. $5–20 fits a 1–3-step WP
+  slice — dogfood-005, the first fully priced campaign, metered $2.14 for
+  a 2-step, 3-file CLI feature.
 - `max_steps` — absolute step ceiling; reaching it seals FAILED. For a
   scoped slice, 6–10 is plenty; the default 100 just delays the inevitable
   on a drifting run.
@@ -305,13 +311,21 @@ ws=.chikory/runs/<run-id>/workspace        # a full clone of your repo
 git -C $ws log --oneline main..HEAD        # 'chikory: step <n>' checkpoint commits
 ```
 
-Land it per TASK-PROTOCOL (one WP = one branch = one PR):
+Land it per TASK-PROTOCOL (one WP = one branch = one PR). Since WP-220
+(dogfood-005) this is one command:
 
 ```sh
-git checkout -b wp-201-python-parity
-git -C $ws diff chikory-base..HEAD | git apply   # squash the run's net diff onto your branch
-devbox run lint && devbox run typecheck && devbox run test
-git add -A && git commit  # conventional message; PR description cites the run-id + verification commands
+pnpm chikory land <run-id> [--branch wp-201-python-parity] [--repo <dir>]
+# → branch + ONE squashed `feat: land <run-id>` commit (body cites run-id,
+#   workspace, verification commands), prints branch/sha/forensics line.
+# Requires a clean target tree; fails actionably on missing workspace or empty diff.
+```
+
+`land` covers harvest.sh's apply-and-commit half only — **it does not
+rebuild or verify** (dogfood-005 F-17, fix WP-224). After landing, always:
+
+```sh
+devbox run build && devbox run lint && devbox run typecheck && devbox run test
 ```
 
 Also per TASK-PROTOCOL §7: keep the journal as an artifact (don't delete
@@ -323,8 +337,9 @@ reprioritization at phase boundaries.
 run-id must contain the run's diff and nothing else — `git show <landed>`
 should equal the run's diff artifact. Hand-written tooling, docs, or specs
 go in separate commits. `ef4b16f` broke this (harvest script + devbox task
-rode along with WP-217's delivery); WP-220 (`chikory land`) will make the
-pure commit mechanical.
+rode along with WP-217's delivery) and `2a4dd21` repeated it (WP-218's
+diff + the dogfood-004 review docs in one commit); `chikory land`
+(dogfood-005) makes the pure commit mechanical — use it.
 
 ### 6.1 Post-run review — mandatory, and scripted
 
@@ -348,6 +363,7 @@ and produced three plan-changing findings (F-8…F-10 → WP-217…WP-220).
 | Judge checks time out | 120 s/check cap. Bare `pnpm` not `devbox run` (§3.4); split slow suites into a focused test file per criterion. |
 | Judge verdict is ESCALATE with `judge raised concerns` | The rubric/concerns fired (e.g. scope creep, deleted tests). `trace --step <n>` shows the full form; approve or reject deliberately. |
 | CLI behaves like yesterday’s code (e.g. a just-harvested trace feature missing from `chikory trace`) | Stale `dist/`. `devbox run build`. `harvest.sh` now rebuilds before verification (dogfood-004 F-16); the dogfood script builds *pre-run*, so post-harvest forensics always need the rebuild. |
+| `chikory land` succeeded but the landed feature is invisible / verification not run | By design (dogfood-005 F-17, fix WP-224): `land` only applies + commits — it never rebuilds or verifies. Run `devbox run build && devbox run lint && devbox run typecheck && devbox run test` on the fresh branch. Stray `Switched to a new branch …` lines in its output are git stderr passing through (F-18, cosmetic). |
 | `pnpm chikory: command not found` | Bin link lost: `rm node_modules/.pnpm-workspace-state-v1.json && devbox run -- pnpm install`. |
 | Proxy run dies with router FAILED on judge pass | Shim not running / wrong port — restart `cli-judge-proxy.mjs` and check `OPENAI_COMPAT_BASE_URL`. |
 | `[cli-judge:…] FAILED … 404 "Requested entity was not found"` *during executor steps* | Not the judge: the executor inherited `OPENAI_COMPAT_BASE_URL` and its in-workspace test run un-skipped `providers.integration.test.ts`, which pings the live shim with a model the backend doesn't have (dogfood-004 F-14). Harmless to the run but burns judge-backend quota; fix is WP-222 (executor env allowlist). |
@@ -371,8 +387,9 @@ and produced three plan-changing findings (F-8…F-10 → WP-217…WP-220).
 - **Completion still costs one probe step** — WP-217 (landed `ef4b16f`)
   fires the judge as soon as a step returns SUCCESS with an empty diff, so
   a finished run no longer waits for the cadence boundary. But the trigger
-  is *inference*: the executor must spend one empty-diff step (~155–211k
-  input tokens observed, dogfood-002 F-8 / dogfood-003 F-11) rediscovering
+  is *inference*: the executor must spend one empty-diff step (~155–245k
+  input tokens observed across dogfood-002…005; the dogfood-005 probe was
+  the first priced one — $0.33, 15.3% of that run's cost) rediscovering
   "nothing to do" before the judge can seal. The explicit `claimsComplete`
   signal that judges the productive step directly is WP-221.
 - Executor tool sandboxes are real but different: claude-code is

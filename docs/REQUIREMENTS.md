@@ -61,7 +61,7 @@ Every requirement in [`project.md`](../project.md), assigned a stable ID, mapped
 | ID | Requirement | WP(s) | Phase | Status |
 |---|---|---|---|---|
 | CG-1 | Terminal states / deterministic exits break retry loops | WP-103, WP-124 (invariant #4) | P1 | done |
-| CG-2 | Spend controls; transparent, predictable, checkpoint-aware budget governance | WP-124, WP-105; WP-218 (token-denominated budgets — USD gate inert on $0-metered runs, dogfood-002 F-9); WP-223 (watch can drop the SUSPENDED-at-cap transition, dogfood-004 F-15); dashboards in WP-407 | P1→P4 | in-progress (P1 USD gate done; WP-218 pricing/blind-meter-warning slice landed via dogfood-004 `run-9edbcd28`, commit pending; `budget_tokens` slice rides next contracts PR; dashboards P4) |
+| CG-2 | Spend controls; transparent, predictable, checkpoint-aware budget governance | WP-124, WP-105; WP-218 (token-denominated budgets — USD gate inert on $0-metered runs, dogfood-002 F-9); WP-223 (watch can drop the SUSPENDED-at-cap transition, dogfood-004 F-15); dashboards in WP-407 | P1→P4 | in-progress (P1 USD gate done; WP-218 pricing/blind-meter-warning slice landed `2a4dd21` via dogfood-004 `run-9edbcd28`, meter proven live on dogfood-005 `run-34926e85` — $2.14/$5.00 metered, judge share 1.9%; `budget_tokens` slice rides next contracts PR; dashboards P4) |
 
 ## AR — Artifact-centric state (spec §5.6)
 
@@ -84,7 +84,7 @@ Every requirement in [`project.md`](../project.md), assigned a stable ID, mapped
 
 | ID | Requirement | WP(s) | Phase | Status |
 |---|---|---|---|---|
-| FA-1 | Entire production-ready apps: brownfield, multi-repo, migrations, long-horizon | ADR-003 (capability via wrapped agents); WP-219 (goal decomposition & run chaining — the long-horizon gap, dogfood-002 F-10); WP-214 (multi-repo); P3 brownfield benchmark proves it | P1→P3 | planned |
+| FA-1 | Entire production-ready apps: brownfield, multi-repo, migrations, long-horizon | ADR-003 (capability via wrapped agents); WP-219 (goal decomposition & run chaining — the long-horizon gap, dogfood-002 F-10); WP-220 (`chikory land` — the per-slice landing primitive chaining calls between runs, delivered via dogfood-005 `run-34926e85`); WP-214 (multi-repo); P3 brownfield benchmark proves it | P1→P3 | in-progress (landing primitive done; decomposition ADR-005 next) |
 | FA-2 | Reliable, redundant execution; fluent restart on failure | WP-123 | P1 | done |
 | FA-3 | Token awareness + intelligent pacing during planning AND execution (batch size, test count, checkpoint cadence, breaks) | WP-207; inputs from WP-105 accounting | P2 | planned |
 
@@ -103,7 +103,7 @@ Every requirement in [`project.md`](../project.md), assigned a stable ID, mapped
 | IF-1 | Thin TypeScript SDK | P1 lanes M1–M5 | P1 | planned |
 | IF-2 | Thin Python SDK | WP-201 | P2 | in-progress (slice 1 — contracts + shared conformance suite — landed `eb5c57e` via dogfood-002) |
 | IF-3 | Durable workflows on existing engine (Temporal) — partner, don't rebuild | ADR-001, WP-004, WP-121 | P0–P1 | done |
-| IF-4 | CLI surface | WP-141, WP-142; WP-223 (watch transition fidelity, dogfood-004 F-15) | P1→P2 | reopened (`run --watch` can miss a SUSPENDED→RUNNING transition between polls — dogfood-004 F-15; fix is WP-223) |
+| IF-4 | CLI surface | WP-141, WP-142; WP-220 (`chikory land`, delivered via dogfood-005 `run-34926e85`, commit pending review); WP-223 (watch transition fidelity, dogfood-004 F-15); WP-224 (`land --verify` + git-stderr seam, dogfood-005 F-17/F-18) | P1→P2 | reopened (`run --watch` can miss a SUSPENDED→RUNNING transition between polls — dogfood-004 F-15, fix WP-223; `land` commits unverified and leaves `dist/` stale — dogfood-005 F-17, fix WP-224) |
 | IF-5 | Cloud control plane: hosted judges, checkpointers, trace browser | WP-401–408 (full design: components/control-plane.md) | P4 | planned |
 
 ## ST — Strategy, moat, business (spec §6, §9, §10)

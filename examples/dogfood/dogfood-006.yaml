@@ -1,0 +1,92 @@
+# Dogfood-006: WP-222 slice 1 — executor subprocess env scrub (plan.md §6,
+# queued from dogfood-004 F-14; recurred in dogfood-005 — both runs' codex
+# steps un-skipped providers.integration.test.ts via the inherited
+# OPENAI_COMPAT_BASE_URL and pinged the live judge shim).
+# No-contracts slice: pure adapter-local scrub — the explicit TaskSpec
+# pass-through opt-in is a contracts change and rides WP-221's PR.
+# Self-falsifying by nature: the very leak this fixes will be visible in
+# THIS run's executor steps (shim 404/500 noise) and must be absent from
+# the next campaign's.
+#
+# Zero-secrets launch (locally-authenticated CLIs; see DOGFOODING.md §2.2/§3.8):
+#   node scripts/cli-judge-proxy.mjs 8787 gemini &
+#   OPENAI_COMPAT_BASE_URL=http://127.0.0.1:8787 pnpm chikory run examples/dogfood/dogfood-006.yaml --watch
+#
+# ⚠ Commit everything before launching — the run workspace clones HEAD.
+name: dogfood-006-wp-222-executor-env-scrub
+goal: >
+  Implement WP-222 slice 1 (plan.md §6): executor adapters must spawn
+  their CLIs with provider/judge env vars scrubbed, so judge-shim and
+  provider configuration never leaks into the executor's child process
+  (dogfood-004 F-14). Three files changed plus one new source file and one
+  new test file; no other changes — in particular DO NOT touch
+  packages/sdk-ts/src/types.ts, schemas.ts, src/runner/, src/providers/,
+  or src/executors/process.ts and step.ts.
+  (1) New file packages/sdk-ts/src/executors/env.ts: export a const
+  PROVIDER_ENV_VARS: readonly string[] = ["ANTHROPIC_API_KEY",
+  "OPENAI_API_KEY", "GEMINI_API_KEY", "OPENAI_COMPAT_BASE_URL",
+  "OPENAI_COMPAT_API_KEY"] (the names validated in src/taskspec.ts and
+  read in src/providers/), and a pure function
+  scrubExecutorEnv(base: Record<string, string | undefined>,
+  keep: readonly string[]): Record<string, string | undefined> that
+  returns a NEW object equal to base minus every PROVIDER_ENV_VARS entry
+  not listed in keep. It must never mutate base and must preserve all
+  non-provider vars untouched (PATH, HOME, FAKE_*, etc.).
+  (2) Wire it into both adapters at their existing
+  `env: opts.env ?? process.env` sites: packages/sdk-ts/src/executors/
+  codex.ts keeps only its own family key (keep: ["OPENAI_API_KEY"]);
+  packages/sdk-ts/src/executors/claude-code.ts keeps only
+  ["ANTHROPIC_API_KEY"]. No behavior change otherwise; opts.env stays the
+  test seam it is today.
+  (3) Extend packages/sdk-ts/test/executors/fake-bins/fake-cli.cjs
+  minimally: when FAKE_ECHO_ENV=1 is set, the emitted agent_message text
+  additionally lists, comma-separated, which of the five
+  PROVIDER_ENV_VARS names are present in the child's env (empty marker
+  "none" when none are). All existing fake modes must behave exactly as
+  before when FAKE_ECHO_ENV is unset.
+  (4) New test file packages/sdk-ts/test/executors/env.test.ts: unit
+  tests for scrubExecutorEnv (drops the other four when keeping one,
+  keeps the kept one, returns a new object without mutating the input,
+  preserves unrelated vars), plus one spawn-level test per adapter using
+  the FAKE_ECHO_ENV fake bin (follow codex.test.ts's FAKE_BIN +
+  makeWorkspace/makeStepInput conventions from test/executors/
+  conformance.js): pass an env containing all five provider vars plus
+  FAKE_DIALECT/FAKE_MODE/FAKE_ECHO_ENV, run one step through
+  createCodexAdapter and createClaudeCodeAdapter, and assert the
+  agent_message-derived summary shows ONLY the adapter's own key
+  survived. Keep every existing test passing unchanged. Follow AGENTS.md
+  conventions: strict TypeScript, ESM imports with .js extensions, named
+  exports only, JSDoc on exported symbols, no new dependencies.
+repos:
+  - url: /Users/nikitazolotarev/repos/chikory
+    writable: true
+acceptance_criteria:
+  # Judge-executed in the run workspace (fresh clone), bare pnpm, 120 s cap
+  # per check.
+  - id: AC-1
+    description: new env-scrub suite passes — unit + per-adapter spawn-level leak assertions
+    check: pnpm install --prefer-offline --silent && pnpm --filter @chikory/sdk exec vitest run test/executors/env.test.ts
+  - id: AC-2
+    description: both adapter suites still pass (conformance over fake bins untouched in behavior)
+    check: pnpm --filter @chikory/sdk exec vitest run test/executors/codex.test.ts test/executors/claude-code.test.ts
+  - id: AC-3
+    description: strict typecheck and lint are clean
+    check: pnpm --filter @chikory/sdk typecheck && pnpm --filter @chikory/sdk lint
+budget_usd: 5
+max_steps: 4
+executor:
+  adapter: codex
+  family: openai
+judge:
+  # openai-compat = the keyless shim seam; real family = the shim backend
+  # (gemini) — structurally different from the openai executor.
+  family: openai-compat
+  cadence: 2
+  max_cost_share: 0.5
+routing:
+  stages:
+    # plan/review unused by CLI executors in P1; code.model feeds `codex -m`.
+    plan: { provider: openai-compat, model: gpt-5.5 }
+    code: { provider: openai-compat, model: gpt-5.5 }
+    review: { provider: openai-compat, model: gpt-5.5 }
+    judge: { provider: openai-compat, model: gemini-3.1-pro-preview }
