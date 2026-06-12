@@ -302,6 +302,17 @@ Also per TASK-PROTOCOL §7: keep the journal as an artifact (don't delete
 and write observed friction into `docs/reports/` — dogfood reports drive
 reprioritization at phase boundaries.
 
+### 6.1 Post-run review — mandatory, and scripted
+
+Every terminal run gets the full review: independent re-verification of the
+delivery, anomaly hunt, numbered report (`docs/reports/dogfood-<NNN>.md`,
+friction ids global across reports), plan/REQUIREMENTS/DOGFOODING updates,
+and the next spec readied. The whole procedure is encoded as a Claude Code
+skill — run `/dogfood-review <run-id>` from the repo root
+([`.claude/skills/dogfood-review/SKILL.md`](../.claude/skills/dogfood-review/SKILL.md)).
+A SUCCESS run still gets reviewed: dogfood-002 was a first-attempt SUCCESS
+and produced three plan-changing findings (F-8…F-10 → WP-217…WP-220).
+
 ## 7. Troubleshooting
 
 | Symptom | Cause → fix |

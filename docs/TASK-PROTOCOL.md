@@ -52,4 +52,4 @@ If you stop before done (context limit, session end, blocked):
 
 ## 7. Dogfood etiquette (P2+)
 
-When a WP is run *through Chikory itself* (full guide: [`DOGFOODING.md`](DOGFOODING.md)): task.yaml lives in `examples/dogfood/dogfood-<NNN>.yaml`, numbered to match its mandatory report `docs/reports/dogfood-<NNN>.md` (naming rules + index: `examples/dogfood/README.md`); the run journal is kept as an artifact; friction observed goes into `docs/reports/` — dogfood reports are first-class plan inputs (they drive reprioritization at phase boundaries).
+When a WP is run *through Chikory itself* (full guide: [`DOGFOODING.md`](DOGFOODING.md)): task.yaml lives in `examples/dogfood/dogfood-<NNN>.yaml`, numbered to match its mandatory report `docs/reports/dogfood-<NNN>.md` (naming rules + index: `examples/dogfood/README.md`); every terminal run gets the standardized post-run review — `/dogfood-review <run-id>` (`.claude/skills/dogfood-review/SKILL.md`, procedure in DOGFOODING.md §6.1); the run journal is kept as an artifact; friction observed goes into `docs/reports/` — dogfood reports are first-class plan inputs (they drive reprioritization at phase boundaries).

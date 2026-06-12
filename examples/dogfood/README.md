@@ -17,6 +17,9 @@ plan.md work-package slice through Chikory itself. Full operating manual:
 - Specs are kept after the run (they're the reproducible half of the
   report); never rewrite the `goal`/criteria of a spec that already ran —
   a new attempt or next slice is a new `dogfood-<NNN+1>.yaml`.
+- After every terminal run: `/dogfood-review <run-id>` — the standardized
+  review that verifies the delivery, writes the report, updates the plan,
+  and readies the next spec (DOGFOODING.md §6.1).
 
 ## Index
 
