@@ -1,0 +1,93 @@
+# Dogfood-004: WP-218 slice 1 — pricing-table refresh + blind-cost-meter
+# warning (plan.md §6, queued from dogfood-002 F-9, recurred dogfood-003:
+# $0.00 reported for 1.39M tokens because gpt-5.5 and gemini-3.1-pro-preview
+# are missing from pricing.ts and unknown models estimate to $0).
+# No-contracts slice: pricing.ts + cli/trace.ts + tests only; the
+# budget_tokens cap (TaskSpec/schemas change) stays hand-done per
+# TASK-PROTOCOL §4. Full how-to: docs/DOGFOODING.md.
+#
+# ⚠ BEFORE LAUNCH: verify the four price figures in the goal against
+# current vendor list prices — they are written into the table verbatim
+# (predecessor-tier values used where the vendor page wasn't rechecked).
+#
+# Per dogfood-003 F-12 (falsifying spec design): cadence 5 > max_steps 4,
+# so the ONLY sealing path is the WP-217 completion-milestone trigger —
+# this run doubles as the live isolation proof dogfood-003 couldn't give.
+# Risk accepted: if the executor never produces an empty-diff step, the run
+# FAILs on maxSteps with zero judge passes (prior runs all converged to an
+# empty diff by step 2).
+#
+# Zero-secrets launch (locally-authenticated CLIs; see DOGFOODING.md §2.2/§3.8):
+#   node scripts/cli-judge-proxy.mjs 8787 gemini &
+#   OPENAI_COMPAT_BASE_URL=http://127.0.0.1:8787 pnpm chikory run examples/dogfood/dogfood-004.yaml --watch
+name: dogfood-004-wp-218-pricing-and-blind-meter-warning
+goal: >
+  Implement WP-218 slice 1 (plan.md §6): make the cost meter honest about
+  what it cannot price. Two files plus their tests; no other changes — in
+  particular DO NOT touch packages/sdk-ts/src/types.ts or schemas.ts (the
+  token-budget cap is a separate, architect-reviewed slice).
+  (1) In packages/sdk-ts/src/pricing.ts: add PRICE_TABLE entries
+  "gpt-5.5" { inputPerMTok: 1.25, outputPerMTok: 10 },
+  "gpt-5.5-mini" { inputPerMTok: 0.25, outputPerMTok: 2 },
+  "gemini-3.1-pro-preview" { inputPerMTok: 1.25, outputPerMTok: 10 },
+  "gemini-3.1-flash" { inputPerMTok: 0.3, outputPerMTok: 2.5 },
+  keeping the existing Anthropic/OpenAI/Gemini grouping comments, and bump
+  PRICING_VERSION to "2026-06-12". Extend
+  packages/sdk-ts/test/pricing.test.ts following its existing patterns:
+  computeCostUsd returns a nonzero cost for "gpt-5.5" and
+  "gemini-3.1-pro-preview" with nonzero TokenUsage, the longest-prefix
+  fallback resolves a dated id like "gpt-5.5-2026-01-15" to the "gpt-5.5"
+  row, and PRICING_VERSION equals "2026-06-12".
+  (2) In packages/sdk-ts/src/cli/trace.ts: when a step record has
+  costEstimated === true, costUsd === 0, and tokens.input + tokens.output
+  > 0, the per-step detail view (the line that currently renders
+  "$0.0000 (estimated)") must instead flag it as
+  "$0.0000 (estimated — UNPRICED: <n> tokens metered)" with the step's
+  total token count, and the run-header summary line must append
+  " · ⚠ cost meter blind (unpriced tokens)" when ANY step in the run
+  matches that condition. Pure rendering change — read only fields already
+  on the journal payloads; no journal/schema changes. Add tests in
+  packages/sdk-ts/test/cli/trace.test.ts following that file's existing
+  fixtures and assertion style: one asserting the UNPRICED flag and header
+  warning appear for a $0-estimated step with nonzero tokens, one asserting
+  neither appears when the step has a nonzero cost or costEstimated is
+  false. Keep the existing pricing and trace tests passing unchanged.
+  Follow AGENTS.md conventions: strict TypeScript, ESM imports with .js
+  extensions, named exports only, JSDoc on exported symbols, no new
+  dependencies.
+repos:
+  - url: /Users/nikitazolotarev/repos/chikory
+    writable: true
+acceptance_criteria:
+  # Judge-executed in the run workspace (fresh clone), bare pnpm, 120 s cap
+  # per check. Timed on 2026-06-12: pricing 2.6 s, trace 1.6 s — install
+  # dominates AC-1.
+  - id: AC-1
+    description: pricing suite passes, including new-model entries, prefix fallback for dated ids, and the version bump
+    check: pnpm install --prefer-offline --silent && pnpm --filter @chikory/sdk exec vitest run test/pricing.test.ts
+  - id: AC-2
+    description: trace CLI suite passes, including the UNPRICED flag + blind-meter header warning tests
+    check: pnpm --filter @chikory/sdk exec vitest run test/cli/trace.test.ts
+  - id: AC-3
+    description: strict typecheck and lint are clean
+    check: pnpm --filter @chikory/sdk typecheck && pnpm --filter @chikory/sdk lint
+budget_usd: 5
+max_steps: 4
+executor:
+  adapter: codex
+  family: openai
+judge:
+  # openai-compat = the keyless shim seam; real family = the shim backend
+  # (gemini) — structurally different from the openai executor.
+  family: openai-compat
+  # cadence > max_steps on purpose (F-12): the WP-217 completion-milestone
+  # trigger is the only path to a verdict, isolating it live.
+  cadence: 5
+  max_cost_share: 0.5
+routing:
+  stages:
+    # plan/review unused by CLI executors in P1; code.model feeds `codex -m`.
+    plan: { provider: openai-compat, model: gpt-5.5 }
+    code: { provider: openai-compat, model: gpt-5.5 }
+    review: { provider: openai-compat, model: gpt-5.5 }
+    judge: { provider: openai-compat, model: gemini-3.1-pro-preview }

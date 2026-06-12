@@ -47,11 +47,20 @@ export interface ScriptedConfig {
   delayMs: number;
   /** 1-based attempt numbers that FAIL. */
   failSteps: number[];
+  /** 1-based attempt numbers that report a zero-byte diff. */
+  emptyDiffSteps: number[];
+  /** Include received judge feedback in the step summary for assertions. */
+  echoJudgeFeedback?: boolean;
   /** Every attempt FAILs (loop-breaker tests, WP-124). */
   failAll?: boolean;
 }
 
-const SCRIPTED_DEFAULTS: ScriptedConfig = { costPerStep: 0.01, delayMs: 0, failSteps: [] };
+const SCRIPTED_DEFAULTS: ScriptedConfig = {
+  costPerStep: 0.01,
+  delayMs: 0,
+  failSteps: [],
+  emptyDiffSteps: [],
+};
 
 /** git init + first commit, including the scripted adapter's config. */
 export async function initSourceRepo(
@@ -96,12 +105,13 @@ export function createScriptedAdapter(ctx: { store: ArtifactStore }): ExecutorAd
       if (cfg.delayMs > 0) await new Promise((r) => setTimeout(r, cfg.delayMs));
 
       const fail = cfg.failAll === true || cfg.failSteps.includes(attempt);
+      const emptyDiff = cfg.emptyDiffSteps.includes(attempt);
       if (!fail) {
         await writeFile(join(input.workspaceDir, `step-${attempt}.txt`), input.instruction);
       }
 
       const [diffRef, transcriptRef] = await Promise.all([
-        ctx.store.put(`scripted diff, attempt ${attempt}`, {
+        ctx.store.put(emptyDiff ? "" : `scripted diff, attempt ${attempt}`, {
           kind: "diff",
           summary: `scripted attempt ${attempt} diff`,
         }),
@@ -114,7 +124,12 @@ export function createScriptedAdapter(ctx: { store: ArtifactStore }): ExecutorAd
       const base = {
         diffRef,
         transcriptRef,
-        summary: fail ? `scripted attempt ${attempt}: failed` : `scripted attempt ${attempt}: ok`,
+        summary: [
+          fail ? `scripted attempt ${attempt}: failed` : `scripted attempt ${attempt}: ok`,
+          ...(cfg.echoJudgeFeedback && input.context.judgeFeedback
+            ? [`judge feedback: ${input.context.judgeFeedback}`]
+            : []),
+        ].join("; "),
         toolCalls: 1,
         tokens: { input: 100, output: 50 },
         costUsd: cfg.costPerStep,

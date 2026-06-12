@@ -27,4 +27,5 @@ plan.md work-package slice through Chikory itself. Full operating manual:
 |---|---|---|---|
 | [`dogfood-001.yaml`](dogfood-001.yaml) | WP-202 slice 1 — Memory Pointer store | SUCCESS (run 4 of 4; landed `e267e28`) | [`dogfood-001.md`](../../docs/reports/dogfood-001.md) |
 | [`dogfood-002.yaml`](dogfood-002.yaml) | WP-201 slice 1 — Python contracts parity | SUCCESS (run-2899005b; landed `eb5c57e`) | [`dogfood-002.md`](../../docs/reports/dogfood-002.md) |
-| [`dogfood-003.yaml`](dogfood-003.yaml) | WP-217 — completion signal → off-cadence judge pass | not yet run | — |
+| [`dogfood-003.yaml`](dogfood-003.yaml) | WP-217 — completion signal → off-cadence judge pass | SUCCESS (run-b2f3504d; landed `ef4b16f`) | [`dogfood-003.md`](../../docs/reports/dogfood-003.md) |
+| [`dogfood-004.yaml`](dogfood-004.yaml) | WP-218 slice 1 — pricing refresh + blind-cost-meter warning | not yet run | — |

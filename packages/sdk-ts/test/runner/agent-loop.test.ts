@@ -32,6 +32,7 @@ import {
   startFakeJudgeWire,
   TERMINAL_STATUSES,
   waitFor,
+  type ScriptedConfig,
 } from "./helpers.js";
 
 const address = inject("temporalAddress");
@@ -46,10 +47,11 @@ describe.skipIf(address === null)("agent loop (WP-121)", () => {
   async function setup(opts: {
     judgeOverride?: RunnerActivities["judgeStep"];
     judgeWireUrl?: string;
+    scriptedConfig?: Partial<ScriptedConfig>;
   }) {
     const tmp = await mkdtemp(join(tmpdir(), "chikory-runner-"));
     cleanups.push(() => rm(tmp, { recursive: true, force: true }));
-    const repoUrl = await initSourceRepo(join(tmp, "src"));
+    const repoUrl = await initSourceRepo(join(tmp, "src"), opts.scriptedConfig);
     const dataDir = join(tmp, "data");
     const taskQueue = `tq-${randomUUID()}`;
 
@@ -196,6 +198,82 @@ describe.skipIf(address === null)("agent loop (WP-121)", () => {
       );
       // Cost conservation includes judge spend (JD-7 visibility).
       expect(journal.totalCostUsd()).toBeCloseTo(0.021, 10);
+    } finally {
+      journal.close();
+    }
+  });
+
+  test("empty successful diff triggers an off-cadence judge pass and seals SUCCESS", async () => {
+    const wire = await startFakeJudgeWire([judgeForm({ criteria: { "AC-1": true } })]);
+    cleanups.push(() => wire.close());
+    const { repoUrl, dataDir, runner } = await setup({
+      judgeWireUrl: wire.url,
+      scriptedConfig: { emptyDiffSteps: [1] },
+    });
+    const spec = makeJudgedSpec({ repoUrl, maxSteps: 3, cadence: 10 });
+
+    const handle = await runner.start(spec);
+    const report = await awaitTerminal(handle);
+
+    expect(report.status).toBe("SUCCESS");
+    expect(report.currentStep).toBe(1);
+    expect(report.lastVerdict).toEqual({ kind: "PROCEED", atStep: 0 });
+
+    const journal = new Journal(journalPath(dataDir, handle.runId));
+    try {
+      expect(journal.entries("step")).toHaveLength(1);
+      expect(journal.entries("judge")).toHaveLength(1);
+      expect(journal.entries("verdict")).toHaveLength(1);
+      expect(journal.entries("terminal")).toHaveLength(1);
+      expect((journal.entries("terminal")[0]!.payload as { status: string }).status).toBe(
+        "SUCCESS",
+      );
+      expect(wire.hits).toBe(1);
+    } finally {
+      journal.close();
+    }
+  });
+
+  test("incomplete empty-diff verdict keeps RUNNING and feeds rationale into the next step", async () => {
+    const wire = await startFakeJudgeWire([judgeForm({ criteria: { "AC-1": false } })]);
+    cleanups.push(() => wire.close());
+    const { repoUrl, dataDir, runner } = await setup({
+      judgeWireUrl: wire.url,
+      scriptedConfig: {
+        delayMs: 500,
+        emptyDiffSteps: [1],
+        echoJudgeFeedback: true,
+      },
+    });
+    const spec = makeJudgedSpec({ repoUrl, maxSteps: 2, cadence: 10 });
+
+    const handle = await runner.start(spec);
+    const running = await waitFor(
+      async () => {
+        const report = await handle.status();
+        return wire.hits === 1 && report.currentStep === 1 && report.status === "RUNNING"
+          ? report
+          : undefined;
+      },
+      { what: "run to continue after the completion-milestone verdict" },
+    );
+
+    expect(running.status).toBe("RUNNING");
+    expect(running.lastVerdict).toEqual({ kind: "PROCEED", atStep: 0 });
+
+    const report = await awaitTerminal(handle);
+    expect(report.status).toBe("FAILED");
+    expect(report.failure?.reason).toContain("maxSteps");
+
+    const journal = new Journal(journalPath(dataDir, handle.runId));
+    try {
+      const steps = journal.entries("step").map((entry) => entry.payload as StepPayload);
+      expect(steps).toHaveLength(2);
+      expect(steps[1]!.record.summary).toContain(
+        "judge feedback: work in progress, no regressions — unmet criteria: AC-1",
+      );
+      expect(journal.entries("judge")).toHaveLength(1);
+      expect(journal.entries("terminal")).toHaveLength(1);
     } finally {
       journal.close();
     }
