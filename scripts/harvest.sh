@@ -31,7 +31,7 @@ fi
 echo "Harvesting: Using run-id $RUN_ID"
 
 # 2. Determine target branch name if not provided
-BRANCH_NAME="${2:-}"
+BRANCH_NAME="${2:-main}"
 if [ -z "$BRANCH_NAME" ]; then
   # Find the latest spec file in examples/dogfood to extract the name
   SPEC_FILE=$(ls examples/dogfood/dogfood-[0-9][0-9][0-9].yaml 2>/dev/null | sort | tail -n 1)
