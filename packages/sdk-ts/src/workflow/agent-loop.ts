@@ -206,9 +206,11 @@ export async function agentLoop(spec: TaskSpec): Promise<RunStatus> {
     stepIndex += 1;
     consecutiveFailures = record.status === "FAILED" ? consecutiveFailures + 1 : 0;
 
-    // Judge every N steps (JD-2); each pass is one activity (WP-121/131).
+    // Judge on cadence or a completion milestone (JD-2); each pass is one
+    // activity (WP-121/131).
+    const completionMilestone = record.status === "SUCCESS" && record.diffRef.bytes === 0;
     let verdict: JudgeVerdict | undefined;
-    if (stepIndex % spec.judge.cadence === 0) {
+    if (stepIndex % spec.judge.cadence === 0 || completionMilestone) {
       verdict = await activities.judgeStep({
         runId,
         judgeIndex: judgeIndex++,
@@ -247,11 +249,11 @@ export async function agentLoop(spec: TaskSpec): Promise<RunStatus> {
       sinceCommit = Object.values(checkpoint.gitCommits)[0] ?? sinceCommit;
       if (verdict.kind === "PROCEED") {
         lastGoodCheckpointId = checkpoint.id;
-        judgeFeedback = undefined;
         // Run-level SUCCESS needs PROCEED *and* every criterion passing — a
         // non-PROCEED verdict with passing criteria (e.g. a secret in the
         // diff) must never seal SUCCESS.
         if (allCriteriaPass(verdict)) return seal("SUCCESS");
+        judgeFeedback = completionMilestone ? verdict.rationale : undefined;
       } else if (verdict.kind === "HALT") {
         return seal("FAILED", `judge HALT: ${verdict.rationale}`);
       } else if (verdict.kind === "ESCALATE") {
