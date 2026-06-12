@@ -9,6 +9,9 @@ Proven path: dogfood-001 (`docs/reports/dogfood-001.md`) implemented WP-202's
 first slice this way — 2 steps, 1 judge pass, 3/3 judge-executed checks,
 SUCCESS in 4 minutes. Dogfood-002 (`docs/reports/dogfood-002.md`) repeated it
 for WP-201 slice 1 — first-attempt SUCCESS, zero new harness code.
+Dogfood-003 (`docs/reports/dogfood-003.md`) had the engine modify its own
+runner loop (WP-217) — third first-attempt SUCCESS, and the landed trigger
+fired in the run that delivered it.
 
 Related docs: [`docs/spec/task-spec.md`](spec/task-spec.md) (schema
 reference) · [`docs/TASK-PROTOCOL.md`](TASK-PROTOCOL.md) (WP etiquette, §7 is
@@ -200,11 +203,21 @@ judge:
 ```
 
 Choosing `cadence`: each pass costs a judge LLM call + all check commands.
-- Small slice (1–3 steps): `cadence: 2` — first verdict early, and a
-  finished step 2 can seal SUCCESS immediately.
+- Since WP-217 (landed `ef4b16f`), a SUCCESS step with an empty diff
+  triggers the judge immediately regardless of cadence — a finished run
+  seals without waiting for the boundary. Cadence is now the *backstop*
+  for runs that keep producing diffs, not the only path to a verdict.
+- Small slice (1–3 steps): `cadence` slightly above the expected step count
+  (e.g. 3–4) is enough — completion triggers the seal.
 - Longer run: `cadence: 3` (default) balances cost vs drift window. Remember
   the HALT guard counts *verdicts*, so cadence × 3 steps is how long a
   criterion may stay red before the run is killed.
+- **Dogfooding new trigger/loop behavior? Make the spec falsifying**
+  (dogfood-003 F-12): configure it so the *old* code observably could not
+  produce the outcome — e.g. dogfood-003 ran `cadence: 2`, completion landed
+  on step 2, and the cadence boundary fired at the same instant, so the live
+  run never isolated the feature it shipped. `cadence` > `max_steps` would
+  have made the milestone trigger the only possible sealing path.
 
 ### 3.8 `routing` (optional — read this if using the zero-secrets path)
 
@@ -302,6 +315,13 @@ Also per TASK-PROTOCOL §7: keep the journal as an artifact (don't delete
 and write observed friction into `docs/reports/` — dogfood reports drive
 reprioritization at phase boundaries.
 
+**Keep the harvest commit pure** (dogfood-003 F-13): the commit citing the
+run-id must contain the run's diff and nothing else — `git show <landed>`
+should equal the run's diff artifact. Hand-written tooling, docs, or specs
+go in separate commits. `ef4b16f` broke this (harvest script + devbox task
+rode along with WP-217's delivery); WP-220 (`chikory land`) will make the
+pure commit mechanical.
+
 ### 6.1 Post-run review — mandatory, and scripted
 
 Every terminal run gets the full review: independent re-verification of the
@@ -339,11 +359,13 @@ and produced three plan-changing findings (F-8…F-10 → WP-217…WP-220).
   $0 even with the codex estimator (openai-compat defaults to $0; unknown
   models price at $0) — dogfood-002 F-9; token-denominated budgets are
   WP-218.
-- **The judge fires only on cadence** — an executor that finishes early
-  still burns filler steps until the next cadence boundary (dogfood-002
-  F-8: a no-op step cost 155k tokens). With `cadence: 2`, scope the goal so
-  the work genuinely needs ~2 steps; off-cadence judge-on-completion is
-  WP-217.
+- **Completion still costs one probe step** — WP-217 (landed `ef4b16f`)
+  fires the judge as soon as a step returns SUCCESS with an empty diff, so
+  a finished run no longer waits for the cadence boundary. But the trigger
+  is *inference*: the executor must spend one empty-diff step (~155–211k
+  input tokens observed, dogfood-002 F-8 / dogfood-003 F-11) rediscovering
+  "nothing to do" before the judge can seal. The explicit `claimsComplete`
+  signal that judges the productive step directly is WP-221.
 - Executor tool sandboxes are real but different: claude-code is
   file-ops-only (can't run tests itself — the judge does), codex has
   workspace-write (can run tests). Both are fine: SUCCESS is judge-verified

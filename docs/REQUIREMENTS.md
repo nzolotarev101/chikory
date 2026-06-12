@@ -40,7 +40,7 @@ Every requirement in [`project.md`](../project.md), assigned a stable ID, mapped
 | ID | Requirement | WP(s) | Phase | Status |
 |---|---|---|---|---|
 | JD-1 | Built-in eval layer: one agent validates another's work | WP-131 | P1 | done |
-| JD-2 | Inner loop: evaluates every N actions / at milestones | WP-132 (every N); WP-217 (at milestones — completion-signal trigger, dogfood-002 F-8) | P1→P2 | in-progress (cadence trigger done; milestone trigger WP-217) |
+| JD-2 | Inner loop: evaluates every N actions / at milestones | WP-132 (every N); WP-217 (empty-diff completion milestone — landed `ef4b16f`, dogfood-003); WP-221 (explicit `claimsComplete` signal, dogfood-003 F-11) | P1→P2 | in-progress (cadence + empty-diff milestone triggers done; explicit completion claim WP-221 — inference still costs one probe step) |
 | JD-3 | Gates next action: halt/rollback/branch/escalate before bad change lands | WP-132 (halt/rollback/escalate); branch verdict WP-205 | P1→P2 | in-progress (halt/rollback/escalate done; branch verdict P2) |
 | JD-4 | Software-native: PR diffs, tests, UI snapshots, acceptance criteria, security posture, architecture rubric | WP-131 (diffs+tests+criteria); WP-211 (UI); WP-215 (security+architecture) | P1→P2 | in-progress (diffs+tests+criteria done; UI/security/architecture P2) |
 | JD-5 | Structurally diversified: different model family / prompt regime / memory than executor | WP-133, ADR-002 | P1 | done |
@@ -61,7 +61,7 @@ Every requirement in [`project.md`](../project.md), assigned a stable ID, mapped
 | ID | Requirement | WP(s) | Phase | Status |
 |---|---|---|---|---|
 | CG-1 | Terminal states / deterministic exits break retry loops | WP-103, WP-124 (invariant #4) | P1 | done |
-| CG-2 | Spend controls; transparent, predictable, checkpoint-aware budget governance | WP-124, WP-105; WP-218 (token-denominated budgets — USD gate inert on $0-metered runs, dogfood-002 F-9); dashboards in WP-407 | P1→P4 | in-progress (P1 USD gate done; token gate WP-218 planned; dashboards P4) |
+| CG-2 | Spend controls; transparent, predictable, checkpoint-aware budget governance | WP-124, WP-105; WP-218 (token-denominated budgets — USD gate inert on $0-metered runs, dogfood-002 F-9; recurred dogfood-003: $0.00 for 1.39M tokens, `gpt-5.5` + `gemini-3.1-pro-preview` both unpriced); dashboards in WP-407 | P1→P4 | in-progress (P1 USD gate done; WP-218 pricing/warning slice = dogfood-004; dashboards P4) |
 
 ## AR — Artifact-centric state (spec §5.6)
 

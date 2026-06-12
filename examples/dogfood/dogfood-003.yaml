@@ -1,6 +1,10 @@
 # Dogfood-003: WP-217 — completion signal → off-cadence judge pass
 # (plan.md §6, queued from dogfood-002 finding F-8: an executor that
 # finishes early burns filler steps until the next cadence boundary).
+#
+# RAN 2026-06-12: run-b2f3504d-64ca-4b85-a511-56bd367981ac · SUCCESS
+# (2 steps, 1 judge pass, 3/3 criteria) · landed ef4b16f ·
+# report: docs/reports/dogfood-003.md (F-11…F-13).
 # This slice is pure runner logic — no contracts/types.ts change, so it is
 # dogfoodable without an architect-reviewed contracts PR (TASK-PROTOCOL §4).
 # Full how-to (every field explained): docs/DOGFOODING.md
