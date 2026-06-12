@@ -18,7 +18,8 @@
       "lint": "pnpm -r lint && ruff check packages/sdk-py && ruff format --check packages/sdk-py",
       "typecheck": "pnpm -r typecheck && (cd packages/sdk-py && uv run pyright)",
       "test": "pnpm -r test && (cd packages/sdk-py && uv run pytest)",
-      "smoke": "bash scripts/smoke.sh"
+      "smoke": "bash scripts/smoke.sh",
+      "dogfood": "bash scripts/dogfood.sh"
     }
   }
 }
