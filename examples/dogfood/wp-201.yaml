@@ -3,8 +3,7 @@
 #
 # Zero-secrets launch (locally-authenticated CLIs; see DOGFOODING.md §2.2/§3.8):
 #   node scripts/cli-judge-proxy.mjs 8787 gemini &
-#   export OPENAI_COMPAT_BASE_URL=http://127.0.0.1:8787
-#   pnpm chikory run examples/dogfood/wp-201.yaml --watch
+#   OPENAI_COMPAT_BASE_URL=http://127.0.0.1:8787 pnpm chikory run examples/dogfood/wp-201.yaml --watch
 #
 # With API keys instead: delete the routing block, set judge.family to a
 # configured family (e.g. gemini), export that key + the executor's.

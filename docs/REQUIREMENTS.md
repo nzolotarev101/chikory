@@ -40,7 +40,7 @@ Every requirement in [`project.md`](../project.md), assigned a stable ID, mapped
 | ID | Requirement | WP(s) | Phase | Status |
 |---|---|---|---|---|
 | JD-1 | Built-in eval layer: one agent validates another's work | WP-131 | P1 | done |
-| JD-2 | Inner loop: evaluates every N actions / at milestones | WP-132 | P1 | done |
+| JD-2 | Inner loop: evaluates every N actions / at milestones | WP-132 (every N); WP-217 (at milestones — completion-signal trigger, dogfood-002 F-8) | P1→P2 | in-progress (cadence trigger done; milestone trigger WP-217) |
 | JD-3 | Gates next action: halt/rollback/branch/escalate before bad change lands | WP-132 (halt/rollback/escalate); branch verdict WP-205 | P1→P2 | in-progress (halt/rollback/escalate done; branch verdict P2) |
 | JD-4 | Software-native: PR diffs, tests, UI snapshots, acceptance criteria, security posture, architecture rubric | WP-131 (diffs+tests+criteria); WP-211 (UI); WP-215 (security+architecture) | P1→P2 | in-progress (diffs+tests+criteria done; UI/security/architecture P2) |
 | JD-5 | Structurally diversified: different model family / prompt regime / memory than executor | WP-133, ADR-002 | P1 | done |
@@ -61,7 +61,7 @@ Every requirement in [`project.md`](../project.md), assigned a stable ID, mapped
 | ID | Requirement | WP(s) | Phase | Status |
 |---|---|---|---|---|
 | CG-1 | Terminal states / deterministic exits break retry loops | WP-103, WP-124 (invariant #4) | P1 | done |
-| CG-2 | Spend controls; transparent, predictable, checkpoint-aware budget governance | WP-124, WP-105; dashboards in WP-407 | P1→P4 | in-progress (P1 gate done; dashboards P4) |
+| CG-2 | Spend controls; transparent, predictable, checkpoint-aware budget governance | WP-124, WP-105; WP-218 (token-denominated budgets — USD gate inert on $0-metered runs, dogfood-002 F-9); dashboards in WP-407 | P1→P4 | in-progress (P1 USD gate done; token gate WP-218 planned; dashboards P4) |
 
 ## AR — Artifact-centric state (spec §5.6)
 
@@ -84,7 +84,7 @@ Every requirement in [`project.md`](../project.md), assigned a stable ID, mapped
 
 | ID | Requirement | WP(s) | Phase | Status |
 |---|---|---|---|---|
-| FA-1 | Entire production-ready apps: brownfield, multi-repo, migrations, long-horizon | ADR-003 (capability via wrapped agents); WP-214 (multi-repo); P3 brownfield benchmark proves it | P1→P3 | planned |
+| FA-1 | Entire production-ready apps: brownfield, multi-repo, migrations, long-horizon | ADR-003 (capability via wrapped agents); WP-219 (goal decomposition & run chaining — the long-horizon gap, dogfood-002 F-10); WP-214 (multi-repo); P3 brownfield benchmark proves it | P1→P3 | planned |
 | FA-2 | Reliable, redundant execution; fluent restart on failure | WP-123 | P1 | done |
 | FA-3 | Token awareness + intelligent pacing during planning AND execution (batch size, test count, checkpoint cadence, breaks) | WP-207; inputs from WP-105 accounting | P2 | planned |
 
@@ -101,7 +101,7 @@ Every requirement in [`project.md`](../project.md), assigned a stable ID, mapped
 | ID | Requirement | WP(s) | Phase | Status |
 |---|---|---|---|---|
 | IF-1 | Thin TypeScript SDK | P1 lanes M1–M5 | P1 | planned |
-| IF-2 | Thin Python SDK | WP-201 | P2 | planned |
+| IF-2 | Thin Python SDK | WP-201 | P2 | in-progress (slice 1 — contracts + shared conformance suite — landed `eb5c57e` via dogfood-002) |
 | IF-3 | Durable workflows on existing engine (Temporal) — partner, don't rebuild | ADR-001, WP-004, WP-121 | P0–P1 | done |
 | IF-4 | CLI surface | WP-141, WP-142 | P1 | done |
 | IF-5 | Cloud control plane: hosted judges, checkpointers, trace browser | WP-401–408 (full design: components/control-plane.md) | P4 | planned |

@@ -371,7 +371,7 @@ judge:
 
 # Zero-secrets routing block. Launch shim first:
 #   node scripts/cli-judge-proxy.mjs 8787 gemini &
-#   export OPENAI_COMPAT_BASE_URL=http://127.0.0.1:8787
+#   OPENAI_COMPAT_BASE_URL=http://127.0.0.1:8787 pnpm chikory run <spec.yaml> --watch
 routing:
   stages:
     plan:   { provider: openai-compat, model: gpt-5.5 }            # unused by codex

@@ -2,8 +2,7 @@
 # through Chikory itself. MVP exit-gate #1: the judge must gate real work on
 # this repo. Zero-secrets setup (locally-authenticated CLIs only):
 #   node scripts/cli-judge-proxy.mjs 8787 gemini &   # judge: Gemini via gemini CLI (Google OAuth)
-#   export OPENAI_COMPAT_BASE_URL=http://127.0.0.1:8787
-#   pnpm chikory run docs/reports/dogfood-001.task.yaml --watch
+#   OPENAI_COMPAT_BASE_URL=http://127.0.0.1:8787 pnpm chikory run docs/reports/dogfood-001.task.yaml --watch
 # Executor: codex CLI on ChatGPT OAuth (run 1 used claude-code until its
 # subscription session limit hit — see the report). NOTE the routing block
 # labels the executor stages openai-compat — a workaround for the §9.3

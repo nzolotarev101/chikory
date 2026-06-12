@@ -27,9 +27,8 @@ locally-authenticated CLIs only:
 
 ```sh
 node scripts/cli-judge-proxy.mjs 8787 gemini &
-export OPENAI_COMPAT_BASE_URL=http://127.0.0.1:8787
 devbox run temporal-dev &
-pnpm chikory run docs/reports/dogfood-001.task.yaml --watch
+OPENAI_COMPAT_BASE_URL=http://127.0.0.1:8787 pnpm chikory run docs/reports/dogfood-001.task.yaml --watch
 ```
 
 ## The task

@@ -4,7 +4,7 @@
 > This is the single source of truth for **what we build, in what order, and why**.
 > Spec: [`project.md`](project.md) · Requirements matrix: [`docs/REQUIREMENTS.md`](docs/REQUIREMENTS.md) · Architecture: [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) · How to pick up work: [`docs/TASK-PROTOCOL.md`](docs/TASK-PROTOCOL.md)
 
-**Status**: Phase 0 complete (2026-06-10); **Phase 1 complete (2026-06-11)** — all lanes M1–M5 done, dogfood-001 SUCCESS (`docs/reports/dogfood-001.md`) · **Plan date**: 2026-06-09 · **Stage 1 deadline (per spec §10)**: ~2026-09-07 (90 days)
+**Status**: Phase 0 complete (2026-06-10); **Phase 1 complete (2026-06-11)** — all lanes M1–M5 done, dogfood-001 SUCCESS (`docs/reports/dogfood-001.md`) · **P2 underway**: WP-201 slice 1 landed via dogfood-002 (`docs/reports/dogfood-002.md`), which queued WP-217–WP-220 ahead of the remaining P2 WPs · **Plan date**: 2026-06-09 · **Stage 1 deadline (per spec §10)**: ~2026-09-07 (90 days)
 
 ---
 
@@ -158,9 +158,15 @@ Five parallel lanes after WP-002/WP-005 land. Lane docs contain full technical d
 
 Goal: survive *real* long horizons (days, big contexts, multi-repo) and close every remaining §5 requirement that isn't benchmark- or cloud-shaped. Built **using** v0.1 wherever practical — each WP here is a candidate dogfood run.
 
+**Queue order**: dogfood findings outrank the original listing — WP-217, WP-218, WP-220 (small, unblock cheap/honest dogfooding of everything else), then WP-219's ADR, then the remainder as originally planned. Rationale: `docs/reports/dogfood-002.md` (F-8/F-9/F-10).
+
 | WP | Title | Tag | Notes |
 |---|---|---|---|
-| WP-201 | Python SDK parity | 🟢 | Mechanical port of frozen TS contracts; conformance suite shared via JSON fixtures. Ideal simpler-model lane; runs parallel to everything. |
+| WP-217 | Completion signal → off-cadence judge pass | 🟡 | **Next up (dogfood-002 F-8).** A step that returns SUCCESS with an empty diff (and/or an explicit `claimsComplete` on `StepRecord` — contracts PR, architect-reviewed) triggers an immediate judge pass instead of waiting for the cadence boundary. Kills the per-slice filler-step tax (run-2899005b paid 155k tokens/49 s for a no-op step 2). |
+| WP-218 | Token-denominated budget + honest $0 metering | 🟡 | **Next up (dogfood-002 F-9).** `budget_tokens` cap in TaskSpec enforced by the same pre-step gate (tokens are always on the wire; cost often isn't); refresh the pricing table (gpt-5.5 missing → $0 estimate) + a versioned update policy; loud journal warning when `costEstimated` ∧ cost=$0 ∧ tokens>0. Makes CG-2 real on subscription/zero-secrets runs. |
+| WP-219 | Goal decomposition & run chaining (ADR-005) | 🔴 | **Design next (dogfood-002 F-10a) — the objective gap.** Today a goal bigger than 1–3 steps is sliced by a human into hand-written yamls; nothing plans *across* runs (WP-207 paces *within* one). ADR-005 first: goal → plan tree → sequenced judge-gated slices, each an ordinary TaskSpec run; context carried via WP-202 refs + WP-203 compaction. Prereq for the P2 exit gate (a 24h run is a chain, not a step loop) and for "full-application engine" generally. Implementation slices fall out of the ADR. |
+| WP-220 | `chikory land <run-id>` | 🟢 | **Next up (dogfood-002 F-10b).** Automates DOGFOODING §6: run workspace → branch + squashed conventional commit citing run-id + verification commands; optional `--pr` via gh. Also what WP-219's chaining calls between slices. |
+| WP-201 | Python SDK parity | 🟢 | **Slice 1 done** (`eb5c57e`, dogfood-002 run `run-2899005b`): contracts port + shared fixture conformance suite (40 tests; pyright/ruff clean). Remaining slices (router/runtime client parity) deferred until something needs them. |
 | WP-202 | Memory Pointer store | 🟡 | Large tool outputs → blob store (local FS first), short `ArtifactRef` into context. **The designated dogfood-001 task.** |
 | WP-203 | Compaction + structured note-taking primitives | 🔴 | Context-rot mitigation co-designed with checkpoints: compaction occurs *at* checkpoint boundaries so a resume never rehydrates rotted context. |
 | WP-204 | Tiered memory (core/archival/recall) | 🔴 | Cross-session state; poisoning safeguards (provenance on every memory write). |

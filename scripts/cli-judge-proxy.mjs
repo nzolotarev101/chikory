@@ -12,7 +12,9 @@
  *
  * Usage: node scripts/cli-judge-proxy.mjs [port] [backend]
  *        (defaults: 8787 codex)
- *        export OPENAI_COMPAT_BASE_URL=http://127.0.0.1:8787
+ *
+ *        To run chikory with this shim:
+ *        OPENAI_COMPAT_BASE_URL=http://127.0.0.1:8787 pnpm chikory run <spec.yaml> --watch
  *
  * The request's `model` is passed through to the CLI (`-m`) unless it is
  * the literal "default".

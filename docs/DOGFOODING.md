@@ -7,7 +7,8 @@ recover a run, and how to land the result as a normal PR.
 
 Proven path: dogfood-001 (`docs/reports/dogfood-001.md`) implemented WP-202's
 first slice this way — 2 steps, 1 judge pass, 3/3 judge-executed checks,
-SUCCESS in 4 minutes.
+SUCCESS in 4 minutes. Dogfood-002 (`docs/reports/dogfood-002.md`) repeated it
+for WP-201 slice 1 — first-attempt SUCCESS, zero new harness code.
 
 Related docs: [`docs/spec/task-spec.md`](spec/task-spec.md) (schema
 reference) · [`docs/TASK-PROTOCOL.md`](TASK-PROTOCOL.md) (WP etiquette, §7 is
@@ -241,10 +242,9 @@ git status                  # commit everything the run should see — the works
 devbox run build            # dist/ is what runs
 devbox run temporal-dev     # running in its own terminal
 node scripts/cli-judge-proxy.mjs 8787 gemini &   # zero-secrets path only
-export OPENAI_COMPAT_BASE_URL=http://127.0.0.1:8787   # (or export the judge family's API key)
 
 # 1. launch (from the repo root; --watch streams journal entries live)
-pnpm chikory run examples/dogfood/wp-201.yaml --watch
+OPENAI_COMPAT_BASE_URL=http://127.0.0.1:8787 pnpm chikory run examples/dogfood/wp-201.yaml --watch
 ```
 
 `run` validates the spec (actionable errors: missing env vars are named),
@@ -320,7 +320,15 @@ reprioritization at phase boundaries.
 - **Single repo**, no `inject`, no `branch`, no suspend-for-days HITL UX, no
   pacing — all P2 (WP-214, -212, -205, -206, -207).
 - **Subscription-auth runs report $0.00 cost** → budget gate inert; rely on
-  `max_steps` and the HALT guard instead.
+  `max_steps` and the HALT guard instead. The zero-secrets routing path is
+  $0 even with the codex estimator (openai-compat defaults to $0; unknown
+  models price at $0) — dogfood-002 F-9; token-denominated budgets are
+  WP-218.
+- **The judge fires only on cadence** — an executor that finishes early
+  still burns filler steps until the next cadence boundary (dogfood-002
+  F-8: a no-op step cost 155k tokens). With `cadence: 2`, scope the goal so
+  the work genuinely needs ~2 steps; off-cadence judge-on-completion is
+  WP-217.
 - Executor tool sandboxes are real but different: claude-code is
   file-ops-only (can't run tests itself — the judge does), codex has
   workspace-write (can run tests). Both are fine: SUCCESS is judge-verified
