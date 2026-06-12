@@ -19,7 +19,8 @@
       "typecheck": "pnpm -r typecheck && (cd packages/sdk-py && uv run pyright)",
       "test": "pnpm -r test && (cd packages/sdk-py && uv run pytest)",
       "smoke": "bash scripts/smoke.sh",
-      "dogfood": "bash scripts/dogfood.sh"
+      "dogfood": "bash scripts/dogfood.sh",
+      "harvest": "bash scripts/harvest.sh"
     }
   }
 }
