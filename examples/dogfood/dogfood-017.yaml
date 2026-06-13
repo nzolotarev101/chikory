@@ -1,0 +1,99 @@
+# Dogfood-017: WP-227 - final journal drain before terminal return
+# (dogfood-016 F-23; follow-up to WP-223/F-15).
+#
+# dogfood-016's executor full-suite run proved a remaining observer race:
+# followRun scans the journal, then awaits handle.status(), and immediately
+# returns a terminal report. If ESCALATE is journaled after that scan and the
+# run is rejected before status returns, the durable AWAITING_APPROVAL line is
+# never rendered. This slice adds the final drain and a deterministic unit
+# test that creates exactly that ordering.
+#
+# Zero-secrets launch:
+#   node scripts/cli-judge-proxy.mjs 8787 gemini &
+#   OPENAI_COMPAT_BASE_URL=http://127.0.0.1:8787 pnpm chikory run examples/dogfood/dogfood-017.yaml --watch
+#
+# Commit dogfood-016 code and review docs before launching; workspaces clone
+# HEAD. Run Devbox commands sequentially (dogfood-016 F-22).
+name: dogfood-017-wp-227-final-journal-drain
+goal: >
+  Implement WP-227 (dogfood-016 F-23), the terminal-boundary completion of
+  WP-223's durable journal transition rendering. Modify exactly two existing
+  files and nothing else:
+  packages/sdk-ts/src/cli/commands.ts and
+  packages/sdk-ts/test/cli/cli.test.ts. Add no dependency and change no
+  contract, journal format, workflow, or runner behavior.
+
+  In commands.ts, change the existing private `followRun` declaration to the
+  named export `export async function followRun`. Inside followRun, extract the
+  current `existsSync(path)` / `new Journal(path)` / entries loop into a local
+  synchronous `drainJournal(): void` closure. Preserve every existing behavior
+  byte-for-byte: `nextEntryIdx` exactly-once filtering, `--watch` entry lines,
+  budget-halt text, ESCALATE/AWAITING_APPROVAL text, and journal close in
+  `finally`.
+
+  The polling loop must then be exactly this ordering:
+
+    for (;;) {
+      drainJournal();
+      const report = await handle.status();
+      if (TERMINAL.has(report.status)) {
+        drainJournal();
+        return report;
+      }
+      await sleep(interval);
+    }
+
+  The second drain is required because a durable transition can be appended
+  after the first scan but before status() returns a terminal report. The
+  `nextEntryIdx` cursor makes the final drain idempotent and prevents duplicate
+  lines.
+
+  In cli.test.ts, import `followRun` beside `main`, import `Journal` from
+  "../../src/journal/journal.js", import `journalPath` from
+  "../../src/runner/paths.js", and import the `RunHandle` type. Add one
+  deterministic test named
+  "final drain renders a transition appended during terminal status()".
+  Create a temp dataDir using the file's existing cleanup pattern and an empty
+  journal for a synthetic run id. Build a fake RunHandle whose `status()`
+  opens that journal, appends one `verdict` entry with payload
+  `{ verdict: { kind: "ESCALATE" } }`, closes it, and returns a terminal
+  `RunStatusReport` with status "FAILED", currentStep 3, spentUsd 0.03,
+  budgetUsd 5, and checkpoints `[]`; its approve/inject/cancel methods are
+  async no-ops. Call followRun with json false, that dataDir, watch false,
+  pollIntervalMs 1, and an output collector. Assert the returned status is
+  "FAILED", the output contains
+  "AWAITING_APPROVAL — answer with: chikory approve", and that line occurs
+  exactly once. This test must fail against the pre-fix ordering and pass with
+  the final drain.
+
+  Follow AGENTS.md: strict TypeScript, ESM `.js` imports, named exports only,
+  no `any`, and run all Devbox verification commands sequentially.
+repos:
+  - url: /Users/nikitazolotarev/repos/chikory
+    writable: true
+acceptance_criteria:
+  - id: AC-1
+    description: >
+      the deterministic final-drain regression and all existing CLI tests pass
+    check: pnpm install --prefer-offline --silent && pnpm --filter @chikory/sdk exec vitest run test/cli/cli.test.ts
+  - id: AC-2
+    description: the complete TypeScript SDK suite remains green
+    check: pnpm --filter @chikory/sdk test
+  - id: AC-3
+    description: strict typecheck and lint are clean
+    check: pnpm --filter @chikory/sdk typecheck && pnpm --filter @chikory/sdk lint
+budget_usd: 5
+max_steps: 4
+executor:
+  adapter: codex
+  family: openai
+judge:
+  family: openai-compat
+  cadence: 2
+  max_cost_share: 0.5
+routing:
+  stages:
+    plan: { provider: openai-compat, model: gpt-5.5 }
+    code: { provider: openai-compat, model: gpt-5.5 }
+    review: { provider: openai-compat, model: gpt-5.5 }
+    judge: { provider: openai-compat, model: gemini-3.1-pro-preview }

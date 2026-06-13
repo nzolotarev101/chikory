@@ -84,7 +84,7 @@ Every requirement in [`project.md`](../project.md), assigned a stable ID, mapped
 
 | ID | Requirement | WP(s) | Phase | Status |
 |---|---|---|---|---|
-| FA-1 | Entire production-ready apps: brownfield, multi-repo, migrations, long-horizon | ADR-003 (capability via wrapped agents); WP-219 (goal decomposition & run chaining — the long-horizon gap, dogfood-002 F-10); WP-220 (`chikory land` — the per-slice landing primitive chaining calls between runs, delivered via dogfood-005 `run-34926e85`); WP-214 (multi-repo); P3 brownfield benchmark proves it | P1→P3 | in-progress (landing primitive done; **ADR-005 accepted + WP-219 S1 contracts landed `d56f35a`**; S3 pure half `readyNodes` delivered dogfood-015, pending commit; planner/executor slices next) |
+| FA-1 | Entire production-ready apps: brownfield, multi-repo, migrations, long-horizon | ADR-003 (capability via wrapped agents); WP-219 (goal decomposition & run chaining — the long-horizon gap, dogfood-002 F-10); WP-220 (`chikory land` — the per-slice landing primitive chaining calls between runs, delivered via dogfood-005 `run-34926e85`); WP-214 (multi-repo); P3 brownfield benchmark proves it | P1→P3 | in-progress (landing primitive done; **ADR-005 accepted + WP-219 S1 contracts landed `d56f35a`**; S3 pure core now has `readyNodes` landed via dogfood-015 and `hasDependencyCycle` delivered via dogfood-016 `run-2418f473`; planner/meta-judge/non-pure executor slices next) |
 | FA-2 | Reliable, redundant execution; fluent restart on failure | WP-123 | P1 | done |
 | FA-3 | Token awareness + intelligent pacing during planning AND execution (batch size, test count, checkpoint cadence, breaks) | WP-207; inputs from WP-105 accounting | P2 | planned |
 
@@ -103,7 +103,7 @@ Every requirement in [`project.md`](../project.md), assigned a stable ID, mapped
 | IF-1 | Thin TypeScript SDK | P1 lanes M1–M5 | P1 | planned |
 | IF-2 | Thin Python SDK | WP-201 | P2 | in-progress (slice 1 — contracts + shared conformance suite — landed `eb5c57e` via dogfood-002) |
 | IF-3 | Durable workflows on existing engine (Temporal) — partner, don't rebuild | ADR-001, WP-004, WP-121 | P0–P1 | done |
-| IF-4 | CLI surface | WP-141, WP-142; WP-220 (`chikory land`, delivered via dogfood-005 `run-34926e85`, commit pending review); WP-223 (watch transition fidelity — delivered via dogfood-007 `run-22b337a9`, commit pending review; F-15 closed, three clean full-suite runs post-fix); WP-224 (`land --verify` + git-stderr seam, dogfood-005 F-17/F-18 — delivered via dogfood-008 `run-86c4b628`, commit pending review; AC-1/2/3 green on independent rerun) | P1→P2 | satisfied pending commit (watch fidelity fixed by WP-223; F-17/F-18 closed by WP-224 — `land --verify` reruns build/lint/typecheck/test on the fresh commit, git stderr now captured + surfaced) |
+| IF-4 | CLI surface | WP-141, WP-142; WP-220 (`chikory land`); WP-223 (durable watch transitions); WP-224 (`land --verify` + git-stderr seam); WP-227 (final journal drain at terminal boundary, dogfood-016 F-23) | P1→P2 | in-progress (core CLI, trace, land, and durable transition rendering are implemented; dogfood-016 reopened one terminal-boundary observer race, queued as WP-227/dogfood-017) |
 | IF-5 | Cloud control plane: hosted judges, checkpointers, trace browser | WP-401–408 (full design: components/control-plane.md) | P4 | planned |
 
 ## ST — Strategy, moat, business (spec §6, §9, §10)

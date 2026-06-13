@@ -18,7 +18,8 @@ The repetitive phase 1–2 checks are scripted. Run it FIRST and reason over
 its output:
 
 ```sh
-RUN_ID=<run-id> devbox run dogfood-verify   # newest run if RUN_ID omitted
+devbox run -- bash scripts/dogfood-verify.sh <run-id>
+# or: devbox run dogfood-verify   # newest run
 ```
 
 It pulls the acceptance checks from the run's OWN journal (`task_json`, so
@@ -35,9 +36,10 @@ they always match the run), and emits one markdown block:
 6. **Cost-share** — exact total (steps+judge), budget %, judge share, and
    the empty-diff **probe step → F-11 % data point** (the WP-221 number).
 
-`devbox run` does NOT forward positional args — pass `RUN_ID=` as an env
-var (or call `bash scripts/dogfood-verify.sh <run-id>` directly). The script
-writes nothing and touches no doc; judgment stays yours (phases below).
+`devbox run` does NOT forward positional args to named scripts, and Devbox
+0.17.0 can make Vitest abort when `devbox run` is prefixed with an env
+assignment. Use the direct script form above for an explicit run-id. The
+script writes nothing and touches no doc; judgment stays yours (phases below).
 
 ## 1. Reconstruct what happened (journal is ground truth)
 

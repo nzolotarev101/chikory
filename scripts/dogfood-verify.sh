@@ -10,12 +10,14 @@
 # a separately-resolved yaml, so the checks always match the run under review.
 #
 # Usage:
-#   RUN_ID=run-<uuid> devbox run dogfood-verify     # explicit (recommended)
-#   devbox run dogfood-verify                         # newest run in .chikory/runs/
-#   bash scripts/dogfood-verify.sh <run-id>           # direct (args work here)
+#   devbox run -- bash scripts/dogfood-verify.sh <run-id>  # explicit
+#   devbox run dogfood-verify                              # newest run
 #
-# NOTE: `devbox run` does NOT forward positional args to shell.scripts — pass
-# the run via the RUN_ID env var. Direct `bash scripts/...` honors $1.
+# NOTE: `devbox run` does NOT forward positional args to shell.scripts. Do not
+# prefix `devbox run` with an env assignment for the run id: Devbox 0.17.0 can
+# make Vitest global setup abort when invoked that way. Use the direct script
+# form above, inside devbox. RUN_ID/DOGFOOD_RUN_ID remain legacy fallbacks for
+# callers already inside `devbox shell`.
 #
 # Runs bare toolchain binaries (pnpm/chikory/git/node) — invoke it THROUGH
 # devbox (`devbox run dogfood-verify`), never add a nested `devbox run` inside.
@@ -25,8 +27,8 @@ set -uo pipefail
 cd "$(dirname "$0")/.."
 REPO_ROOT="$(pwd)"
 
-# ── resolve run-id (env RUN_ID > positional $1 > newest run dir) ─────────────
-RUN_ID="${RUN_ID:-${1:-}}"
+# ── resolve run-id (positional $1 > env > newest run dir) ────────────────────
+RUN_ID="${1:-${DOGFOOD_RUN_ID:-${RUN_ID:-}}}"
 if [ -z "$RUN_ID" ]; then
   RUN_ID="$(ls -t .chikory/runs/ 2>/dev/null | head -n 1)"
 fi
@@ -34,6 +36,9 @@ if [ -z "$RUN_ID" ] || [ ! -d ".chikory/runs/$RUN_ID" ]; then
   echo "Error: run dir .chikory/runs/$RUN_ID not found" >&2
   exit 1
 fi
+# Keep the legacy selector out of acceptance-check environments. Explicit
+# devbox invocation must still use the positional form documented above.
+export -n RUN_ID
 JOURNAL=".chikory/runs/$RUN_ID/journal.db"
 WORKSPACE=".chikory/runs/$RUN_ID/workspace"
 

@@ -7,13 +7,15 @@
 # this as a hard check). Pure graph predicate, no IO, two NEW files, same shape
 # as dogfood-010…015.
 #
+# OUTCOME: SUCCESS, run
+# `run-2418f473-0906-4e86-94ae-9c644a3145f8`; harvested byte-identically and
+# staged, pending commit. Report: docs/reports/dogfood-016.md.
+#
 # ⚠ PRECONDITION: the ADR-005 slice-1 contracts (Plan/PlanNode in types.ts,
 # commit `d56f35a`) MUST be on HEAD — this slice imports the `Plan` TYPE. They
-# are committed. ALSO commit dogfood-015's `readyNodes`
-# (`packages/sdk-ts/src/chain/sequencing.ts` + test) first if not yet done —
-# it is harvested-but-uncommitted (F-21); don't lose it, and keep the
-# `src/chain/` module coherent. This slice itself imports only the `Plan` type,
-# so it does not strictly need sequencing.ts, but commit it anyway.
+# are committed. Dogfood-015's `readyNodes` is also committed (`40ada45`);
+# keep the `src/chain/` module coherent. This slice itself imports only the
+# `Plan` type and does not otherwise depend on sequencing.ts.
 #
 # Zero-secrets launch (locally-authenticated CLIs; see DOGFOODING.md §2.2/§3.8):
 #   node scripts/cli-judge-proxy.mjs 8787 gemini &

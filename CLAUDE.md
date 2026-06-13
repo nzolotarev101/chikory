@@ -50,6 +50,7 @@ All project tasks (build, lint, test, run, Temporal, scripts) run **inside devbo
 
 - Enter the environment: `devbox shell` — or prefix one-offs: `devbox run <script>` / `devbox run -- <command>`
 - Canonical task entry points live in `devbox.json` `shell.scripts` (e.g., `devbox run test`, `devbox run lint`, `devbox run temporal-dev`)
+- Run Devbox commands sequentially. Concurrent `devbox run` startup races on `.devbox/gen/scripts/.cmd.sh` under Devbox 0.17.0.
 - Never invoke `pnpm`, `node`, `python`, `pytest`, `ruff`, `temporal`, etc. directly on the host — toolchain versions are pinned in `devbox.json`, host versions are not supported
 - Adding a tool = `devbox add <pkg>` (updates `devbox.json` + lock), never a global install
 - CI uses the same `devbox run` scripts — if it isn't runnable via devbox, it doesn't exist

@@ -1,6 +1,6 @@
 # Dogfood-015 — WP-219 S3 pure half (pure `readyNodes` chain sequencing)
 
-**WP**: WP-219 · **Date**: 2026-06-13 · **Task spec**: [`examples/dogfood/dogfood-015.yaml`](../../examples/dogfood/dogfood-015.yaml) · **Run**: `run-56d95ffc-e4a4-4ddd-a776-9bca6b9e6b08` · **Landed**: **code uncommitted** (harvested into the working tree as `src/chain/`, *not* in any commit — see F-21; `20a43a2` is mislabeled and carries only the dogfood-014 review docs)
+**WP**: WP-219 · **Date**: 2026-06-13 · **Task spec**: [`examples/dogfood/dogfood-015.yaml`](../../examples/dogfood/dogfood-015.yaml) · **Run**: `run-56d95ffc-e4a4-4ddd-a776-9bca6b9e6b08` · **Landed**: `40ada45` after review exposed F-21 (the earlier `20a43a2` was mislabeled and carried only review docs)
 
 > Fifteenth dogfood, fifteenth first-attempt SUCCESS — and the **first slice
 > to code against the ADR-005 contracts**. The engine added `readyNodes(plan,

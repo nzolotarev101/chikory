@@ -93,9 +93,16 @@ Its one new friction, **F-21**, is again in the *landing*, not the output: the
 harvested NEW files (`src/chain/`) were left untracked and the operator's
 commit shipped only the review docs under a "readyNodes" message — a "feat"
 commit with none of the feature's code (→ WP-226: harvest stages what it
-applies; until then follow the guidance's `git add -A` literally). Next:
-dogfood-016 carves the executor's other pure precondition — `hasDependencyCycle`
-over a `Plan`.
+applies; fixed before the next campaign). Dogfood-016
+(`docs/reports/dogfood-016.md`) delivered the other S3 pure precondition,
+`hasDependencyCycle(plan)`, with the prescribed Kahn traversal and four focused
+tests — sixteenth first-attempt SUCCESS. It also proved WP-226 live: both new
+files were harvested byte-identically and staged. Three surrounding issues
+surfaced: parallel Devbox startup races (F-22, operational rule added), the
+terminal-boundary remainder of the F-15 observer race (F-23 → WP-227), and the
+env-prefixed explicit `dogfood-verify` command aborting Vitest under Devbox
+0.17.0 (F-24, command form fixed). F-11 was 7.6 %. Next: dogfood-017 closes
+F-23 with a final journal drain before terminal return.
 
 Related docs: [`docs/spec/task-spec.md`](spec/task-spec.md) (schema
 reference) · [`docs/TASK-PROTOCOL.md`](TASK-PROTOCOL.md) (WP etiquette, §7 is
@@ -126,6 +133,9 @@ devbox run bootstrap                 # pnpm install + python sync
 devbox run build                     # compiles the chikory CLI to dist/
 devbox run temporal-dev              # durable-execution substrate — leave running (own terminal)
 ```
+
+Run Devbox commands **sequentially**. Concurrent `devbox run` startup races
+on `.devbox/gen/scripts/.cmd.sh` under Devbox 0.17.0 (dogfood-016 F-22).
 
 > **Rebuild after every SDK change**: `pnpm chikory` runs from `dist/`, not
 > `src/`. Stale dist = running yesterday's CLI (this bit us in dogfood-001
@@ -454,11 +464,13 @@ a first-attempt SUCCESS and produced three plan-changing findings
 | CLI behaves like yesterday’s code (e.g. a just-harvested trace feature missing from `chikory trace`) | Stale `dist/`. `devbox run build`. `harvest.sh` now rebuilds before verification (dogfood-004 F-16); the dogfood script builds *pre-run*, so post-harvest forensics always need the rebuild. |
 | `chikory land` succeeded but the landed feature is invisible / verification not run | Pass `--verify` (since WP-224, dogfood-008): it reruns `devbox run build/lint/typecheck/test` against the fresh commit and exits 1 on the first red check (commit kept for inspection). Bare `land` (no flag) still only applies + commits — run the four commands by hand. The stray `Switched to a new branch …` lines are gone (F-18 fixed): git stderr is now captured and only surfaced inside `land failed: …` on real errors. |
 | `pnpm chikory: command not found` | Bin link lost: `rm node_modules/.pnpm-workspace-state-v1.json && devbox run -- pnpm install`. |
+| Parallel `devbox run` commands fail with `.devbox/gen/scripts/.cmd.sh: No such file or directory` | Devbox 0.17.0 concurrent-startup race (dogfood-016 **F-22**). Run every Devbox command sequentially; do not parallelize test/typecheck/lint invocations. |
+| `dogfood-verify` shows Vitest `undefined` failures although the same tests pass directly | Do not prefix `devbox run` with an env assignment under Devbox 0.17.0 (dogfood-016 **F-24**). For an explicit run use `devbox run -- bash scripts/dogfood-verify.sh <run-id>`; for the newest run use `devbox run dogfood-verify`. |
 | Proxy run dies with router FAILED on judge pass | Shim not running / wrong port — restart `cli-judge-proxy.mjs` and check `OPENAI_COMPAT_BASE_URL`. |
 | `[cli-judge:…] FAILED … 404/500` *during executor steps* | Not the judge: the executor inherited `OPENAI_COMPAT_BASE_URL` and its in-workspace test run un-skipped `providers.integration.test.ts`, which pings the live shim (dogfood-004 F-14; recurred dogfood-005/006). **Fixed by WP-222 slice 1** (dogfood-006, landed `18fae43`): executor children now see only their own family key. **Closure confirmed by dogfood-007** — zero shim noise in `run-22b337a9`'s executor transcript. Seeing this symptom now is a regression — file it. |
-| A `feat:` commit's diff is only docs — the harvested CODE (new files) is missing / shows as `??` untracked | The untracked-new-file commit gap (dogfood-015 **F-21**, → WP-226). Harvest *applies* files but does not stage them; a `git commit -a` (or partial `git add`) commits only tracked-modified files and silently omits new untracked ones, while the message still claims the feature. Use **`git add -A && git commit`** (the harvest guidance's exact line) — never `commit -a`. Check before committing: `git status --short` should show the run's new files as `??`; they must be staged. (WP-226 will make harvest `git add` what it applies.) |
-| `devbox run harvest` says `Successfully applied changes` but the feature is missing / files unchanged | The pre-fix modified-file blind spot (dogfood-014 **F-20**): the old harvest skipped a file whose host version *differed* from the run's final version, which is exactly the normal case for an edit-in-place. **Fixed** (commit `0c20694`): harvest now applies the workspace's final version by intent and a **reconciliation pass** hard-errors (exit 1) on any unapplied change — it can no longer report success having applied nothing. To check past runs for silent drops: `devbox run harvest-audit` (every run's final file content vs git history). Reminder: `devbox run harvest` defaults to the **newest** run (devbox doesn't forward args) — for a specific run use `bash scripts/harvest.sh <run-id>`. |
-| `devbox run harvest` (or a full-suite run) fails on a `cli.test.ts` test unrelated to the run's diff | The watch race flake (dogfood-004 F-15). **Fixed by WP-223** (dogfood-007 `run-22b337a9`, commit pending review): transition lines now derive from durable journal entries, not poll sampling — three clean full-suite runs post-fix. Seeing either flavor (`budget halt` missing the `SUSPENDED at the budget cap` line, `loop-breaker escalation` missing the `AWAITING_APPROVAL` line) on a post-WP-223 tree is a regression — file it. |
+| A `feat:` commit's diff is only docs — the harvested CODE (new files) is missing | The untracked-new-file commit gap (dogfood-015 **F-21**). **Fixed by WP-226**: harvest now stages every applied file after reconciliation. Dogfood-016 proved the path with both new files staged. |
+| `devbox run harvest` says `Successfully applied changes` but the feature is missing / files unchanged | The pre-fix modified-file blind spot (dogfood-014 **F-20**): the old harvest skipped a file whose host version *differed* from the run's final version, which is exactly the normal case for an edit-in-place. **Fixed** (commit `0c20694`): harvest now applies the workspace's final version by intent and a **reconciliation pass** hard-errors (exit 1) on any unapplied change — it can no longer report success having applied nothing. To check past runs for silent drops: `devbox run harvest-audit` (every run's final file content vs git history). Reminder: `devbox run harvest` defaults to the **newest** run (devbox doesn't forward args) — for a specific run use `devbox run -- bash scripts/harvest.sh <run-id>`. |
+| A full-suite run fails because `cli.test.ts` misses `AWAITING_APPROVAL` immediately before terminal FAILED | F-15's terminal-boundary remainder (dogfood-016 **F-23**, → WP-227): `followRun` can append a transition after its journal scan and then return terminal status without a final drain. Focused reruns may pass. Dogfood-017 adds the final drain and deterministic regression test. |
 | A full-suite or AC run fails on `agent-loop.test.ts > incomplete empty-diff verdict keeps RUNNING…` with `expected undefined to deeply equal { kind: 'PROCEED', … }` | Pre-existing test-harness race (dogfood-007 F-19, fix WP-225): the test's `waitFor` gates on the judge-wire hit count, not on the verdict being journaled, so `lastVerdict` can still be `undefined` at assert time (flapped 2/13 host invocations). Re-run the file in isolation; unrelated to any CLI diff. One-line fix: gate the predicate on `report.lastVerdict !== undefined`. |
 
 ## 8. Known P1 limitations (so you don't fight them)
@@ -480,9 +492,9 @@ a first-attempt SUCCESS and produced three plan-changing findings
   fires the judge as soon as a step returns SUCCESS with an empty diff, so
   a finished run no longer waits for the cadence boundary. But the trigger
   is *inference*: the executor must spend one empty-diff step (~34–252k
-  input tokens observed across dogfood-002…013) rediscovering "nothing to do"
+  input tokens observed across dogfood-002…016) rediscovering "nothing to do"
   before the judge can seal. Priced cost-share has spanned **5.8 %–35.1 %**
-  across nine priced campaigns (record low 5.8 % in dogfood-009, record high
+  across twelve priced campaigns (record low 5.8 % in dogfood-009, record high
   35.1 % in dogfood-013) — the share tracks executor discretion on the suite
   re-run and inversely the size of the productive step it follows, so a cheap
   real step inflates the probe's share. The explicit `claimsComplete` signal
