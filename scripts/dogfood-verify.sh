@@ -145,7 +145,7 @@ echo
 # ── 5. harvest byte-diff (working tree vs run workspace) ─────────────────────
 echo "## 5. Harvest byte-diff (working tree vs $WORKSPACE)"
 echo '```'
-git status --short | awk '{print $NF}' | grep -E '^(packages|services|benchmarks)/' | while read -r f; do
+(git diff --name-only; git diff --cached --name-only; git ls-files --others --exclude-standard) | sort -u | grep -E '^(packages|services|benchmarks)/' | while read -r f; do
   if [ -f "$WORKSPACE/$f" ]; then
     if diff -q "$f" "$WORKSPACE/$f" >/dev/null 2>&1; then
       echo "IDENTICAL: $f"

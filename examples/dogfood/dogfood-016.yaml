@@ -1,0 +1,121 @@
+# Dogfood-016: WP-219 S3 pure precondition — `hasDependencyCycle`
+# (plan.md §6; ADR-005). dogfood-015 added `readyNodes` (the chain executor's
+# dependency-resolution core). This adds its safety precondition: detect a
+# dependency CYCLE in a Plan. A cyclic plan deadlocks `readyNodes` — it would
+# return [] forever once the acyclic prefix is done — so the chain executor
+# must reject a cyclic decomposition up front (and the plan meta-judge can use
+# this as a hard check). Pure graph predicate, no IO, two NEW files, same shape
+# as dogfood-010…015.
+#
+# ⚠ PRECONDITION: the ADR-005 slice-1 contracts (Plan/PlanNode in types.ts,
+# commit `d56f35a`) MUST be on HEAD — this slice imports the `Plan` TYPE. They
+# are committed. ALSO commit dogfood-015's `readyNodes`
+# (`packages/sdk-ts/src/chain/sequencing.ts` + test) first if not yet done —
+# it is harvested-but-uncommitted (F-21); don't lose it, and keep the
+# `src/chain/` module coherent. This slice itself imports only the `Plan` type,
+# so it does not strictly need sequencing.ts, but commit it anyway.
+#
+# Zero-secrets launch (locally-authenticated CLIs; see DOGFOODING.md §2.2/§3.8):
+#   node scripts/cli-judge-proxy.mjs 8787 gemini &
+#   OPENAI_COMPAT_BASE_URL=http://127.0.0.1:8787 pnpm chikory run examples/dogfood/dogfood-016.yaml --watch
+#
+# ⚠ Commit everything before launching — the run workspace clones HEAD.
+name: dogfood-016-wp-219-has-dependency-cycle
+goal: >
+  Implement WP-219 S3 pure precondition (plan.md §6; ADR-005): add a PURE
+  predicate that detects a dependency cycle in a Plan. Exactly two NEW files
+  are created and nothing else changes — in particular DO NOT touch types.ts,
+  schemas.ts, taskspec.ts, the runner/ agent loop, src/chain/sequencing.ts, or
+  any other existing src file or test, and add no dependency. Do NOT perform
+  any network/IO — this is a pure graph predicate only.
+
+  Create packages/sdk-ts/src/chain/validation.ts exporting:
+
+    export function hasDependencyCycle(plan: Plan): boolean
+
+  Import the `Plan` interface as a TYPE import from "../types.js" (added by the
+  ADR-005 slice-1 contracts, on HEAD). Detect a cycle via Kahn's algorithm over
+  the dependency edges (a node depends on the ids in its `dependsOn`; only ids
+  that are actual node ids count as edges). Implement exactly:
+
+    const ids = new Set(plan.nodes.map((n) => n.id));
+    const indegree = new Map<string, number>();
+    for (const node of plan.nodes) {
+      indegree.set(node.id, node.dependsOn.filter((d) => ids.has(d)).length);
+    }
+    const ready = plan.nodes
+      .filter((n) => indegree.get(n.id) === 0)
+      .map((n) => n.id);
+    let processed = 0;
+    while (ready.length > 0) {
+      const id = ready.shift();
+      if (id === undefined) break;
+      processed += 1;
+      for (const node of plan.nodes) {
+        if (node.dependsOn.includes(id)) {
+          const next = (indegree.get(node.id) ?? 0) - 1;
+          indegree.set(node.id, next);
+          if (next === 0) ready.push(node.id);
+        }
+      }
+    }
+    return processed < plan.nodes.length;
+
+  Add no other exports. Do NOT use non-null assertions (`!`) — strict TS.
+
+  Create packages/sdk-ts/test/chain/validation.test.ts — a PURE unit test (no
+  Temporal, no runner harness; it must pass standalone) using vitest
+  (`import { describe, expect, test } from "vitest";`). Import
+  `hasDependencyCycle` from "../../src/chain/validation.js" and the `Plan` type
+  from "../../src/types.js". Add a helper to build a minimal `Plan` from a list
+  of `[id, dependsOn[]]` pairs (each node: that id and dependsOn, goal "g",
+  acceptanceCriteria: [{ id: "AC-1", description: "x" }], budgetUsd: 5; plan id
+  "plan-1", goal "g", createdAt "2026-06-13T00:00:00.000Z"). Add a
+  `describe("hasDependencyCycle (WP-219)", …)` block with exactly four tests,
+  each asserting `toBe`:
+    1. acyclic linear  — N-1 [], N-2 ["N-1"], N-3 ["N-1","N-2"]   → false
+    2. two-node cycle  — N-1 ["N-2"], N-2 ["N-1"]                 → true
+    3. self dependency — N-1 ["N-1"]                              → true
+    4. acyclic diamond — N-1 [], N-2 ["N-1"], N-3 ["N-1"], N-4 ["N-2","N-3"] → false
+
+  Follow AGENTS.md conventions: strict TypeScript, ESM imports with `.js`
+  extensions, named exports only, no default export.
+repos:
+  - url: /Users/nikitazolotarev/repos/chikory
+    writable: true
+acceptance_criteria:
+  # Judge-executed in the run workspace (fresh clone), bare pnpm, 120 s cap
+  # per check. Host-timed 2026-06-13 on the identical surface: validation test
+  # ≈ 1.0 s, contracts ≈ 1.0 s, typecheck + lint ≈ 4 s; install dominates AC-1.
+  - id: AC-1
+    description: >
+      the new hasDependencyCycle unit tests pass (acyclic linear, two-node
+      cycle, self-dependency, acyclic diamond)
+    check: pnpm install --prefer-offline --silent && pnpm --filter @chikory/sdk exec vitest run test/chain/validation.test.ts
+  - id: AC-2
+    description: >
+      the frozen Plan contracts the new module imports are intact — the
+      contract conformance suite still passes (the new module has no
+      call-sites, so nothing else can change)
+    check: pnpm --filter @chikory/sdk exec vitest run test/contracts.test.ts
+  - id: AC-3
+    description: strict typecheck and lint are clean
+    check: pnpm --filter @chikory/sdk typecheck && pnpm --filter @chikory/sdk lint
+budget_usd: 5
+max_steps: 4
+executor:
+  adapter: codex
+  family: openai
+judge:
+  # openai-compat = the keyless shim seam; real family = the shim backend
+  # (gemini) — structurally different from the openai executor.
+  family: openai-compat
+  cadence: 2
+  max_cost_share: 0.5
+routing:
+  stages:
+    # plan/review unused by CLI executors in P1; code.model feeds `codex -m`.
+    plan: { provider: openai-compat, model: gpt-5.5 }
+    code: { provider: openai-compat, model: gpt-5.5 }
+    review: { provider: openai-compat, model: gpt-5.5 }
+    judge: { provider: openai-compat, model: gemini-3.1-pro-preview }

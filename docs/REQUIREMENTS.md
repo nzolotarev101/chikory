@@ -84,7 +84,7 @@ Every requirement in [`project.md`](../project.md), assigned a stable ID, mapped
 
 | ID | Requirement | WP(s) | Phase | Status |
 |---|---|---|---|---|
-| FA-1 | Entire production-ready apps: brownfield, multi-repo, migrations, long-horizon | ADR-003 (capability via wrapped agents); WP-219 (goal decomposition & run chaining — the long-horizon gap, dogfood-002 F-10); WP-220 (`chikory land` — the per-slice landing primitive chaining calls between runs, delivered via dogfood-005 `run-34926e85`); WP-214 (multi-repo); P3 brownfield benchmark proves it | P1→P3 | in-progress (landing primitive done; decomposition ADR-005 next) |
+| FA-1 | Entire production-ready apps: brownfield, multi-repo, migrations, long-horizon | ADR-003 (capability via wrapped agents); WP-219 (goal decomposition & run chaining — the long-horizon gap, dogfood-002 F-10); WP-220 (`chikory land` — the per-slice landing primitive chaining calls between runs, delivered via dogfood-005 `run-34926e85`); WP-214 (multi-repo); P3 brownfield benchmark proves it | P1→P3 | in-progress (landing primitive done; **ADR-005 accepted + WP-219 S1 contracts landed `d56f35a`**; S3 pure half `readyNodes` delivered dogfood-015, pending commit; planner/executor slices next) |
 | FA-2 | Reliable, redundant execution; fluent restart on failure | WP-123 | P1 | done |
 | FA-3 | Token awareness + intelligent pacing during planning AND execution (batch size, test count, checkpoint cadence, breaks) | WP-207; inputs from WP-105 accounting | P2 | planned |
 

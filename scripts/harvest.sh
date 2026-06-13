@@ -117,6 +117,13 @@ else
     exit 1
   fi
   echo "Reconciliation OK: every changed file matches the run workspace."
+  echo "Staging applied changes..."
+  for f in ${EXPECT_PRESENT[@]+"${EXPECT_PRESENT[@]}"}; do
+    git add "$f"
+  done
+  for f in ${EXPECT_ABSENT[@]+"${EXPECT_ABSENT[@]}"}; do
+    git rm --cached -rf "$f" >/dev/null 2>&1 || true
+  done
 fi
 
 # ── 4. Verify (build first — chikory bin runs from dist/, dogfood-004 F-16) ──
@@ -133,7 +140,7 @@ echo "Harvest complete and reconciled for run $RUN_ID."
 echo "=========================================================="
 echo "Next:"
 echo "1. Review the applied diff:  git status && git diff"
-echo "2. Commit:                   git add -A && git commit -m \"feat(<scope>): <message>\""
+echo "2. Commit:                   git commit -m \"feat(<scope>): <message>\""
 echo "   (cite Run ID: $RUN_ID and the verification checks above)"
 echo "3. Post-run review:          /dogfood-review $RUN_ID"
 echo "=========================================================="

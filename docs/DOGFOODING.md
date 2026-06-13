@@ -84,8 +84,18 @@ skip) while reporting success — root-caused and fixed the same session
 F-11 was a mid-spread 24.1 %. **Then the contract wall fell by hand**: WP-219
 ADR-005 was accepted and its slice-1 contracts (`Plan`/chain types +
 `claimsComplete`/`budgetTokens`) landed — unblocking the dogfoodable chain
-implementation slices. Next: dogfood-015 carves the pure half of the chain
-executor (`readyNodes`), the first consumer of the new `Plan` types.
+implementation slices. Dogfood-015
+(`docs/reports/dogfood-015.md`) delivered that pure half — `readyNodes(plan,
+completed)`, the chain executor's dependency-resolution core — the **first
+slice to consume the ADR-005 contracts** (its own AC-2 kept the 77-test
+conformance suite green inside the run), and the cheapest campaign yet ($0.39).
+Its one new friction, **F-21**, is again in the *landing*, not the output: the
+harvested NEW files (`src/chain/`) were left untracked and the operator's
+commit shipped only the review docs under a "readyNodes" message — a "feat"
+commit with none of the feature's code (→ WP-226: harvest stages what it
+applies; until then follow the guidance's `git add -A` literally). Next:
+dogfood-016 carves the executor's other pure precondition — `hasDependencyCycle`
+over a `Plan`.
 
 Related docs: [`docs/spec/task-spec.md`](spec/task-spec.md) (schema
 reference) · [`docs/TASK-PROTOCOL.md`](TASK-PROTOCOL.md) (WP etiquette, §7 is
@@ -446,6 +456,7 @@ a first-attempt SUCCESS and produced three plan-changing findings
 | `pnpm chikory: command not found` | Bin link lost: `rm node_modules/.pnpm-workspace-state-v1.json && devbox run -- pnpm install`. |
 | Proxy run dies with router FAILED on judge pass | Shim not running / wrong port — restart `cli-judge-proxy.mjs` and check `OPENAI_COMPAT_BASE_URL`. |
 | `[cli-judge:…] FAILED … 404/500` *during executor steps* | Not the judge: the executor inherited `OPENAI_COMPAT_BASE_URL` and its in-workspace test run un-skipped `providers.integration.test.ts`, which pings the live shim (dogfood-004 F-14; recurred dogfood-005/006). **Fixed by WP-222 slice 1** (dogfood-006, landed `18fae43`): executor children now see only their own family key. **Closure confirmed by dogfood-007** — zero shim noise in `run-22b337a9`'s executor transcript. Seeing this symptom now is a regression — file it. |
+| A `feat:` commit's diff is only docs — the harvested CODE (new files) is missing / shows as `??` untracked | The untracked-new-file commit gap (dogfood-015 **F-21**, → WP-226). Harvest *applies* files but does not stage them; a `git commit -a` (or partial `git add`) commits only tracked-modified files and silently omits new untracked ones, while the message still claims the feature. Use **`git add -A && git commit`** (the harvest guidance's exact line) — never `commit -a`. Check before committing: `git status --short` should show the run's new files as `??`; they must be staged. (WP-226 will make harvest `git add` what it applies.) |
 | `devbox run harvest` says `Successfully applied changes` but the feature is missing / files unchanged | The pre-fix modified-file blind spot (dogfood-014 **F-20**): the old harvest skipped a file whose host version *differed* from the run's final version, which is exactly the normal case for an edit-in-place. **Fixed** (commit `0c20694`): harvest now applies the workspace's final version by intent and a **reconciliation pass** hard-errors (exit 1) on any unapplied change — it can no longer report success having applied nothing. To check past runs for silent drops: `devbox run harvest-audit` (every run's final file content vs git history). Reminder: `devbox run harvest` defaults to the **newest** run (devbox doesn't forward args) — for a specific run use `bash scripts/harvest.sh <run-id>`. |
 | `devbox run harvest` (or a full-suite run) fails on a `cli.test.ts` test unrelated to the run's diff | The watch race flake (dogfood-004 F-15). **Fixed by WP-223** (dogfood-007 `run-22b337a9`, commit pending review): transition lines now derive from durable journal entries, not poll sampling — three clean full-suite runs post-fix. Seeing either flavor (`budget halt` missing the `SUSPENDED at the budget cap` line, `loop-breaker escalation` missing the `AWAITING_APPROVAL` line) on a post-WP-223 tree is a regression — file it. |
 | A full-suite or AC run fails on `agent-loop.test.ts > incomplete empty-diff verdict keeps RUNNING…` with `expected undefined to deeply equal { kind: 'PROCEED', … }` | Pre-existing test-harness race (dogfood-007 F-19, fix WP-225): the test's `waitFor` gates on the judge-wire hit count, not on the verdict being journaled, so `lastVerdict` can still be `undefined` at assert time (flapped 2/13 host invocations). Re-run the file in isolation; unrelated to any CLI diff. One-line fix: gate the predicate on `report.lastVerdict !== undefined`. |
