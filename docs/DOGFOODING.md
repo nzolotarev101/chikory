@@ -28,7 +28,13 @@ executor steps exactly as the spec predicted. Dogfood-007
 transitions) — seventh first-attempt SUCCESS, closing F-15 by construction
 (three clean full-suite runs post-fix) and confirming F-14 closure (zero
 shim noise in the executor transcript, the acceptance test dogfood-006
-set).
+set). Dogfood-008 (`docs/reports/dogfood-008.md`) delivered WP-224
+(`chikory land --verify` + git-stderr capture) — eighth first-attempt
+SUCCESS, the **second campaign with no new friction**, closing F-17 (land
+never verified) and F-18 (git stderr leak): `land --verify` now reruns
+build/lint/typecheck/test against the fresh commit and exits nonzero on
+red. F-11's completion-probe tax recurred at a new record 25.4 % cost
+share (cheap productive step → proportionally larger wasted probe).
 
 Related docs: [`docs/spec/task-spec.md`](spec/task-spec.md) (schema
 reference) · [`docs/TASK-PROTOCOL.md`](TASK-PROTOCOL.md) (WP etiquette, §7 is
@@ -324,14 +330,21 @@ Land it per TASK-PROTOCOL (one WP = one branch = one PR). Since WP-220
 (dogfood-005) this is one command:
 
 ```sh
-pnpm chikory land <run-id> [--branch wp-201-python-parity] [--repo <dir>]
+pnpm chikory land <run-id> --verify [--branch wp-201-python-parity] [--repo <dir>]
 # → branch + ONE squashed `feat: land <run-id>` commit (body cites run-id,
 #   workspace, verification commands), prints branch/sha/forensics line.
+# --verify (since WP-224, dogfood-008): reruns devbox build/lint/typecheck/test
+#   against the fresh commit, stops on first red, KEEPS the commit, exits 1.
 # Requires a clean target tree; fails actionably on missing workspace or empty diff.
 ```
 
-`land` covers harvest.sh's apply-and-commit half only — **it does not
-rebuild or verify** (dogfood-005 F-17, fix WP-224). After landing, always:
+Since WP-224 (dogfood-008) `land --verify` reruns the four `devbox run
+build/lint/typecheck/test` commands against the fresh commit (F-17 closed)
+and the `git()` helper now captures + surfaces git stderr instead of
+leaking `Switched to a new branch …` lines (F-18 closed). Use `--verify`
+as the default landing path; the commit is kept even on a red check so you
+can inspect it (`git -C <repo> show <sha>`). Without `--verify`, `land`
+still only applies + commits — verify by hand:
 
 ```sh
 devbox run build && devbox run lint && devbox run typecheck && devbox run test
@@ -372,7 +385,7 @@ and produced three plan-changing findings (F-8…F-10 → WP-217…WP-220).
 | Judge checks time out | 120 s/check cap. Bare `pnpm` not `devbox run` (§3.4); split slow suites into a focused test file per criterion. |
 | Judge verdict is ESCALATE with `judge raised concerns` | The rubric/concerns fired (e.g. scope creep, deleted tests). `trace --step <n>` shows the full form; approve or reject deliberately. |
 | CLI behaves like yesterday’s code (e.g. a just-harvested trace feature missing from `chikory trace`) | Stale `dist/`. `devbox run build`. `harvest.sh` now rebuilds before verification (dogfood-004 F-16); the dogfood script builds *pre-run*, so post-harvest forensics always need the rebuild. |
-| `chikory land` succeeded but the landed feature is invisible / verification not run | By design (dogfood-005 F-17, fix WP-224): `land` only applies + commits — it never rebuilds or verifies. Run `devbox run build && devbox run lint && devbox run typecheck && devbox run test` on the fresh branch. Stray `Switched to a new branch …` lines in its output are git stderr passing through (F-18, cosmetic). |
+| `chikory land` succeeded but the landed feature is invisible / verification not run | Pass `--verify` (since WP-224, dogfood-008): it reruns `devbox run build/lint/typecheck/test` against the fresh commit and exits 1 on the first red check (commit kept for inspection). Bare `land` (no flag) still only applies + commits — run the four commands by hand. The stray `Switched to a new branch …` lines are gone (F-18 fixed): git stderr is now captured and only surfaced inside `land failed: …` on real errors. |
 | `pnpm chikory: command not found` | Bin link lost: `rm node_modules/.pnpm-workspace-state-v1.json && devbox run -- pnpm install`. |
 | Proxy run dies with router FAILED on judge pass | Shim not running / wrong port — restart `cli-judge-proxy.mjs` and check `OPENAI_COMPAT_BASE_URL`. |
 | `[cli-judge:…] FAILED … 404/500` *during executor steps* | Not the judge: the executor inherited `OPENAI_COMPAT_BASE_URL` and its in-workspace test run un-skipped `providers.integration.test.ts`, which pings the live shim (dogfood-004 F-14; recurred dogfood-005/006). **Fixed by WP-222 slice 1** (dogfood-006, landed `18fae43`): executor children now see only their own family key. **Closure confirmed by dogfood-007** — zero shim noise in `run-22b337a9`'s executor transcript. Seeing this symptom now is a regression — file it. |

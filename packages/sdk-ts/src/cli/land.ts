@@ -1,4 +1,4 @@
-import { execFileSync } from "node:child_process";
+import { execFileSync, execSync } from "node:child_process";
 import { existsSync } from "node:fs";
 import { resolve } from "node:path";
 
@@ -9,12 +9,25 @@ interface LandArgs extends CommonFlags {
   runId: string;
   branch?: string;
   repo?: string;
+  verify?: boolean;
 }
+
+export interface LandDeps extends CliDeps {
+  runCheck?: (command: string, cwd: string) => void;
+}
+
+export const VERIFY_COMMANDS: readonly string[] = [
+  "devbox run build",
+  "devbox run lint",
+  "devbox run typecheck",
+  "devbox run test",
+];
 
 function git(cwd: string, args: string[], input?: string): string {
   return execFileSync("git", ["-C", cwd, ...args], {
     encoding: "utf8",
     maxBuffer: 100 * 1024 * 1024,
+    stdio: ["pipe", "pipe", "pipe"],
     ...(input === undefined ? {} : { input }),
   });
 }
@@ -30,15 +43,30 @@ function hasRef(cwd: string, ref: string): boolean {
 
 function errorMessage(error: unknown): string {
   const message = error instanceof Error ? error.message : String(error);
-  return message.replace(/\s+/g, " ").trim();
+  const collapsedMessage = message.replace(/\s+/g, " ").trim();
+  if (
+    typeof error === "object" &&
+    error !== null &&
+    "stderr" in error &&
+    typeof error.stderr === "string"
+  ) {
+    const stderr = error.stderr.replace(/\s+/g, " ").trim();
+    if (stderr !== "") return `${collapsedMessage}: ${stderr}`;
+  }
+  return collapsedMessage;
 }
 
 /**
  * Land a finished run's net workspace diff as one auditable commit.
  */
-export async function cmdLand(args: LandArgs, deps: CliDeps = {}): Promise<number> {
+export async function cmdLand(args: LandArgs, deps: LandDeps = {}): Promise<number> {
   const out = deps.out ?? (() => {});
   const err = deps.err ?? (() => {});
+  const runCheck =
+    deps.runCheck ??
+    ((command: string, cwd: string): void => {
+      execSync(command, { cwd, stdio: ["ignore", "inherit", "inherit"] });
+    });
   const workspace = workspaceDir(args.dataDir, args.runId);
   const repo = resolve(args.repo ?? process.cwd());
   const branch = args.branch ?? `land-${args.runId}`;
@@ -79,14 +107,38 @@ export async function cmdLand(args: LandArgs, deps: CliDeps = {}): Promise<numbe
       [
         `Run-ID: ${args.runId}`,
         `Source workspace: ${workspace}`,
-        "Verification: devbox run build && devbox run lint && devbox run typecheck && devbox run test",
+        `Verification: ${VERIFY_COMMANDS.join(" && ")}`,
       ].join("\n"),
     ]);
     const sha = git(repo, ["rev-parse", "HEAD"]).trim();
 
+    if (args.verify === true) {
+      for (const command of VERIFY_COMMANDS) {
+        if (!args.json) out(`verify: ${command}`);
+        try {
+          runCheck(command, repo);
+        } catch {
+          err(`chikory: verification failed: ${command}`);
+          err(`chikory: commit kept: ${sha} — inspect with: git -C ${repo} show ${sha}`);
+          return 1;
+        }
+      }
+    }
+
     if (args.json) {
-      out(JSON.stringify({ runId: args.runId, branch, commit: sha, workspace }));
+      out(
+        JSON.stringify({
+          runId: args.runId,
+          branch,
+          commit: sha,
+          workspace,
+          ...(args.verify === true ? { verified: true } : {}),
+        }),
+      );
     } else {
+      if (args.verify === true) {
+        out(`verified: ${VERIFY_COMMANDS.length}/${VERIFY_COMMANDS.length} checks green`);
+      }
       out(`branch: ${branch}`);
       out(`commit: ${sha}`);
       out(`forensics: chikory trace ${args.runId}`);

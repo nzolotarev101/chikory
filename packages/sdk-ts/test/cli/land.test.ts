@@ -5,13 +5,13 @@ import { join } from "node:path";
 
 import { afterEach, describe, expect, test } from "vitest";
 
-import type { CliDeps } from "../../src/cli/commands.js";
+import { type LandDeps, VERIFY_COMMANDS } from "../../src/cli/land.js";
 import { main } from "../../src/cli/main.js";
 
 interface Cli {
   out: string[];
   err: string[];
-  deps: CliDeps;
+  deps: LandDeps;
 }
 
 interface Fixture {
@@ -142,5 +142,60 @@ describe("chikory land (WP-220)", () => {
     ).toBe(1);
     expect(c.err).toEqual([expect.stringContaining("has no workspace changes to land")]);
     expect(git(f.repo, ["rev-parse", "HEAD"])).toBe(f.baseSha);
+  });
+
+  test("--verify runs the four devbox checks in order against the target repo", async () => {
+    const f = await fixture();
+    const c = cli();
+    const checks: Array<{ command: string; cwd: string }> = [];
+    c.deps.runCheck = (command, cwd) => checks.push({ command, cwd });
+
+    expect(
+      await main(
+        ["land", f.runId, "--verify", "--repo", f.repo, "--data-dir", f.dataDir],
+        c.deps,
+      ),
+    ).toBe(0);
+    expect(checks.map(({ command }) => command)).toEqual(VERIFY_COMMANDS);
+    expect(checks.every(({ cwd }) => cwd === f.repo)).toBe(true);
+    expect(c.out).toContain("verified: 4/4 checks green");
+  });
+
+  test("--verify stops at the first red check, keeps the commit, exits 1", async () => {
+    const f = await fixture();
+    const c = cli();
+    const commands: string[] = [];
+    c.deps.runCheck = (command) => {
+      commands.push(command);
+      if (command === "devbox run lint") throw new Error("red");
+    };
+
+    expect(
+      await main(
+        ["land", f.runId, "--verify", "--repo", f.repo, "--data-dir", f.dataDir],
+        c.deps,
+      ),
+    ).toBe(1);
+    expect(commands).toEqual(["devbox run build", "devbox run lint"]);
+    expect(git(f.repo, ["rev-list", "--count", `${f.baseSha}..HEAD`])).toBe("1");
+    expect(c.err).toEqual([
+      expect.stringContaining("verification failed: devbox run lint"),
+      expect.stringContaining("commit kept"),
+    ]);
+  });
+
+  test("git failures surface git's stderr in the error message", async () => {
+    const f = await fixture();
+    await writeFile(join(f.repo, "landed.txt"), "from host repository\n");
+    git(f.repo, ["add", "--all"]);
+    git(f.repo, ["commit", "-m", "feat: conflicting host change"]);
+    const c = cli();
+
+    expect(
+      await main(["land", f.runId, "--repo", f.repo, "--data-dir", f.dataDir], c.deps),
+    ).toBe(1);
+    expect(c.err).toHaveLength(1);
+    expect(c.err[0]).toContain("land failed");
+    expect(c.err[0]).toContain("landed.txt");
   });
 });

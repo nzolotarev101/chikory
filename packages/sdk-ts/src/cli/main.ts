@@ -14,10 +14,9 @@ import {
   cmdRun,
   cmdStatus,
   cmdTrace,
-  type CliDeps,
   type CommonFlags,
 } from "./commands.js";
-import { cmdLand } from "./land.js";
+import { cmdLand, type LandDeps } from "./land.js";
 
 export const HELP = `chikory — vendor-neutral control plane for long-running, self-correcting agents
 
@@ -59,6 +58,7 @@ trace options:
 land options:
   --branch <name>       target branch (default: land-<run-id>)
   --repo <dir>          target repository (default: current directory)
+  --verify   run devbox build/lint/typecheck/ test after committing; exit 1 on red (commit kept)
 
 exit codes:
   0  command succeeded; run/resume: run sealed SUCCESS
@@ -110,7 +110,7 @@ interface Io {
   err: (line: string) => void;
 }
 
-export async function main(argv: string[], deps: CliDeps = {}): Promise<number> {
+export async function main(argv: string[], deps: LandDeps = {}): Promise<number> {
   const io: Io = {
     out: deps.out ?? ((line) => console.log(line)),
     err: deps.err ?? ((line) => console.error(line)),
@@ -143,6 +143,7 @@ export async function main(argv: string[], deps: CliDeps = {}): Promise<number> 
         parsed = parseCommand(rest, {
           branch: { type: "string" },
           repo: { type: "string" },
+          verify: { type: "boolean" },
         });
         break;
       case "status":
@@ -214,7 +215,10 @@ export async function main(argv: string[], deps: CliDeps = {}): Promise<number> 
       if (runId === undefined) return 1;
       const branch = typeof values["branch"] === "string" ? values["branch"] : undefined;
       const repo = typeof values["repo"] === "string" ? values["repo"] : undefined;
-      return cmdLand({ runId, branch, repo, ...flags }, { ...deps, out: io.out, err: io.err });
+      return cmdLand(
+        { runId, branch, repo, verify: values["verify"] === true, ...flags },
+        { ...deps, out: io.out, err: io.err },
+      );
     }
     /* v8 ignore next 2 — unreachable: unknown commands return above */
     default:
