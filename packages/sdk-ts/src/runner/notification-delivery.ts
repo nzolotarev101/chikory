@@ -11,3 +11,19 @@ export function slackPayloadFor(notification: Notification): { text: string } {
     text: `${EMOJI[notification.trigger]} ${notification.message}`,
   };
 }
+
+const TITLE: Record<Notification["trigger"], string> = {
+  escalate: "🚨 Escalation",
+  milestone: "✅ Milestone",
+  terminal: "🏁 Run finished",
+};
+
+export function desktopPayloadFor(notification: Notification): {
+  title: string;
+  body: string;
+} {
+  return {
+    title: TITLE[notification.trigger],
+    body: notification.message,
+  };
+}
