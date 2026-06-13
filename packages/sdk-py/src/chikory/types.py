@@ -28,6 +28,20 @@ JournalEntryKind = Literal[
     "compaction",
     "pacing",
     "terminal",
+    "plan",
+    "plan_verdict",
+    "node_started",
+    "node_sealed",
+]
+PlanVerdictKind = Literal["PROCEED", "REVISE", "ESCALATE"]
+ChainStatus = Literal[
+    "PLANNING",
+    "AWAITING_PLAN_APPROVAL",
+    "RUNNING",
+    "SUSPENDED",
+    "SUCCESS",
+    "FAILED",
+    "CANCELLED",
 ]
 CheckpointId = str
 RunStatus = Literal[
@@ -141,18 +155,26 @@ class ExecutorConfig(ContractModel):
     family: LLMProvider
 
 
+class ChainLink(ContractModel):
+    plan_id: str
+    node_id: str
+    parent_run_id: str | None = None
+
+
 class TaskSpec(ContractModel):
     name: str
     goal: str
     repos: list[RepoSpec] = Field(min_length=1)
     acceptance_criteria: list[AcceptanceCriterion] = Field(min_length=1)
     budget_usd: float = Field(gt=0)
+    budget_tokens: int | None = Field(default=None, gt=0)
     max_steps: int | None = None
     executor: ExecutorConfig
     judge: JudgePolicy
     routing: RoutingPolicy
     pacing: PacingPolicy | None = None
     notifications: NotificationPolicy | None = None
+    chain_link: ChainLink | None = None
 
     @model_validator(mode="after")
     def validate_task(self) -> Self:
@@ -213,6 +235,7 @@ class StepRecord(ContractModel):
     duration_ms: int
     transcript_ref: ArtifactRef
     failure: StepFailure | None = None
+    claims_complete: bool | None = None
 
 
 class TestResultArtifact(ContractModel):
@@ -301,3 +324,35 @@ class RunStatusReport(ContractModel):
     last_verdict: LastVerdict | None = None
     checkpoints: list[Checkpoint]
     failure: RunFailure | None = None
+
+
+# ── Plans & chains (WP-219, ADR-005) ──────────────────────────────────────────
+
+
+class PlanNode(ContractModel):
+    id: str
+    goal: str
+    acceptance_criteria: list[AcceptanceCriterion] = Field(min_length=1)
+    depends_on: list[str]
+    budget_usd: float = Field(gt=0)
+
+
+class Plan(ContractModel):
+    id: str
+    goal: str
+    nodes: list[PlanNode] = Field(min_length=1)
+    created_at: str
+
+
+class PlanVerdict(ContractModel):
+    kind: PlanVerdictKind
+    rationale: str
+    uncovered_criteria: list[str]
+
+
+class ChainRecord(ContractModel):
+    plan_id: str
+    plan: Plan
+    plan_verdict: PlanVerdict | None = None
+    node_runs: dict[str, str]
+    status: ChainStatus

@@ -12,6 +12,8 @@ import { z } from "zod";
 import type {
   AcceptanceCriterion,
   ArtifactRef,
+  ChainLink,
+  ChainRecord,
   Checkpoint,
   CompletionRequest,
   ContextBundle,
@@ -25,6 +27,9 @@ import type {
   ModelChoice,
   NotificationPolicy,
   PacingPolicy,
+  Plan,
+  PlanNode,
+  PlanVerdict,
   RepoSpec,
   RouterError,
   RoutingPolicy,
@@ -162,6 +167,15 @@ export const NotificationPolicySchema = z
   })
   .strict();
 
+/** WP-219 (ADR-005) — run → chain back-reference; defined here for TaskSpec. */
+export const ChainLinkSchema = z
+  .object({
+    planId: z.string().min(1),
+    nodeId: z.string().min(1),
+    parentRunId: z.string().min(1).optional(),
+  })
+  .strict();
+
 export const TaskSpecSchema = z
   .object({
     name: z.string().min(1),
@@ -169,6 +183,7 @@ export const TaskSpecSchema = z
     repos: z.array(RepoSpecSchema).min(1),
     acceptanceCriteria: z.array(AcceptanceCriterionSchema).min(1),
     budgetUsd: z.number().gt(0),
+    budgetTokens: z.number().int().positive().optional(),
     maxSteps: z.number().int().positive().optional(),
     executor: z
       .object({
@@ -180,6 +195,7 @@ export const TaskSpecSchema = z
     routing: RoutingPolicySchema,
     pacing: PacingPolicySchema.optional(),
     notifications: NotificationPolicySchema.optional(),
+    chainLink: ChainLinkSchema.optional(),
   })
   .strict();
 
@@ -268,6 +284,7 @@ export const StepRecordSchema = z
       })
       .strict()
       .optional(),
+    claimsComplete: z.boolean().optional(),
   })
   .strict();
 
@@ -333,6 +350,10 @@ export const JournalEntryKindSchema = z.enum([
   "compaction",
   "pacing",
   "terminal",
+  "plan",
+  "plan_verdict",
+  "node_started",
+  "node_sealed",
 ]);
 
 export const JournalEntrySchema = z
@@ -393,6 +414,57 @@ export const RunStatusReportSchema = z
   })
   .strict();
 
+// ─── §7a Plans & chains (WP-219, ADR-005) ───────────────────────────────────
+
+export const PlanNodeSchema = z
+  .object({
+    id: z.string().min(1),
+    goal: z.string().min(1),
+    acceptanceCriteria: z.array(AcceptanceCriterionSchema).min(1),
+    dependsOn: z.array(z.string().min(1)),
+    budgetUsd: z.number().gt(0),
+  })
+  .strict();
+
+export const PlanSchema = z
+  .object({
+    id: z.string().min(1),
+    goal: z.string().min(1),
+    nodes: z.array(PlanNodeSchema).min(1),
+    createdAt: z.string().datetime(),
+  })
+  .strict();
+
+export const PlanVerdictKindSchema = z.enum(["PROCEED", "REVISE", "ESCALATE"]);
+
+export const PlanVerdictSchema = z
+  .object({
+    kind: PlanVerdictKindSchema,
+    rationale: z.string().min(1),
+    uncoveredCriteria: z.array(z.string().min(1)),
+  })
+  .strict();
+
+export const ChainStatusSchema = z.enum([
+  "PLANNING",
+  "AWAITING_PLAN_APPROVAL",
+  "RUNNING",
+  "SUSPENDED",
+  "SUCCESS",
+  "FAILED",
+  "CANCELLED",
+]);
+
+export const ChainRecordSchema = z
+  .object({
+    planId: z.string().min(1),
+    plan: PlanSchema,
+    planVerdict: PlanVerdictSchema.optional(),
+    nodeRuns: z.record(z.string(), z.string()),
+    status: ChainStatusSchema,
+  })
+  .strict();
+
 // ─── Type-parity assertions ─────────────────────────────────────────────────
 // Compile-time check: every valid value of a contract interface is accepted
 // by its schema's inferred type. (The runtime direction is covered by the
@@ -426,6 +498,11 @@ export type ContractTypeChecks = [
   AssertAccepts<JournalEntry, z.infer<typeof JournalEntrySchema>>,
   AssertAccepts<Checkpoint, z.infer<typeof CheckpointSchema>>,
   AssertAccepts<RunStatusReport, z.infer<typeof RunStatusReportSchema>>,
+  AssertAccepts<PlanNode, z.infer<typeof PlanNodeSchema>>,
+  AssertAccepts<Plan, z.infer<typeof PlanSchema>>,
+  AssertAccepts<PlanVerdict, z.infer<typeof PlanVerdictSchema>>,
+  AssertAccepts<ChainLink, z.infer<typeof ChainLinkSchema>>,
+  AssertAccepts<ChainRecord, z.infer<typeof ChainRecordSchema>>,
 ];
 
 /** Schema lookup by interface name — used by the fixture conformance tests. */
@@ -455,6 +532,11 @@ export const contractSchemas = {
   JournalEntry: JournalEntrySchema,
   Checkpoint: CheckpointSchema,
   RunStatusReport: RunStatusReportSchema,
+  PlanNode: PlanNodeSchema,
+  Plan: PlanSchema,
+  PlanVerdict: PlanVerdictSchema,
+  ChainLink: ChainLinkSchema,
+  ChainRecord: ChainRecordSchema,
 } as const;
 
 export type ContractName = keyof typeof contractSchemas;

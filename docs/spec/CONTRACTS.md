@@ -70,12 +70,14 @@ export interface TaskSpec {
   repos: RepoSpec[];                  // 1 in P1; N in P2 (WP-214)
   acceptanceCriteria: AcceptanceCriterion[];
   budgetUsd: number;                  // CG-2 hard cap
+  budgetTokens?: number;              // P2 (WP-218 slice 2) — token cap, complements budgetUsd
   maxSteps?: number;
   executor: { adapter: string; family: LLMProvider };
   judge: JudgePolicy;
   routing: RoutingPolicy;
   pacing?: PacingPolicy;              // P2 (WP-207); absent = fixed defaults
   notifications?: NotificationPolicy; // P2 (WP-208)
+  chainLink?: ChainLink;              // P2 (WP-219, ADR-005) — set when this run is a chain node
 }
 
 export interface RepoSpec {
@@ -136,6 +138,7 @@ export interface StepRecord {
   durationMs: number;
   transcriptRef: ArtifactRef;
   failure?: { reason: string; retriable: boolean };
+  claimsComplete?: boolean;        // P2 (WP-221) — explicit "task done"; OR'd into the WP-217 trigger (kills F-11 probe)
 }
 
 export interface TokenUsage { input: number; output: number; }
@@ -232,7 +235,9 @@ export type CheckpointId = string; // `${runId}@${journalIdx}`
 
 export type JournalEntryKind =
   | "step" | "judge" | "checkpoint" | "verdict" | "injection"
-  | "budget_event" | "compaction" | "pacing" | "terminal";
+  | "budget_event" | "compaction" | "pacing" | "terminal"
+  // P2 (WP-219, ADR-005) — chain-scope kinds (emitted to the chain store)
+  | "plan" | "plan_verdict" | "node_started" | "node_sealed";
 
 export interface JournalEntry {
   idx: number;                  // monotonic per run
@@ -289,6 +294,53 @@ export interface DurableRunner {
 ```
 
 Implementations: `TemporalRunner` (P1, only one). The interface exists because ADR-001 names a possible second (revisit trigger); do **not** add abstraction beyond it (NF-1).
+
+## 7a. Plans & chains (WP-219, ADR-005)
+
+A plan is a tree of ordinary judge-gated TaskSpec runs; chaining is an orchestration layer **above** the run loop (NF-1). Each `PlanNode` runs as a normal `TaskSpec`. The plan itself is judged by a meta-judge of a **different family than the planner** (ADR-005 D2). Chain state spans runs and lives in a chain-level store, not a per-run journal (D4).
+
+```ts
+export interface PlanNode {
+  id: string;                          // "N-1"; referenced by chain linkage + verdicts
+  goal: string;                        // self-contained 1–3-step brief; the child run's goal
+  acceptanceCriteria: AcceptanceCriterion[];
+  dependsOn: string[];                 // node ids that must reach SUCCESS first
+  budgetUsd: number;                   // per-node cap; chain budget = Σ nodes
+}
+
+export interface Plan {
+  id: string;
+  goal: string;                        // the original goal this plan decomposes
+  nodes: PlanNode[];
+  createdAt: string;                   // ISO-8601 UTC
+}
+
+export type PlanVerdictKind = "PROCEED" | "REVISE" | "ESCALATE"; // REVISE → re-plan
+
+export interface PlanVerdict {
+  kind: PlanVerdictKind;
+  rationale: string;
+  uncoveredCriteria: string[];         // goal criteria the plan fails to cover
+}
+
+export interface ChainLink {           // run → chain back-reference (on TaskSpec)
+  planId: string;
+  nodeId: string;
+  parentRunId?: string;                // run whose checkpoint this node started from
+}
+
+export type ChainStatus =
+  | "PLANNING" | "AWAITING_PLAN_APPROVAL" | "RUNNING"
+  | "SUSPENDED" | "SUCCESS" | "FAILED" | "CANCELLED";
+
+export interface ChainRecord {
+  planId: string;
+  plan: Plan;
+  planVerdict?: PlanVerdict;
+  nodeRuns: Record<string, string>;    // node id → child run id
+  status: ChainStatus;
+}
+```
 
 ## 8. Telemetry
 

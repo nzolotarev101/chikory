@@ -1,0 +1,13 @@
+{
+  "acceptanceCriteria": [
+    {
+      "check": "devbox run -- pnpm --filter @chikory/sdk test artifacts",
+      "description": "ArtifactStore interface implemented with content-addressed FS backend",
+      "id": "AC-1"
+    }
+  ],
+  "budgetUsd": 0,
+  "dependsOn": [],
+  "goal": "Add the ArtifactStore interface and a local FS backend with put/get.",
+  "id": "N-1"
+}

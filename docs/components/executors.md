@@ -40,6 +40,7 @@ export interface StepRecord {
   durationMs: number;
   transcriptRef: ArtifactRef;    // full raw transcript, stored outside context (CM-3 pattern from day 1)
   failure?: { reason: string; retriable: boolean };
+  claimsComplete?: boolean;        // P2 (WP-221) — executor's explicit "task done" signal
 }
 ```
 

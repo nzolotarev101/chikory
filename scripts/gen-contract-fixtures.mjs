@@ -161,6 +161,48 @@ const checkpoint = {
   lastGood: true,
 };
 
+// ── plans & chains (WP-219, ADR-005) ────────────────────────────────────────
+
+const planNode = {
+  id: "N-1",
+  goal: "Add the ArtifactStore interface and a local FS backend with put/get.",
+  acceptanceCriteria: [criterion],
+  dependsOn: [],
+  budgetUsd: 5,
+};
+
+const plan = {
+  id: "plan-7f3a",
+  goal: "Implement the Memory Pointer store end to end.",
+  nodes: [
+    planNode,
+    {
+      id: "N-2",
+      goal: "Wire excerpt() and apply it to tool outputs over 8KB.",
+      acceptanceCriteria: [criterion],
+      dependsOn: ["N-1"],
+      budgetUsd: 5,
+    },
+  ],
+  createdAt: "2026-06-10T12:00:00.000Z",
+};
+
+const planVerdict = {
+  kind: "PROCEED",
+  rationale: "Both criteria are covered; node boundaries are independently checkable.",
+  uncoveredCriteria: [],
+};
+
+const chainLink = { planId: "plan-7f3a", nodeId: "N-2", parentRunId: "run-7f3a-n1" };
+
+const chainRecord = {
+  planId: "plan-7f3a",
+  plan,
+  planVerdict,
+  nodeRuns: { "N-1": "run-7f3a-n1" },
+  status: "RUNNING",
+};
+
 // ── fixtures ────────────────────────────────────────────────────────────────
 
 const valid = {
@@ -238,6 +280,11 @@ const valid = {
     lastVerdict: { kind: "PROCEED", atStep: 3 },
     checkpoints: [checkpoint],
   },
+  PlanNode: planNode,
+  Plan: plan,
+  PlanVerdict: planVerdict,
+  ChainLink: chainLink,
+  ChainRecord: chainRecord,
 };
 
 const invalid = {
@@ -245,6 +292,8 @@ const invalid = {
   "TaskSpec.invalid-zero-budget": { ...taskSpec, budgetUsd: 0 },
   "TaskSpec.invalid-no-repos": { ...taskSpec, repos: [] },
   "TaskSpec.invalid-unknown-key": { ...taskSpec, ownerEmail: "a@b.c" },
+  "PlanVerdict.invalid-unknown-kind": { ...planVerdict, kind: "HALT" },
+  "PlanNode.invalid-zero-budget": { ...planNode, budgetUsd: 0 },
   "RoutingPolicy.invalid-missing-stage": {
     stages: {
       plan: routingPolicy.stages.plan,

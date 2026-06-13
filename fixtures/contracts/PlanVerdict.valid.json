@@ -1,0 +1,5 @@
+{
+  "kind": "PROCEED",
+  "rationale": "Both criteria are covered; node boundaries are independently checkable.",
+  "uncoveredCriteria": []
+}

@@ -1,0 +1,35 @@
+{
+  "createdAt": "2026-06-10T12:00:00.000Z",
+  "goal": "Implement the Memory Pointer store end to end.",
+  "id": "plan-7f3a",
+  "nodes": [
+    {
+      "acceptanceCriteria": [
+        {
+          "check": "devbox run -- pnpm --filter @chikory/sdk test artifacts",
+          "description": "ArtifactStore interface implemented with content-addressed FS backend",
+          "id": "AC-1"
+        }
+      ],
+      "budgetUsd": 5,
+      "dependsOn": [],
+      "goal": "Add the ArtifactStore interface and a local FS backend with put/get.",
+      "id": "N-1"
+    },
+    {
+      "acceptanceCriteria": [
+        {
+          "check": "devbox run -- pnpm --filter @chikory/sdk test artifacts",
+          "description": "ArtifactStore interface implemented with content-addressed FS backend",
+          "id": "AC-1"
+        }
+      ],
+      "budgetUsd": 5,
+      "dependsOn": [
+        "N-1"
+      ],
+      "goal": "Wire excerpt() and apply it to tool outputs over 8KB.",
+      "id": "N-2"
+    }
+  ]
+}

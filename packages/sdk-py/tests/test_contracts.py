@@ -10,6 +10,8 @@ from pydantic import BaseModel, ValidationError
 from chikory.types import (
     AcceptanceCriterion,
     ArtifactRef,
+    ChainLink,
+    ChainRecord,
     Checkpoint,
     CompletionRequest,
     ContextBundle,
@@ -23,6 +25,9 @@ from chikory.types import (
     ModelChoice,
     NotificationPolicy,
     PacingPolicy,
+    Plan,
+    PlanNode,
+    PlanVerdict,
     RepoSpec,
     RouterError,
     RoutingPolicy,
@@ -68,6 +73,11 @@ MODELS: dict[str, ModelType] = {
         TaskSpec,
         ContractTestResultArtifact,
         TokenUsage,
+        PlanNode,
+        Plan,
+        PlanVerdict,
+        ChainLink,
+        ChainRecord,
     )
 }
 VALID_FIXTURES = sorted(FIXTURE_DIR.glob("*.valid.json"))
