@@ -78,7 +78,7 @@ Every requirement in [`project.md`](../project.md), assigned a stable ID, mapped
 | OB-3 | Set success criteria upfront | WP-005 (acceptance_criteria in TaskSpec) | P0 | done |
 | OB-4 | OTel-compliant traces by default | WP-105, WP-134 (invariant #3) | P1 | in-progress |
 | OB-5 | Trajectory-level forensics, whole path debuggable after the fact | WP-122 (journal), WP-142 (renderer), WP-403 (web) | P1→P4 | in-progress (P1 journal + renderer done; web browser P4) |
-| OB-6 | Human-observable metrics: tokens, decisions, checks, feedback frequency | WP-142, WP-209 | P1→P2 | in-progress (trace totals/footer done — tokens/decisions/checks/feedback-frequency render today; remaining process metrics WP-209 queued as dogfood-010) |
+| OB-6 | Human-observable metrics: tokens, decisions, checks, feedback frequency | WP-142, WP-209 | P1→P2 | in-progress (trace totals/footer done — tokens/decisions/checks/feedback-frequency render today; WP-209 slice 1 added the issues-found:changes-made footer line via dogfood-010, run `run-c9df353b`, commit pending review; components-over-time queued as dogfood-011) |
 
 ## FA — Full-application scope (spec §5.8)
 
@@ -94,7 +94,7 @@ Every requirement in [`project.md`](../project.md), assigned a stable ID, mapped
 |---|---|---|---|---|
 | SE-1 | Checkpoint notifications at judge milestones | WP-208 | P2 | planned |
 | SE-2 | Window-fit reasoning for implementation and judging passes | WP-207 | P2 | planned |
-| SE-3 | Process metrics: components over time; issues found vs changes made | WP-209 | P2 | planned (queued as dogfood-010 — the next 🟢/no-contracts dogfood slice) |
+| SE-3 | Process metrics: components over time; issues found vs changes made | WP-209 | P2 | in-progress (issues-found:changes-made half done — WP-209 slice 1 via dogfood-010, run `run-c9df353b`, commit pending review; components-over-time queued as WP-209 slice 2 / dogfood-011) |
 
 ## IF — Interface & architecture (spec §8)
 

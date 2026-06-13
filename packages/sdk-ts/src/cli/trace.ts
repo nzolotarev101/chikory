@@ -166,6 +166,20 @@ export function renderTrace(run: RunRow, entries: JournalEntry[], totals: RunTot
 
   const injections = entries.filter((e) => e.kind === "injection").length;
   const checkpoints = entries.filter((e) => e.kind === "checkpoint").length;
+  const issuesFound = entries.reduce((count, entry) => {
+    if (entry.kind !== "judge") return count;
+    const { form } = entry.payload as JudgePayload;
+    return (
+      count +
+      form.criterionResults.filter((result) => result.pass === false).length +
+      form.rubricResults.filter((result) => result.pass === false).length +
+      form.concerns.length
+    );
+  }, 0);
+  const changesMade = entries.filter(
+    (entry) =>
+      entry.kind === "step" && (entry.payload as StepPayload).record.diffRef.bytes > 0,
+  ).length;
   lines.push(
     `totals: decisions ${totals.steps} · judge passes ${totals.judgePasses} ` +
       `($${totals.judgeCostUsd.toFixed(2)}, ${(totals.judgeCostShare * 100).toFixed(1)}%) · ` +
@@ -176,6 +190,10 @@ export function renderTrace(run: RunRow, entries: JournalEntry[], totals: RunTot
       ? ` · feedback frequency 1/${Math.max(1, Math.round(totals.steps / totals.judgePasses))} steps`
       : "";
   lines.push(`        injections ${injections} · checkpoints ${checkpoints}${feedback}`);
+  lines.push(
+    `        issues found ${issuesFound} · changes made ${changesMade} ` +
+      `(issues:changes ${issuesFound}:${changesMade})`,
+  );
 
   const terminal = entries.find((e) => e.kind === "terminal");
   if (terminal) {

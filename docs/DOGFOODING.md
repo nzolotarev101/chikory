@@ -42,7 +42,14 @@ that could spuriously fail a judge-executed check, now gated on the durable
 verdict; 8/8 host runs). F-11's probe tax recurred at a new record *low*
 5.8 % cost share — the probe step skipped the suite re-run — so the tax now
 spans 5.8 %–25.4 % across eight data points; the spread, not the magnitude,
-is the WP-221 argument.
+is the WP-221 argument. Dogfood-010 (`docs/reports/dogfood-010.md`)
+delivered WP-209 slice 1 (the issues-found:changes-made process metric in
+`chikory trace`, SE-3's concrete half) — tenth first-attempt SUCCESS, the
+**fourth campaign with no new friction**, hitting the prescribed footer
+string byte-for-byte under a tight two-file scope. F-11's probe tax recurred
+mid-spread at 16.1 % (the probe re-ran the full suite), confirming the tax
+tracks executor discretion across a 5.8 %–25.4 % range over nine data
+points.
 
 Related docs: [`docs/spec/task-spec.md`](spec/task-spec.md) (schema
 reference) · [`docs/TASK-PROTOCOL.md`](TASK-PROTOCOL.md) (WP etiquette, §7 is

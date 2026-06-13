@@ -34,4 +34,5 @@ plan.md work-package slice through Chikory itself. Full operating manual:
 | [`dogfood-007.yaml`](dogfood-007.yaml) | WP-223 — watch renders journal transitions, never sampled state | SUCCESS (run-22b337a9; diff verified, commit pending review) | [`dogfood-007.md`](../../docs/reports/dogfood-007.md) |
 | [`dogfood-008.yaml`](dogfood-008.yaml) | WP-224 — `land --verify` + git-stderr capture | SUCCESS (run-86c4b628; diff verified, commit pending review) | [`dogfood-008.md`](../../docs/reports/dogfood-008.md) |
 | [`dogfood-009.yaml`](dogfood-009.yaml) | WP-225 — de-flake the WP-217 milestone test (durable-state waitFor) | SUCCESS (run-841bc838; diff verified, commit pending review on `main`) | [`dogfood-009.md`](../../docs/reports/dogfood-009.md) |
-| [`dogfood-010.yaml`](dogfood-010.yaml) | WP-209 — process metrics in `chikory trace` (issues-found:changes-made ratio) | not yet run | — |
+| [`dogfood-010.yaml`](dogfood-010.yaml) | WP-209 slice 1 — process metrics in `chikory trace` (issues-found:changes-made ratio) | SUCCESS (run-c9df353b; diff verified, commit pending review on `main`) | [`dogfood-010.md`](../../docs/reports/dogfood-010.md) |
+| [`dogfood-011.yaml`](dogfood-011.yaml) | WP-209 slice 2 — components-over-time (executor/judge timeline footer in `chikory trace`) | not yet run | — |

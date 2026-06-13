@@ -215,6 +215,44 @@ describe("renderTrace (WP-142)", () => {
     expect(text).toContain("failed: judge HALT: gave up (last checkpoint run-x@4)");
   });
 
+  test("reports issues found and changes made", () => {
+    const changedStep = step(0, 0, "changed files");
+    const probeStep = step(1, 1, "checked state");
+    const probePayload = probeStep.payload as StepPayload;
+    const metricEntries: JournalEntry[] = [
+      changedStep,
+      {
+        ...probeStep,
+        payload: {
+          ...probePayload,
+          record: {
+            ...probePayload.record,
+            diffRef: { ...probePayload.record.diffRef, bytes: 0 },
+          },
+        },
+      },
+      entry(2, "judge", {
+        judgeIndex: 0,
+        atStep: 1,
+        form: {
+          criterionResults: [{ id: "AC-1", pass: true, justification: "verified" }],
+          rubricResults: [{ id: "R1", pass: false, justification: "needs revision" }],
+          concerns: ["missing edge-case coverage"],
+        },
+        evidenceRefs: [],
+        evidenceBytes: 0,
+        judgeModel,
+        costUsd: 0.05,
+        tokens: { input: 100, output: 50 },
+        durationMs: 4000,
+      }),
+    ];
+
+    expect(renderTrace(run, metricEntries, totals)).toContain(
+      "        issues found 2 · changes made 1 (issues:changes 2:1)",
+    );
+  });
+
   test("warns when metered tokens have an estimated zero cost", () => {
     const unpricedEntries = [withCost(step(0, 0, "unpriced model"), 0, true)];
     const trace = renderTrace(run, unpricedEntries, totals);

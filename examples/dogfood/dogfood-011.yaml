@@ -1,0 +1,103 @@
+# Dogfood-011: WP-209 slice 2 — components-over-time in `chikory trace`
+# (plan.md §6; satisfies the temporal half of SE-3 in docs/REQUIREMENTS.md:
+# "process metrics: components over time"). Slice 1 (dogfood-010) added the
+# issues-found:changes-made footer line; this adds a per-decision
+# executor/judge TIMELINE — the ordered sequence of which component acted at
+# each journal decision — to the totals footer. The data is already in the
+# JournalEntry[] renderTrace() receives (entry.kind + StepPayload.stepIndex +
+# JudgePayload.atStep), so this is a pure renderer enhancement: NO
+# contracts/types/schema change, no new product surface, no new journal kind.
+# No-contracts slice: two files (src/cli/trace.ts + its unit test), same
+# renderer-only shape as slice 1 / WP-223 / WP-224.
+#
+# ⚠ PRECONDITION: dogfood-010 (slice 1) MUST be landed on HEAD before
+# launching — the run workspace clones HEAD, and the instruction below
+# anchors the new line directly after slice 1's issues:changes footer line.
+# If slice 1 is not on HEAD the anchor will not match.
+#
+# Picked because it is the next 🟢/no-contracts renderer slice below the
+# design/contract-gated queue head (WP-219 ADR, WP-221 / WP-218-slice-2 are
+# all hand-done first, TASK-PROTOCOL §4); continues the active WP-209.
+#
+# Zero-secrets launch (locally-authenticated CLIs; see DOGFOODING.md §2.2/§3.8):
+#   node scripts/cli-judge-proxy.mjs 8787 gemini &
+#   OPENAI_COMPAT_BASE_URL=http://127.0.0.1:8787 pnpm chikory run examples/dogfood/dogfood-011.yaml --watch
+#
+# ⚠ Commit everything before launching — the run workspace clones HEAD.
+name: dogfood-011-wp-209-components-over-time
+goal: >
+  Implement WP-209 slice 2 (plan.md §6): add a components-over-time timeline
+  to the `chikory trace <run-id>` totals footer. Exactly two files change —
+  packages/sdk-ts/src/cli/trace.ts and packages/sdk-ts/test/cli/trace.test.ts
+  — and nothing else; in particular DO NOT touch types.ts, schemas.ts, any
+  other src file, any other test, the journal layer, or add any dependency.
+  No new journal entry kind, no TaskSpec/contract change: the timeline is
+  computed purely from the JournalEntry[] that `renderTrace` already
+  receives.
+
+  In `renderTrace` (src/cli/trace.ts), after the existing issues-found :
+  changes-made totals line added by slice 1 (the line beginning
+  `        issues found …`), append a FOURTH totals line. Do not modify the
+  header, per-step rows, or the first three totals lines — every current
+  assertion in trace.test.ts must still pass byte-for-byte.
+
+  Build a timeline string by iterating `entries` IN ORDER and, for each
+  entry, pushing one token:
+    - kind === "step": the token `s${(entry.payload as StepPayload).stepIndex}`
+    - kind === "judge": the token `j@${(entry.payload as JudgePayload).atStep}`
+    - every other kind (terminal, checkpoint, injection, budget_event,
+      verdict): skipped, contributes no token.
+  Join the tokens with a single space. (StepPayload and JudgePayload are both
+  already imported in this file.)
+
+  Render the new line exactly as (note the leading 8 spaces, matching the
+  other continuation footer lines):
+    `        components over time: ${timeline}`
+
+  Add ONE new unit test to the `describe("renderTrace (WP-142)", …)` block
+  in trace.test.ts that builds its own JournalEntry[] fixture (do not mutate
+  the shared `entries` const) containing, in this order, two step entries
+  (stepIndex 0 then 1) and one judge entry (atStep 1), then asserts the
+  rendered trace `.toContain(...)` the exact new footer line
+  `        components over time: s0 s1 j@1`. Do not change any existing test.
+  Reuse the existing `step(...)` / `entry(...)` test helpers and the
+  `StepPayload` / `JudgePayload` imports already present in the file. Follow
+  AGENTS.md conventions: strict TypeScript, ESM imports with .js extensions,
+  named exports only.
+repos:
+  - url: /Users/nikitazolotarev/repos/chikory
+    writable: true
+acceptance_criteria:
+  # Judge-executed in the run workspace (fresh clone), bare pnpm, 120 s cap
+  # per check. Timed on host 2026-06-12 (dogfood-010, identical surface): the
+  # trace suite ≈ 1.7 s, cli+land ≈ 4.7 s, typecheck+lint ≈ 3.5 s. Install
+  # dominates AC-1.
+  - id: AC-1
+    description: >
+      the trace renderer unit tests pass, including the new
+      components-over-time footer assertion
+    check: pnpm install --prefer-offline --silent && pnpm --filter @chikory/sdk exec vitest run test/cli/trace.test.ts
+  - id: AC-2
+    description: the rest of the CLI surface is untouched in behavior
+    check: pnpm --filter @chikory/sdk exec vitest run test/cli/cli.test.ts test/cli/land.test.ts
+  - id: AC-3
+    description: strict typecheck and lint are clean
+    check: pnpm --filter @chikory/sdk typecheck && pnpm --filter @chikory/sdk lint
+budget_usd: 5
+max_steps: 4
+executor:
+  adapter: codex
+  family: openai
+judge:
+  # openai-compat = the keyless shim seam; real family = the shim backend
+  # (gemini) — structurally different from the openai executor.
+  family: openai-compat
+  cadence: 2
+  max_cost_share: 0.5
+routing:
+  stages:
+    # plan/review unused by CLI executors in P1; code.model feeds `codex -m`.
+    plan: { provider: openai-compat, model: gpt-5.5 }
+    code: { provider: openai-compat, model: gpt-5.5 }
+    review: { provider: openai-compat, model: gpt-5.5 }
+    judge: { provider: openai-compat, model: gemini-3.1-pro-preview }
