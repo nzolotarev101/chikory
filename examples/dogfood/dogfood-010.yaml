@@ -1,0 +1,97 @@
+# Dogfood-010: WP-209 slice 1 — process metrics in `chikory trace`
+# (plan.md §6; satisfies the concrete half of SE-3 in docs/REQUIREMENTS.md:
+# "process metrics: ... issues found vs changes made"). OB-6 already renders
+# tokens/decisions/checks/feedback-frequency; this adds the issues-found :
+# changes-made ratio to the totals footer. The data is already in the
+# journal entries renderTrace() receives — judge forms carry per-criterion /
+# per-rubric pass booleans + concerns; step records carry diffRef.bytes — so
+# this is a pure renderer enhancement: NO contracts/types/schema change, no
+# new product surface, no new journal kind.
+# No-contracts slice: two files (src/cli/trace.ts + its unit test).
+#
+# Picked because the queue head (WP-219 ADR, WP-221 / WP-218-slice-2) is all
+# design- or contract-gated and hand-done first (TASK-PROTOCOL §4); this is
+# the first 🟢/no-contracts item below it, same renderer-enhancement shape as
+# WP-223/WP-224 which dogfooded cleanly.
+#
+# Zero-secrets launch (locally-authenticated CLIs; see DOGFOODING.md §2.2/§3.8):
+#   node scripts/cli-judge-proxy.mjs 8787 gemini &
+#   OPENAI_COMPAT_BASE_URL=http://127.0.0.1:8787 pnpm chikory run examples/dogfood/dogfood-010.yaml --watch
+#
+# ⚠ Commit everything before launching — the run workspace clones HEAD.
+name: dogfood-010-wp-209-issues-changes-ratio
+goal: >
+  Implement WP-209 slice 1 (plan.md §6): add an issues-found : changes-made
+  process metric to the `chikory trace <run-id>` totals footer. Exactly two
+  files change — packages/sdk-ts/src/cli/trace.ts and
+  packages/sdk-ts/test/cli/trace.test.ts — and nothing else; in particular
+  DO NOT touch types.ts, schemas.ts, any other src file, any other test, the
+  journal layer, or add any dependency. No new journal entry kind, no
+  TaskSpec/contract change: the metric is computed purely from the
+  JournalEntry[] that `renderTrace` already receives.
+
+  In `renderTrace` (src/cli/trace.ts), after the existing second totals line
+  (the `injections … · checkpoints … <feedback>` line), append a THIRD
+  totals line. Do not modify the existing header, per-step rows, or the
+  first two totals lines — every current assertion in trace.test.ts must
+  still pass byte-for-byte.
+
+  Compute two integers from `entries`:
+    - issuesFound: summed across every entry with `kind === "judge"`, the
+      count of `payload.form.criterionResults` with `pass === false`, plus
+      `payload.form.rubricResults` with `pass === false`, plus
+      `payload.form.concerns.length`. (Cast the payload to the existing
+      JudgePayload type already imported in this file.)
+    - changesMade: the count of entries with `kind === "step"` whose
+      `(payload as StepPayload).record.diffRef.bytes > 0` (an empty-diff
+      probe step does not count as a change).
+
+  Render the new line exactly as (note the leading 8 spaces, matching the
+  other continuation footer line):
+    `        issues found ${issuesFound} · changes made ${changesMade} (issues:changes ${issuesFound}:${changesMade})`
+
+  Add ONE new unit test to the `describe("renderTrace (WP-142)", …)` block
+  in trace.test.ts that builds its own JournalEntry[] fixture (do not mutate
+  the shared `entries` const) containing at least one judge entry whose form
+  has a failed rubric result AND a non-empty concern, plus at least one step
+  with a non-empty diff and one step whose diffRef.bytes === 0, then asserts
+  the rendered trace `.toContain(...)` the exact new footer line for that
+  fixture's known counts. Do not change any existing test. Follow AGENTS.md
+  conventions: strict TypeScript, ESM imports with .js extensions, named
+  exports only.
+repos:
+  - url: /Users/nikitazolotarev/repos/chikory
+    writable: true
+acceptance_criteria:
+  # Judge-executed in the run workspace (fresh clone), bare pnpm, 120 s cap
+  # per check. Timed on host 2026-06-12: the three cli test files ≈ 6.6 s
+  # together; typecheck+lint ≈ 3.5 s. Install dominates AC-1.
+  - id: AC-1
+    description: >
+      the trace renderer unit tests pass, including the new
+      issues:changes footer assertion
+    check: pnpm install --prefer-offline --silent && pnpm --filter @chikory/sdk exec vitest run test/cli/trace.test.ts
+  - id: AC-2
+    description: the rest of the CLI surface is untouched in behavior
+    check: pnpm --filter @chikory/sdk exec vitest run test/cli/cli.test.ts test/cli/land.test.ts
+  - id: AC-3
+    description: strict typecheck and lint are clean
+    check: pnpm --filter @chikory/sdk typecheck && pnpm --filter @chikory/sdk lint
+budget_usd: 5
+max_steps: 4
+executor:
+  adapter: codex
+  family: openai
+judge:
+  # openai-compat = the keyless shim seam; real family = the shim backend
+  # (gemini) — structurally different from the openai executor.
+  family: openai-compat
+  cadence: 2
+  max_cost_share: 0.5
+routing:
+  stages:
+    # plan/review unused by CLI executors in P1; code.model feeds `codex -m`.
+    plan: { provider: openai-compat, model: gpt-5.5 }
+    code: { provider: openai-compat, model: gpt-5.5 }
+    review: { provider: openai-compat, model: gpt-5.5 }
+    judge: { provider: openai-compat, model: gemini-3.1-pro-preview }

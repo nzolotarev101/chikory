@@ -35,6 +35,14 @@ never verified) and F-18 (git stderr leak): `land --verify` now reruns
 build/lint/typecheck/test against the fresh commit and exits nonzero on
 red. F-11's completion-probe tax recurred at a new record 25.4 % cost
 share (cheap productive step → proportionally larger wasted probe).
+Dogfood-009 (`docs/reports/dogfood-009.md`) delivered WP-225 (de-flake the
+WP-217 milestone test) — ninth first-attempt SUCCESS, the **third campaign
+with no new friction**, closing F-19 (the `agent-loop.test.ts` waitFor race
+that could spuriously fail a judge-executed check, now gated on the durable
+verdict; 8/8 host runs). F-11's probe tax recurred at a new record *low*
+5.8 % cost share — the probe step skipped the suite re-run — so the tax now
+spans 5.8 %–25.4 % across eight data points; the spread, not the magnitude,
+is the WP-221 argument.
 
 Related docs: [`docs/spec/task-spec.md`](spec/task-spec.md) (schema
 reference) · [`docs/TASK-PROTOCOL.md`](TASK-PROTOCOL.md) (WP etiquette, §7 is

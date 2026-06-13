@@ -251,7 +251,7 @@ describe.skipIf(address === null)("agent loop (WP-121)", () => {
     const running = await waitFor(
       async () => {
         const report = await handle.status();
-        return wire.hits === 1 && report.currentStep === 1 && report.status === "RUNNING"
+        return wire.hits === 1 && report.currentStep === 1 && report.status === "RUNNING" && report.lastVerdict !== undefined
           ? report
           : undefined;
       },

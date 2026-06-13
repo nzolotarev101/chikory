@@ -33,4 +33,5 @@ plan.md work-package slice through Chikory itself. Full operating manual:
 | [`dogfood-006.yaml`](dogfood-006.yaml) | WP-222 slice 1 — executor subprocess env scrub | SUCCESS (run-559ea904; landed `18fae43`) | [`dogfood-006.md`](../../docs/reports/dogfood-006.md) |
 | [`dogfood-007.yaml`](dogfood-007.yaml) | WP-223 — watch renders journal transitions, never sampled state | SUCCESS (run-22b337a9; diff verified, commit pending review) | [`dogfood-007.md`](../../docs/reports/dogfood-007.md) |
 | [`dogfood-008.yaml`](dogfood-008.yaml) | WP-224 — `land --verify` + git-stderr capture | SUCCESS (run-86c4b628; diff verified, commit pending review) | [`dogfood-008.md`](../../docs/reports/dogfood-008.md) |
-| [`dogfood-009.yaml`](dogfood-009.yaml) | WP-225 — de-flake the WP-217 milestone test (durable-state waitFor) | not yet run | — |
+| [`dogfood-009.yaml`](dogfood-009.yaml) | WP-225 — de-flake the WP-217 milestone test (durable-state waitFor) | SUCCESS (run-841bc838; diff verified, commit pending review on `main`) | [`dogfood-009.md`](../../docs/reports/dogfood-009.md) |
+| [`dogfood-010.yaml`](dogfood-010.yaml) | WP-209 — process metrics in `chikory trace` (issues-found:changes-made ratio) | not yet run | — |

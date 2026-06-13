@@ -40,7 +40,7 @@ Every requirement in [`project.md`](../project.md), assigned a stable ID, mapped
 | ID | Requirement | WP(s) | Phase | Status |
 |---|---|---|---|---|
 | JD-1 | Built-in eval layer: one agent validates another's work | WP-131 | P1 | done |
-| JD-2 | Inner loop: evaluates every N actions / at milestones | WP-132 (every N); WP-217 (empty-diff completion milestone — landed `ef4b16f`, dogfood-003); WP-221 (explicit `claimsComplete` signal, dogfood-003 F-11); WP-225 (de-flake the agent-loop test exercising the WP-217 path — waitFor races the verdict journaling, dogfood-007 F-19) | P1→P2 | in-progress (cadence + empty-diff milestone triggers done; explicit completion claim WP-221 — inference still costs one probe step, six data points dogfood-002…007) |
+| JD-2 | Inner loop: evaluates every N actions / at milestones | WP-132 (every N); WP-217 (empty-diff completion milestone — landed `ef4b16f`, dogfood-003); WP-221 (explicit `claimsComplete` signal, dogfood-003 F-11); WP-225 (de-flaked the agent-loop test exercising the WP-217 path — waitFor now gates on the durable verdict, delivered via dogfood-009 `run-841bc838`, commit pending review; **F-19 closed**, 8/8 host runs) | P1→P2 | in-progress (cadence + empty-diff milestone triggers done, milestone test now deterministic; explicit completion claim WP-221 — inference still costs one probe step, eight data points dogfood-002…009, cost share now spans 5.8 %–25.4 %) |
 | JD-3 | Gates next action: halt/rollback/branch/escalate before bad change lands | WP-132 (halt/rollback/escalate); branch verdict WP-205 | P1→P2 | in-progress (halt/rollback/escalate done; branch verdict P2) |
 | JD-4 | Software-native: PR diffs, tests, UI snapshots, acceptance criteria, security posture, architecture rubric | WP-131 (diffs+tests+criteria); WP-211 (UI); WP-215 (security+architecture) | P1→P2 | in-progress (diffs+tests+criteria done; UI/security/architecture P2) |
 | JD-5 | Structurally diversified: different model family / prompt regime / memory than executor | WP-133, ADR-002; WP-222 slice 1 (executor env allowlist — landed `18fae43` via dogfood-006 `run-559ea904`) | P1→P2 | done (declared-family check); seam hardened — `scrubExecutorEnv` gives executor children only their own family key; F-14 closure **confirmed** by dogfood-007 `run-22b337a9` (zero shim noise in the executor transcript); TaskSpec pass-through opt-in rides WP-221's contracts PR |
@@ -78,7 +78,7 @@ Every requirement in [`project.md`](../project.md), assigned a stable ID, mapped
 | OB-3 | Set success criteria upfront | WP-005 (acceptance_criteria in TaskSpec) | P0 | done |
 | OB-4 | OTel-compliant traces by default | WP-105, WP-134 (invariant #3) | P1 | in-progress |
 | OB-5 | Trajectory-level forensics, whole path debuggable after the fact | WP-122 (journal), WP-142 (renderer), WP-403 (web) | P1→P4 | in-progress (P1 journal + renderer done; web browser P4) |
-| OB-6 | Human-observable metrics: tokens, decisions, checks, feedback frequency | WP-142, WP-209 | P1→P2 | in-progress (trace totals/footer done; process metrics WP-209 P2) |
+| OB-6 | Human-observable metrics: tokens, decisions, checks, feedback frequency | WP-142, WP-209 | P1→P2 | in-progress (trace totals/footer done — tokens/decisions/checks/feedback-frequency render today; remaining process metrics WP-209 queued as dogfood-010) |
 
 ## FA — Full-application scope (spec §5.8)
 
@@ -94,7 +94,7 @@ Every requirement in [`project.md`](../project.md), assigned a stable ID, mapped
 |---|---|---|---|---|
 | SE-1 | Checkpoint notifications at judge milestones | WP-208 | P2 | planned |
 | SE-2 | Window-fit reasoning for implementation and judging passes | WP-207 | P2 | planned |
-| SE-3 | Process metrics: components over time; issues found vs changes made | WP-209 | P2 | planned |
+| SE-3 | Process metrics: components over time; issues found vs changes made | WP-209 | P2 | planned (queued as dogfood-010 — the next 🟢/no-contracts dogfood slice) |
 
 ## IF — Interface & architecture (spec §8)
 
