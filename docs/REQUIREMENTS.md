@@ -92,7 +92,7 @@ Every requirement in [`project.md`](../project.md), assigned a stable ID, mapped
 
 | ID | Requirement | WP(s) | Phase | Status |
 |---|---|---|---|---|
-| SE-1 | Checkpoint notifications at judge milestones | WP-208 | P2 | planned |
+| SE-1 | Checkpoint notifications at judge milestones | WP-208 | P2 | in-progress (WP-208 slice 1 added the pure `notificationsFor` derivation — `JournalEntry[]` + `NotificationPolicy` → ordered `Notification[]` for escalate/milestone/terminal — via dogfood-012, run `run-ea31f96c`, harvested uncommitted on `main`; the Slack/desktop delivery + runner call-site are deferred to later slices) |
 | SE-2 | Window-fit reasoning for implementation and judging passes | WP-207 | P2 | planned |
 | SE-3 | Process metrics: components over time; issues found vs changes made | WP-209 | P2 | in-progress (both trace-footer halves done — issues-found:changes-made via WP-209 slice 1 / dogfood-010, run `run-c9df353b`; components-over-time via WP-209 slice 2 / dogfood-011, run `run-59e0166c`; both commit pending review on `main`. OTel metric emission deferred to a later WP-209 slice) |
 

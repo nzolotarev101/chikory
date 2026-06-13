@@ -81,7 +81,77 @@ DIFF_CONTENT=$(git -C "$ws" $DIFF_CMD)
 if [ -z "$DIFF_CONTENT" ]; then
   echo "No changes found between the run workspace and base branch."
 else
-  echo "$DIFF_CONTENT" | git apply
+  # Get the list of changed files
+  CHANGED_FILES=$(git -C "$ws" diff --name-only "${DIFF_CMD#diff }")
+  EXCLUDE_ARGS=()
+  CHANGED_COUNT=0
+
+  while IFS= read -r file; do
+    [ -z "$file" ] && continue
+    CHANGED_COUNT=$((CHANGED_COUNT + 1))
+
+    host_exists=false
+    if [ -e "$file" ] || [ -L "$file" ]; then
+      host_exists=true
+    fi
+
+    ws_exists=false
+    if [ -e "$ws/$file" ] || [ -L "$ws/$file" ]; then
+      ws_exists=true
+    fi
+
+    if [ "$host_exists" = true ] && [ "$ws_exists" = true ]; then
+      # File exists in both
+      if cmp -s "$file" "$ws/$file"; then
+        echo "  - '$file' already exists and is identical to the workspace version. Skipping git apply for it."
+        EXCLUDE_ARGS+=("--exclude=$file")
+      else
+        echo "  - '$file' already exists but differs from the workspace version."
+        if [ -t 0 ]; then
+          echo "Diff between host version and workspace version:"
+          git diff --no-index --color=always "$file" "$ws/$file" || true
+          read -p "File '$file' differs. Overwrite with the workspace version (fresh re-apply)? [y/N]: " REPLY < /dev/tty
+          if [[ "$REPLY" =~ ^[Yy]$ ]]; then
+            echo "Overwriting '$file' with workspace version..."
+            mkdir -p "$(dirname "$file")"
+            cp "$ws/$file" "$file"
+            EXCLUDE_ARGS+=("--exclude=$file")
+          else
+            echo "Skipping '$file' (keeping host version)."
+            EXCLUDE_ARGS+=("--exclude=$file")
+          fi
+        else
+          echo "Warning: Non-interactive terminal. Skipping '$file' (keeping host version)."
+          EXCLUDE_ARGS+=("--exclude=$file")
+        fi
+      fi
+    elif [ "$host_exists" = true ] && [ "$ws_exists" = false ]; then
+      # Deleted in workspace, but exists in host
+      echo "  - '$file' is deleted in the workspace but still exists in the host."
+      if [ -t 0 ]; then
+        read -p "Delete '$file' in host as well? [y/N]: " REPLY < /dev/tty
+        if [[ "$REPLY" =~ ^[Yy]$ ]]; then
+          echo "Deleting '$file'..."
+          rm -f "$file"
+          EXCLUDE_ARGS+=("--exclude=$file")
+        else
+          echo "Skipping deletion of '$file' (keeping host version)."
+          EXCLUDE_ARGS+=("--exclude=$file")
+        fi
+      else
+        echo "Warning: Non-interactive terminal. Skipping deletion of '$file'."
+        EXCLUDE_ARGS+=("--exclude=$file")
+      fi
+    fi
+  done <<< "$CHANGED_FILES"
+
+  EXCLUDE_COUNT=${#EXCLUDE_ARGS[@]}
+  if [ "$EXCLUDE_COUNT" -eq "$CHANGED_COUNT" ]; then
+    echo "All changes have been applied or skipped."
+  else
+    echo "Applying remaining changes via git apply..."
+    echo "$DIFF_CONTENT" | git apply "${EXCLUDE_ARGS[@]}"
+  fi
 fi
 
 # 4. Verify the changes (lint, typecheck, tests)

@@ -56,7 +56,16 @@ both SE-3 footer halves now render) — eleventh first-attempt SUCCESS, the
 `components over time: s0 s1 j@1` footer string byte-for-byte under a tight
 two-file scope. F-11's probe tax set a new record *high* of 34.3 % (the probe
 re-ran the full suite while the productive step 1 was cheap, $0.58), widening
-the spread to **5.8 %–34.3 %** over ten data points.
+the spread to **5.8 %–34.3 %** over ten data points. Dogfood-012
+(`docs/reports/dogfood-012.md`) opened WP-208 with slice 1 (the pure
+`notificationsFor` derivation — `JournalEntry[]` + `NotificationPolicy` →
+ordered notification messages; delivery + call-site deferred) — twelfth
+first-attempt SUCCESS, the **sixth campaign with no new friction**, hitting
+the prescribed escalate/milestone/terminal message strings and policy-filter
+behavior byte-for-byte under a strict two-NEW-file scope, proving the loop
+generalizes past the now-exhausted WP-209 trace-footer vein. F-11's probe tax
+recurred at 25.1 % (212k input tokens, full-suite re-run), within the
+established 5.8 %–34.3 % spread over eleven data points.
 
 Related docs: [`docs/spec/task-spec.md`](spec/task-spec.md) (schema
 reference) · [`docs/TASK-PROTOCOL.md`](TASK-PROTOCOL.md) (WP etiquette, §7 is
