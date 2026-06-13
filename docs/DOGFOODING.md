@@ -49,7 +49,14 @@ delivered WP-209 slice 1 (the issues-found:changes-made process metric in
 string byte-for-byte under a tight two-file scope. F-11's probe tax recurred
 mid-spread at 16.1 % (the probe re-ran the full suite), confirming the tax
 tracks executor discretion across a 5.8 %–25.4 % range over nine data
-points.
+points. Dogfood-011 (`docs/reports/dogfood-011.md`) delivered WP-209 slice 2
+(the components-over-time timeline in `chikory trace`, SE-3's temporal half —
+both SE-3 footer halves now render) — eleventh first-attempt SUCCESS, the
+**fifth campaign with no new friction**, hitting the prescribed
+`components over time: s0 s1 j@1` footer string byte-for-byte under a tight
+two-file scope. F-11's probe tax set a new record *high* of 34.3 % (the probe
+re-ran the full suite while the productive step 1 was cheap, $0.58), widening
+the spread to **5.8 %–34.3 %** over ten data points.
 
 Related docs: [`docs/spec/task-spec.md`](spec/task-spec.md) (schema
 reference) · [`docs/TASK-PROTOCOL.md`](TASK-PROTOCOL.md) (WP etiquette, §7 is

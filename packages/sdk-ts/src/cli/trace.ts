@@ -180,6 +180,15 @@ export function renderTrace(run: RunRow, entries: JournalEntry[], totals: RunTot
     (entry) =>
       entry.kind === "step" && (entry.payload as StepPayload).record.diffRef.bytes > 0,
   ).length;
+  const timelineTokens: string[] = [];
+  for (const entry of entries) {
+    if (entry.kind === "step") {
+      timelineTokens.push(`s${(entry.payload as StepPayload).stepIndex}`);
+    } else if (entry.kind === "judge") {
+      timelineTokens.push(`j@${(entry.payload as JudgePayload).atStep}`);
+    }
+  }
+  const timeline = timelineTokens.join(" ");
   lines.push(
     `totals: decisions ${totals.steps} · judge passes ${totals.judgePasses} ` +
       `($${totals.judgeCostUsd.toFixed(2)}, ${(totals.judgeCostShare * 100).toFixed(1)}%) · ` +
@@ -194,6 +203,7 @@ export function renderTrace(run: RunRow, entries: JournalEntry[], totals: RunTot
     `        issues found ${issuesFound} · changes made ${changesMade} ` +
       `(issues:changes ${issuesFound}:${changesMade})`,
   );
+  lines.push(`        components over time: ${timeline}`);
 
   const terminal = entries.find((e) => e.kind === "terminal");
   if (terminal) {

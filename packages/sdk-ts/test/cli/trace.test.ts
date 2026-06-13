@@ -16,6 +16,7 @@ import type {
   ArtifactRef,
   JournalEntry,
   JudgeForm,
+  JudgePayload,
   RunRow,
   RunTotals,
   StepPayload,
@@ -250,6 +251,29 @@ describe("renderTrace (WP-142)", () => {
 
     expect(renderTrace(run, metricEntries, totals)).toContain(
       "        issues found 2 · changes made 1 (issues:changes 2:1)",
+    );
+  });
+
+  test("reports components over time in journal order", () => {
+    const judgePayload: JudgePayload = {
+      judgeIndex: 0,
+      atStep: 1,
+      form,
+      evidenceRefs: [],
+      evidenceBytes: 0,
+      judgeModel,
+      costUsd: 0.05,
+      tokens: { input: 100, output: 50 },
+      durationMs: 4000,
+    };
+    const timelineEntries: JournalEntry[] = [
+      step(0, 0, "first step"),
+      step(1, 1, "second step"),
+      entry(2, "judge", judgePayload),
+    ];
+
+    expect(renderTrace(run, timelineEntries, totals)).toContain(
+      "        components over time: s0 s1 j@1",
     );
   });
 

@@ -1,0 +1,137 @@
+# Dogfood-012: WP-208 slice 1 — pure `notificationsFor` derivation
+# (plan.md §6; first slice of WP-208 "checkpoint notifications"). The
+# NotificationPolicy contract ALREADY EXISTS (packages/sdk-ts/src/types.ts:130,
+# `on: Array<"escalate" | "milestone" | "terminal">` + optional slackWebhookEnv,
+# referenced by TaskSpec.notifications at types.ts:87) — so this slice changes
+# NO contracts/types/schema. It adds the PURE function that maps a
+# JournalEntry[] + NotificationPolicy to the ordered list of notification
+# messages the loop should fire; actual delivery (Slack webhook via
+# slackWebhookEnv, desktop ping) and the runner call-site are DEFERRED to a
+# later slice. Same renderer-only / pure-derivation shape as WP-209 slices 1–2
+# (dogfood-010 / dogfood-011) and WP-225: two files, no contracts, no journal
+# kind, no product wiring.
+#
+# Picked because the WP-209 trace-renderer vein is exhausted (both SE-3 footer
+# halves landed via dogfood-010/011) and the queue head WP-219/WP-221/WP-218-s2
+# is design- or contract-gated (hand-done first, TASK-PROTOCOL §4). WP-208 is
+# the next 🟢 whose first slice is a pure, no-contracts derivation.
+#
+# ⚠ PRECONDITION: dogfood-011 (WP-209 slice 2) should be committed on HEAD
+# before launching — the run workspace clones HEAD. This slice touches a NEW
+# file plus a NEW test and does not depend on the trace footer, but keep HEAD
+# clean so scope review is unambiguous.
+#
+# Zero-secrets launch (locally-authenticated CLIs; see DOGFOODING.md §2.2/§3.8):
+#   node scripts/cli-judge-proxy.mjs 8787 gemini &
+#   OPENAI_COMPAT_BASE_URL=http://127.0.0.1:8787 pnpm chikory run examples/dogfood/dogfood-012.yaml --watch
+#
+# ⚠ Commit everything before launching — the run workspace clones HEAD.
+name: dogfood-012-wp-208-notifications-for
+goal: >
+  Implement WP-208 slice 1 (plan.md §6): add a PURE notification-derivation
+  function. Exactly two NEW files are created and nothing else changes — in
+  particular DO NOT touch types.ts, schemas.ts, taskspec.ts, the runner/
+  agent loop, any existing src file, or any existing test, and add no
+  dependency. The NotificationPolicy interface already exists in
+  packages/sdk-ts/src/types.ts and must NOT be modified.
+
+  Create packages/sdk-ts/src/runner/notifications.ts exporting:
+
+    export interface Notification {
+      trigger: "escalate" | "milestone" | "terminal";
+      atStep: number | null;
+      message: string;
+    }
+
+    export function notificationsFor(
+      entries: JournalEntry[],
+      policy: NotificationPolicy,
+    ): Notification[]
+
+  Import `JournalEntry`, `NotificationPolicy`, and `VerdictKind` as TYPE
+  imports from "../types.js". The function iterates `entries` IN ORDER and,
+  for each entry, may push at most one Notification:
+
+    - kind === "verdict": read the payload as
+        { atStep: number; verdict: { kind: VerdictKind; escalateReason?: string } }
+      (cast with `as`, the journal payload is `unknown`). Then:
+        * if verdict.kind === "ESCALATE" AND policy.on includes "escalate":
+            push { trigger: "escalate", atStep, message:
+              `ESCALATE at step ${atStep}: ${escalateReason ?? "(no reason given)"}` }
+        * else if verdict.kind === "PROCEED" AND policy.on includes "milestone":
+            push { trigger: "milestone", atStep, message:
+              `milestone PROCEED at step ${atStep}` }
+        * any other verdict kind contributes nothing.
+    - kind === "terminal" AND policy.on includes "terminal": read the payload
+      as { status: string } and push
+        { trigger: "terminal", atStep: null, message: `terminal: ${status}` }.
+    - every other kind (step, judge, checkpoint, injection, budget_event,
+      compaction, pacing): skipped, contributes nothing.
+
+  Return the accumulated Notification[] in journal order.
+
+  Create packages/sdk-ts/test/runner/notifications.test.ts — a PURE unit test
+  (no Temporal, no runner harness; it must pass standalone) using vitest
+  (`import { describe, expect, test } from "vitest";`). Build local
+  JournalEntry[] fixtures inline (construct minimal `{ idx, ts, kind, payload,
+  costDeltaUsd: 0, artifactRefs: [] }` objects; cast payloads as needed). Add
+  at least two tests in a `describe("notificationsFor (WP-208)", …)` block:
+    1. Given, in this order, a step entry, a verdict entry (kind "ESCALATE",
+       atStep 1, escalateReason "needs human"), a verdict entry (kind
+       "PROCEED", atStep 2), and a terminal entry (status "SUCCESS"), with
+       policy { on: ["escalate", "milestone", "terminal"] }, assert the result
+       deep-equals (`toEqual`) exactly, in order:
+         [
+           { trigger: "escalate", atStep: 1, message: "ESCALATE at step 1: needs human" },
+           { trigger: "milestone", atStep: 2, message: "milestone PROCEED at step 2" },
+           { trigger: "terminal", atStep: null, message: "terminal: SUCCESS" },
+         ]
+    2. Given the same entries but policy { on: ["terminal"] }, assert the
+       result `toEqual` exactly
+         [{ trigger: "terminal", atStep: null, message: "terminal: SUCCESS" }]
+       (the escalate/milestone notifications are filtered out).
+
+  Follow AGENTS.md conventions: strict TypeScript, ESM imports with `.js`
+  extensions, named exports only, no default export.
+repos:
+  - url: /Users/nikitazolotarev/repos/chikory
+    writable: true
+acceptance_criteria:
+  # Judge-executed in the run workspace (fresh clone), bare pnpm, 120 s cap
+  # per check. The Temporal global-setup skips when the `temporal` binary is
+  # absent (the clone has no devbox), so the pure notifications test runs in
+  # well under a second; install dominates AC-1. Timings extrapolated from
+  # dogfood-010/011 (identical surface): trace suite ≈ 1 s, cli+land ≈ 6 s,
+  # typecheck+lint ≈ 3.5 s.
+  - id: AC-1
+    description: >
+      the new notificationsFor unit tests pass (escalate/milestone/terminal
+      derivation + policy filtering)
+    check: pnpm install --prefer-offline --silent && pnpm --filter @chikory/sdk exec vitest run test/runner/notifications.test.ts
+  - id: AC-2
+    description: >
+      no existing surface regressed — the trace and land suites still pass
+      byte-for-byte (the new module has no call-sites, so nothing else can
+      change)
+    check: pnpm --filter @chikory/sdk exec vitest run test/cli/trace.test.ts test/cli/land.test.ts
+  - id: AC-3
+    description: strict typecheck and lint are clean
+    check: pnpm --filter @chikory/sdk typecheck && pnpm --filter @chikory/sdk lint
+budget_usd: 5
+max_steps: 4
+executor:
+  adapter: codex
+  family: openai
+judge:
+  # openai-compat = the keyless shim seam; real family = the shim backend
+  # (gemini) — structurally different from the openai executor.
+  family: openai-compat
+  cadence: 2
+  max_cost_share: 0.5
+routing:
+  stages:
+    # plan/review unused by CLI executors in P1; code.model feeds `codex -m`.
+    plan: { provider: openai-compat, model: gpt-5.5 }
+    code: { provider: openai-compat, model: gpt-5.5 }
+    review: { provider: openai-compat, model: gpt-5.5 }
+    judge: { provider: openai-compat, model: gemini-3.1-pro-preview }
