@@ -1,0 +1,135 @@
+# Dogfood-014: WP-208 slice 3 (pure half) — `desktopPayloadFor` formatter
+# (plan.md §6; the pure half of WP-208 slice 3 "delivery"). Slice 1
+# (dogfood-012, run-ea31f96c) added the pure `notificationsFor` derivation;
+# slice 2 (dogfood-013, run-048635b1) added the pure `slackPayloadFor`
+# formatter (Notification → Slack `{ text }`). This slice adds the SECOND pure
+# delivery formatter: `desktopPayloadFor`, mapping a single `Notification` to
+# the `{ title, body }` a desktop notification (macOS/libnotify ping) will
+# carry — title is a trigger-specific label with the same emoji prefix family,
+# body is the notification's `message`. The actual side-effectful delivery
+# (the `fetch` to `slackWebhookEnv`, the OS-level desktop ping) and the runner
+# call-site that invokes notificationsFor + dispatches both formatters are
+# DEFERRED to the final, NON-PURE slice (touches the runner loop). Same
+# pure-formatter shape as dogfood-013 — additive, no contracts, no journal
+# kind, no product wiring.
+#
+# ⚠ This is the LAST 🟢/no-contracts dogfood slice of WP-208 (and of the
+# pure-renderer/derivation vein generally): after it, the remaining §6 queue
+# (WP-208 slice 3 non-pure delivery + call-site, WP-221, WP-218 slice 2,
+# WP-219 ADR) is all contract/ADR-gated and hand-done first per
+# TASK-PROTOCOL §4.
+#
+# NOTE — unlike dogfood-010…013 this slice is NOT a two-NEW-file run: it makes
+# an ADDITION-ONLY edit to `notification-delivery.ts` (a second export beside
+# `slackPayloadFor`, which is the natural home) plus an ADDITION-ONLY edit to
+# its existing test file. Nothing existing is modified or deleted — the
+# `slackPayloadFor`/`EMOJI` definitions and all existing tests stay byte-for-
+# byte. The scope contract below is explicit about this.
+#
+# ⚠ PRECONDITION — STRICT: dogfood-012 (notifications.ts) AND dogfood-013
+# (notification-delivery.ts + notification-delivery.test.ts) MUST be committed
+# on HEAD before launching. The run workspace clones HEAD; this slice edits
+# notification-delivery.ts and imports the `Notification` TYPE from
+# `./notifications.js`. If either is still uncommitted in the working tree the
+# clone will not contain it and the edit (and AC-3 typecheck) will fail. Commit
+# both slices (and the dogfood-013 report + these docs) first.
+#
+# Zero-secrets launch (locally-authenticated CLIs; see DOGFOODING.md §2.2/§3.8):
+#   node scripts/cli-judge-proxy.mjs 8787 gemini &
+#   OPENAI_COMPAT_BASE_URL=http://127.0.0.1:8787 pnpm chikory run examples/dogfood/dogfood-014.yaml --watch
+#
+# ⚠ Commit everything before launching — the run workspace clones HEAD.
+name: dogfood-014-wp-208-desktop-payload-for
+goal: >
+  Implement the pure half of WP-208 slice 3 (plan.md §6): add a PURE
+  desktop-notification payload formatter beside the existing
+  `slackPayloadFor`. Make ADDITION-ONLY edits to exactly two existing files
+  and create nothing else — in particular DO NOT modify or delete the existing
+  `slackPayloadFor` function or the `EMOJI` record, DO NOT touch types.ts,
+  schemas.ts, taskspec.ts, the runner/ agent loop, notifications.ts, or any
+  other existing src file or test, and add no dependency. Do NOT perform any
+  network/IO — this slice is pure formatting only; the actual webhook POST,
+  the OS-level desktop ping, and the runner call-site are the final
+  (non-pure) slice.
+
+  Edit packages/sdk-ts/src/runner/notification-delivery.ts to ADD (alongside,
+  not replacing, the existing `slackPayloadFor`/`EMOJI`):
+
+    export function desktopPayloadFor(notification: Notification): { title: string; body: string }
+
+  Reuse the existing `Notification` TYPE import already at the top of the file
+  (do not add a second import). The function returns a desktop-notification
+  body whose `title` is a trigger-specific label and whose `body` is the
+  notification's `message` verbatim:
+
+    - trigger === "escalate" → title `🚨 Escalation`
+    - trigger === "milestone" → title `✅ Milestone`
+    - trigger === "terminal" → title `🏁 Run finished`
+
+  Implement the title lookup as a NEW `const` record typed
+  `Record<Notification["trigger"], string>` named `TITLE` mapping
+  { escalate: "🚨 Escalation", milestone: "✅ Milestone", terminal: "🏁 Run finished" },
+  then return `{ title: TITLE[notification.trigger], body: notification.message }`.
+  Do not handle any other trigger value (the union is exhaustive) and add no
+  other exports.
+
+  Edit packages/sdk-ts/test/runner/notification-delivery.test.ts to ADD (after
+  the existing `describe("slackPayloadFor (WP-208)", …)` block, which must stay
+  unchanged) a new `describe("desktopPayloadFor (WP-208)", …)` block importing
+  nothing new (extend the existing
+  `import { slackPayloadFor } from "../../src/runner/notification-delivery.js";`
+  line to also import `desktopPayloadFor` from the same module). Add exactly
+  three tests, each constructing a minimal `Notification` inline and asserting
+  `toEqual`:
+    1. { trigger: "escalate", atStep: 1, message: "ESCALATE at step 1: needs human" }
+       → { title: "🚨 Escalation", body: "ESCALATE at step 1: needs human" }
+    2. { trigger: "milestone", atStep: 2, message: "milestone PROCEED at step 2" }
+       → { title: "✅ Milestone", body: "milestone PROCEED at step 2" }
+    3. { trigger: "terminal", atStep: null, message: "terminal: SUCCESS" }
+       → { title: "🏁 Run finished", body: "terminal: SUCCESS" }
+
+  Follow AGENTS.md conventions: strict TypeScript, ESM imports with `.js`
+  extensions, named exports only, no default export.
+repos:
+  - url: /Users/nikitazolotarev/repos/chikory
+    writable: true
+acceptance_criteria:
+  # Judge-executed in the run workspace (fresh clone), bare pnpm, 120 s cap
+  # per check. The Temporal global-setup skips when the `temporal` binary is
+  # absent (the clone has no devbox), so the pure tests run in well under a
+  # second; install dominates AC-1. Host-timed 2026-06-13 on the identical
+  # surface: notification-delivery test ≈ 1.3 s, notifications + trace ≈ 2.4 s,
+  # typecheck + lint ≈ 4 s.
+  - id: AC-1
+    description: >
+      the new desktopPayloadFor unit tests pass AND the existing
+      slackPayloadFor tests still pass (both live in
+      notification-delivery.test.ts — the addition did not break slice 2)
+    check: pnpm install --prefer-offline --silent && pnpm --filter @chikory/sdk exec vitest run test/runner/notification-delivery.test.ts
+  - id: AC-2
+    description: >
+      slice 1 and the CLI surface are untouched — the notificationsFor tests
+      and the trace suite still pass (the new function has no call-sites, so
+      nothing else can change)
+    check: pnpm --filter @chikory/sdk exec vitest run test/runner/notifications.test.ts test/cli/trace.test.ts
+  - id: AC-3
+    description: strict typecheck and lint are clean
+    check: pnpm --filter @chikory/sdk typecheck && pnpm --filter @chikory/sdk lint
+budget_usd: 5
+max_steps: 4
+executor:
+  adapter: codex
+  family: openai
+judge:
+  # openai-compat = the keyless shim seam; real family = the shim backend
+  # (gemini) — structurally different from the openai executor.
+  family: openai-compat
+  cadence: 2
+  max_cost_share: 0.5
+routing:
+  stages:
+    # plan/review unused by CLI executors in P1; code.model feeds `codex -m`.
+    plan: { provider: openai-compat, model: gpt-5.5 }
+    code: { provider: openai-compat, model: gpt-5.5 }
+    review: { provider: openai-compat, model: gpt-5.5 }
+    judge: { provider: openai-compat, model: gemini-3.1-pro-preview }

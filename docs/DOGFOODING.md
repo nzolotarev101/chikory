@@ -65,7 +65,18 @@ the prescribed escalate/milestone/terminal message strings and policy-filter
 behavior byte-for-byte under a strict two-NEW-file scope, proving the loop
 generalizes past the now-exhausted WP-209 trace-footer vein. F-11's probe tax
 recurred at 25.1 % (212k input tokens, full-suite re-run), within the
-established 5.8 %–34.3 % spread over eleven data points.
+established 5.8 %–34.3 % spread over eleven data points. Dogfood-013
+(`docs/reports/dogfood-013.md`) added WP-208 slice 2 (the pure `slackPayloadFor`
+formatter — `Notification` → Slack `{ text }` with a `🚨`/`✅`/`🏁` trigger
+prefix; webhook POST + call-site deferred) — thirteenth first-attempt SUCCESS,
+the **seventh campaign with no new friction**, hitting the prescribed emoji
+lookup and payload strings byte-for-byte under a strict two-NEW-file scope.
+F-11's probe tax set a **new record high of 35.1 %** (220k input tokens,
+full-suite re-run) — set from below, by the cheapest productive step yet
+($0.51), widening the spread to **5.8 %–35.1 %** over twelve data points. With
+slice 2 landed, the WP-208 pure vein has one piece left (the desktop-ping
+payload formatter, dogfood-014); after it the pure-renderer vein is exhausted
+and the queue meets the contract/ADR-gated wall.
 
 Related docs: [`docs/spec/task-spec.md`](spec/task-spec.md) (schema
 reference) · [`docs/TASK-PROTOCOL.md`](TASK-PROTOCOL.md) (WP etiquette, §7 is
@@ -402,8 +413,14 @@ friction ids global across reports), plan/REQUIREMENTS/DOGFOODING updates,
 and the next spec readied. The whole procedure is encoded as a Claude Code
 skill — run `/dogfood-review <run-id>` from the repo root
 ([`.claude/skills/dogfood-review/SKILL.md`](../.claude/skills/dogfood-review/SKILL.md)).
-A SUCCESS run still gets reviewed: dogfood-002 was a first-attempt SUCCESS
-and produced three plan-changing findings (F-8…F-10 → WP-217…WP-220).
+The mechanical half (trace, per-step evidence, acceptance-check re-runs,
+harvest byte-diff, cost-share + the F-11 probe %) is scripted —
+`RUN_ID=<run-id> devbox run dogfood-verify` emits a single evidence block;
+the checks are read from the run's own journal so they always match the run.
+The script writes nothing — judgment (diff-vs-goal, anomaly hunt, report,
+doc updates) stays human. A SUCCESS run still gets reviewed: dogfood-002 was
+a first-attempt SUCCESS and produced three plan-changing findings
+(F-8…F-10 → WP-217…WP-220).
 
 ## 7. Troubleshooting
 
@@ -441,12 +458,14 @@ and produced three plan-changing findings (F-8…F-10 → WP-217…WP-220).
 - **Completion still costs one probe step** — WP-217 (landed `ef4b16f`)
   fires the judge as soon as a step returns SUCCESS with an empty diff, so
   a finished run no longer waits for the cadence boundary. But the trigger
-  is *inference*: the executor must spend one empty-diff step (~136–245k
-  input tokens observed across dogfood-002…007; the priced probes —
-  $0.33/15.3% in dogfood-005, $0.21/14.8% in dogfood-006, $0.19/18.9% in
-  dogfood-007) rediscovering "nothing to do" before the judge can seal. The
-  explicit `claimsComplete` signal that judges the productive step directly
-  is WP-221.
+  is *inference*: the executor must spend one empty-diff step (~34–252k
+  input tokens observed across dogfood-002…013) rediscovering "nothing to do"
+  before the judge can seal. Priced cost-share has spanned **5.8 %–35.1 %**
+  across nine priced campaigns (record low 5.8 % in dogfood-009, record high
+  35.1 % in dogfood-013) — the share tracks executor discretion on the suite
+  re-run and inversely the size of the productive step it follows, so a cheap
+  real step inflates the probe's share. The explicit `claimsComplete` signal
+  that judges the productive step directly is WP-221.
 - Executor tool sandboxes are real but different: claude-code is
   file-ops-only (can't run tests itself — the judge does), codex has
   workspace-write (can run tests). Both are fine: SUCCESS is judge-verified

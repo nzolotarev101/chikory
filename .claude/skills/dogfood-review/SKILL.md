@@ -12,34 +12,70 @@ order, and **do not skip phase 4 even when the run looks clean** — the
 report is a first-class plan input (TASK-PROTOCOL §7), and dogfood-002
 proved a SUCCESS run can still surface three plan-changing gaps.
 
-## 1. Reconstruct what happened (journal is ground truth)
+## 0. Run the mechanical evidence pack — one command
+
+The repetitive phase 1–2 checks are scripted. Run it FIRST and reason over
+its output:
 
 ```sh
-devbox run -- pnpm chikory trace <run-id>              # header, per-step rows, totals
-devbox run -- pnpm chikory trace <run-id> --step <n>   # each step: diff/transcript refs, judge form, rationale
+RUN_ID=<run-id> devbox run dogfood-verify   # newest run if RUN_ID omitted
 ```
 
-Read every step and every judge pass. Record: terminal state, steps, judge
-passes/verdicts, tokens in/out per step, cost vs budget, duration,
-executor/judge families, checkpoint chain. Locate the spec
-(`examples/dogfood/dogfood-<NNN>.yaml`, see `examples/dogfood/README.md`
-index) and the harvest commit (`git log --grep <run-id>`).
+It pulls the acceptance checks from the run's OWN journal (`task_json`, so
+they always match the run), and emits one markdown block:
+
+1. **Trace** — header · per-step rows · totals.
+2. **Per-step evidence** — diff bytes, cost, checkpoint chain, judge pass
+   (criteria/rubric/verdict/rationale) per step.
+3. **Acceptance checks re-run** against the working tree — `PASS/FAIL` +
+   exit code + output tail for each.
+4. **Scope** — `git status --short`.
+5. **Harvest byte-diff** — each changed `packages/…` file vs the run
+   workspace (`IDENTICAL`/`DIFFERS`/not-in-workspace).
+6. **Cost-share** — exact total (steps+judge), budget %, judge share, and
+   the empty-diff **probe step → F-11 % data point** (the WP-221 number).
+
+`devbox run` does NOT forward positional args — pass `RUN_ID=` as an env
+var (or call `bash scripts/dogfood-verify.sh <run-id>` directly). The script
+writes nothing and touches no doc; judgment stays yours (phases below).
+
+## 1. Reconstruct what happened (journal is ground truth)
+
+From the phase-0 pack: record terminal state, steps, judge passes/verdicts,
+tokens in/out per step, cost vs budget, duration, executor/judge families,
+checkpoint chain. **Still read every step's full transcript and every judge
+pass by hand** — the pack surfaces the salient lines, not the whole
+transcript:
+
+```sh
+devbox run -- pnpm chikory trace <run-id> --step <n>   # full diff/transcript refs, judge form, rationale
+```
+
+Locate the spec (`examples/dogfood/dogfood-<NNN>.yaml`, see
+`examples/dogfood/README.md` index) and the harvest commit
+(`git log --grep <run-id>`).
 
 ## 2. Verify the delivery independently — never trust the run's own green
 
-- Re-run **every acceptance criterion's `check`** from the spec yourself,
-  in devbox, against the landed commit. Quote real output in the report.
-- Review the landed diff against the spec's `goal` line by line: every
+The pack's §3 already re-ran every acceptance `check` against the working
+tree and its §5 byte-diffed the harvested files — confirm both are green.
+The judgment half is still yours:
+
+- Review the landed diff against the spec's `goal` **line by line**: every
   named file/symbol present; conventions honored (AGENTS.md); nothing
   out of scope; no new dependencies unless the goal allowed them; for
   parity/port work, compare against the source-of-truth artifact
   (e.g. `types.ts` / CONTRACTS.md / shared fixtures).
-- Confirm scope discipline: `git show --stat` — only files the goal names
-  (or trivially entailed) changed.
+- Confirm scope discipline against the pack's §4 / `git show --stat` — only
+  files the goal names (or trivially entailed) changed. If §5 reports
+  `DIFFERS`, the harvest diverged from what ran — investigate before trusting
+  the green.
 
 ## 3. Hunt anomalies — the checklist that has caught real findings
 
-Walk all of these explicitly; each earlier hit became a WP:
+Walk all of these explicitly (the phase-0 pack feeds several — cost
+telemetry, token-per-step, the probe-step %, judge criteria/rubric — but the
+judgment is yours); each earlier hit became a WP:
 
 - **Wasted/filler steps**: empty diffs, "already done" summaries, steps
   spent re-verifying (F-8 → WP-217).
