@@ -197,6 +197,7 @@ describe.skipIf(address === null)("chikory CLI (WP-141/142)", () => {
 
     expect(await runPromise).toBe(1);
     expect(run.out.join("\n")).toContain("AWAITING_APPROVAL — answer with: chikory approve");
+    expect(run.out.filter((line) => line.includes("AWAITING_APPROVAL — answer with"))).toHaveLength(1);
     expect(run.out.join("\n")).toContain("FAILED");
 
     const trace = cli();
@@ -231,6 +232,7 @@ describe.skipIf(address === null)("chikory CLI (WP-141/142)", () => {
     expect(resumeCode, resume.err.join("\n")).toBe(0);
     expect(await runPromise).toBe(0);
     expect(run.out.join("\n")).toContain("SUSPENDED at the budget cap");
+    expect(run.out.filter((line) => line.includes("SUSPENDED at the budget cap"))).toHaveLength(1);
     expect(run.out.join("\n")).toContain("SUCCESS");
   });
 

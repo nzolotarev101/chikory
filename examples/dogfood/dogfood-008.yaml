@@ -1,0 +1,111 @@
+# Dogfood-008: WP-224 — `chikory land --verify` + git-stderr capture
+# (plan.md §6, queued from dogfood-005 F-17/F-18). `land` currently
+# applies + commits but never verifies, so every landing still needs a
+# hand-run `devbox run build && lint && typecheck && test` (F-17) — and
+# its git() helper inherits stderr, so "Switched to a new branch …" leaks
+# raw into the CLI output and real git failures throw without their
+# stderr detail (F-18). This slice makes `land` the default landing path:
+# verification is one flag, failures are actionable.
+# No-contracts slice: pure src/cli + tests.
+#
+# Zero-secrets launch (locally-authenticated CLIs; see DOGFOODING.md §2.2/§3.8):
+#   node scripts/cli-judge-proxy.mjs 8787 gemini &
+#   OPENAI_COMPAT_BASE_URL=http://127.0.0.1:8787 pnpm chikory run examples/dogfood/dogfood-008.yaml --watch
+#
+# ⚠ Commit everything before launching — the run workspace clones HEAD.
+name: dogfood-008-wp-224-land-verify
+goal: >
+  Implement WP-224 (plan.md §6): `chikory land` gains a --verify flag that
+  runs the repo's verification commands against the fresh commit, and the
+  land command's git plumbing captures stderr instead of leaking it
+  (dogfood-005 F-17 and F-18). Three files changed, nothing else — in
+  particular DO NOT touch packages/sdk-ts/src/types.ts, schemas.ts,
+  src/runner/, src/workflow/, src/executors/, src/cli/trace.ts, or
+  src/cli/commands.ts.
+  (1) packages/sdk-ts/src/cli/land.ts — two changes. First, verification:
+  add `verify?: boolean` to LandArgs and export a module-level constant
+  `VERIFY_COMMANDS: readonly string[]` holding exactly ["devbox run
+  build", "devbox run lint", "devbox run typecheck", "devbox run test"];
+  build the commit message's existing "Verification: …" line from this
+  constant (joined with " && ") so the cited commands and the executed
+  commands can never drift. Export `interface LandDeps extends CliDeps {
+  runCheck?: (command: string, cwd: string) => void }` and change
+  cmdLand's signature to `deps: LandDeps = {}`; the default runCheck runs
+  the command with node:child_process execSync, cwd set to the target
+  repo, stdio ["ignore", "inherit", "inherit"] (live output, throws on
+  non-zero exit). When args.verify is true, after the commit is created:
+  for each command in VERIFY_COMMANDS in order, print `verify: <command>`
+  via out, then invoke runCheck(command, repo); on the first throw, print
+  via err `chikory: verification failed: <command>` and `chikory: commit
+  kept: <sha> — inspect with: git -C <repo> show <sha>`, then return 1 —
+  the commit is NOT rolled back and later commands are NOT run. When all
+  pass, print `verified: 4/4 checks green` via out (in --json mode,
+  instead add `"verified": true` to the existing JSON object and print no
+  verify/verified lines). Without --verify, behavior is byte-identical to
+  today. Second, F-18: in the git() helper pass stdio ["pipe", "pipe",
+  "pipe"] to execFileSync so git's stderr is captured rather than
+  inherited (no more stray "Switched to a new branch …" lines), and
+  extend errorMessage so that when the caught error has a non-empty
+  string `stderr` property, its whitespace-collapsed trim is appended to
+  the message (separated by ": ") — git failures must surface git's own
+  stderr text in the `chikory: land failed: …` line.
+  (2) packages/sdk-ts/src/cli/main.ts — register `verify: { type:
+  "boolean" }` in the land case's parseCommand extras, pass `verify:
+  values["verify"] === true` into cmdLand, and document the flag in HELP
+  under "land options" as: `--verify   run devbox build/lint/typecheck/
+  test after committing; exit 1 on red (commit kept)`.
+  (3) packages/sdk-ts/test/cli/land.test.ts — add three tests, keep all
+  five existing tests and the fixture unchanged: (a) "--verify runs the
+  four devbox checks in order against the target repo" — inject a fake
+  runCheck that records (command, cwd) pairs, expect exit 0, the recorded
+  commands exactly equal to VERIFY_COMMANDS in order, every recorded cwd
+  === the fixture repo path, and `verified: 4/4 checks green` in out; (b)
+  "--verify stops at the first red check, keeps the commit, exits 1" —
+  fake runCheck throws on "devbox run lint", expect exit 1, recorded
+  commands exactly ["devbox run build", "devbox run lint"], the squashed
+  commit still present (rev-list count from baseSha is 1), and err
+  containing both "verification failed: devbox run lint" and "commit
+  kept"; (c) "git failures surface git's stderr in the error message" —
+  build the standard fixture, then commit a conflicting landed.txt with
+  different content in the HOST repo so `git apply` must fail; run land
+  without --verify and expect exit 1, exactly one err line, and that
+  line containing both "land failed" and "landed.txt" — the latter can
+  only come from git's captured stderr, proving the F-18 fix. Inject
+  fakes by passing a LandDeps
+  object through main(["land", …], deps) as the existing tests do.
+  Follow AGENTS.md conventions: strict TypeScript, ESM imports with .js
+  extensions, named exports only, no new dependencies.
+repos:
+  - url: /Users/nikitazolotarev/repos/chikory
+    writable: true
+acceptance_criteria:
+  # Judge-executed in the run workspace (fresh clone), bare pnpm, 120 s cap
+  # per check. Timed on host 2026-06-12: land.test.ts ≈ 4.4 s + install,
+  # AC-2 ≈ 8 s, AC-3 ≈ 10 s.
+  - id: AC-1
+    description: land suite passes with the three new --verify/stderr tests
+    check: pnpm install --prefer-offline --silent && pnpm --filter @chikory/sdk exec vitest run test/cli/land.test.ts
+  - id: AC-2
+    description: the rest of the CLI surface is untouched in behavior
+    check: pnpm --filter @chikory/sdk exec vitest run test/cli/cli.test.ts test/cli/trace.test.ts
+  - id: AC-3
+    description: strict typecheck and lint are clean
+    check: pnpm --filter @chikory/sdk typecheck && pnpm --filter @chikory/sdk lint
+budget_usd: 5
+max_steps: 4
+executor:
+  adapter: codex
+  family: openai
+judge:
+  # openai-compat = the keyless shim seam; real family = the shim backend
+  # (gemini) — structurally different from the openai executor.
+  family: openai-compat
+  cadence: 2
+  max_cost_share: 0.5
+routing:
+  stages:
+    # plan/review unused by CLI executors in P1; code.model feeds `codex -m`.
+    plan: { provider: openai-compat, model: gpt-5.5 }
+    code: { provider: openai-compat, model: gpt-5.5 }
+    review: { provider: openai-compat, model: gpt-5.5 }
+    judge: { provider: openai-compat, model: gemini-3.1-pro-preview }

@@ -30,5 +30,6 @@ plan.md work-package slice through Chikory itself. Full operating manual:
 | [`dogfood-003.yaml`](dogfood-003.yaml) | WP-217 — completion signal → off-cadence judge pass | SUCCESS (run-b2f3504d; landed `ef4b16f`) | [`dogfood-003.md`](../../docs/reports/dogfood-003.md) |
 | [`dogfood-004.yaml`](dogfood-004.yaml) | WP-218 slice 1 — pricing refresh + blind-cost-meter warning | SUCCESS (run-9edbcd28; landed `2a4dd21`) | [`dogfood-004.md`](../../docs/reports/dogfood-004.md) |
 | [`dogfood-005.yaml`](dogfood-005.yaml) | WP-220 — `chikory land <run-id>` | SUCCESS (run-34926e85; diff verified on `wp-220-chikory-land`, commit pending review) | [`dogfood-005.md`](../../docs/reports/dogfood-005.md) |
-| [`dogfood-006.yaml`](dogfood-006.yaml) | WP-222 slice 1 — executor subprocess env scrub | SUCCESS (run-559ea904; diff verified, commit pending review) | [`dogfood-006.md`](../../docs/reports/dogfood-006.md) |
-| [`dogfood-007.yaml`](dogfood-007.yaml) | WP-223 — watch renders journal transitions, never sampled state | not yet run | — |
+| [`dogfood-006.yaml`](dogfood-006.yaml) | WP-222 slice 1 — executor subprocess env scrub | SUCCESS (run-559ea904; landed `18fae43`) | [`dogfood-006.md`](../../docs/reports/dogfood-006.md) |
+| [`dogfood-007.yaml`](dogfood-007.yaml) | WP-223 — watch renders journal transitions, never sampled state | SUCCESS (run-22b337a9; diff verified, commit pending review) | [`dogfood-007.md`](../../docs/reports/dogfood-007.md) |
+| [`dogfood-008.yaml`](dogfood-008.yaml) | WP-224 — `land --verify` + git-stderr capture | not yet run | — |
