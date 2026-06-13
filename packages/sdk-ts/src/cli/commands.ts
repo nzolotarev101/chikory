@@ -87,7 +87,7 @@ function journalReport(dataDir: string, runId: string): RunStatusReport | undefi
  * with --watch, every new journal entry) as they land. The run itself is
  * durable — ctrl-C only detaches this process; `chikory resume` reattaches.
  */
-async function followRun(
+export async function followRun(
   handle: RunHandle,
   flags: CommonFlags,
   opts: { watch: boolean; deps: CliDeps; io: Io },
@@ -95,42 +95,49 @@ async function followRun(
   const interval = opts.deps.pollIntervalMs ?? 1000;
   const path = journalPath(flags.dataDir, handle.runId);
   let nextEntryIdx = 0;
-  for (;;) {
-    if (existsSync(path)) {
-      const journal = new Journal(path);
-      try {
-        for (const entry of journal.entries()) {
-          if (entry.idx < nextEntryIdx) continue;
-          nextEntryIdx = entry.idx + 1;
-          if (opts.watch) opts.io.out(formatEntryLine(entry));
-          if (entry.kind === "budget_event") {
-            const payload = entry.payload as {
-              event: string;
-              details: { spentUsd: number; budgetUsd: number };
-            };
-            if (payload.event === "halt") {
-              opts.io.out(
-                `run is SUSPENDED at the budget cap ($${payload.details.spentUsd.toFixed(2)} of ` +
-                  `$${payload.details.budgetUsd.toFixed(2)}) — top up with: chikory resume ` +
-                  `${handle.runId} --add-budget <usd>`,
-              );
-            }
-          } else if (entry.kind === "verdict") {
-            const payload = entry.payload as { verdict: { kind: string } };
-            if (payload.verdict.kind === "ESCALATE") {
-              opts.io.out(
-                `run is AWAITING_APPROVAL — answer with: chikory approve ${handle.runId} ` +
-                  `[--reject "<reason>"]`,
-              );
-            }
+
+  function drainJournal(): void {
+    if (!existsSync(path)) return;
+    const journal = new Journal(path);
+    try {
+      for (const entry of journal.entries()) {
+        if (entry.idx < nextEntryIdx) continue;
+        nextEntryIdx = entry.idx + 1;
+        if (opts.watch) opts.io.out(formatEntryLine(entry));
+        if (entry.kind === "budget_event") {
+          const payload = entry.payload as {
+            event: string;
+            details: { spentUsd: number; budgetUsd: number };
+          };
+          if (payload.event === "halt") {
+            opts.io.out(
+              `run is SUSPENDED at the budget cap ($${payload.details.spentUsd.toFixed(2)} of ` +
+                `$${payload.details.budgetUsd.toFixed(2)}) — top up with: chikory resume ` +
+                `${handle.runId} --add-budget <usd>`,
+            );
+          }
+        } else if (entry.kind === "verdict") {
+          const payload = entry.payload as { verdict: { kind: string } };
+          if (payload.verdict.kind === "ESCALATE") {
+            opts.io.out(
+              `run is AWAITING_APPROVAL — answer with: chikory approve ${handle.runId} ` +
+                `[--reject "<reason>"]`,
+            );
           }
         }
-      } finally {
-        journal.close();
       }
+    } finally {
+      journal.close();
     }
+  }
+
+  for (;;) {
+    drainJournal();
     const report = await handle.status();
-    if (TERMINAL.has(report.status)) return report;
+    if (TERMINAL.has(report.status)) {
+      drainJournal();
+      return report;
+    }
     await sleep(interval);
   }
 }

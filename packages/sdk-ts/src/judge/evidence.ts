@@ -10,6 +10,7 @@
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 
+import { scrubExecutorEnv } from "../executors/env.js";
 import type {
   AcceptanceCriterion,
   ArtifactStore,
@@ -70,6 +71,7 @@ async function runCheck(
       cwd: workspaceDir,
       timeout: timeoutMs,
       maxBuffer: 16 * 1024 * 1024,
+      env: scrubExecutorEnv(process.env, []),
     });
     output = stdout + stderr;
   } catch (err) {

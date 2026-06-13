@@ -11,9 +11,12 @@ import { join } from "node:path";
 
 import { afterEach, beforeAll, describe, expect, inject, test } from "vitest";
 
-import type { CliDeps } from "../../src/cli/commands.js";
+import { followRun, type CliDeps } from "../../src/cli/commands.js";
 import { main } from "../../src/cli/main.js";
 import type { RunStatusReport } from "../../src/index.js";
+import { Journal } from "../../src/journal/journal.js";
+import { journalPath } from "../../src/runner/paths.js";
+import type { RunHandle } from "../../src/types.js";
 import {
   initSourceRepo,
   judgeForm,
@@ -285,5 +288,61 @@ describe.skipIf(address === null)("chikory CLI (WP-141/142)", () => {
     for (const cmd of ["run", "resume", "status", "approve", "cancel", "trace"]) {
       expect(help.out.join("\n")).toContain(cmd);
     }
+  });
+
+  test("final drain renders a transition appended during terminal status()", async () => {
+    const tmp = await mkdtemp(join(tmpdir(), "chikory-cli-"));
+    cleanups.push(() => rm(tmp, { recursive: true, force: true }));
+    const runId = "run-fake-drain";
+    const path = journalPath(tmp, runId);
+    
+    // Create an empty journal so Journal initialization succeeds
+    const journal = new Journal(path);
+    journal.close();
+
+    const fakeHandle: RunHandle = {
+      runId,
+      async status() {
+        const j = new Journal(path);
+        try {
+          j.append({
+            kind: "verdict",
+            payload: { verdict: { kind: "ESCALATE" } },
+            costDeltaUsd: 0,
+            artifactRefs: [],
+          });
+        } finally {
+          j.close();
+        }
+        return {
+          status: "FAILED",
+          currentStep: 3,
+          spentUsd: 0.03,
+          budgetUsd: 5,
+          checkpoints: [],
+        };
+      },
+      approve: async () => {},
+      inject: async () => {},
+      cancel: async () => {},
+    };
+
+    const output: string[] = [];
+    const ioPair = {
+      out: (line: string) => output.push(line),
+      err: () => {},
+    };
+
+    const report = await followRun(
+      fakeHandle,
+      { json: false, dataDir: tmp },
+      { watch: false, deps: { pollIntervalMs: 1 }, io: ioPair },
+    );
+
+    expect(report.status).toBe("FAILED");
+    const awaitingApprovalLines = output.filter((line) =>
+      line.includes("AWAITING_APPROVAL — answer with: chikory approve"),
+    );
+    expect(awaitingApprovalLines).toHaveLength(1);
   });
 });
