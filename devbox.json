@@ -21,7 +21,8 @@
       "smoke": "bash scripts/smoke.sh",
       "dogfood": "bash scripts/dogfood.sh",
       "dogfood-verify": "bash scripts/dogfood-verify.sh",
-      "harvest": "bash scripts/harvest.sh \"\" main"
+      "harvest": "bash scripts/harvest.sh \"\" main",
+      "harvest-audit": "bash scripts/harvest-audit.sh"
     }
   }
 }
