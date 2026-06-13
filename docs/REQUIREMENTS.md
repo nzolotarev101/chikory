@@ -92,7 +92,7 @@ Every requirement in [`project.md`](../project.md), assigned a stable ID, mapped
 
 | ID | Requirement | WP(s) | Phase | Status |
 |---|---|---|---|---|
-| SE-1 | Checkpoint notifications at judge milestones | WP-208 | P2 | in-progress (slice 1 added the pure `notificationsFor` derivation — `JournalEntry[]` + `NotificationPolicy` → ordered `Notification[]` — via dogfood-012, run `run-ea31f96c`; slice 2 added the pure `slackPayloadFor` formatter — `Notification` → Slack `{ text }` with `🚨`/`✅`/`🏁` trigger prefix — via dogfood-013, run `run-048635b1`; both harvested uncommitted on `main`. Remaining: the desktop-ping payload formatter (next 🟢, dogfood-014) then the side-effectful Slack/desktop delivery + runner call-site — non-pure, contract/loop-gated) |
+| SE-1 | Checkpoint notifications at judge milestones | WP-208 | P2 | in-progress — **pure delivery layer complete**: slice 1 `notificationsFor` derivation (`JournalEntry[]` + `NotificationPolicy` → `Notification[]`, dogfood-012); slice 2 `slackPayloadFor` (`Notification` → Slack `{ text }`, dogfood-013); slice 3 pure half `desktopPayloadFor` (`Notification` → `{ title, body }`, dogfood-014, landed `3e1336f`). Remaining: the side-effectful Slack/desktop delivery + runner call-site — non-pure, rides the chain/runner work. |
 | SE-2 | Window-fit reasoning for implementation and judging passes | WP-207 | P2 | planned |
 | SE-3 | Process metrics: components over time; issues found vs changes made | WP-209 | P2 | in-progress (both trace-footer halves done — issues-found:changes-made via WP-209 slice 1 / dogfood-010, run `run-c9df353b`; components-over-time via WP-209 slice 2 / dogfood-011, run `run-59e0166c`; both commit pending review on `main`. OTel metric emission deferred to a later WP-209 slice) |
 

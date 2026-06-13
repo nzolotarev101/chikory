@@ -73,10 +73,19 @@ the **seventh campaign with no new friction**, hitting the prescribed emoji
 lookup and payload strings byte-for-byte under a strict two-NEW-file scope.
 F-11's probe tax set a **new record high of 35.1 %** (220k input tokens,
 full-suite re-run) — set from below, by the cheapest productive step yet
-($0.51), widening the spread to **5.8 %–35.1 %** over twelve data points. With
-slice 2 landed, the WP-208 pure vein has one piece left (the desktop-ping
-payload formatter, dogfood-014); after it the pure-renderer vein is exhausted
-and the queue meets the contract/ADR-gated wall.
+($0.51), widening the spread to **5.8 %–35.1 %** over twelve data points. Dogfood-014
+(`docs/reports/dogfood-014.md`) added the slice-3 pure half (`desktopPayloadFor`
+— `Notification` → `{ title, body }`) — fourteenth first-attempt SUCCESS, and
+the **first run to modify an existing tracked file** (additive, beside
+`slackPayloadFor`) rather than create two new ones. That first surfaced **F-20**:
+the harvest tool silently dropped the modified files (non-interactive conflict
+skip) while reporting success — root-caused and fixed the same session
+(reconciliation guard + `harvest-audit`, which confirmed no past silent losses).
+F-11 was a mid-spread 24.1 %. **Then the contract wall fell by hand**: WP-219
+ADR-005 was accepted and its slice-1 contracts (`Plan`/chain types +
+`claimsComplete`/`budgetTokens`) landed — unblocking the dogfoodable chain
+implementation slices. Next: dogfood-015 carves the pure half of the chain
+executor (`readyNodes`), the first consumer of the new `Plan` types.
 
 Related docs: [`docs/spec/task-spec.md`](spec/task-spec.md) (schema
 reference) · [`docs/TASK-PROTOCOL.md`](TASK-PROTOCOL.md) (WP etiquette, §7 is
@@ -437,6 +446,7 @@ a first-attempt SUCCESS and produced three plan-changing findings
 | `pnpm chikory: command not found` | Bin link lost: `rm node_modules/.pnpm-workspace-state-v1.json && devbox run -- pnpm install`. |
 | Proxy run dies with router FAILED on judge pass | Shim not running / wrong port — restart `cli-judge-proxy.mjs` and check `OPENAI_COMPAT_BASE_URL`. |
 | `[cli-judge:…] FAILED … 404/500` *during executor steps* | Not the judge: the executor inherited `OPENAI_COMPAT_BASE_URL` and its in-workspace test run un-skipped `providers.integration.test.ts`, which pings the live shim (dogfood-004 F-14; recurred dogfood-005/006). **Fixed by WP-222 slice 1** (dogfood-006, landed `18fae43`): executor children now see only their own family key. **Closure confirmed by dogfood-007** — zero shim noise in `run-22b337a9`'s executor transcript. Seeing this symptom now is a regression — file it. |
+| `devbox run harvest` says `Successfully applied changes` but the feature is missing / files unchanged | The pre-fix modified-file blind spot (dogfood-014 **F-20**): the old harvest skipped a file whose host version *differed* from the run's final version, which is exactly the normal case for an edit-in-place. **Fixed** (commit `0c20694`): harvest now applies the workspace's final version by intent and a **reconciliation pass** hard-errors (exit 1) on any unapplied change — it can no longer report success having applied nothing. To check past runs for silent drops: `devbox run harvest-audit` (every run's final file content vs git history). Reminder: `devbox run harvest` defaults to the **newest** run (devbox doesn't forward args) — for a specific run use `bash scripts/harvest.sh <run-id>`. |
 | `devbox run harvest` (or a full-suite run) fails on a `cli.test.ts` test unrelated to the run's diff | The watch race flake (dogfood-004 F-15). **Fixed by WP-223** (dogfood-007 `run-22b337a9`, commit pending review): transition lines now derive from durable journal entries, not poll sampling — three clean full-suite runs post-fix. Seeing either flavor (`budget halt` missing the `SUSPENDED at the budget cap` line, `loop-breaker escalation` missing the `AWAITING_APPROVAL` line) on a post-WP-223 tree is a regression — file it. |
 | A full-suite or AC run fails on `agent-loop.test.ts > incomplete empty-diff verdict keeps RUNNING…` with `expected undefined to deeply equal { kind: 'PROCEED', … }` | Pre-existing test-harness race (dogfood-007 F-19, fix WP-225): the test's `waitFor` gates on the judge-wire hit count, not on the verdict being journaled, so `lastVerdict` can still be `undefined` at assert time (flapped 2/13 host invocations). Re-run the file in isolation; unrelated to any CLI diff. One-line fix: gate the predicate on `report.lastVerdict !== undefined`. |
 
