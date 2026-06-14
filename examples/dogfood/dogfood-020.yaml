@@ -1,0 +1,92 @@
+# Dogfood-020: WP-230 — the typecheck gate must cover test/** (dogfood-019 F-29).
+#
+# dogfood-019 shipped a SUCCESS run whose new test (test/runner/judge-trigger.test.ts)
+# built `ArtifactRef` fixtures as `{uri, sha256, bytes}` — but the real type
+# (types.ts) is `{id, kind, bytes, summary}`. That is 7 real `TS2353` type errors,
+# and every dogfood signal stayed green: the `typecheck` script is `tsc --noEmit`
+# over `tsconfig.json`, whose `include` is `["src/**/*"]` — test files are never
+# type-checked — and Vitest transpiles tests without type-checking. The cheap gate
+# the judge sits on top of has a blind spot. This slice closes it.
+#
+# Pre-verified blast radius (this is safe to land in one run): compiling
+# `src/**/*` + `test/**/*` under the project's strict config surfaces exactly the
+# 7 errors in judge-trigger.test.ts and NOTHING else — the rest of the suite is
+# already type-clean. So fixing that one file + wiring the gate goes green.
+#
+# Zero-secrets launch:
+#   node scripts/cli-judge-proxy.mjs 8787 gemini &
+#   OPENAI_COMPAT_BASE_URL=http://127.0.0.1:8787 pnpm chikory run examples/dogfood/dogfood-020.yaml --watch
+#
+# Commit the dogfood-019 report + doc updates before launching; workspaces clone
+# HEAD. Run Devbox commands sequentially (dogfood-016 F-22).
+name: dogfood-020-wp-230-typecheck-covers-tests
+goal: >
+  Implement WP-230 (dogfood-019 F-29): make the TypeScript typecheck gate cover
+  test files, and fix the fixtures the current src-only gate let through. Work
+  only inside packages/sdk-ts. Create one new tsconfig, modify package.json's
+  typecheck script, and fix one existing test file — change no other file, add no
+  dependency, and change no source type, contract, or runtime behavior. Do NOT
+  modify packages/sdk-ts/tsconfig.json or the `build` script (the build's
+  src-only `rootDir` emit must stay exactly as is).
+
+  1. New file packages/sdk-ts/tsconfig.test.json: a type-check-only config that
+     `extends` "./tsconfig.json", sets `compilerOptions.noEmit` true and
+     `compilerOptions.rootDir` to the package root "." (so test files outside
+     src/ are allowed in the program), and whose `include` covers both
+     "src/**/*" and "test/**/*". It must inherit the base config's strict
+     settings; it only widens the file set and relaxes rootDir/emit.
+
+  2. packages/sdk-ts/package.json: change the `typecheck` script so it
+     type-checks BOTH the src tree and the test tree — keep the existing
+     `tsc --noEmit` (src, via tsconfig.json) AND add a second pass
+     `tsc --noEmit -p tsconfig.test.json`, run sequentially so a failure in
+     either fails the script (e.g. `tsc --noEmit && tsc --noEmit -p tsconfig.test.json`).
+     Add no other script and touch no other package.json field.
+
+  3. packages/sdk-ts/test/runner/judge-trigger.test.ts: the `makeRecord` helper
+     builds `diffRef` and `transcriptRef` as `{ uri, sha256, bytes }`, which is
+     not a valid `ArtifactRef`. Fix every `ArtifactRef` literal in this file to
+     the real shape from types.ts — `{ id, kind, bytes, summary }` — choosing a
+     valid `ArtifactKind` for `kind` (e.g. "diff" for the diff ref, "transcript"
+     for the transcript ref) and any short placeholder strings for `id`/`summary`.
+     Keep `bytes` as it is in each case (that is the field the predicate reads, so
+     the existing six test cases and their expected booleans must stay byte-for-byte
+     unchanged). Do not alter the test names, the cases, or the assertions — only
+     correct the fixture object shapes.
+
+  After this change, `pnpm --filter @chikory/sdk typecheck` type-checks the test
+  tree too and passes clean, and any future test with a wrong-shaped fixture fails
+  the gate. Follow AGENTS.md: strict TypeScript, ESM `.js` import extensions, named
+  exports only, no `any`, and run all Devbox verification commands sequentially.
+repos:
+  - url: /Users/nikitazolotarev/repos/chikory
+    writable: true
+acceptance_criteria:
+  - id: AC-1
+    description: >
+      the typecheck gate now covers tests and is clean — proving both the new
+      test-inclusive config is wired into `typecheck` and the judge-trigger
+      fixtures were fixed (a green run here is impossible unless test/** is
+      actually type-checked and error-free)
+    check: pnpm install --prefer-offline --silent && pnpm --filter @chikory/sdk typecheck
+  - id: AC-2
+    description: the complete TypeScript SDK suite remains green
+    check: pnpm --filter @chikory/sdk test
+  - id: AC-3
+    description: lint is clean and the judge-trigger unit test still passes unchanged
+    check: pnpm --filter @chikory/sdk lint && pnpm --filter @chikory/sdk exec vitest run test/runner/judge-trigger.test.ts
+budget_usd: 5
+max_steps: 4
+executor:
+  adapter: codex
+  family: openai
+judge:
+  family: openai-compat
+  cadence: 2
+  max_cost_share: 0.5
+routing:
+  stages:
+    plan: { provider: openai-compat, model: gpt-5.5 }
+    code: { provider: openai-compat, model: gpt-5.5 }
+    review: { provider: openai-compat, model: gpt-5.5 }
+    judge: { provider: openai-compat, model: gemini-3.1-pro-preview }

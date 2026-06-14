@@ -115,9 +115,16 @@ renders `judge escalated: <reason>` on the watch stream before the
 AWAITING_APPROVAL line; diff byte-for-byte to spec, 3/3 AC + 4/4 rubric PROCEED,
 harvested byte-identically. **F-27 closed.** It surfaced F-28 (specs
 over-prescribed to the keystroke under-test the thesis — see §3) and F-11
-recurred at 34.8 % of run cost (top of the range). Next: dogfood-019 delivers
-WP-221's pure trigger half (OR `claimsComplete` into the WP-217 empty-diff judge
-trigger — the direct fix for that probe-step waste).
+recurred at 34.8 % of run cost (top of the range). Dogfood-019
+(`docs/reports/dogfood-019.md`) delivered WP-221's pure trigger half —
+`isCompletionMilestone(record)` ORs `claimsComplete` into the WP-217 empty-diff
+trigger, behavior preserved — its eighteenth first-attempt SUCCESS. **But human
+review caught F-29**: the new test's fixtures violate the `ArtifactRef` contract
+(7 real `TS2353` errors) yet shipped green, because `typecheck` compiles only
+`src/**` and Vitest skips type-checking. A SUCCESS run again surfaced a
+plan-changing gap (dogfood-002's lesson). F-11 recurred at 25.2 %; step 1 hit a
+campaign-high 921k input tokens. Next: dogfood-020 delivers WP-230 (extend the
+typecheck gate to `test/**` and fix the fixtures) before WP-221 Slice B.
 
 Related docs: [`docs/spec/task-spec.md`](spec/task-spec.md) (schema
 reference) · [`docs/TASK-PROTOCOL.md`](TASK-PROTOCOL.md) (WP etiquette, §7 is
@@ -499,6 +506,7 @@ a first-attempt SUCCESS and produced three plan-changing findings
 | A full-suite or AC run fails on `agent-loop.test.ts > incomplete empty-diff verdict keeps RUNNING…` with `expected undefined to deeply equal { kind: 'PROCEED', … }` | Pre-existing test-harness race (dogfood-007 F-19, fix WP-225): the test's `waitFor` gates on the judge-wire hit count, not on the verdict being journaled, so `lastVerdict` can still be `undefined` at assert time (flapped 2/13 host invocations). Re-run the file in isolation; unrelated to any CLI diff. One-line fix: gate the predicate on `report.lastVerdict !== undefined`. |
 | A run produces a ~empty diff, the executor still claims SUCCESS, and the judge ESCALATEs "diff missing the required changes" | The spec was **redundant — its WP already landed by another path** before launch (dogfood-017 **F-25**: WP-227 hand-landed `26b9964` four hours before the spec ran). The executor had no work and narrated the spec as done over an empty diff (F-26); the judge correctly caught the mismatch. **Operating rule: retire/supersede a dogfood spec the moment its WP lands by any other path** — check `git log`/HEAD before launching. WP-228 will add a launch-time precheck that runs the acceptance checks against the clean baseline and warns if they already pass. |
 | `devbox run dogfood` ends with `exit status 1` / `[ELIFECYCLE] Command failed` after you reject an escalation | Not a crash. A deliberate `chikory approve … --reject` seals the run **FAILED**, so `chikory run --watch` exits non-zero and devbox propagates it, then cleanly tears down the judge-proxy and Temporal (dogfood-017). A failed run *should* exit non-zero; the worktree stays clean. Distinguish from a real crash by the `terminal FAILED — judge escalation rejected: …` line above the teardown. |
+| A run's tests pass and `typecheck` is clean, but a test fixture has the wrong shape for a real type | The `typecheck` AC (`tsc --noEmit`) compiles only `src/**` (`tsconfig.json` `include`), and Vitest transpiles tests via esbuild **without** type-checking — so type errors *in test code* are invisible to every dogfood signal (dogfood-019 **F-29**: `judge-trigger.test.ts` built `ArtifactRef` fixtures as `{uri,sha256,bytes}` vs the real `{id,kind,bytes,summary}` — 7 `TS2353` errors, all green). To check a suspect test: add it to a temp tsconfig that `extends ./tsconfig.json`, sets `compilerOptions.rootDir: "."`, and includes both `src/**/*` and the test file, then `pnpm --filter @chikory/sdk exec tsc --noEmit -p <that-config>`. **WP-230** makes a test-inclusive typecheck a standing AC. |
 | Live `--watch` shows `verdict ⚠ ESCALATE` and `run is AWAITING_APPROVAL` but no reason | **Fixed by WP-229** (dogfood-018, `run-59115f35`): `followRun` now prints `judge escalated: <reason>` immediately before the AWAITING_APPROVAL line whenever the ESCALATE verdict carries a non-empty `escalateReason`. If you still see no reason, the verdict had an empty `escalateReason` (the line is suppressed by design) — fall back to `pnpm chikory trace <run-id> --step <n>` for the full judge form, or read the `verdict` entry in `.chikory/runs/<run-id>/journal.db`. |
 
 ## 8. Known P1 limitations (so you don't fight them)

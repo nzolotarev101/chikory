@@ -35,6 +35,7 @@ import type {
   StepLimits,
   TaskSpec,
 } from "../types.js";
+import { isCompletionMilestone } from "./judge-trigger.js";
 
 /** Step bound when the TaskSpec doesn't say otherwise (executors.md). */
 export const DEFAULT_STEP_LIMITS: StepLimits = { maxSeconds: 600 };
@@ -208,7 +209,7 @@ export async function agentLoop(spec: TaskSpec): Promise<RunStatus> {
 
     // Judge on cadence or a completion milestone (JD-2); each pass is one
     // activity (WP-121/131).
-    const completionMilestone = record.status === "SUCCESS" && record.diffRef.bytes === 0;
+    const completionMilestone = isCompletionMilestone(record);
     let verdict: JudgeVerdict | undefined;
     if (stepIndex % spec.judge.cadence === 0 || completionMilestone) {
       verdict = await activities.judgeStep({
