@@ -109,7 +109,15 @@ acceptance check and rubric item passed, and the structurally-different judge
 still ESCALATEd on the diff-vs-claim mismatch. It surfaced F-25 (retire
 superseded specs; launch baseline-satisfied precheck → WP-228), F-26 (executor
 empty-diff completion claim → raises WP-221), and F-27 (the `--watch` ESCALATE
-line drops the judge reasoning → WP-229). Next: dogfood-018 delivers WP-229.
+line drops the judge reasoning → WP-229). Dogfood-018
+(`docs/reports/dogfood-018.md`) delivered WP-229 cleanly — `followRun` now
+renders `judge escalated: <reason>` on the watch stream before the
+AWAITING_APPROVAL line; diff byte-for-byte to spec, 3/3 AC + 4/4 rubric PROCEED,
+harvested byte-identically. **F-27 closed.** It surfaced F-28 (specs
+over-prescribed to the keystroke under-test the thesis — see §3) and F-11
+recurred at 34.8 % of run cost (top of the range). Next: dogfood-019 delivers
+WP-221's pure trigger half (OR `claimsComplete` into the WP-217 empty-diff judge
+trigger — the direct fix for that probe-step waste).
 
 Related docs: [`docs/spec/task-spec.md`](spec/task-spec.md) (schema
 reference) · [`docs/TASK-PROTOCOL.md`](TASK-PROTOCOL.md) (WP etiquette, §7 is
@@ -214,6 +222,16 @@ open and `AGENTS.md` read:
 - Scope it to 1–3 steps' worth of work (§1). If you can't describe the
   change in one paragraph of concrete instructions, split the WP into
   multiple runs.
+- **Specify the *what*, not the *how* (dogfood-018 F-28).** Name files,
+  symbol signatures, the behavior, and the tests with their assertions — then
+  stop. Do **not** transcribe the literal code body (exact cast text, exact
+  variable names, exact one-line expressions). A goal that dictates the change
+  keystroke-by-keystroke collapses the executor's job to transcription: the
+  run no longer tests agent judgment and the judge can only confirm code the
+  human already wrote (dogfood-018 produced a diff byte-for-byte identical to
+  its goal; dogfood-017's redundant-spec failure was the same drift taken to
+  its limit). Leave a real decision in every spec so the run is genuine thesis
+  evidence — autonomy exercised, judge grading something independent.
 
 ### 3.3 `repos` (required, exactly 1 in P1)
 
@@ -481,7 +499,7 @@ a first-attempt SUCCESS and produced three plan-changing findings
 | A full-suite or AC run fails on `agent-loop.test.ts > incomplete empty-diff verdict keeps RUNNING…` with `expected undefined to deeply equal { kind: 'PROCEED', … }` | Pre-existing test-harness race (dogfood-007 F-19, fix WP-225): the test's `waitFor` gates on the judge-wire hit count, not on the verdict being journaled, so `lastVerdict` can still be `undefined` at assert time (flapped 2/13 host invocations). Re-run the file in isolation; unrelated to any CLI diff. One-line fix: gate the predicate on `report.lastVerdict !== undefined`. |
 | A run produces a ~empty diff, the executor still claims SUCCESS, and the judge ESCALATEs "diff missing the required changes" | The spec was **redundant — its WP already landed by another path** before launch (dogfood-017 **F-25**: WP-227 hand-landed `26b9964` four hours before the spec ran). The executor had no work and narrated the spec as done over an empty diff (F-26); the judge correctly caught the mismatch. **Operating rule: retire/supersede a dogfood spec the moment its WP lands by any other path** — check `git log`/HEAD before launching. WP-228 will add a launch-time precheck that runs the acceptance checks against the clean baseline and warns if they already pass. |
 | `devbox run dogfood` ends with `exit status 1` / `[ELIFECYCLE] Command failed` after you reject an escalation | Not a crash. A deliberate `chikory approve … --reject` seals the run **FAILED**, so `chikory run --watch` exits non-zero and devbox propagates it, then cleanly tears down the judge-proxy and Temporal (dogfood-017). A failed run *should* exit non-zero; the worktree stays clean. Distinguish from a real crash by the `terminal FAILED — judge escalation rejected: …` line above the teardown. |
-| Live `--watch` shows `verdict ⚠ ESCALATE` and `run is AWAITING_APPROVAL` but no reason | The watch line currently drops `verdict.escalateReason` (dogfood-017 **F-27**, → WP-229). To see *why* the judge escalated before deciding approve-vs-reject: `pnpm chikory trace <run-id> --step <n>` (full judge form + rationale), or read the `verdict` entry in `.chikory/runs/<run-id>/journal.db`. WP-229 will render the reason on the AWAITING_APPROVAL line. |
+| Live `--watch` shows `verdict ⚠ ESCALATE` and `run is AWAITING_APPROVAL` but no reason | **Fixed by WP-229** (dogfood-018, `run-59115f35`): `followRun` now prints `judge escalated: <reason>` immediately before the AWAITING_APPROVAL line whenever the ESCALATE verdict carries a non-empty `escalateReason`. If you still see no reason, the verdict had an empty `escalateReason` (the line is suppressed by design) — fall back to `pnpm chikory trace <run-id> --step <n>` for the full judge form, or read the `verdict` entry in `.chikory/runs/<run-id>/journal.db`. |
 
 ## 8. Known P1 limitations (so you don't fight them)
 

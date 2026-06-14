@@ -1,0 +1,99 @@
+# Dogfood-019: WP-221 pure trigger half — `isCompletionMilestone` ORs
+# `claimsComplete` into the WP-217 empty-diff judge trigger (dogfood-003/018 F-11).
+#
+# Today the agent loop forces an off-cadence judge pass only when a step is
+# SUCCESS *and* its diff is empty (agent-loop.ts:211). The productive step
+# (non-empty diff) is therefore never judged directly — the loop spends a whole
+# extra "completion probe" step that re-runs the work, which has cost 5.4%–35.1%
+# of run cost across seventeen campaigns (dogfood-018 paid 34.8%). The frozen
+# `StepRecord.claimsComplete?: boolean` contract (landed `d56f35a`) exists to fix
+# this: OR it into the milestone condition so a step the executor declares
+# complete is judged where it stands. This slice delivers the PURE trigger half
+# (the predicate + its wiring). The adapter half — executors actually populating
+# `claimsComplete` — is a separate later slice, so this run changes no observable
+# behavior on today's runs (nothing sets `claimsComplete` yet).
+#
+# This spec deliberately names the file, signature, behavior, and the test cases
+# with their expected results, but NOT the function body — the executor designs
+# the implementation (dogfood-018 F-28: specs state the *what*, not the *how*).
+#
+# Zero-secrets launch:
+#   node scripts/cli-judge-proxy.mjs 8787 gemini &
+#   OPENAI_COMPAT_BASE_URL=http://127.0.0.1:8787 pnpm chikory run examples/dogfood/dogfood-019.yaml --watch
+#
+# Commit the dogfood-018 report + doc updates before launching; workspaces clone
+# HEAD. Run Devbox commands sequentially (dogfood-016 F-22).
+name: dogfood-019-wp-221-completion-milestone-predicate
+goal: >
+  Implement the pure trigger half of WP-221 (dogfood-003/018 F-11): extract the
+  agent loop's "completion milestone" judge-trigger decision into a pure,
+  independently testable predicate and widen it to honor the executor's
+  `claimsComplete` signal. Create exactly one new source file, modify exactly one
+  existing source file, and create exactly one new test file — nothing else. Add
+  no dependency, and change no contract, type, schema, journal format, or runner
+  activity.
+
+  New source file: packages/sdk-ts/src/workflow/judge-trigger.ts. Export a single
+  pure function `isCompletionMilestone(record: StepRecord): boolean` (import
+  `StepRecord` as a type from "../types.js"; named export, no default export). It
+  returns true exactly when the step is a SUCCESS *and* either its diff is empty
+  (`record.diffRef.bytes === 0`) or the executor explicitly claimed completion
+  (`record.claimsComplete === true`); it returns false otherwise. A SUCCESS step
+  with a non-empty diff and no `claimsComplete` must return false (this preserves
+  today's behavior); a FAILED step must return false regardless of diff size or
+  `claimsComplete`. The function must be pure — no I/O, no mutation of its
+  argument. Add a short JSDoc comment on the export citing WP-217/WP-221 and F-11.
+
+  Modify packages/sdk-ts/src/workflow/agent-loop.ts: replace the inline
+  `completionMilestone` expression (currently
+  `const completionMilestone = record.status === "SUCCESS" && record.diffRef.bytes === 0;`)
+  with a call to the new `isCompletionMilestone(record)`, and add the import. The
+  empty-diff path must remain true, so the existing agent-loop integration tests
+  keep passing unchanged. Touch nothing else in that file — the cadence check, the
+  `if (stepIndex % spec.judge.cadence === 0 || completionMilestone)` gate, the
+  judge-pass body, checkpointing, and verdict gating stay byte-for-byte as they are.
+
+  New test file: packages/sdk-ts/test/runner/judge-trigger.test.ts. Unit-test
+  `isCompletionMilestone` in isolation over constructed `StepRecord` values (build
+  a minimal valid record helper; only the fields the predicate reads need realistic
+  values). Cover and assert each case explicitly: (1) SUCCESS + empty diff
+  (`diffRef.bytes` 0) + no `claimsComplete` → true; (2) SUCCESS + non-empty diff
+  (`diffRef.bytes` > 0) + `claimsComplete: true` → true; (3) SUCCESS + non-empty
+  diff + `claimsComplete` absent → false; (4) SUCCESS + non-empty diff +
+  `claimsComplete: false` → false; (5) FAILED + empty diff → false; (6) FAILED +
+  `claimsComplete: true` → false. Do not modify or weaken any existing test,
+  especially test/runner/agent-loop.test.ts.
+
+  Follow AGENTS.md: strict TypeScript, ESM `.js` import extensions, named exports
+  only, no `any`, and run all Devbox verification commands sequentially.
+repos:
+  - url: /Users/nikitazolotarev/repos/chikory
+    writable: true
+acceptance_criteria:
+  - id: AC-1
+    description: >
+      the new judge-trigger unit test passes (all six cases)
+    check: pnpm install --prefer-offline --silent && pnpm --filter @chikory/sdk exec vitest run test/runner/judge-trigger.test.ts
+  - id: AC-2
+    description: >
+      the complete TypeScript SDK suite remains green — proving the agent-loop
+      refactor changed no observable behavior
+    check: pnpm --filter @chikory/sdk test
+  - id: AC-3
+    description: strict typecheck and lint are clean
+    check: pnpm --filter @chikory/sdk typecheck && pnpm --filter @chikory/sdk lint
+budget_usd: 5
+max_steps: 4
+executor:
+  adapter: codex
+  family: openai
+judge:
+  family: openai-compat
+  cadence: 2
+  max_cost_share: 0.5
+routing:
+  stages:
+    plan: { provider: openai-compat, model: gpt-5.5 }
+    code: { provider: openai-compat, model: gpt-5.5 }
+    review: { provider: openai-compat, model: gpt-5.5 }
+    judge: { provider: openai-compat, model: gemini-3.1-pro-preview }

@@ -117,8 +117,14 @@ export async function followRun(
             );
           }
         } else if (entry.kind === "verdict") {
-          const payload = entry.payload as { verdict: { kind: string } };
+          const payload = entry.payload as {
+            verdict: { kind: string; escalateReason?: string };
+          };
           if (payload.verdict.kind === "ESCALATE") {
+            const reason = payload.verdict.escalateReason;
+            if (typeof reason === "string" && reason.length > 0) {
+              opts.io.out(`judge escalated: ${reason}`);
+            }
             opts.io.out(
               `run is AWAITING_APPROVAL — answer with: chikory approve ${handle.runId} ` +
                 `[--reject "<reason>"]`,

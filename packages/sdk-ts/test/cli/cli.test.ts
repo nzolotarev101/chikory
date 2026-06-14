@@ -345,4 +345,68 @@ describe.skipIf(address === null)("chikory CLI (WP-141/142)", () => {
     );
     expect(awaitingApprovalLines).toHaveLength(1);
   });
+
+  test("watch surfaces the judge escalate reason before the AWAITING_APPROVAL line", async () => {
+    const tmp = await mkdtemp(join(tmpdir(), "chikory-cli-"));
+    cleanups.push(() => rm(tmp, { recursive: true, force: true }));
+    const runId = "run-fake-escalate-reason";
+    const path = journalPath(tmp, runId);
+
+    const journal = new Journal(path);
+    journal.close();
+
+    const fakeHandle: RunHandle = {
+      runId,
+      async status(): Promise<RunStatusReport> {
+        const j = new Journal(path);
+        try {
+          j.append({
+            kind: "verdict",
+            payload: {
+              verdict: {
+                kind: "ESCALATE",
+                escalateReason: "diff missing the required changes",
+              },
+            },
+            costDeltaUsd: 0,
+            artifactRefs: [],
+          });
+        } finally {
+          j.close();
+        }
+        return {
+          status: "FAILED",
+          currentStep: 3,
+          spentUsd: 0.03,
+          budgetUsd: 5,
+          checkpoints: [],
+        };
+      },
+      approve: async () => {},
+      inject: async () => {},
+      cancel: async () => {},
+    };
+
+    const output: string[] = [];
+    const ioPair = {
+      out: (line: string) => output.push(line),
+      err: () => {},
+    };
+
+    const report = await followRun(
+      fakeHandle,
+      { json: false, dataDir: tmp },
+      { watch: true, deps: { pollIntervalMs: 1 }, io: ioPair },
+    );
+
+    expect(report.status).toBe("FAILED");
+    const reasonLine = "judge escalated: diff missing the required changes";
+    expect(output).toContain(reasonLine);
+    expect(output.filter((line) => line === reasonLine)).toHaveLength(1);
+    const reasonIndex = output.indexOf(reasonLine);
+    const awaitingApprovalIndex = output.findIndex((line) =>
+      line.includes("AWAITING_APPROVAL — answer with: chikory approve"),
+    );
+    expect(awaitingApprovalIndex).toBeGreaterThan(reasonIndex);
+  });
 });
