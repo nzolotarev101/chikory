@@ -14,7 +14,12 @@ function makeRecord(
     costUsd: 0,
     costEstimated: false,
     durationMs: 0,
-    transcriptRef: { uri: "memory://transcript", sha256: "transcript", bytes: 0 },
+    transcriptRef: {
+      id: "transcript",
+      kind: "transcript",
+      bytes: 0,
+      summary: "test transcript",
+    },
     ...overrides,
   };
 }
@@ -23,7 +28,7 @@ describe("isCompletionMilestone", () => {
   test("returns true for SUCCESS with an empty diff and no completion claim", () => {
     const record = makeRecord({
       status: "SUCCESS",
-      diffRef: { uri: "memory://diff", sha256: "diff", bytes: 0 },
+      diffRef: { id: "diff", kind: "diff", bytes: 0, summary: "test diff" },
     });
 
     expect(isCompletionMilestone(record)).toBe(true);
@@ -32,7 +37,7 @@ describe("isCompletionMilestone", () => {
   test("returns true for SUCCESS with a non-empty diff and an explicit completion claim", () => {
     const record = makeRecord({
       status: "SUCCESS",
-      diffRef: { uri: "memory://diff", sha256: "diff", bytes: 1 },
+      diffRef: { id: "diff", kind: "diff", bytes: 1, summary: "test diff" },
       claimsComplete: true,
     });
 
@@ -42,7 +47,7 @@ describe("isCompletionMilestone", () => {
   test("returns false for SUCCESS with a non-empty diff and no completion claim", () => {
     const record = makeRecord({
       status: "SUCCESS",
-      diffRef: { uri: "memory://diff", sha256: "diff", bytes: 1 },
+      diffRef: { id: "diff", kind: "diff", bytes: 1, summary: "test diff" },
     });
 
     expect(isCompletionMilestone(record)).toBe(false);
@@ -51,7 +56,7 @@ describe("isCompletionMilestone", () => {
   test("returns false for SUCCESS with a non-empty diff and a false completion claim", () => {
     const record = makeRecord({
       status: "SUCCESS",
-      diffRef: { uri: "memory://diff", sha256: "diff", bytes: 1 },
+      diffRef: { id: "diff", kind: "diff", bytes: 1, summary: "test diff" },
       claimsComplete: false,
     });
 
@@ -61,7 +66,7 @@ describe("isCompletionMilestone", () => {
   test("returns false for FAILED with an empty diff", () => {
     const record = makeRecord({
       status: "FAILED",
-      diffRef: { uri: "memory://diff", sha256: "diff", bytes: 0 },
+      diffRef: { id: "diff", kind: "diff", bytes: 0, summary: "test diff" },
     });
 
     expect(isCompletionMilestone(record)).toBe(false);
@@ -70,7 +75,7 @@ describe("isCompletionMilestone", () => {
   test("returns false for FAILED with an explicit completion claim", () => {
     const record = makeRecord({
       status: "FAILED",
-      diffRef: { uri: "memory://diff", sha256: "diff", bytes: 1 },
+      diffRef: { id: "diff", kind: "diff", bytes: 1, summary: "test diff" },
       claimsComplete: true,
     });
 

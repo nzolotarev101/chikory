@@ -1,0 +1,100 @@
+# Dogfood-021: WP-218 pure token-budget gate math (CG-2, F-9 blind meter).
+#
+# The USD budget gate (runner/budget.ts) halts a run before a step whose
+# conservative cost estimate would breach `budget_usd`. On subscription / CLI-auth
+# runs the cost meter reads $0 (dogfood-002 F-9), so the USD gate is inert and only
+# `max_steps` bounds spend. The frozen contract already carries the fix:
+# `TaskSpec.budgetTokens?: number` landed with the ADR-005 S1 contracts. This slice
+# delivers the PURE arithmetic half of the token gate — the exact token-denominated
+# mirror of the existing USD `estimateNextStepCost`/`budgetBreached` — so a later
+# hand-done slice can wire it into the pre-step gate (that wiring needs the token
+# HALT-event shape decided first, so it is deliberately out of scope here).
+#
+# This spec names the functions, signatures, behavior, and the test cases with
+# their expected numbers — NOT the function bodies (dogfood-018 F-28: state the
+# *what*, leave the *how* to the executor). The shape to mirror is right there in
+# runner/budget.ts.
+#
+# Zero-secrets launch:
+#   node scripts/cli-judge-proxy.mjs 8787 gemini &
+#   OPENAI_COMPAT_BASE_URL=http://127.0.0.1:8787 pnpm chikory run examples/dogfood/dogfood-021.yaml --watch
+#
+# Commit the dogfood-020 report + doc updates before launching; workspaces clone
+# HEAD. Launch the spec ONCE and watch to terminal (dogfood-020 F-30 — a duplicate
+# launch wastes a full run's spend). Run Devbox commands sequentially (F-22).
+name: dogfood-021-wp-218-token-budget-math
+goal: >
+  Implement the pure arithmetic half of WP-218's token-denominated budget gate
+  (CG-2; the F-9 blind-meter gap): add two pure functions that mirror the existing
+  USD gate math, token-for-dollar. Modify exactly two source files and one existing
+  test file — nothing else. Add no dependency, and change no contract, type, schema,
+  journal format, or runtime/workflow behavior (this slice only adds pure functions
+  and their re-export; no caller is wired yet).
+
+  In packages/sdk-ts/src/runner/budget.ts, add two exported pure functions
+  alongside the existing `estimateNextStepCost`/`budgetBreached` (do not modify the
+  existing functions or the `ESTIMATE_WINDOW`/`ESTIMATE_SAFETY_FACTOR` constants —
+  reuse them):
+    - `estimateNextStepTokens(stepTokens: readonly number[]): number` — the exact
+      token analogue of `estimateNextStepCost`: empty history returns 0; otherwise
+      the rolling mean of the last `ESTIMATE_WINDOW` entries times
+      `ESTIMATE_SAFETY_FACTOR`.
+    - `tokenBudgetBreached(spentTokens: number, budgetTokens: number, estimate: number): boolean`
+      — the exact token analogue of `budgetBreached`: with
+      `remaining = budgetTokens - spentTokens`, return true when `remaining <= 0`
+      OR `remaining < estimate`.
+  Keep both pure (no I/O, no mutation) and give each a short JSDoc citing WP-218 and
+  the F-9 blind-meter motivation.
+
+  In packages/sdk-ts/src/index.ts, re-export the two new functions from the existing
+  `export { ... } from "./runner/budget.js";` block (the same block that already
+  re-exports `budgetBreached` and `estimateNextStepCost`). Add nothing else.
+
+  In packages/sdk-ts/test/runner/budget-gate.test.ts, add ONE new top-level
+  `describe("token budget estimate math (WP-218)", ...)` block (do not modify or
+  weaken the existing `describe("budget estimate math (WP-124)")` or the
+  Temporal-gated integration block). Import the two new functions from
+  "../../src/index.js" like the existing math tests do. Mirror the existing USD
+  math tests exactly, with these cases and expected results:
+    - `estimateNextStepTokens([])` is 0; `estimateNextStepTokens([1000])` is 1500
+      (1000 × 1.5); and only the last 5 of 6 are averaged, e.g.
+      `estimateNextStepTokens([1_000_000_000, 1000, 1000, 1000, 1000, 1000])` is 1500.
+    - `tokenBudgetBreached` breaches on `remaining <= 0` even when the estimate is 0:
+      `tokenBudgetBreached(1000, 1000, 0)` is true, `tokenBudgetBreached(0, 1000, 0)`
+      is false; and it breaches when `remaining < estimate`:
+      `tokenBudgetBreached(900, 1000, 150)` is true (remaining 100 < 150).
+  Use exact integer assertions (these are token counts, not floats).
+
+  Follow AGENTS.md: strict TypeScript, ESM `.js` import extensions, named exports
+  only, no `any`, and run all Devbox verification commands sequentially. Note the
+  typecheck gate now type-checks test/** too (WP-230), so the new test must be
+  type-correct.
+repos:
+  - url: /Users/nikitazolotarev/repos/chikory
+    writable: true
+acceptance_criteria:
+  - id: AC-1
+    description: >
+      the budget-gate suite passes, including the new token math block
+    check: pnpm install --prefer-offline --silent && pnpm --filter @chikory/sdk exec vitest run test/runner/budget-gate.test.ts
+  - id: AC-2
+    description: the complete TypeScript SDK suite remains green
+    check: pnpm --filter @chikory/sdk test
+  - id: AC-3
+    description: strict typecheck (now covering test/**, WP-230) and lint are clean
+    check: pnpm --filter @chikory/sdk typecheck && pnpm --filter @chikory/sdk lint
+budget_usd: 5
+max_steps: 4
+executor:
+  adapter: codex
+  family: openai
+judge:
+  family: openai-compat
+  cadence: 2
+  max_cost_share: 0.5
+routing:
+  stages:
+    plan: { provider: openai-compat, model: gpt-5.5 }
+    code: { provider: openai-compat, model: gpt-5.5 }
+    review: { provider: openai-compat, model: gpt-5.5 }
+    judge: { provider: openai-compat, model: gemini-3.1-pro-preview }
