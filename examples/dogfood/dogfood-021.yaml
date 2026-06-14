@@ -1,84 +1,95 @@
-# Dogfood-021: WP-218 pure token-budget gate math (CG-2, F-9 blind meter).
+# Dogfood-021: WP-221 Slice B — runner detects the executor's completion claim
+# (dogfood-003/018/019/020 F-11; the cost win, every run taxed 5–35%).
 #
-# The USD budget gate (runner/budget.ts) halts a run before a step whose
-# conservative cost estimate would breach `budget_usd`. On subscription / CLI-auth
-# runs the cost meter reads $0 (dogfood-002 F-9), so the USD gate is inert and only
-# `max_steps` bounds spend. The frozen contract already carries the fix:
-# `TaskSpec.budgetTokens?: number` landed with the ADR-005 S1 contracts. This slice
-# delivers the PURE arithmetic half of the token gate — the exact token-denominated
-# mirror of the existing USD `estimateNextStepCost`/`budgetBreached` — so a later
-# hand-done slice can wire it into the pre-step gate (that wiring needs the token
-# HALT-event shape decided first, so it is deliberately out of scope here).
+# WHY THIS IS THE PRIORITY: every run pays an empty-diff "completion probe" step
+# (F-11) — 19 data points, 5.4%–35.1% of run cost — because the productive step
+# emits no completion signal, so the loop takes one more no-op step that the
+# judge then grades. Slice A (dogfood-019) already made the trigger honor it:
+# `isCompletionMilestone(record)` fires an off-cadence judge pass when
+# `record.status === "SUCCESS" && (diffRef.bytes === 0 || claimsComplete === true)`.
+# Nothing sets `claimsComplete` yet — this slice does, end-to-end.
 #
-# This spec names the functions, signatures, behavior, and the test cases with
-# their expected numbers — NOT the function bodies (dogfood-018 F-28: state the
-# *what*, leave the *how* to the executor). The shape to mirror is right there in
-# runner/budget.ts.
+# HAND-DONE FIRST (already landed at HEAD — do NOT re-touch): the vendor-neutral
+# completion-marker protocol. `COMPLETION_MARKER` ("CHIKORY_TASK_COMPLETE") is
+# exported from src/executors/step.ts, and renderStepPrompt (src/executors/prompt.ts)
+# instructs the wrapped agent to end its final message with that line iff the task
+# is fully complete. This slice implements the runner-side CONSUMPTION only.
 #
 # Zero-secrets launch:
 #   node scripts/cli-judge-proxy.mjs 8787 gemini &
 #   OPENAI_COMPAT_BASE_URL=http://127.0.0.1:8787 pnpm chikory run examples/dogfood/dogfood-021.yaml --watch
 #
-# Commit the dogfood-020 report + doc updates before launching; workspaces clone
-# HEAD. Launch the spec ONCE and watch to terminal (dogfood-020 F-30 — a duplicate
-# launch wastes a full run's spend). Run Devbox commands sequentially (F-22).
-name: dogfood-021-wp-218-token-budget-math
+# Commit the dogfood-020 docs AND the hand-done protocol scaffold (step.ts marker
+# + prompt.ts instruction) before launching; workspaces clone HEAD, so the run
+# must see `COMPLETION_MARKER`. Launch ONCE and watch to terminal (F-30). Run
+# Devbox commands sequentially (F-22).
+name: dogfood-021-wp-221-completion-claim-detection
 goal: >
-  Implement the pure arithmetic half of WP-218's token-denominated budget gate
-  (CG-2; the F-9 blind-meter gap): add two pure functions that mirror the existing
-  USD gate math, token-for-dollar. Modify exactly two source files and one existing
-  test file — nothing else. Add no dependency, and change no contract, type, schema,
-  journal format, or runtime/workflow behavior (this slice only adds pure functions
-  and their re-export; no caller is wired yet).
+  Implement WP-221 Slice B: make `runCliStep` detect the executor's completion
+  marker and populate `StepRecord.claimsComplete`, so the already-wired
+  `isCompletionMilestone` (Slice A) judges the productive step directly and the
+  empty-diff probe step (F-11) disappears. The completion-marker protocol is
+  already landed by hand — `COMPLETION_MARKER` is exported from
+  packages/sdk-ts/src/executors/step.ts and the step prompt already instructs the
+  agent to emit it. Do NOT modify prompt.ts, the `COMPLETION_MARKER` value, or any
+  contract/type/schema/journal format. Add no dependency. Modify exactly two source
+  files and add exactly one new test file.
 
-  In packages/sdk-ts/src/runner/budget.ts, add two exported pure functions
-  alongside the existing `estimateNextStepCost`/`budgetBreached` (do not modify the
-  existing functions or the `ESTIMATE_WINDOW`/`ESTIMATE_SAFETY_FACTOR` constants —
-  reuse them):
-    - `estimateNextStepTokens(stepTokens: readonly number[]): number` — the exact
-      token analogue of `estimateNextStepCost`: empty history returns 0; otherwise
-      the rolling mean of the last `ESTIMATE_WINDOW` entries times
-      `ESTIMATE_SAFETY_FACTOR`.
-    - `tokenBudgetBreached(spentTokens: number, budgetTokens: number, estimate: number): boolean`
-      — the exact token analogue of `budgetBreached`: with
-      `remaining = budgetTokens - spentTokens`, return true when `remaining <= 0`
-      OR `remaining < estimate`.
-  Keep both pure (no I/O, no mutation) and give each a short JSDoc citing WP-218 and
-  the F-9 blind-meter motivation.
+  1. packages/sdk-ts/src/executors/step.ts — add an exported pure function
+     `claimsCompleteFromSummary(summary: string): boolean` that returns true iff at
+     least one line of `summary` (split on newlines, each line trimmed) equals
+     `COMPLETION_MARKER` exactly. A bare substring match inside a longer line must
+     NOT count — the marker must stand alone on its own line (per the prompt
+     contract). Keep it pure (no I/O, no mutation); give it a short JSDoc citing
+     WP-221 and F-11. Then, in the SUCCESS branch where the record is built
+     (`record = { ...base, status: "SUCCESS" }`), set
+     `claimsComplete: claimsCompleteFromSummary(parsed.summary)`. Do NOT set
+     `claimsComplete` on the FAILED branches (a failed step's completion claim is
+     moot, and `isCompletionMilestone` already gates on SUCCESS). Change nothing
+     else in the file.
 
-  In packages/sdk-ts/src/index.ts, re-export the two new functions from the existing
-  `export { ... } from "./runner/budget.js";` block (the same block that already
-  re-exports `budgetBreached` and `estimateNextStepCost`). Add nothing else.
+  2. packages/sdk-ts/src/executors/index.ts — re-export `claimsCompleteFromSummary`
+     and `COMPLETION_MARKER` from the existing
+     `export { ... } from "./step.js";` block (the one that already re-exports
+     `runCliStep`, `SPAN_STEP`, `ParsedCliResult`). Add nothing else.
 
-  In packages/sdk-ts/test/runner/budget-gate.test.ts, add ONE new top-level
-  `describe("token budget estimate math (WP-218)", ...)` block (do not modify or
-  weaken the existing `describe("budget estimate math (WP-124)")` or the
-  Temporal-gated integration block). Import the two new functions from
-  "../../src/index.js" like the existing math tests do. Mirror the existing USD
-  math tests exactly, with these cases and expected results:
-    - `estimateNextStepTokens([])` is 0; `estimateNextStepTokens([1000])` is 1500
-      (1000 × 1.5); and only the last 5 of 6 are averaged, e.g.
-      `estimateNextStepTokens([1_000_000_000, 1000, 1000, 1000, 1000, 1000])` is 1500.
-    - `tokenBudgetBreached` breaches on `remaining <= 0` even when the estimate is 0:
-      `tokenBudgetBreached(1000, 1000, 0)` is true, `tokenBudgetBreached(0, 1000, 0)`
-      is false; and it breaches when `remaining < estimate`:
-      `tokenBudgetBreached(900, 1000, 150)` is true (remaining 100 < 150).
-  Use exact integer assertions (these are token counts, not floats).
+  3. packages/sdk-ts/test/executors/completion-marker.test.ts (new) — unit-test
+     `claimsCompleteFromSummary`, importing it and `COMPLETION_MARKER` from
+     "../../src/executors/step.js". Cover and assert each case:
+       - a summary that is exactly the marker → true;
+       - the marker on its own line after other text
+         (e.g. `"Implemented the feature.\n" + COMPLETION_MARKER`) → true;
+       - the marker on its own line but indented / trailing-whitespaced
+         (e.g. `"   " + COMPLETION_MARKER + "  "`) → true (trimmed match);
+       - an empty summary → false;
+       - the marker as a substring inside a sentence
+         (e.g. `"I will emit " + COMPLETION_MARKER + " once tests pass"`) → false;
+       - a normal summary with no marker → false.
+     Build the marker strings from the imported `COMPLETION_MARKER` constant (do
+     not hardcode the literal), so the test tracks the protocol if the value changes.
+
+  After this slice, a step whose agent emits the marker yields
+  `record.claimsComplete === true`, `isCompletionMilestone` fires the judge on that
+  productive step, and a PROCEED with all criteria passing seals SUCCESS without the
+  extra probe step. (An end-to-end agent-loop test that asserts the probe step is
+  gone needs a fake executor that emits the marker through the loop — that is a
+  documented follow-up, out of scope for this deterministic unit slice.)
 
   Follow AGENTS.md: strict TypeScript, ESM `.js` import extensions, named exports
-  only, no `any`, and run all Devbox verification commands sequentially. Note the
-  typecheck gate now type-checks test/** too (WP-230), so the new test must be
-  type-correct.
+  only, no `any`, run all Devbox verification commands sequentially. The typecheck
+  gate now type-checks test/** (WP-230), so the new test must be type-correct.
 repos:
   - url: /Users/nikitazolotarev/repos/chikory
     writable: true
 acceptance_criteria:
   - id: AC-1
     description: >
-      the budget-gate suite passes, including the new token math block
-    check: pnpm install --prefer-offline --silent && pnpm --filter @chikory/sdk exec vitest run test/runner/budget-gate.test.ts
+      the new completion-marker detection test passes (all cases)
+    check: pnpm install --prefer-offline --silent && pnpm --filter @chikory/sdk exec vitest run test/executors/completion-marker.test.ts
   - id: AC-2
-    description: the complete TypeScript SDK suite remains green
+    description: >
+      the complete TypeScript SDK suite remains green — proving the new
+      claimsComplete threading breaks no adapter/conformance behavior
     check: pnpm --filter @chikory/sdk test
   - id: AC-3
     description: strict typecheck (now covering test/**, WP-230) and lint are clean

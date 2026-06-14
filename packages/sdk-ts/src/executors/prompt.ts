@@ -5,6 +5,7 @@
  * summaries only (CM-3).
  */
 import type { StepInput } from "../types.js";
+import { COMPLETION_MARKER } from "./step.js";
 
 export function renderStepPrompt(input: StepInput): string {
   const { context, instruction } = input;
@@ -45,7 +46,13 @@ export function renderStepPrompt(input: StepInput): string {
 
   parts.push(
     `# This step — do ONLY this, then stop\n${instruction}\n\n` +
-      `Work only inside the current directory. Do not commit; the runner checkpoints for you.`,
+      `Work only inside the current directory. Do not commit; the runner checkpoints for you.\n\n` +
+      `# Completion signal\n` +
+      `If — and only if — you judge the whole task above fully complete after this step ` +
+      `(nothing left for a follow-up step), end your final message with this exact line on its own:\n` +
+      `${COMPLETION_MARKER}\n` +
+      `Omit it entirely if more work remains; never emit it speculatively. It only asks the ` +
+      `runner to grade your work now — the quality gate still decides whether the task passes.`,
   );
 
   return parts.join("\n\n");

@@ -15,6 +15,18 @@ import { assertGitWorkspace, captureWorkspaceDiff } from "./workspace.js";
 
 export const SPAN_STEP = "chikory.step";
 
+/**
+ * WP-221 completion-marker protocol (vendor-neutral). The step prompt
+ * (`renderStepPrompt`) instructs the wrapped agent to end its final message
+ * with this exact line — and only that line, on its own — when, and only when,
+ * it judges the task fully complete. `runCliStep` detects it in the parsed
+ * summary and sets `StepRecord.claimsComplete`, which `isCompletionMilestone`
+ * ORs into the WP-217 empty-diff trigger so the *productive* step is judged
+ * directly, removing the dedicated empty-diff probe step (F-11). The marker is
+ * a runner↔executor protocol token, never a contract/journal field.
+ */
+export const COMPLETION_MARKER = "CHIKORY_TASK_COMPLETE";
+
 /** What an adapter's parser extracts from the CLI's stdout. */
 export interface ParsedCliResult {
   ok: boolean;
