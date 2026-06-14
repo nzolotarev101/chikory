@@ -101,8 +101,15 @@ files were harvested byte-identically and staged. Three surrounding issues
 surfaced: parallel Devbox startup races (F-22, operational rule added), the
 terminal-boundary remainder of the F-15 observer race (F-23 → WP-227), and the
 env-prefixed explicit `dogfood-verify` command aborting Vitest under Devbox
-0.17.0 (F-24, command form fixed). F-11 was 7.6 %. Next: dogfood-017 closes
-F-23 with a final journal drain before terminal return.
+0.17.0 (F-24, command form fixed). F-11 was 7.6 %. Dogfood-017
+(`docs/reports/dogfood-017.md`) was the **first FAILED campaign — and the
+clearest thesis win**: WP-227 had already been hand-landed (`26b9964`) so the
+spec ran redundantly, the executor narrated completion over an empty diff, every
+acceptance check and rubric item passed, and the structurally-different judge
+still ESCALATEd on the diff-vs-claim mismatch. It surfaced F-25 (retire
+superseded specs; launch baseline-satisfied precheck → WP-228), F-26 (executor
+empty-diff completion claim → raises WP-221), and F-27 (the `--watch` ESCALATE
+line drops the judge reasoning → WP-229). Next: dogfood-018 delivers WP-229.
 
 Related docs: [`docs/spec/task-spec.md`](spec/task-spec.md) (schema
 reference) · [`docs/TASK-PROTOCOL.md`](TASK-PROTOCOL.md) (WP etiquette, §7 is
@@ -472,6 +479,9 @@ a first-attempt SUCCESS and produced three plan-changing findings
 | `devbox run harvest` says `Successfully applied changes` but the feature is missing / files unchanged | The pre-fix modified-file blind spot (dogfood-014 **F-20**): the old harvest skipped a file whose host version *differed* from the run's final version, which is exactly the normal case for an edit-in-place. **Fixed** (commit `0c20694`): harvest now applies the workspace's final version by intent and a **reconciliation pass** hard-errors (exit 1) on any unapplied change — it can no longer report success having applied nothing. To check past runs for silent drops: `devbox run harvest-audit` (every run's final file content vs git history). Reminder: `devbox run harvest` defaults to the **newest** run (devbox doesn't forward args) — for a specific run use `devbox run -- bash scripts/harvest.sh <run-id>`. |
 | A full-suite run fails because `cli.test.ts` misses `AWAITING_APPROVAL` immediately before terminal FAILED | F-15's terminal-boundary remainder (dogfood-016 **F-23**, → WP-227): `followRun` can append a transition after its journal scan and then return terminal status without a final drain. Focused reruns may pass. Dogfood-017 adds the final drain and deterministic regression test. |
 | A full-suite or AC run fails on `agent-loop.test.ts > incomplete empty-diff verdict keeps RUNNING…` with `expected undefined to deeply equal { kind: 'PROCEED', … }` | Pre-existing test-harness race (dogfood-007 F-19, fix WP-225): the test's `waitFor` gates on the judge-wire hit count, not on the verdict being journaled, so `lastVerdict` can still be `undefined` at assert time (flapped 2/13 host invocations). Re-run the file in isolation; unrelated to any CLI diff. One-line fix: gate the predicate on `report.lastVerdict !== undefined`. |
+| A run produces a ~empty diff, the executor still claims SUCCESS, and the judge ESCALATEs "diff missing the required changes" | The spec was **redundant — its WP already landed by another path** before launch (dogfood-017 **F-25**: WP-227 hand-landed `26b9964` four hours before the spec ran). The executor had no work and narrated the spec as done over an empty diff (F-26); the judge correctly caught the mismatch. **Operating rule: retire/supersede a dogfood spec the moment its WP lands by any other path** — check `git log`/HEAD before launching. WP-228 will add a launch-time precheck that runs the acceptance checks against the clean baseline and warns if they already pass. |
+| `devbox run dogfood` ends with `exit status 1` / `[ELIFECYCLE] Command failed` after you reject an escalation | Not a crash. A deliberate `chikory approve … --reject` seals the run **FAILED**, so `chikory run --watch` exits non-zero and devbox propagates it, then cleanly tears down the judge-proxy and Temporal (dogfood-017). A failed run *should* exit non-zero; the worktree stays clean. Distinguish from a real crash by the `terminal FAILED — judge escalation rejected: …` line above the teardown. |
+| Live `--watch` shows `verdict ⚠ ESCALATE` and `run is AWAITING_APPROVAL` but no reason | The watch line currently drops `verdict.escalateReason` (dogfood-017 **F-27**, → WP-229). To see *why* the judge escalated before deciding approve-vs-reject: `pnpm chikory trace <run-id> --step <n>` (full judge form + rationale), or read the `verdict` entry in `.chikory/runs/<run-id>/journal.db`. WP-229 will render the reason on the AWAITING_APPROVAL line. |
 
 ## 8. Known P1 limitations (so you don't fight them)
 

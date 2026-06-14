@@ -1,0 +1,92 @@
+# Dogfood-018: WP-229 - surface the ESCALATE reason in `--watch`
+# (dogfood-017 F-27).
+#
+# dogfood-017 ran an already-landed spec and the judge correctly ESCALATEd,
+# but the live `--watch` operator saw only `verdict ⚠ ESCALATE` and the
+# `run is AWAITING_APPROVAL` line with NO reason — `followRun` formats that
+# line from the verdict payload (commands.ts:119-127) but discards
+# `verdict.escalateReason`. Deciding approve-vs-reject required reading
+# journal.db / a `chikory trace`. This slice renders the reason on the watch
+# stream so the human can decide in place.
+#
+# Zero-secrets launch:
+#   node scripts/cli-judge-proxy.mjs 8787 gemini &
+#   OPENAI_COMPAT_BASE_URL=http://127.0.0.1:8787 pnpm chikory run examples/dogfood/dogfood-018.yaml --watch
+#
+# Commit dogfood-017 report + doc updates before launching; workspaces clone
+# HEAD. Run Devbox commands sequentially (dogfood-016 F-22).
+name: dogfood-018-wp-229-watch-escalate-reason
+goal: >
+  Implement WP-229 (dogfood-017 F-27): surface the judge's escalate reason on
+  the live `--watch` stream when a run becomes AWAITING_APPROVAL. Modify exactly
+  two existing files and nothing else:
+  packages/sdk-ts/src/cli/commands.ts and
+  packages/sdk-ts/test/cli/cli.test.ts. Add no dependency and change no
+  contract, type, journal format, workflow, or runner behavior.
+
+  In commands.ts, inside `followRun`'s `drainJournal()` closure, find the
+  existing `entry.kind === "verdict"` branch (the one that prints
+  `run is AWAITING_APPROVAL — answer with: chikory approve …` for an ESCALATE
+  verdict). Widen the payload cast from
+  `{ verdict: { kind: string } }` to
+  `{ verdict: { kind: string; escalateReason?: string } }`. When
+  `payload.verdict.kind === "ESCALATE"`, before emitting the existing
+  AWAITING_APPROVAL line, read `const reason = payload.verdict.escalateReason;`
+  and, only if `reason` is a non-empty string, emit one preceding line via
+  `opts.io.out(`judge escalated: ${reason}`)`. Leave the existing
+  AWAITING_APPROVAL line, its wording, and every other branch (budget halt,
+  `formatEntryLine`, the `nextEntryIdx` cursor, the `finally` close, the double
+  drain) byte-for-byte unchanged. Guarding on a non-empty `reason` is required:
+  an ESCALATE verdict without `escalateReason` must print no `judge escalated:`
+  line at all.
+
+  In cli.test.ts, add one deterministic test named
+  "watch surfaces the judge escalate reason before the AWAITING_APPROVAL line".
+  Mirror the existing final-drain test's setup (temp dataDir via the file's
+  cleanup pattern, an empty journal for a synthetic run id, and a fake
+  RunHandle whose `status()` opens that journal, appends one `verdict` entry
+  with payload `{ verdict: { kind: "ESCALATE", escalateReason: "diff missing
+  the required changes" } }`, closes it, and returns a terminal FAILED
+  `RunStatusReport`; approve/inject/cancel are async no-ops). Call `followRun`
+  with json false, that dataDir, watch true, pollIntervalMs 1, and an output
+  collector. Assert the output contains a line
+  "judge escalated: diff missing the required changes", that this line occurs
+  exactly once, and that it appears at an earlier index than the
+  "AWAITING_APPROVAL — answer with: chikory approve" line. Do not weaken or
+  delete the existing
+  "final drain renders a transition appended during terminal status()" test,
+  which exercises the no-`escalateReason` path and must still pass unchanged
+  (it asserts the AWAITING_APPROVAL line renders exactly once and must NOT
+  gain a `judge escalated:` line).
+
+  Follow AGENTS.md: strict TypeScript, ESM `.js` imports, named exports only,
+  no `any`, and run all Devbox verification commands sequentially.
+repos:
+  - url: /Users/nikitazolotarev/repos/chikory
+    writable: true
+acceptance_criteria:
+  - id: AC-1
+    description: >
+      the new escalate-reason test and all existing CLI tests pass
+    check: pnpm install --prefer-offline --silent && pnpm --filter @chikory/sdk exec vitest run test/cli/cli.test.ts
+  - id: AC-2
+    description: the complete TypeScript SDK suite remains green
+    check: pnpm --filter @chikory/sdk test
+  - id: AC-3
+    description: strict typecheck and lint are clean
+    check: pnpm --filter @chikory/sdk typecheck && pnpm --filter @chikory/sdk lint
+budget_usd: 5
+max_steps: 4
+executor:
+  adapter: codex
+  family: openai
+judge:
+  family: openai-compat
+  cadence: 2
+  max_cost_share: 0.5
+routing:
+  stages:
+    plan: { provider: openai-compat, model: gpt-5.5 }
+    code: { provider: openai-compat, model: gpt-5.5 }
+    review: { provider: openai-compat, model: gpt-5.5 }
+    judge: { provider: openai-compat, model: gemini-3.1-pro-preview }
