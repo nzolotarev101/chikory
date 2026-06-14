@@ -1,0 +1,142 @@
+# Dogfood-022: WP-219 S2 — the goal planner's PURE prompt half
+# (the first dogfood since the 2026-06-14 architect wall-clear; resumes the
+#  pillar queue with WP-219 goal decomposition).
+#
+# WHY THIS IS THE PRIORITY: WP-219 (goal decomposition & run chaining, ADR-005)
+# is the headline Phase-2 planner pillar. Its S1 contracts and the pure
+# `planCoverageGaps` are landed (wall-clear `821d67f`); the S3 dependency
+# primitives (`readyNodes`, `hasDependencyCycle`) are landed too. The missing
+# piece is S2 — the `GoalPlanner.decompose` component itself. `decompose` makes
+# ONE non-deterministic `plan`-stage LLM call (NF-1), so it is NOT a pure
+# dogfood. This slice carves out its PURE half — the prompt construction —
+# exactly as `judge/prompt.ts` (`buildJudgeMessages` + `JUDGE_SYSTEM_PROMPT` +
+# `JUDGE_FORM_RESPONSE_SCHEMA`) is the pure half of `judge/harness.ts`. The
+# router call + response parse + the `GoalPlanner` impl are the documented
+# non-pure follow-up (hand-design territory, TASK-PROTOCOL §4).
+#
+# WP-203 S2 (compaction digest wiring) was the other candidate but is BLOCKED:
+# `CompactionResult.digestRef` is a Memory Pointer (WP-202), and the
+# WP-202 store is not built yet — so it is not dogfoodable as a pure slice now.
+#
+# Zero-secrets launch:
+#   node scripts/cli-judge-proxy.mjs 8787 gemini &
+#   OPENAI_COMPAT_BASE_URL=http://127.0.0.1:8787 pnpm chikory run examples/dogfood/dogfood-022.yaml --watch
+#
+# Commit everything before launching — workspaces clone HEAD, so the run must
+# see the frozen `PlanInput`/`Plan`/`PlanNode` contracts in types.ts. Launch
+# ONCE and watch to terminal (F-30). Run Devbox commands sequentially (F-22).
+# This is the first run on post-Slice-B code, so it is also the F-11 kill-test:
+# if the executor emits CHIKORY_TASK_COMPLETE on its productive step, the loop
+# should seal SUCCESS WITHOUT taking an empty-diff probe step. Watch step count.
+name: dogfood-022-wp-219-planner-prompt
+goal: >
+  Implement WP-219 S2 Slice 1: the PURE prompt half of the goal planner
+  (`GoalPlanner.decompose`, ADR-005 D1), mirroring `judge/prompt.ts`. Build the
+  deterministic prompt-construction functions a later (non-pure) `decompose`
+  wrapper will feed to the `plan` routing stage. Do NOT make any LLM/router
+  call, do NOT implement `GoalPlanner.decompose`, do NOT touch the router,
+  agent-loop, or any contract/type/schema/journal format. Add no dependency.
+  Add exactly one new source file, edit exactly one existing source file, and
+  add exactly one new test file.
+
+  1. packages/sdk-ts/src/planner/prompt.ts (new) — pure planner prompt
+     construction. Import `Message`, `PlanInput`, `AcceptanceCriterion` (type-
+     only) from "../types.js". Export three symbols, all pure (no I/O, no
+     mutation), with a short JSDoc citing WP-219 S2 and ADR-005 D1:
+       - `PLANNER_SYSTEM_PROMPT: string` — a joined multi-line string (build it
+         with `[ ... ].join("\n")` exactly like `JUDGE_SYSTEM_PROMPT`) framing
+         the model as a goal decomposer: break the user goal into an ordered
+         dependency tree of judge-gated slices; each node a self-contained
+         1–3-step brief that becomes a child run's goal; every goal acceptance
+         criterion must be covered by at least one node; `dependsOn` lists the
+         ids of nodes that must reach SUCCESS first; per-node `budgetUsd` must
+         sum to at most the chain budget. End with: respond with a single JSON
+         object matching the requested schema.
+       - `PLAN_RESPONSE_SCHEMA` — a JSON Schema object literal (`as const`,
+         mirroring `JUDGE_FORM_RESPONSE_SCHEMA`) for the planner's reply:
+         `{ type: "object", additionalProperties: false, required: ["nodes"],
+            properties: { nodes: { type: "array", items: <node schema> } } }`
+         where the node schema is `{ type: "object", additionalProperties:
+         false, required: ["id","goal","acceptanceCriteria","dependsOn",
+         "budgetUsd"], properties: { id: {type:"string", minLength:1},
+         goal: {type:"string"}, acceptanceCriteria: {type:"array", items:
+         {type:"object", additionalProperties:false, required:["id",
+         "description"], properties:{ id:{type:"string",minLength:1},
+         description:{type:"string"}, check:{type:"string"} }}},
+         dependsOn: {type:"array", items:{type:"string"}},
+         budgetUsd: {type:"number"} } }`. The shape must match `PlanNode`
+         (types.ts §7a): id, goal, acceptanceCriteria (AcceptanceCriterion[]),
+         dependsOn, budgetUsd.
+       - `buildPlannerMessages(input: PlanInput): Message[]` — returns exactly
+         two messages in order: `{ role: "system", content:
+         PLANNER_SYSTEM_PROMPT }` then a `{ role: "user", content: ... }` whose
+         content renders, with clear section headers (mirror
+         `buildJudgeMessages`): the goal (`input.goal`); the acceptance
+         criteria the plan must cover, each rendered as `- <id>: <description>`
+         (a private helper; render `(none defined)` when the array is empty);
+         and the chain budget (`input.budgetUsd`) the node budgets must sum
+         within. Do not reference `input.family` (that is the meta-judge's
+         concern, not the prompt's).
+
+  2. packages/sdk-ts/src/index.ts — add ONE re-export line for the three new
+     symbols, immediately after the existing
+     `export { planCoverageGaps } from "./planner/coverage.js";` line:
+     `export { buildPlannerMessages, PLANNER_SYSTEM_PROMPT, PLAN_RESPONSE_SCHEMA } from "./planner/prompt.js";`
+     Add nothing else.
+
+  3. packages/sdk-ts/test/planner/prompt.test.ts (new) — unit-test the pure
+     functions, importing them from "../../src/planner/prompt.js" and any types
+     from "../../src/types.js". Build a `PlanInput` fixture with a non-empty
+     goal, two acceptance criteria, a `budgetUsd`, and a `family`. Cover and
+     assert:
+       - `buildPlannerMessages` returns exactly two messages, roles
+         `["system", "user"]` in that order;
+       - the system message content is exactly `PLANNER_SYSTEM_PROMPT`;
+       - the user message content contains the goal, BOTH criterion ids and
+         descriptions, and the `budgetUsd` value (as a string);
+       - an empty `acceptanceCriteria` array renders the `(none defined)`
+         placeholder and does not throw;
+       - `PLAN_RESPONSE_SCHEMA.required` includes `"nodes"` and the node item
+         schema's `required` lists all five PlanNode fields
+         (`id`,`goal`,`acceptanceCriteria`,`dependsOn`,`budgetUsd`).
+
+  After this slice, the planner's prompt regime is pure, isolated, and unit-
+  tested — ready for a later non-pure `decompose` to route it through the
+  `plan` stage and parse the reply into a `Plan` (the documented S2 follow-up,
+  out of scope for this deterministic slice).
+
+  Follow AGENTS.md: strict TypeScript, ESM `.js` import extensions, named
+  exports only, no `any`, no default exports. The typecheck gate type-checks
+  test/** (WP-230), so the new test must be type-correct. Run all Devbox
+  verification commands sequentially.
+repos:
+  - url: /Users/nikitazolotarev/repos/chikory
+    writable: true
+acceptance_criteria:
+  - id: AC-1
+    description: >
+      the new planner-prompt test passes (all cases)
+    check: pnpm install --prefer-offline --silent && pnpm --filter @chikory/sdk exec vitest run test/planner/prompt.test.ts
+  - id: AC-2
+    description: >
+      the complete TypeScript SDK suite remains green — proving the new planner
+      module breaks no existing behavior
+    check: pnpm --filter @chikory/sdk test
+  - id: AC-3
+    description: strict typecheck (covering test/**, WP-230) and lint are clean
+    check: pnpm --filter @chikory/sdk typecheck && pnpm --filter @chikory/sdk lint
+budget_usd: 5
+max_steps: 4
+executor:
+  adapter: codex
+  family: openai
+judge:
+  family: openai-compat
+  cadence: 2
+  max_cost_share: 0.5
+routing:
+  stages:
+    plan: { provider: openai-compat, model: gpt-5.5 }
+    code: { provider: openai-compat, model: gpt-5.5 }
+    review: { provider: openai-compat, model: gpt-5.5 }
+    judge: { provider: openai-compat, model: gemini-3.1-pro-preview }
