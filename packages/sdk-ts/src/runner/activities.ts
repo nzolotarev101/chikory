@@ -460,9 +460,12 @@ export function createRunnerActivities(deps: RunnerActivityDeps) {
     /**
      * Checkpointer (WP-122): every step ends in a git commit on the
      * run-private branch + a journal checkpoint row + a context snapshot
-     * artifact (the CM-1 co-design point — WP-203 compacts *here*).
-     * Idempotent by stepIndex; a crash between commit and journal write
-     * costs one extra empty commit, never a duplicate journal row.
+     * artifact (the CM-1 co-design point — WP-203 compacts *here*: call the
+     * pure `planCompaction` over the recall tier, fold `toDigest` into a
+     * digest artifact, journal a `compaction` `CompactionResult`, and snapshot
+     * the compacted context — ADR-006). Idempotent by stepIndex; a crash
+     * between commit and journal write costs one extra empty commit, never a
+     * duplicate journal row.
      */
     async writeCheckpoint(input: {
       runId: string;
@@ -568,6 +571,10 @@ export function createRunnerActivities(deps: RunnerActivityDeps) {
       event: "halt" | "top_up";
       remainingUsd: number;
       details: Record<string, number>;
+      /** WP-218: which budget tripped. Absent ⇒ "usd" (back-compatible). */
+      cause?: "usd" | "tokens";
+      /** WP-218: token headroom at a token HALT (rides the token gate). */
+      remainingTokens?: number;
     }): Promise<void> {
       const journal = openJournal(deps, input.runId);
       try {
@@ -580,6 +587,13 @@ export function createRunnerActivities(deps: RunnerActivityDeps) {
               event: input.event,
               remainingUsd: input.remainingUsd,
               details: input.details,
+              // Additive (WP-218): omit `cause`/`remainingTokens` on the USD
+              // path so existing journals/readers stay byte-identical; an
+              // absent `cause` means "usd".
+              ...(input.cause !== undefined ? { cause: input.cause } : {}),
+              ...(input.remainingTokens !== undefined
+                ? { remainingTokens: input.remainingTokens }
+                : {}),
             },
             costDeltaUsd: 0,
             artifactRefs: [],

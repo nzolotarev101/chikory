@@ -20,9 +20,11 @@ import {
   createRunnerWorker,
   createTemporalRunner,
   estimateNextStepCost,
+  estimateNextStepTokens,
   Journal,
   journalPath,
   type RunStatusReport,
+  tokenBudgetBreached,
 } from "../../src/index.js";
 import {
   initSourceRepo,
@@ -48,6 +50,20 @@ describe("budget estimate math (WP-124)", () => {
     expect(budgetBreached(1, 1, 0)).toBe(true);
     expect(budgetBreached(0, 1, 0)).toBe(false);
     expect(budgetBreached(0.99, 1, 0.015)).toBe(true);
+  });
+
+  // WP-218 — the token twin of the USD math (same estimator/predicate shape).
+  test("token estimate: rolling mean of last 5 × 1.5; empty history estimates 0", () => {
+    expect(estimateNextStepTokens([])).toBe(0);
+    expect(estimateNextStepTokens([1000])).toBeCloseTo(1500, 6);
+    // Only the last 5 of 6 are averaged.
+    expect(estimateNextStepTokens([1e9, 1000, 1000, 1000, 1000, 1000])).toBeCloseTo(1500, 6);
+  });
+
+  test("token breach on remaining <= 0 even when estimate is 0", () => {
+    expect(tokenBudgetBreached(1000, 1000, 0)).toBe(true);
+    expect(tokenBudgetBreached(0, 1000, 0)).toBe(false);
+    expect(tokenBudgetBreached(990, 1000, 15)).toBe(true);
   });
 });
 
@@ -148,6 +164,52 @@ describe.skipIf(address === null)("budget gate + terminal states (WP-124)", () =
       );
       expect(kinds).toEqual(["halt", "top_up"]);
       expect(journal.entries("step")).toHaveLength(4);
+      expect(journal.entries("terminal")).toHaveLength(1);
+    } finally {
+      journal.close();
+    }
+  });
+
+  test("token gate (WP-218): budgetTokens breach → token HALT + resumable FAILED (no USD top-up channel)", async () => {
+    // 600 tokens/step; budget 1000 covers step 1 (est 0), blocks step 2
+    // (est 600×1.5=900 > remaining 400). USD budget is generous — only the
+    // token gate trips, proving CG-2 governance on a $0-metered run.
+    const { repoUrl, dataDir, runner } = await setup({ tokensPerStep: 600 });
+    const spec = makeSpec({
+      repoUrl,
+      budgetUsd: 100,
+      budgetTokens: 1000,
+      maxSteps: 4,
+      judge: { family: "gemini", cadence: 50 },
+    });
+
+    const handle = await runner.start(spec);
+    const finished = await awaitStatus(
+      handle,
+      (r) => TERMINAL_STATUSES.includes(r.status),
+      "token-budget terminal",
+    );
+    // Sealed FAILED after exactly one paid step — the pre-step gate blocked #2.
+    expect(finished.status).toBe("FAILED");
+    expect(finished.currentStep).toBe(1);
+
+    const journal = new Journal(journalPath(dataDir, handle.runId));
+    try {
+      expect(journal.entries("step")).toHaveLength(1);
+      const events = journal.entries("budget_event");
+      expect(events).toHaveLength(1);
+      const payload = events[0]!.payload as {
+        event: string;
+        cause?: string;
+        remainingTokens?: number;
+        details: Record<string, number>;
+      };
+      expect(payload.event).toBe("halt");
+      expect(payload.cause).toBe("tokens");
+      expect(payload.remainingTokens).toBe(400); // 1000 budget − 600 spent
+      expect(payload.details.spentTokens).toBe(600);
+      expect(payload.details.budgetTokens).toBe(1000);
+      // Resumable terminal — the run sealed FAILED, not spun.
       expect(journal.entries("terminal")).toHaveLength(1);
     } finally {
       journal.close();

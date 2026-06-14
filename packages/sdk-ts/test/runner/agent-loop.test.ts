@@ -234,6 +234,46 @@ describe.skipIf(address === null)("agent loop (WP-121)", () => {
     }
   });
 
+  test("F-11 retired: a productive (non-empty) step that claimsComplete is judged directly — no probe step", async () => {
+    // The F-11 cost win, proven end-to-end (WP-221 Slice A trigger + Slice B
+    // consumption). Step 1 writes a REAL diff (bytes > 0) AND claims
+    // completion. With cadence 10, the empty-diff trigger would NOT fire here
+    // (the diff is non-empty) — only `claimsComplete` does. So the productive
+    // step is judged at step 1 and the run seals SUCCESS in ONE step. Before
+    // Slice B nothing set `claimsComplete`, so the loop took a second
+    // empty-diff probe step purely to elicit the off-cadence judge pass — the
+    // 5–35 % F-11 tax. This asserts that probe step is gone.
+    const wire = await startFakeJudgeWire([judgeForm({ criteria: { "AC-1": true } })]);
+    cleanups.push(() => wire.close());
+    const { repoUrl, dataDir, runner } = await setup({
+      judgeWireUrl: wire.url,
+      scriptedConfig: { claimsCompleteSteps: [1] }, // non-empty diff + completion claim
+    });
+    const spec = makeJudgedSpec({ repoUrl, maxSteps: 3, cadence: 10 });
+
+    const handle = await runner.start(spec);
+    const report = await awaitTerminal(handle);
+
+    expect(report.status).toBe("SUCCESS");
+    expect(report.currentStep).toBe(1); // sealed on the productive step — no probe
+    expect(report.lastVerdict).toEqual({ kind: "PROCEED", atStep: 0 });
+
+    const journal = new Journal(journalPath(dataDir, handle.runId));
+    try {
+      const steps = journal.entries("step").map((e) => e.payload as StepPayload);
+      expect(steps).toHaveLength(1); // exactly one step, not the old two (probe gone)
+      expect(steps[0]!.record.claimsComplete).toBe(true);
+      // The judged step carried a real diff — the milestone fired on the claim,
+      // not on an empty diff.
+      expect(steps[0]!.record.diffRef.bytes).toBeGreaterThan(0);
+      expect(journal.entries("judge")).toHaveLength(1);
+      expect(journal.entries("terminal")).toHaveLength(1);
+      expect(wire.hits).toBe(1);
+    } finally {
+      journal.close();
+    }
+  });
+
   test("incomplete empty-diff verdict keeps RUNNING and feeds rationale into the next step", async () => {
     const wire = await startFakeJudgeWire([judgeForm({ criteria: { "AC-1": false } })]);
     cleanups.push(() => wire.close());

@@ -336,6 +336,37 @@ export interface Checkpoint {
   lastGood: boolean;
 }
 
+// ─── §6a Compaction (WP-203, ADR-006) ───────────────────────────────────────
+// Context-rot mitigation (CM-1/CM-2). Compaction runs AT the checkpoint
+// boundary (activities.ts writeCheckpoint, the CM-1 co-design point) so a
+// resume never rehydrates rotted context. The decision of WHAT to fold is a
+// pure function (`planCompaction`); the LLM digest call + the journal/artifact
+// write are the non-pure wiring on top.
+
+/** Knobs for the pure compaction decision (ADR-006). */
+export interface CompactionPolicy {
+  /** Only eligible once the recall tier exceeds this many step summaries. */
+  triggerAfterSteps: number;
+  /** Newest N step summaries kept verbatim — never folded (CM-2). */
+  keepLastN: number;
+}
+
+/** Pure output of `planCompaction`: which recall-tier summaries fold vs stay. */
+export interface CompactionPlan {
+  /** Newest summaries kept verbatim in the recall tier (order preserved). */
+  keepVerbatim: string[];
+  /** Older summaries to fold into one digest (empty ⇒ no compaction this turn). */
+  toDigest: string[];
+}
+
+/** Journaled outcome of a compaction (the `compaction` JIF kind). */
+export interface CompactionResult {
+  tokensBefore: number;
+  tokensAfter: number;
+  /** Memory Pointer (WP-202) to the folded digest; absent if nothing folded. */
+  digestRef?: ArtifactRef;
+}
+
 // ─── §7 Durable runner (the substrate seam — ADR-001) ───────────────────────
 
 export type RunStatus =
@@ -407,6 +438,35 @@ export interface Plan {
   nodes: PlanNode[];
   /** ISO-8601 UTC. */
   createdAt: string;
+}
+
+/**
+ * Planner input (WP-219 S2, ADR-005 D1). What the dedicated `planner/`
+ * component decomposes — the user goal plus the goal-level acceptance criteria
+ * the plan must cover and the chain's total budget. The planner routes its one
+ * decomposition LLM call through the `plan` routing stage (NF-1); `family` is
+ * the planner's own model family, frozen here so the D2 plan meta-judge can
+ * enforce **plan-judge ≠ planner family** (invariant #2, extended to plans).
+ */
+export interface PlanInput {
+  goal: string;
+  acceptanceCriteria: AcceptanceCriterion[];
+  /** Chain budget = Σ node budgets; the planner sizes nodes within this. */
+  budgetUsd: number;
+  /** Planner model family — the plan meta-judge must differ from it (D2). */
+  family: LLMProvider;
+}
+
+/**
+ * The goal decomposer (WP-219 S2, ADR-005 D1). A dedicated component (mirrors
+ * `judge/`): owns the decomposition logic, isolation, and tests; calls the
+ * router for the single `plan`-stage LLM call. Output is an ordinary `Plan`
+ * (an ordered dependency tree of judge-gated `PlanNode`s) that the S2b plan
+ * meta-judge gates before any node executes (D2). Static decomposition;
+ * halt-and-replan on node failure is the chain executor's job (D3).
+ */
+export interface GoalPlanner {
+  decompose(input: PlanInput): Promise<Plan>;
 }
 
 /** Plan meta-judge verdict (ADR-005 D2). REVISE → re-plan; ESCALATE → human. */

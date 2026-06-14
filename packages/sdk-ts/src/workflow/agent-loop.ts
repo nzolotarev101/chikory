@@ -25,7 +25,12 @@ import {
   SIGNAL_TOP_UP,
   type ApproveDecision,
 } from "../runner/api.js";
-import { budgetBreached, estimateNextStepCost } from "../runner/budget.js";
+import {
+  budgetBreached,
+  estimateNextStepCost,
+  estimateNextStepTokens,
+  tokenBudgetBreached,
+} from "../runner/budget.js";
 import type {
   Checkpoint,
   ContextBundle,
@@ -79,6 +84,7 @@ export async function agentLoop(spec: TaskSpec): Promise<RunStatus> {
   let status: RunStatus = "RUNNING";
   let stepIndex = 0;
   let spentUsd = 0;
+  let spentTokens = 0;
   let budgetUsd = spec.budgetUsd;
   let judgeIndex = 0;
   let injectionIndex = 0;
@@ -92,6 +98,7 @@ export async function agentLoop(spec: TaskSpec): Promise<RunStatus> {
   let failure: { reason: string; lastCheckpoint: string } | undefined;
   const recentSummaries: string[] = [];
   const stepCosts: number[] = [];
+  const stepTokens: number[] = [];
   const pendingInjections: string[] = [];
   const pendingTopUps: number[] = [];
   const pendingApprovals: ApproveDecision[] = [];
@@ -172,6 +179,37 @@ export async function agentLoop(spec: TaskSpec): Promise<RunStatus> {
       continue; // re-run the gate with the new budget
     }
 
+    // Token gate (WP-218, CG-2): mirrors the USD gate for token-denominated
+    // budgets — the governance that makes spend real on $0-metered
+    // subscription runs where the USD meter reads $0 (F-9). Only armed when
+    // the spec opts in via `budgetTokens`. Unlike money, tokens have no
+    // top-up channel, so a breach is a hard cap: record the token HALT on the
+    // ledger and seal a resumable FAILED (re-launch with a higher budget).
+    if (spec.budgetTokens !== undefined) {
+      const tokenEstimate = estimateNextStepTokens(stepTokens);
+      if (tokenBudgetBreached(spentTokens, spec.budgetTokens, tokenEstimate)) {
+        await activities.recordBudgetEvent({
+          runId,
+          budgetEventIndex: budgetEventIndex++,
+          event: "halt",
+          cause: "tokens",
+          remainingUsd: budgetUsd - spentUsd,
+          remainingTokens: spec.budgetTokens - spentTokens,
+          details: {
+            estimateTokens: tokenEstimate,
+            spentTokens,
+            budgetTokens: spec.budgetTokens,
+            atStep: stepIndex,
+          },
+        });
+        return seal(
+          "FAILED",
+          `token budget exhausted: ${spentTokens}/${spec.budgetTokens} tokens spent, ` +
+            `next step ~${Math.round(tokenEstimate)} tokens (re-launch with a higher budgetTokens)`,
+        );
+      }
+    }
+
     // Drain pending mid-run corrections into this step's context (WP-212).
     const injections = pendingInjections.splice(0);
     for (const text of injections) {
@@ -203,6 +241,9 @@ export async function agentLoop(spec: TaskSpec): Promise<RunStatus> {
     });
     spentUsd += record.costUsd;
     stepCosts.push(record.costUsd);
+    const recordTokens = record.tokens.input + record.tokens.output;
+    spentTokens += recordTokens;
+    stepTokens.push(recordTokens);
     recentSummaries.push(record.summary);
     stepIndex += 1;
     consecutiveFailures = record.status === "FAILED" ? consecutiveFailures + 1 : 0;

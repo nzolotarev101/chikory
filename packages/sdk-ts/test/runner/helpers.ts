@@ -53,6 +53,10 @@ export interface ScriptedConfig {
   echoJudgeFeedback?: boolean;
   /** Every attempt FAILs (loop-breaker tests, WP-124). */
   failAll?: boolean;
+  /** Total input tokens each attempt reports — drives the WP-218 token gate. */
+  tokensPerStep?: number;
+  /** 1-based attempt numbers that set `claimsComplete` (WP-221 / F-11 proof). */
+  claimsCompleteSteps?: number[];
 }
 
 const SCRIPTED_DEFAULTS: ScriptedConfig = {
@@ -106,6 +110,7 @@ export function createScriptedAdapter(ctx: { store: ArtifactStore }): ExecutorAd
 
       const fail = cfg.failAll === true || cfg.failSteps.includes(attempt);
       const emptyDiff = cfg.emptyDiffSteps.includes(attempt);
+      const claimsComplete = (cfg.claimsCompleteSteps ?? []).includes(attempt);
       if (!fail) {
         await writeFile(join(input.workspaceDir, `step-${attempt}.txt`), input.instruction);
       }
@@ -131,7 +136,10 @@ export function createScriptedAdapter(ctx: { store: ArtifactStore }): ExecutorAd
             : []),
         ].join("; "),
         toolCalls: 1,
-        tokens: { input: 100, output: 50 },
+        tokens:
+          cfg.tokensPerStep !== undefined
+            ? { input: cfg.tokensPerStep, output: 0 }
+            : { input: 100, output: 50 },
         costUsd: cfg.costPerStep,
         costEstimated: false,
         durationMs: cfg.delayMs,
@@ -142,7 +150,7 @@ export function createScriptedAdapter(ctx: { store: ArtifactStore }): ExecutorAd
             status: "FAILED",
             failure: { reason: `scripted failure at attempt ${attempt}`, retriable: true },
           }
-        : { ...base, status: "SUCCESS" };
+        : { ...base, status: "SUCCESS", claimsComplete };
     },
   };
 }

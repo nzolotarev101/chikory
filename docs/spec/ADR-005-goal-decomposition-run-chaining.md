@@ -134,10 +134,17 @@ Slices fall out of the accepted ADR (S1 hand-done; later S's become dogfood
 runs again, now against a real chaining substrate):
 
 - **S1** — contracts above (hand-done PR). *Unblocks WP-221 + WP-218 s2.*
-- **S2** — `planner/` component: goal → plan tree (router decomposition call),
-  journaled; `chikory plan <goal>` dry-run renders the tree.
+- **S2 contract landed (hand-done, 2026-06-14)** — the planner *function*
+  surface is frozen (`PlanInput`, `GoalPlanner.decompose(input): Promise<Plan>`
+  in `types.ts`; CONTRACTS.md §7a) plus the pure, unit-tested precondition
+  `planCoverageGaps(plan, goalCriteria)` (`src/planner/coverage.ts`) that feeds
+  `PlanVerdict.uncoveredCriteria`. **Unblocks the S2/S2b dogfoods.**
+- **S2** — `planner/` component: implement `GoalPlanner` — goal → plan tree
+  (one router decomposition call through the `plan` stage), journaled;
+  `chikory plan <goal>` dry-run renders the tree. *(now dogfoodable)*
 - **S2b** — plan meta-judge: gates the decomposition (different family than the
-  planner) → PROCEED/REVISE/ESCALATE before any node executes.
+  planner) → PROCEED/REVISE/ESCALATE before any node executes; consumes
+  `planCoverageGaps` for the coverage half of its verdict. *(now dogfoodable)*
 - **S3** — chain executor: run nodes in dep order, gate on verdicts, carry the
   predecessor checkpoint git state forward; halt-and-replan on node failure (D3).
 - **S4** — context handoff: WP-203 compaction note + WP-202 refs between nodes.

@@ -64,6 +64,7 @@ export {
   type ParseTaskSpecOptions,
 } from "./taskspec.js";
 export * from "./judge/index.js";
+export { planCoverageGaps } from "./planner/coverage.js";
 export {
   Journal,
   MAX_PAYLOAD_BYTES,
@@ -116,4 +117,7 @@ export {
   ESTIMATE_SAFETY_FACTOR,
   ESTIMATE_WINDOW,
   estimateNextStepCost,
+  estimateNextStepTokens,
+  tokenBudgetBreached,
 } from "./runner/budget.js";
+export { planCompaction } from "./runner/compaction.js";

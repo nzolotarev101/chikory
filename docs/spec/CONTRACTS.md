@@ -259,6 +259,39 @@ export interface Checkpoint {
 }
 ```
 
+## 6a. Compaction (WP-203, ADR-006)
+
+Context-rot mitigation (CM-1/CM-2). Compaction runs **at the checkpoint
+boundary** (`writeCheckpoint`, the CM-1 co-design point) so a resume never
+rehydrates rotted context. The **decision** of what to fold is a pure function;
+the LLM digest call + the journal/artifact write are the non-pure wiring on
+top. The `compaction` JIF kind carries the `CompactionResult`.
+
+```ts
+export interface CompactionPolicy {
+  triggerAfterSteps: number;           // recall tier must exceed this to be eligible
+  keepLastN: number;                   // newest N summaries kept verbatim (CM-2)
+}
+
+export interface CompactionPlan {      // pure output of planCompaction
+  keepVerbatim: string[];              // newest summaries kept (order preserved)
+  toDigest: string[];                  // older summaries to fold (empty ⇒ no-op)
+}
+
+export interface CompactionResult {    // journaled (compaction kind)
+  tokensBefore: number;
+  tokensAfter: number;
+  digestRef?: ArtifactRef;             // Memory Pointer (WP-202) to the digest
+}
+
+// Pure, unit-tested decision core (src/runner/compaction.ts):
+export function planCompaction(summaries: readonly string[], policy: CompactionPolicy): CompactionPlan;
+```
+
+`CompactionPolicy`/`CompactionPlan`/`planCompaction` are language-local code
+contracts (no fixture); `CompactionResult` is the journaled payload shape
+(journal-format.md §3, `compaction`).
+
 ## 7. Durable runner (the substrate seam — ADR-001)
 
 ```ts
@@ -341,6 +374,33 @@ export interface ChainRecord {
   status: ChainStatus;
 }
 ```
+
+**Planner component (WP-219 S2, ADR-005 D1)** — the `planner/` module that
+produces a `Plan` from a goal. Frozen so S2 (planner impl) and S2b (plan
+meta-judge) are dogfoodable against a stable surface. The planner is the only
+producer of `Plan`; the meta-judge is the only gate before nodes execute.
+
+```ts
+export interface PlanInput {
+  goal: string;
+  acceptanceCriteria: AcceptanceCriterion[];
+  budgetUsd: number;                   // chain budget; planner sizes nodes within it
+  family: LLMProvider;                 // planner model family; meta-judge MUST differ (D2)
+}
+
+export interface GoalPlanner {         // dedicated component (mirrors judge/), routes
+  decompose(input: PlanInput): Promise<Plan>;  // its one LLM call through the `plan` stage
+}
+
+// Pure coverage check feeding PlanVerdict.uncoveredCriteria — the meta-judge's
+// safety precondition (a decomposition that drops a goal criterion is unsafe).
+export function planCoverageGaps(plan: Plan, goalCriteria: AcceptanceCriterion[]): string[];
+```
+
+`PlanInput`/`GoalPlanner`/`planCoverageGaps` are language-local code contracts
+(no wire serialization), so they carry no conformance fixture; `Plan`,
+`PlanNode`, and `PlanVerdict` remain the serialized, fixtured, cross-language
+data contracts.
 
 ## 8. Telemetry
 
