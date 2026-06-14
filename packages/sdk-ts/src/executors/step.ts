@@ -27,6 +27,11 @@ export const SPAN_STEP = "chikory.step";
  */
 export const COMPLETION_MARKER = "CHIKORY_TASK_COMPLETE";
 
+/** Detects the WP-221 completion claim that removes the F-11 probe step. */
+export function claimsCompleteFromSummary(summary: string): boolean {
+  return summary.split("\n").some((line) => line.trim() === COMPLETION_MARKER);
+}
+
 /** What an adapter's parser extracts from the CLI's stdout. */
 export interface ParsedCliResult {
   ok: boolean;
@@ -169,7 +174,11 @@ export async function runCliStep(opts: CliStepOptions): Promise<StepRecord> {
       failure: parsed.failure ?? { reason: "executor reported failure", retriable: false },
     };
   } else {
-    record = { ...base, status: "SUCCESS" };
+    record = {
+      ...base,
+      status: "SUCCESS",
+      claimsComplete: claimsCompleteFromSummary(parsed.summary),
+    };
   }
 
   recordStepSpan({

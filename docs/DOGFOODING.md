@@ -127,9 +127,17 @@ plan-changing gap (dogfood-002's lesson). Dogfood-020
 `tsc -p tsconfig.test.json` pass so `test/**` is type-checked, verified to trip
 on a bad fixture (`TS2353`). **F-29 closed.** It surfaced **F-30** (the same
 spec was launched twice ~11 min apart, ~$1 wasted — operator ceremony, no WP).
-Next: dogfood-021 takes the best remaining pure, contract-landed pillar slice
-(WP-218 token-budget gate math); the high-value pillars (WP-221 Slice B,
-WP-219 planner, WP-218 gate wiring) sit behind hand-done design decisions an
+Dogfood-021 (`docs/reports/dogfood-021.md`) delivered **WP-221 Slice B** — the
+runner now reads the executor's `CHIKORY_TASK_COMPLETE` marker via pure
+`claimsCompleteFromSummary` → `StepRecord.claimsComplete`, so the productive step
+is judged directly and the **F-11 probe step retires**. Its twentieth
+first-attempt SUCCESS, no new friction, single clean launch (F-30 did not
+recur). **The F-11 cost win is now complete in code**; closure (the probe step
+actually gone) is confirmed by watching the next marker-emitting run. Next:
+dogfood-022 takes the deferred **WP-218 pure token-budget gate math**
+(`estimateNextStepTokens`/`tokenBudgetBreached`, the token twin of the USD gate);
+the remaining pillars (WP-219 planner, WP-218 gate wiring, the F-11 end-to-end
+fake-executor loop proof) sit behind hand-done design decisions an
 **architect/contract wall** the human should clear next.
 
 Related docs: [`docs/spec/task-spec.md`](spec/task-spec.md) (schema
