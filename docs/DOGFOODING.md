@@ -130,15 +130,20 @@ spec was launched twice ~11 min apart, ~$1 wasted — operator ceremony, no WP).
 Dogfood-021 (`docs/reports/dogfood-021.md`) delivered **WP-221 Slice B** — the
 runner now reads the executor's `CHIKORY_TASK_COMPLETE` marker via pure
 `claimsCompleteFromSummary` → `StepRecord.claimsComplete`, so the productive step
-is judged directly and the **F-11 probe step retires**. Its twentieth
-first-attempt SUCCESS, no new friction, single clean launch (F-30 did not
-recur). **The F-11 cost win is now complete in code**; closure (the probe step
-actually gone) is confirmed by watching the next marker-emitting run. Next:
-dogfood-022 takes the deferred **WP-218 pure token-budget gate math**
-(`estimateNextStepTokens`/`tokenBudgetBreached`, the token twin of the USD gate);
-the remaining pillars (WP-219 planner, WP-218 gate wiring, the F-11 end-to-end
-fake-executor loop proof) sit behind hand-done design decisions an
-**architect/contract wall** the human should clear next.
+is judged directly and the F-11 probe step retires. Dogfood-022
+(`docs/reports/dogfood-022.md`) delivered **WP-219 S2 Slice 1** — the pure
+goal-planner prompt half (`planner/prompt.ts`, mirroring `judge/prompt.ts`) — but
+its headline is in the trace: as the **first real run on post-Slice-B code where
+the executor emits the marker**, it sealed SUCCESS in **ONE step with no
+empty-diff probe step** (`components over time: s0 j@0`, vs the `s0 s1 j@1` F-11
+signature of all twenty predecessors). **F-11 is CLOSED — by observation, not
+just in code.** Twenty-first first-attempt SUCCESS, no new friction, single clean
+launch (F-30 did not recur). The one watch-item: the productive step cost $1.26
+on **969k input tokens** (campaign high) — with the probe gone, input-side cost
+(WP-203 compaction / WP-207 pacing) is the next reliability lever. Next:
+dogfood-023 takes **WP-219 S2 Slice 2 — the pure plan-assembly half**
+(`buildPlan(reply, input, opts): Plan`, mirroring `buildVerdict`), the last pure
+sub-slice of S2 before the non-pure `decompose` wrapper (hand-design).
 
 Related docs: [`docs/spec/task-spec.md`](spec/task-spec.md) (schema
 reference) · [`docs/TASK-PROTOCOL.md`](TASK-PROTOCOL.md) (WP etiquette, §7 is
@@ -539,17 +544,18 @@ a first-attempt SUCCESS and produced three plan-changing findings
   tokens)` to the run header whenever `costEstimated` ∧ cost=$0 ∧
   tokens>0. Token-denominated budgets (`budget_tokens`) remain — the
   contracts slice of WP-218.
-- **Completion still costs one probe step** — WP-217 (landed `ef4b16f`)
-  fires the judge as soon as a step returns SUCCESS with an empty diff, so
-  a finished run no longer waits for the cadence boundary. But the trigger
-  is *inference*: the executor must spend one empty-diff step (~34–252k
-  input tokens observed across dogfood-002…016) rediscovering "nothing to do"
-  before the judge can seal. Priced cost-share has spanned **5.8 %–35.1 %**
-  across twelve priced campaigns (record low 5.8 % in dogfood-009, record high
-  35.1 % in dogfood-013) — the share tracks executor discretion on the suite
-  re-run and inversely the size of the productive step it follows, so a cheap
-  real step inflates the probe's share. The explicit `claimsComplete` signal
-  that judges the productive step directly is WP-221.
+- **Completion no longer costs a probe step (F-11 CLOSED, dogfood-022)** —
+  historically WP-217 (landed `ef4b16f`) fired the judge on an empty-diff
+  SUCCESS, but the executor first had to *spend* one empty-diff step
+  rediscovering "nothing to do" (the F-11 tax, **5.8 %–35.1 %** across twenty
+  priced campaigns dogfood-002…021). WP-221 closes it: the executor ends its
+  productive step's summary with `CHIKORY_TASK_COMPLETE`, the runner reads it
+  (pure `claimsCompleteFromSummary` → `StepRecord.claimsComplete`), and
+  `isCompletionMilestone` fires the judge off-cadence **on the productive step
+  itself**. Confirmed live by dogfood-022 (`run-499218ef`): the first
+  marker-emitting run sealed SUCCESS in one step, `components over time: s0 j@0`,
+  no probe. So a well-scoped goal that the executor finishes in one productive
+  step now seals in one step — no trailing no-op.
 - Executor tool sandboxes are real but different: claude-code is
   file-ops-only (can't run tests itself — the judge does), codex has
   workspace-write (can run tests). Both are fine: SUCCESS is judge-verified

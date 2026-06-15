@@ -1,0 +1,133 @@
+# Dogfood-023: WP-219 S2 Slice 2 — the goal planner's PURE plan-assembly half.
+#
+# WHY THIS IS THE PRIORITY: WP-219 (goal decomposition & run chaining, ADR-005)
+# is the headline Phase-2 planner pillar. S1 contracts, the pure
+# `planCoverageGaps`, the S3 dependency primitives (`readyNodes`,
+# `hasDependencyCycle`), and — as of dogfood-022 (`run-499218ef`) — the pure
+# PROMPT half (`planner/prompt.ts`) are all landed. The `GoalPlanner.decompose`
+# component makes ONE non-deterministic `plan`-stage LLM call (NF-1), so it is
+# NOT a pure dogfood. dogfood-022 carved out its prompt half; this slice carves
+# out the OTHER pure half — turning the planner's schema-valid JSON reply into a
+# validated `Plan` — exactly as the judge's pure `buildVerdict` (`judge/harness.ts`)
+# assembles a `JudgeVerdict` from a parsed `JudgeForm`. After this slice, the
+# only non-pure piece left in S2 is the thin `decompose` wrapper: route the
+# `buildPlannerMessages` output through the `plan` stage, `JSON.parse` the reply,
+# then `buildPlan(reply, input, { id, createdAt })`. That wrapper (router call +
+# parse + id/clock) is hand-design territory (TASK-PROTOCOL §4).
+#
+# WP-203 S2 digest wiring remains BLOCKED: `CompactionResult.digestRef` is a
+# Memory Pointer (WP-202), and the WP-202 store is not built yet.
+#
+# Zero-secrets launch:
+#   node scripts/cli-judge-proxy.mjs 8787 gemini &
+#   OPENAI_COMPAT_BASE_URL=http://127.0.0.1:8787 pnpm chikory run examples/dogfood/dogfood-023.yaml --watch
+#
+# Commit everything before launching — workspaces clone HEAD, so the run must
+# see the frozen `Plan`/`PlanNode`/`PlanInput` contracts in types.ts and the
+# landed `planner/prompt.ts`. Launch ONCE and watch to terminal (F-30). Run
+# Devbox commands sequentially (F-22). F-11 is closed (dogfood-022): a clean
+# one-step finish should seal SUCCESS with NO empty-diff probe step — watch the
+# step count stay at 1.
+name: dogfood-023-wp-219-plan-assembly
+goal: >
+  Implement WP-219 S2 Slice 2: the PURE plan-assembly half of the goal planner
+  (`GoalPlanner.decompose`, ADR-005 D1), mirroring the judge's pure
+  `buildVerdict` (`judge/harness.ts`). Build the deterministic function that
+  turns the planner's already-parsed, schema-valid JSON reply into a validated
+  `Plan`. Do NOT make any LLM/router call, do NOT implement
+  `GoalPlanner.decompose`, do NOT call `JSON.parse` (the caller parses), do NOT
+  touch the router, agent-loop, prompt.ts, or any contract/type/schema/journal
+  format. Add no dependency. Add exactly one new source file, edit exactly one
+  existing source file, and add exactly one new test file.
+
+  1. packages/sdk-ts/src/planner/assemble.ts (new) — pure plan assembly.
+     Import `Plan`, `PlanNode`, `PlanInput` (type-only) from "../types.js".
+     Export, all pure (no I/O, no mutation, no clock, no id generation), with a
+     short JSDoc citing WP-219 S2 and ADR-005 D1:
+       - `interface BuildPlanOptions { id: string; createdAt: string }` — the
+         two non-deterministic fields the (later, non-pure) `decompose` wrapper
+         injects: the plan id and the ISO-8601 UTC `createdAt`. Keeping them in
+         the options is what makes `buildPlan` pure (mirrors how `buildVerdict`
+         takes `runId`/`costUsd` in its options).
+       - `buildPlan(reply: { nodes: PlanNode[] }, input: PlanInput, opts: BuildPlanOptions): Plan`
+         — assemble the `Plan` `{ id: opts.id, goal: input.goal, nodes:
+         reply.nodes, createdAt: opts.createdAt }`, after validating the
+         reply's STRUCTURE (throw a plain `Error` with a clear message on each
+         violation; do NOT validate plan QUALITY — budget sums and coverage are
+         the S2b meta-judge's concern, out of scope here):
+           a. `reply.nodes` is non-empty — else throw
+              `Error("planner returned no nodes")`;
+           b. node `id`s are unique — on the first duplicate throw
+              `Error("duplicate plan node id: <id>")`;
+           c. every id in every node's `dependsOn` references an existing node
+              id in `reply.nodes` — on the first dangling ref throw
+              `Error("plan node <nodeId> depends on unknown node <depId>")`.
+         Use a private helper for the id-set if it reads cleanly. Return the
+         assembled `Plan` only when all three checks pass. Do not mutate
+         `reply`, `input`, or `reply.nodes`.
+
+  2. packages/sdk-ts/src/index.ts — add ONE re-export line for the two new
+     symbols, immediately after the existing
+     `export { buildPlannerMessages, PLANNER_SYSTEM_PROMPT, PLAN_RESPONSE_SCHEMA } from "./planner/prompt.js";`
+     line:
+     `export { buildPlan, type BuildPlanOptions } from "./planner/assemble.js";`
+     Add nothing else.
+
+  3. packages/sdk-ts/test/planner/assemble.test.ts (new) — unit-test the pure
+     function, importing `buildPlan` (and `BuildPlanOptions` if used) from
+     "../../src/planner/assemble.js" and any types from "../../src/types.js".
+     Build a valid two-node reply fixture (node "N-1" with empty `dependsOn`,
+     node "N-2" depending on "N-1"; each node a non-empty `goal`, an
+     `acceptanceCriteria` array, and a `budgetUsd`), a `PlanInput` fixture, and
+     a `BuildPlanOptions` fixture. Cover and assert:
+       - the happy path returns a `Plan` whose `id`/`createdAt` come from
+         `opts`, whose `goal` equals `input.goal`, and whose `nodes` equal the
+         reply's nodes (same length, ids in order);
+       - an empty `nodes` array throws (message contains "no nodes");
+       - a duplicate node id throws (message contains the duplicated id);
+       - a `dependsOn` referencing a non-existent node id throws (message
+         contains both the node id and the unknown dep id);
+       - `buildPlan` does not mutate the input reply (e.g. `reply.nodes.length`
+         is unchanged after the call).
+
+  After this slice, BOTH pure halves of the S2 planner are landed (prompt
+  construction + reply assembly), and the only remaining S2 piece is the thin
+  non-pure `decompose` wrapper (route `buildPlannerMessages` through the `plan`
+  stage, `JSON.parse` the reply, call `buildPlan`) — the documented hand-design
+  follow-up, out of scope for this deterministic slice.
+
+  Follow AGENTS.md: strict TypeScript, ESM `.js` import extensions, named
+  exports only, no `any`, no default exports. The typecheck gate type-checks
+  test/** (WP-230), so the new test must be type-correct. Run all Devbox
+  verification commands sequentially.
+repos:
+  - url: /Users/nikitazolotarev/repos/chikory
+    writable: true
+acceptance_criteria:
+  - id: AC-1
+    description: >
+      the new plan-assembly test passes (all cases)
+    check: pnpm install --prefer-offline --silent && pnpm --filter @chikory/sdk exec vitest run test/planner/assemble.test.ts
+  - id: AC-2
+    description: >
+      the complete TypeScript SDK suite remains green — proving the new planner
+      module breaks no existing behavior
+    check: pnpm --filter @chikory/sdk test
+  - id: AC-3
+    description: strict typecheck (covering test/**, WP-230) and lint are clean
+    check: pnpm --filter @chikory/sdk typecheck && pnpm --filter @chikory/sdk lint
+budget_usd: 5
+max_steps: 4
+executor:
+  adapter: codex
+  family: openai
+judge:
+  family: openai-compat
+  cadence: 2
+  max_cost_share: 0.5
+routing:
+  stages:
+    plan: { provider: openai-compat, model: gpt-5.5 }
+    code: { provider: openai-compat, model: gpt-5.5 }
+    review: { provider: openai-compat, model: gpt-5.5 }
+    judge: { provider: openai-compat, model: gemini-3.1-pro-preview }
