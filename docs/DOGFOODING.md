@@ -149,10 +149,24 @@ SUCCESS, the F-11-closed `s0 j@0` shape held for a second straight run, no new
 friction, single clean launch. Bright spot on the cost watch-item: input tokens
 fell to **451k** (lowest of the last four runs, ~half the 969k high) for a
 comparably small change — the 022 "climbing tokens" worry is **noise, not a
-ratchet**. Next: dogfood-024 takes **WP-219 S2b — the pure plan meta-judge
-prompt half** (`buildPlanJudgeMessages` + `PLAN_JUDGE_SYSTEM_PROMPT` +
-`PLAN_VERDICT_RESPONSE_SCHEMA`, mirroring `judge/prompt.ts`), the plan analogue
-of the judge's pure prompt half.
+ratchet**. Dogfood-024 (`docs/reports/dogfood-024.md`) delivered **WP-219 S2b —
+the pure plan meta-judge prompt half** (`planner/meta-judge-prompt.ts`:
+`PLAN_JUDGE_SYSTEM_PROMPT` + `PLAN_VERDICT_RESPONSE_SCHEMA` +
+`buildPlanJudgeMessages`, mirroring `judge/prompt.ts`); dogfood-025
+(`docs/reports/dogfood-025.md`) delivered **its pure verdict-assembly half**
+(`planner/meta-judge-verdict.ts`: `buildPlanVerdict`, mirroring `buildVerdict`,
+folding `planCoverageGaps` in as a deterministic coverage override that
+downgrades `PROCEED`→`REVISE` when a goal criterion is uncovered). **WP-219's
+entire pure surface is now landed** — both the S2 planner and the S2b plan
+meta-judge mirror the executor judge symbol-for-symbol; everything left in
+WP-219 is non-pure / hand-design (the `decompose` wrapper + plan-judge harness,
+TASK-PROTOCOL §4). Both runs sealed SUCCESS in one step, no probe (F-11-closed
+shape, now four straight); no new friction. The input-token series ran a clean
+sawtooth across the five adjacent pure slices (862k → 969k → 451k → 976k →
+467k) — cost is **noisy, not monotonic**, a variance/ceiling lever (WP-203/
+WP-207), not a runaway trend. Next: dogfood-026 takes **WP-203 S4 — the pure
+compaction-trace renderer** (`formatEntryLine` gains a `case "compaction"`),
+the WP-209 trace-renderer pattern, since WP-219's pure work is exhausted.
 
 Related docs: [`docs/spec/task-spec.md`](spec/task-spec.md) (schema
 reference) · [`docs/TASK-PROTOCOL.md`](TASK-PROTOCOL.md) (WP etiquette, §7 is

@@ -1,0 +1,137 @@
+# Dogfood-026: WP-203 S4 — the compaction-trace renderer (pure `formatEntryLine` case).
+#
+# WHY THIS IS THE PRIORITY: WP-219's entire PURE surface is now landed — S2
+# planner (prompt half dogfood-022 `run-499218ef`, assembly half dogfood-023
+# `run-2d40ded5`) and S2b plan meta-judge (prompt half dogfood-024
+# `run-28073328`, verdict-assembly half dogfood-025 `run-0d39fd12`). Everything
+# left in WP-219 is non-pure / hand-design (the `GoalPlanner.decompose` wrapper
+# and the plan-judge harness — router call + `JSON.parse`, TASK-PROTOCOL §4),
+# so it is NOT dogfoodable yet (contracts/LLM-call work is hand-done first).
+#
+# The next clean PURE dogfood is WP-203 S4 (🟢): the compaction-trace renderer.
+# `formatEntryLine` (`src/cli/trace.ts`) — the per-entry `--watch` formatter —
+# already renders `step`/`verdict`/`judge`/`checkpoint`/`budget_event`/
+# `injection`/`terminal`, but a `compaction` JIF entry (the WP-203 ADR-006 kind)
+# falls through to the bare `default` (`[ts] compaction`). This slice adds the
+# `case "compaction"` so a compaction entry renders its `CompactionResult`
+# payload (`tokensBefore`→`tokensAfter`, digest-pointer presence). It is the
+# direct analog of the WP-209 trace slices (dogfood-010/011): a pure renderer
+# over a synthetic `JournalEntry[]` fixture, machine-checkable, no contract
+# change. The `compaction` `JournalEntryKind` and the `CompactionResult` shape
+# (`types.ts:362`: `{ tokensBefore, tokensAfter, digestRef? }`) are frozen by
+# ADR-006, and `formatTokens` (`trace.ts:42`) already exists — so this needs
+# nothing un-landed.
+#
+# NOT BLOCKED on WP-202: the renderer operates on a JournalEntry fixture, so the
+# `digestRef` (a WP-202 Memory Pointer) is just an optional `ArtifactRef` in the
+# fixture — the test exercises both the digest-present and digest-absent paths
+# without the (still-unbuilt) WP-202 store. The WP-203 S2 digest WIRING (folding
+# a real digest behind a Memory Pointer at the checkpoint) stays BLOCKED on
+# WP-202; only this pure renderer is in scope.
+#
+# Zero-secrets launch:
+#   node scripts/cli-judge-proxy.mjs 8787 gemini &
+#   OPENAI_COMPAT_BASE_URL=http://127.0.0.1:8787 pnpm chikory run examples/dogfood/dogfood-026.yaml --watch
+#
+# Commit everything before launching — workspaces clone HEAD, so the run must
+# see the frozen `CompactionResult` contract (`types.ts:362`), the `compaction`
+# `JournalEntryKind`, and the current `src/cli/trace.ts` + `test/cli/trace.test.ts`.
+# Launch ONCE and watch to terminal (F-30). Run Devbox commands sequentially
+# (F-22). F-11 is closed (dogfood-022/023/024/025): a clean one-step finish
+# should seal SUCCESS with NO empty-diff probe step — watch the step count stay
+# at 1.
+name: dogfood-026-wp-203-compaction-trace
+goal: >
+  Implement WP-203 S4: render the `compaction` journal entry in the per-entry
+  `--watch` formatter `formatEntryLine` (`packages/sdk-ts/src/cli/trace.ts`),
+  the analog of the WP-209 process-metric trace renderers. A `compaction` JIF
+  entry (ADR-006, the `CompactionResult` payload) currently falls through to the
+  bare `default` arm and renders only `[ts] compaction`; add a `case
+  "compaction"` so it renders the token before/after and digest presence. This
+  is a PURE renderer slice. Do NOT make any LLM/router call, do NOT touch the
+  router, agent-loop, journal writer, runner, or any contract/type/schema/
+  journal format, do NOT change `CompactionResult` or the `compaction`
+  `JournalEntryKind`, do NOT add the (still-blocked) WP-202 digest wiring, do NOT
+  alter any other `formatEntryLine` arm or any other function in `trace.ts`. Add
+  no dependency. Edit exactly two existing files — one source file and one test
+  file — and add no new file.
+
+  1. packages/sdk-ts/src/cli/trace.ts — two additive edits, nothing else:
+       - add `CompactionResult` to the existing type-only import block from
+         "../types.js" (alphabetically, after `Checkpoint`), keeping it
+         `import type`;
+       - add a `case "compaction":` arm to the `formatEntryLine` switch,
+         immediately before the existing `case "terminal":` arm, that casts
+         `entry.payload as CompactionResult` and returns a single line in the
+         established `[${ts}] <kind> …` idiom (the same `ts = entry.ts.slice(11,
+         19)` already in scope): render the token delta using the existing
+         `formatTokens` helper as
+         `[${ts}] compaction ${formatTokens(payload.tokensBefore)}→${formatTokens(payload.tokensAfter)} tokens`,
+         then append the digest-pointer state — when `payload.digestRef` is
+         present, ` (digest ${payload.digestRef.id.slice(0, 12)})`; when it is
+         absent, ` (no digest)`. Do NOT mutate `entry` or `payload`; do NOT
+         touch the `default` arm or any other case.
+
+  2. packages/sdk-ts/test/cli/trace.test.ts — extend the existing
+     `describe("formatEntryLine (--watch)", …)` block (do not remove or rewrite
+     the existing `"one line per entry kind"` assertions) with NEW assertions
+     for the `compaction` kind, built with the existing `entry(idx, kind,
+     payload, cost?)` test helper:
+       - a compaction entry WITH a digest — `entry(N, "compaction", {
+         tokensBefore: 120_000, tokensAfter: 40_000, digestRef: { id:
+         "abc123def456ghi", kind: <a valid ArtifactKind>, bytes: 2048, summary:
+         "folded 8 step summaries" } })` — `formatEntryLine` returns a line that
+         contains the rendered before token figure, the rendered after token
+         figure, and `(digest abc123def456)` (the 12-char id prefix);
+       - a compaction entry WITHOUT a digest — same token figures, `digestRef`
+         omitted — `formatEntryLine` returns a line containing `(no digest)` and
+         NOT containing `digest abc` (i.e. the no-digest branch, not the digest
+         branch).
+     Keep the fixtures type-correct against `CompactionResult` and `ArtifactRef`
+     (`types.ts`); import any needed types from "../../src/types.js". The
+     `formatTokens` rounding is already covered by the existing `formatTokens`
+     test, so assert on the substrings the renderer must contain, not on exact
+     full-line equality.
+
+  After this slice, the compaction journal entry is legible in `chikory trace
+  --watch` output, completing the WP-203 S4 pure trace surface and matching the
+  WP-209 renderer pattern. Remaining WP-203: the S2 digest wiring (fold a real
+  digest behind a Memory Pointer at the checkpoint boundary and journal the
+  `CompactionResult`) stays BLOCKED on the WP-202 store; the S3 recall-tier
+  projection and any OTel emission are later slices.
+
+  Follow AGENTS.md: strict TypeScript, ESM `.js` import extensions, named
+  exports only, no `any`, no default exports. The typecheck gate type-checks
+  test/** (WP-230), so the edited test must be type-correct. Run all Devbox
+  verification commands sequentially.
+repos:
+  - url: /Users/nikitazolotarev/repos/chikory
+    writable: true
+acceptance_criteria:
+  - id: AC-1
+    description: >
+      the trace formatter test (incl. the new compaction assertions) passes
+    check: pnpm install --prefer-offline --silent && pnpm --filter @chikory/sdk exec vitest run test/cli/trace.test.ts
+  - id: AC-2
+    description: >
+      the complete TypeScript SDK suite remains green — proving the renderer
+      change breaks no existing behavior
+    check: pnpm --filter @chikory/sdk test
+  - id: AC-3
+    description: strict typecheck (covering test/**, WP-230) and lint are clean
+    check: pnpm --filter @chikory/sdk typecheck && pnpm --filter @chikory/sdk lint
+budget_usd: 5
+max_steps: 4
+executor:
+  adapter: codex
+  family: openai
+judge:
+  family: openai-compat
+  cadence: 2
+  max_cost_share: 0.5
+routing:
+  stages:
+    plan: { provider: openai-compat, model: gpt-5.5 }
+    code: { provider: openai-compat, model: gpt-5.5 }
+    review: { provider: openai-compat, model: gpt-5.5 }
+    judge: { provider: openai-compat, model: gemini-3.1-pro-preview }
