@@ -1,0 +1,153 @@
+# Dogfood-027: WP-228 S1 — the pure launch-baseline-precheck decision
+# (`evaluateBaselinePrecheck`).
+#
+# WHY THIS IS THE PRIORITY: WP-219's entire PURE surface is landed (S2 planner
+# prompt+assembly dogfood-022/023, S2b plan meta-judge prompt+verdict-assembly
+# dogfood-024/025) and its remainder is non-pure / hand-design (the `decompose`
+# wrapper + plan-judge harness — router call + `JSON.parse`, TASK-PROTOCOL §4),
+# so NOT dogfoodable yet. WP-203's remaining slices are blocked or later: the S2
+# digest wiring stays BLOCKED on the WP-202 Memory Pointer store
+# (`CompactionResult.digestRef`); S3 recall-tier projection has no frozen pure
+# contract; the S4 trace renderer just landed (dogfood-026 `run-f9d699d4`). The
+# next clean PURE dogfood is WP-228 (🟡) — the launch-baseline precheck (dogfood-
+# 017 F-25): before step 1, run the spec's acceptance `check`s against the clean
+# baseline; if they ALL already pass, the goal may already be done → warn/refuse
+# (the guard that would have stopped dogfood-017 from burning $1.41 against an
+# already-landed WP). The check-EXECUTION (`child_process`) and the CLI
+# warn/`--force` wiring are non-pure / hand-design (TASK-PROTOCOL §4, done by
+# hand later); THIS slice is only the PURE DECISION over already-collected check
+# results — the exact analog of the judge's pure `buildVerdict` and the planner's
+# pure `buildPlanVerdict` (a pure function turning collected facts into a
+# validated verdict object). Local result types only (the `PlanJudgeReply`
+# precedent, `planner/meta-judge-verdict.ts`) — NO contract/`types.ts` change, so
+# it needs nothing un-landed and no hand-design first.
+#
+# Zero-secrets launch:
+#   node scripts/cli-judge-proxy.mjs 8787 gemini &
+#   OPENAI_COMPAT_BASE_URL=http://127.0.0.1:8787 pnpm chikory run examples/dogfood/dogfood-027.yaml --watch
+#
+# Commit everything before launching — workspaces clone HEAD, so the run must
+# see the current `src/cli/` (no `precheck.ts` yet) and `src/index.ts`.
+# Launch ONCE and watch to terminal (F-30). Run Devbox commands sequentially
+# (F-22). F-11 is closed (dogfood-022..026): a clean one-step finish should seal
+# SUCCESS with NO empty-diff probe step — watch the step count stay at 1.
+name: dogfood-027-wp-228-baseline-precheck
+goal: >
+  Implement WP-228 Slice 1: the PURE launch-baseline-precheck DECISION — a pure
+  function that, given the exit codes of a task spec's acceptance `check`s run
+  against the clean baseline, decides whether the baseline already satisfies the
+  goal (so the run would be redundant, dogfood-017 F-25). This is the direct
+  analog of the judge's pure `buildVerdict` and the planner's pure
+  `buildPlanVerdict`: a pure transform from already-collected facts to a
+  validated verdict object. Do NOT make any LLM/router call, do NOT run or spawn
+  any check / `child_process` / shell, do NOT touch the router, agent-loop,
+  journal writer, runner, CLI command wiring (`run`/`commands.ts`/`main.ts`), or
+  any contract/type/schema in `types.ts`, do NOT add a `--force` flag or any CLI
+  flag, do NOT wire this into the launch path (that EXECUTION + warn/refuse
+  wiring is the non-pure hand-design follow-up). Define the result types LOCALLY
+  in the new module (the `PlanJudgeReply` precedent in
+  `planner/meta-judge-verdict.ts`) — add NOTHING to `types.ts`. Add no
+  dependency. Add exactly one new source file and one new test file, and edit
+  exactly one existing file (the barrel `src/index.ts`) for a single re-export —
+  three files total, no other file changed.
+
+  1. packages/sdk-ts/src/cli/precheck.ts — a NEW pure module, named exports
+     only, strict TypeScript, ESM `.js` import extensions, no `any`, no default
+     export. JSDoc each export citing WP-228 / dogfood-017 F-25. It needs no
+     imports from `../types.js` (the inputs are plain check results), and must
+     perform NO I/O, clock read, randomness, or mutation of its inputs:
+       - `export interface PrecheckCheckResult { id: string; exitCode: number }`
+         — one acceptance check's id and the exit code it produced when run
+         against the clean baseline (0 ⇒ already passing).
+       - `export interface BaselinePrecheckResult` with EXACTLY these fields, in
+         this order:
+           - `satisfied: boolean` — true iff there is at least one check AND
+             every check has `exitCode === 0` (the baseline already meets the
+             whole goal — a redundant run);
+           - `passedIds: string[]` — ids of checks with `exitCode === 0`, input
+             order preserved;
+           - `failedIds: string[]` — ids of checks with `exitCode !== 0`, input
+             order preserved (the work the run still has to do);
+           - `summary: string` — a single human-readable line for the launch
+             warning.
+       - `export function evaluateBaselinePrecheck(results: readonly
+         PrecheckCheckResult[]): BaselinePrecheckResult` — pure. Partition
+         `results` into `passedIds`/`failedIds` by `exitCode === 0`, preserving
+         input order and NOT mutating `results` or its elements (build fresh
+         arrays). Compute `satisfied = results.length > 0 &&
+         failedIds.length === 0`. Build `summary` as:
+           - empty input (`results.length === 0`) ⇒
+             `"no acceptance checks to precheck"` and `satisfied === false`;
+           - `satisfied` true ⇒
+             `` `baseline already satisfies all ${results.length} acceptance checks — the goal may already be done` ``;
+           - otherwise ⇒
+             `` `${passedIds.length}/${results.length} acceptance checks already pass; ${failedIds.length} still failing` ``.
+         Return exactly the `BaselinePrecheckResult` shape — no extra or missing
+         field.
+
+  2. packages/sdk-ts/src/index.ts — add EXACTLY ONE re-export line, immediately
+     after the `buildPlanVerdict` re-export (`index.ts:71`):
+       `export { evaluateBaselinePrecheck, type PrecheckCheckResult, type BaselinePrecheckResult } from "./cli/precheck.js";`
+     Change nothing else in the barrel.
+
+  3. packages/sdk-ts/test/cli/precheck.test.ts — a NEW Vitest file importing
+     `evaluateBaselinePrecheck` and the two types from
+     "../../src/cli/precheck.js", with a `describe("evaluateBaselinePrecheck",
+     …)` block asserting at least these cases:
+       - all checks pass — `[{ id: "AC-1", exitCode: 0 }, { id: "AC-2", exitCode:
+         0 }]` ⇒ `satisfied === true`, `passedIds` deep-equals `["AC-1",
+         "AC-2"]`, `failedIds` deep-equals `[]`, and `summary` contains
+         `"all 2 acceptance checks"`;
+       - some fail — `[{ id: "AC-1", exitCode: 0 }, { id: "AC-2", exitCode: 1 }]`
+         ⇒ `satisfied === false`, `passedIds` deep-equals `["AC-1"]`, `failedIds`
+         deep-equals `["AC-2"]`, and `summary` contains `"1/2"`;
+       - all fail — every `exitCode !== 0` ⇒ `satisfied === false`,
+         `passedIds` deep-equals `[]`;
+       - empty input — `[]` ⇒ `satisfied === false`, `passedIds`/`failedIds`
+         both `[]`, `summary` equals `"no acceptance checks to precheck"`;
+       - purity — the input array (and its element objects) is not mutated:
+         capture the array length and an element before the call and assert
+         unchanged afterward.
+     Keep fixtures type-correct against `PrecheckCheckResult`.
+
+  After this slice, the redundant-run guard's DECISION half is a pure,
+  unit-tested function ready for the non-pure launch-path wiring (run each
+  acceptance `check` against the clean baseline → `evaluateBaselinePrecheck` →
+  warn, or refuse unless `--force`), which is the hand-design follow-up
+  (TASK-PROTOCOL §4). No CLI behavior changes in this slice.
+
+  Follow AGENTS.md: strict TypeScript, ESM `.js` import extensions, named
+  exports only, no `any`, no default exports. The typecheck gate type-checks
+  test/** (WP-230), so the new test must be type-correct. Run all Devbox
+  verification commands sequentially.
+repos:
+  - url: /Users/nikitazolotarev/repos/chikory
+    writable: true
+acceptance_criteria:
+  - id: AC-1
+    description: >
+      the new precheck unit test passes
+    check: pnpm install --prefer-offline --silent && pnpm --filter @chikory/sdk exec vitest run test/cli/precheck.test.ts
+  - id: AC-2
+    description: >
+      the complete TypeScript SDK suite remains green — proving the new pure
+      module breaks no existing behavior
+    check: pnpm --filter @chikory/sdk test
+  - id: AC-3
+    description: strict typecheck (covering test/**, WP-230) and lint are clean
+    check: pnpm --filter @chikory/sdk typecheck && pnpm --filter @chikory/sdk lint
+budget_usd: 5
+max_steps: 4
+executor:
+  adapter: codex
+  family: openai
+judge:
+  family: openai-compat
+  cadence: 2
+  max_cost_share: 0.5
+routing:
+  stages:
+    plan: { provider: openai-compat, model: gpt-5.5 }
+    code: { provider: openai-compat, model: gpt-5.5 }
+    review: { provider: openai-compat, model: gpt-5.5 }
+    judge: { provider: openai-compat, model: gemini-3.1-pro-preview }

@@ -160,13 +160,20 @@ downgrades `PROCEED`→`REVISE` when a goal criterion is uncovered). **WP-219's
 entire pure surface is now landed** — both the S2 planner and the S2b plan
 meta-judge mirror the executor judge symbol-for-symbol; everything left in
 WP-219 is non-pure / hand-design (the `decompose` wrapper + plan-judge harness,
-TASK-PROTOCOL §4). Both runs sealed SUCCESS in one step, no probe (F-11-closed
-shape, now four straight); no new friction. The input-token series ran a clean
-sawtooth across the five adjacent pure slices (862k → 969k → 451k → 976k →
-467k) — cost is **noisy, not monotonic**, a variance/ceiling lever (WP-203/
-WP-207), not a runaway trend. Next: dogfood-026 takes **WP-203 S4 — the pure
-compaction-trace renderer** (`formatEntryLine` gains a `case "compaction"`),
-the WP-209 trace-renderer pattern, since WP-219's pure work is exhausted.
+TASK-PROTOCOL §4). Dogfood-026 (`docs/reports/dogfood-026.md`) then delivered **WP-203 S4 — the
+pure compaction-trace renderer** (`formatEntryLine` gains a `case "compaction"`
+rendering `tokensBefore→tokensAfter` + digest presence), the WP-209
+trace-renderer pattern; **WP-203's pure trace surface is now complete** and the
+compaction JIF entry is legible in `chikory trace --watch`. All three runs
+sealed SUCCESS in one step, no probe (F-11-closed shape, now five straight); no
+new friction. The input-token series ran a clean sawtooth across the six
+adjacent pure slices (862k → 969k → 451k → 976k → 467k → 807k), the smallest
+diff of the set drawing a mid-high 807k — cost is **noisy, not monotonic**, a
+variance/ceiling lever (WP-203/WP-207), not a runaway trend. Next: dogfood-027
+takes **WP-228 S1 — the pure launch-baseline-precheck decision**
+(`evaluateBaselinePrecheck`, the `buildVerdict`/`buildPlanVerdict` analog, dogfood-017
+F-25), since the WP-203 and WP-219 pure surfaces are both now exhausted; the
+check-execution + warn/`--force` wiring is the hand-design follow-up.
 
 Related docs: [`docs/spec/task-spec.md`](spec/task-spec.md) (schema
 reference) · [`docs/TASK-PROTOCOL.md`](TASK-PROTOCOL.md) (WP etiquette, §7 is

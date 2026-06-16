@@ -11,6 +11,7 @@ import type { JudgePayload, StepPayload } from "../runner/activities.js";
 import type {
   ArtifactRef,
   Checkpoint,
+  CompactionResult,
   JournalEntry,
   JudgeForm,
   VerdictKind,
@@ -346,6 +347,13 @@ export function formatEntryLine(entry: JournalEntry): string {
     case "injection": {
       const payload = entry.payload as { text: string };
       return `[${ts}] injection: ${payload.text}`;
+    }
+    case "compaction": {
+      const payload = entry.payload as CompactionResult;
+      return (
+        `[${ts}] compaction ${formatTokens(payload.tokensBefore)}→${formatTokens(payload.tokensAfter)} tokens` +
+        (payload.digestRef ? ` (digest ${payload.digestRef.id.slice(0, 12)})` : " (no digest)")
+      );
     }
     case "terminal": {
       const payload = entry.payload as TerminalPayload;

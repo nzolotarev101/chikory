@@ -13,7 +13,6 @@ import {
   traceJson,
 } from "../../src/cli/trace.js";
 import type {
-  ArtifactRef,
   JournalEntry,
   JudgeForm,
   JudgePayload,
@@ -22,6 +21,7 @@ import type {
   StepPayload,
   TaskSpec,
 } from "../../src/index.js";
+import type { ArtifactRef, CompactionResult } from "../../src/types.js";
 
 function ref(kind: ArtifactRef["kind"], summary: string): ArtifactRef {
   return { id: "c0ffee".padEnd(64, "0"), kind, bytes: 321, summary };
@@ -337,5 +337,34 @@ describe("formatEntryLine (--watch)", () => {
     expect(formatEntryLine(entries[3]!)).toContain("verdict ✓ PROCEED (1/1 criteria) @ step 2");
     expect(formatEntryLine(entries[4]!)).toContain("checkpoint run-x@4 (lastGood)");
     expect(formatEntryLine(entries[8]!)).toContain("terminal FAILED — judge HALT: gave up");
+  });
+
+  test("compaction renders token delta and digest pointer", () => {
+    const payload: CompactionResult = {
+      tokensBefore: 120_000,
+      tokensAfter: 40_000,
+      digestRef: {
+        id: "abc123def456ghi",
+        kind: "context_snapshot",
+        bytes: 2048,
+        summary: "folded 8 step summaries",
+      },
+    };
+    const line = formatEntryLine(entry(9, "compaction", payload));
+
+    expect(line).toContain("120k");
+    expect(line).toContain("40k");
+    expect(line).toContain("(digest abc123def456)");
+  });
+
+  test("compaction renders the absence of a digest pointer", () => {
+    const payload: CompactionResult = {
+      tokensBefore: 120_000,
+      tokensAfter: 40_000,
+    };
+    const line = formatEntryLine(entry(9, "compaction", payload));
+
+    expect(line).toContain("(no digest)");
+    expect(line).not.toContain("digest abc");
   });
 });
