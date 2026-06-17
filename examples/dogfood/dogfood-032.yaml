@@ -1,0 +1,97 @@
+# Dogfood-032: WP-231 landing-scope audit — make the dogfood verifier catch
+# F-31, where a clean run diff landed inside a commit that also contained
+# unrelated manual changes outside the judge's evidence.
+#
+# WHY THIS IS THE PRIORITY: dogfood-031 delivered WP-207's pure helper cleanly,
+# but the landed `HEAD` commit (`67eb167`) mixed the verified three-file run
+# diff with five unrelated runtime-warning edits. That means a SUCCESS run can
+# still lose audit integrity after the judge has passed. Dogfood findings outrank
+# the standing queue, so WP-231 comes before WP-207 runtime wiring.
+#
+# Zero-secrets launch:
+#   node scripts/cli-judge-proxy.mjs 8787 gemini &
+#   OPENAI_COMPAT_BASE_URL=http://127.0.0.1:8787 pnpm chikory run examples/dogfood/dogfood-032.yaml --watch
+#
+# Commit everything before launching — workspaces clone HEAD. Launch ONCE and
+# watch to terminal (F-30). Run Devbox commands sequentially (F-22). F-11 is
+# closed (dogfood-022..031): a clean one-step finish should seal SUCCESS with
+# NO empty-diff probe step.
+name: dogfood-032-wp-231-landing-scope-audit
+goal: >
+  Implement the WP-231 dogfood landing-scope audit that catches dogfood-031 F-31:
+  a run's verified workspace diff was clean, but the landed commit also contained
+  unrelated manual changes that the judge never reviewed. The goal is to make
+  that mismatch mechanically visible during `/dogfood-review`.
+
+  Add a small shell-level audit, with a self-contained fixture test, that compares
+  the run workspace diff against a landed commit and reports:
+    - exact match;
+    - extra paths in the landed commit;
+    - paths missing from the landed commit;
+    - paths whose landed content differs from the run workspace final content.
+
+  Keep this slice limited to dogfood verification tooling. Do NOT change product
+  runtime behavior, TypeScript SDK exports, schemas, TaskSpec parsing, journal
+  format, router, judge, executor prompts, Temporal workflow code, or dogfood
+  task specs/reports other than this new spec. Do NOT add dependencies. Use bash
+  and git only.
+
+  Implement exactly three tracked files:
+
+  1. scripts/dogfood-landed-scope.sh — NEW helper script. It should accept a run
+     workspace path and a landed commit/ref, use the run workspace's
+     `chikory-base..HEAD` diff as the expected run diff, and compare it to the
+     landed commit's diff against that same base commit in the host repository.
+     Print a deterministic, human-readable summary with stable labels for
+     `MATCH`, `EXTRA_IN_COMMIT`, `MISSING_IN_COMMIT`, and
+     `DIFFERS_FROM_RUN`. Exit 0 when the landed commit exactly matches the run
+     diff; exit nonzero when any extra/missing/different path exists. Paths should
+     be sorted for stable review output.
+
+  2. scripts/dogfood-verify.sh — call the new helper in a new "Landed commit
+     scope" section after the harvest byte-diff section. Reuse the existing
+     `git log --grep "$RUN_ID"` harvest lookup when present. If no run-linked
+     commit exists, print an explicit "no landed commit found" note and do not
+     fail the verifier; reviewers can still pass an explicit commit to the helper
+     manually. Keep all existing sections and acceptance-check behavior intact.
+
+  3. scripts/test-dogfood-landed-scope.sh — NEW self-contained bash test using
+     temporary git repositories. It must cover at least:
+       - an exact landed commit exits 0 and prints `MATCH`;
+       - a landed commit with an extra path exits nonzero and prints
+         `EXTRA_IN_COMMIT`;
+       - a landed commit missing a run path exits nonzero and prints
+         `MISSING_IN_COMMIT`;
+       - a landed commit with the same path but different content exits nonzero
+         and prints `DIFFERS_FROM_RUN`.
+
+  After this slice, dogfood review has a mechanical guardrail for "what ran" vs
+  "what landed", closing the F-31 blind spot without changing Chikory runtime
+  behavior.
+repos:
+  - url: /Users/nikitazolotarev/repos/chikory
+    writable: true
+acceptance_criteria:
+  - id: AC-1
+    description: the new landing-scope fixture test passes
+    check: bash scripts/test-dogfood-landed-scope.sh
+  - id: AC-2
+    description: the edited and new shell scripts parse cleanly
+    check: bash -n scripts/dogfood-verify.sh scripts/dogfood-landed-scope.sh scripts/test-dogfood-landed-scope.sh
+  - id: AC-3
+    description: the verifier integrates a landed commit scope section without changing existing acceptance-check behavior
+budget_usd: 5
+max_steps: 4
+executor:
+  adapter: codex
+  family: openai
+judge:
+  family: openai-compat
+  cadence: 2
+  max_cost_share: 0.5
+routing:
+  stages:
+    plan: { provider: openai-compat, model: gpt-5.5 }
+    code: { provider: openai-compat, model: gpt-5.5 }
+    review: { provider: openai-compat, model: gpt-5.5 }
+    judge: { provider: openai-compat, model: gemini-3.1-pro-preview }

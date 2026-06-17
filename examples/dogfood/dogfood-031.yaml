@@ -19,6 +19,11 @@
 # watch to terminal (F-30). Run Devbox commands sequentially (F-22). F-11 is
 # closed (dogfood-022..030): a clean one-step finish should seal SUCCESS with
 # NO empty-diff probe step.
+#
+# Run: run-c4aa79d3-a1dc-4444-a629-69761c7373a9
+# Outcome: SUCCESS (judge PROCEED 3/3), landed in `67eb167` with post-run
+# commit-scope contamination (F-31).
+# Report: docs/reports/dogfood-031.md
 name: dogfood-031-wp-207-context-window-pacing-decision
 goal: >
   Add the WP-207 PURE context-window pacing decision to the TypeScript SDK as a
