@@ -43,7 +43,7 @@ if temporal operator cluster health --address "$ADDRESS" >/dev/null 2>&1; then
   echo "Setup: Temporal server is already running at $ADDRESS"
 else
   echo "Setup: Starting ephemeral Temporal dev server on port $PORT..."
-  temporal server start-dev --headless --port "$PORT" --log-level error &
+  temporal server start-dev --headless --port "$PORT" --log-level error >/dev/null &
   TEMPORAL_PID=$!
   TEMPORAL_STARTED=true
 

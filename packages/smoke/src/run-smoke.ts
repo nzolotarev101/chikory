@@ -3,7 +3,7 @@
 import { fileURLToPath } from "node:url";
 
 import { Client, Connection } from "@temporalio/client";
-import { NativeConnection, Worker } from "@temporalio/worker";
+import { NativeConnection, Worker, DefaultLogger, Runtime } from "@temporalio/worker";
 
 import * as activities from "./activities.js";
 
@@ -11,6 +11,11 @@ const TASK_QUEUE = "chikory-smoke";
 const ADDRESS = process.env["TEMPORAL_ADDRESS"] ?? "localhost:7233";
 
 async function main(): Promise<void> {
+  try {
+    Runtime.install({ logger: new DefaultLogger("WARN") });
+  } catch {
+    // Already installed
+  }
   const workerConnection = await NativeConnection.connect({ address: ADDRESS });
   const worker = await Worker.create({
     connection: workerConnection,

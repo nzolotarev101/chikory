@@ -17,7 +17,7 @@ cleanup() {
 trap cleanup EXIT
 
 echo "smoke: starting ephemeral Temporal dev server on port ${PORT}…"
-temporal server start-dev --headless --port "$PORT" --log-level error &
+temporal server start-dev --headless --port "$PORT" --log-level error >/dev/null &
 SERVER_PID=$!
 
 for i in $(seq 1 60); do

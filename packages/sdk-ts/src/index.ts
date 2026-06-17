@@ -71,6 +71,12 @@ export { buildPlanJudgeMessages, PLAN_JUDGE_SYSTEM_PROMPT, PLAN_VERDICT_RESPONSE
 export { buildPlanVerdict, type PlanJudgeReply } from "./planner/meta-judge-verdict.js";
 export { evaluateBaselinePrecheck, type PrecheckCheckResult, type BaselinePrecheckResult } from "./cli/precheck.js";
 export { shouldPointerize, formatPointerReference, type MemoryPointerPolicy } from "./runner/memory-pointer.js";
+export {
+  decideContextWindowPacing,
+  type ContextWindowPacingDecision,
+  type ContextWindowPacingPolicy,
+  type ContextWindowUsage,
+} from "./runner/pacing.js";
 export { DIGEST_SYSTEM_PROMPT, buildDigestMessages } from "./runner/compaction-prompt.js";
 export {
   Journal,

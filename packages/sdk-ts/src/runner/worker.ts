@@ -7,7 +7,7 @@
 import { existsSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 
-import { NativeConnection, Worker } from "@temporalio/worker";
+import { NativeConnection, Worker, DefaultLogger, Runtime } from "@temporalio/worker";
 
 import type { RouterOptions } from "../router.js";
 import {
@@ -53,6 +53,11 @@ export function resolveWorkflowsPath(): string {
 }
 
 export async function createRunnerWorker(opts: RunnerWorkerOptions): Promise<RunnerWorker> {
+  try {
+    Runtime.install({ logger: new DefaultLogger("WARN") });
+  } catch {
+    // Already installed
+  }
   const connection = await NativeConnection.connect({
     address: opts.address ?? process.env["TEMPORAL_ADDRESS"] ?? "localhost:7233",
   });
