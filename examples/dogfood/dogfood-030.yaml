@@ -26,6 +26,10 @@
 # Devbox commands sequentially (F-22). F-11 is closed (dogfood-022..029): a clean
 # one-step finish should seal SUCCESS with NO empty-diff probe step — watch the
 # step count stay at 1.
+#
+# Run: run-1a97e2ca-3b0b-4d01-8afd-74ea2df8caef
+# Outcome: SUCCESS (judge PROCEED 3/3), harvested IDENTICAL + staged on main.
+# Report: docs/reports/dogfood-030.md
 name: dogfood-030-wp-201-python-compaction-digest-prompt-parity
 goal: >
   Port the WP-203 S2 PURE compaction digest-prompt half to the Python SDK

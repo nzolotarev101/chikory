@@ -1,0 +1,107 @@
+# Dogfood-031: WP-207 context-window pacing — add the pure runner-side
+# decision that turns projected context-window pressure into a deterministic
+# continue/compact/park recommendation. No runtime wiring in this slice.
+#
+# WHY THIS IS THE PRIORITY: dogfood-030 completed the queued WP-201 Python
+# parity slice. The recent pure surfaces for WP-202, WP-203, WP-219, and WP-228
+# are exhausted; their remaining work is non-pure hand-design wiring. The
+# adjacent one-step pure dogfoods still cost hundreds of thousands of input
+# tokens (021..030: 862k, 969k, 451k, 976k, 467k, 807k, 527k, 410k, 462k,
+# 434k). WP-207 is the next dogfoodable pure reliability lever: a window-fit
+# decision that can later feed compaction/checkpoint cadence without touching
+# the runner loop yet.
+#
+# Zero-secrets launch:
+#   node scripts/cli-judge-proxy.mjs 8787 gemini &
+#   OPENAI_COMPAT_BASE_URL=http://127.0.0.1:8787 pnpm chikory run examples/dogfood/dogfood-031.yaml --watch
+#
+# Commit everything before launching — workspaces clone HEAD. Launch ONCE and
+# watch to terminal (F-30). Run Devbox commands sequentially (F-22). F-11 is
+# closed (dogfood-022..030): a clean one-step finish should seal SUCCESS with
+# NO empty-diff probe step.
+name: dogfood-031-wp-207-context-window-pacing-decision
+goal: >
+  Add the WP-207 PURE context-window pacing decision to the TypeScript SDK as a
+  local runner helper, with no runtime wiring. This is the pure predicate/decision
+  that estimates whether the next step fits the configured context window and
+  recommends `continue`, `compact`, or `park` before any agent-loop integration
+  exists. It is the analog of `runner/budget.ts`, `runner/compaction.ts`,
+  `runner/memory-pointer.ts`, and `cli/precheck.ts`: deterministic math first,
+  side effects later.
+
+  Do NOT change `types.ts`, schemas, TaskSpec parsing, the workflow/agent loop,
+  activities, journal format, router, judge, executor prompts, or compaction
+  wiring. Do NOT add dependencies. Do NOT read/write the filesystem, touch the
+  network, call an LLM/router, read the clock, or use randomness.
+
+  Implement exactly three tracked files:
+
+  1. packages/sdk-ts/src/runner/pacing.ts — NEW pure module. Named exports only,
+     strict TypeScript, no `any`, no default export. Define local types:
+       - `ContextWindowUsage` with `currentInputTokens`, `currentOutputTokens`,
+         `estimatedNextStepTokens`, and `contextWindowTokens` numbers.
+       - `ContextWindowPacingPolicy` with `compactAtFraction` number.
+       - `ContextWindowPacingDecision` with
+         `action: "continue" | "compact" | "park"`,
+         `projectedTokens`, `remainingTokens`, and `utilization` numbers.
+     Export `decideContextWindowPacing(usage, policy): ContextWindowPacingDecision`.
+     Behavior:
+       - `projectedTokens = currentInputTokens + currentOutputTokens +
+         estimatedNextStepTokens`.
+       - `remainingTokens = contextWindowTokens - projectedTokens`.
+       - `utilization = projectedTokens / contextWindowTokens`.
+       - If `estimatedNextStepTokens > contextWindowTokens`, return `action:
+         "park"` because even an empty window cannot fit the next step.
+       - Else if `projectedTokens > contextWindowTokens * compactAtFraction`,
+         return `action: "compact"`.
+       - Else return `action: "continue"`.
+       - Exactly-at-threshold continues (`>` not `>=`), matching the
+         `shouldPointerize` threshold convention.
+     Keep the function pure and leave inputs unmutated. Add concise JSDoc
+     citing WP-207 / FA-3 / SE-2.
+
+  2. packages/sdk-ts/src/index.ts — re-export `decideContextWindowPacing` and
+     the three local types from `./runner/pacing.js`, next to the other runner
+     pure helpers. Change nothing else.
+
+  3. packages/sdk-ts/test/runner/pacing.test.ts — NEW focused Vitest file. Test
+     at least:
+       - under threshold returns `continue` and reports projected/remaining/
+         utilization correctly;
+       - exactly at `contextWindowTokens * compactAtFraction` still returns
+         `continue`;
+       - above the compact threshold returns `compact`;
+       - `estimatedNextStepTokens > contextWindowTokens` returns `park`;
+       - input objects are not mutated.
+
+  After this slice, WP-207 has its pure window-fit decision ready for the
+  non-pure runner integration that will later journal pacing decisions and tune
+  compaction/checkpoint cadence. This slice must not change runtime behavior.
+repos:
+  - url: /Users/nikitazolotarev/repos/chikory
+    writable: true
+acceptance_criteria:
+  - id: AC-1
+    description: the new pure context-window pacing test passes
+    check: cd packages/sdk-ts && pnpm vitest run test/runner/pacing.test.ts
+  - id: AC-2
+    description: neighboring runner pure-helper tests still pass
+    check: cd packages/sdk-ts && pnpm vitest run test/runner/pacing.test.ts test/runner/compaction.test.ts test/runner/memory-pointer.test.ts
+  - id: AC-3
+    description: TypeScript typecheck and lint are clean
+    check: cd packages/sdk-ts && pnpm typecheck && pnpm lint
+budget_usd: 5
+max_steps: 4
+executor:
+  adapter: codex
+  family: openai
+judge:
+  family: openai-compat
+  cadence: 2
+  max_cost_share: 0.5
+routing:
+  stages:
+    plan: { provider: openai-compat, model: gpt-5.5 }
+    code: { provider: openai-compat, model: gpt-5.5 }
+    review: { provider: openai-compat, model: gpt-5.5 }
+    judge: { provider: openai-compat, model: gemini-3.1-pro-preview }

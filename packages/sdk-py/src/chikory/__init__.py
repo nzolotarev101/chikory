@@ -1,3 +1,4 @@
+from .compaction_prompt import DIGEST_SYSTEM_PROMPT, build_digest_messages
 from .judge import Judge
 from .router import Router
 from .runner import AgentRunner
@@ -46,6 +47,7 @@ __all__ = [
     "CheckpointId",
     "CompletionRequest",
     "ContextBundle",
+    "DIGEST_SYSTEM_PROMPT",
     "JournalEntry",
     "JournalEntryKind",
     "Judge",
@@ -74,4 +76,5 @@ __all__ = [
     "TestResultArtifact",
     "TokenUsage",
     "VerdictKind",
+    "build_digest_messages",
 ]

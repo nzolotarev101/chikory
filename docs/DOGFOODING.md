@@ -197,13 +197,18 @@ new friction; input tokens 462k, low band (021–029: 862k → 969k → 451k →
 entire pure surface is now exhausted** (S4 trace + S2 digest-prompt); the digest
 wiring (router fold → `store.put` behind a Memory Pointer → journal
 `CompactionResult`) stays non-pure hand-design, blocked on the WP-202 store.
-Next: with the TS pure surface exhausted, dogfood-030 takes **WP-201 Python-SDK
+Dogfood-030 (`docs/reports/dogfood-030.md`) then delivered **WP-201 Python-SDK
 parity — the pure compaction digest-prompt half** (`DIGEST_SYSTEM_PROMPT` +
 `build_digest_messages(to_digest) -> list[Message]` in a new
 `packages/sdk-py/src/chikory/compaction_prompt.py`, the Python parity of
 dogfood-029; mirrors the TS `compaction-prompt.ts` source-of-truth, `Message`
-already ported, no contract change) — dual-SDK parity (vendor-neutral launch
-requirement) is the standing dogfoodable thread.
+already ported, no contract/runtime wiring change): a **ninth** straight
+one-step no-probe SUCCESS, no new friction; input tokens 434k, low band
+(021-030: 862k -> 969k -> 451k -> 976k -> 467k -> 807k -> 527k -> 410k ->
+462k -> 434k). Next: with the recent pure surfaces exhausted, dogfood-031 takes
+**WP-207 context-window pacing** — the pure `decideContextWindowPacing` runner
+decision (`continue` / `compact` / `park`) before any non-pure runner/journal
+wiring.
 
 Related docs: [`docs/spec/task-spec.md`](spec/task-spec.md) (schema
 reference) · [`docs/TASK-PROTOCOL.md`](TASK-PROTOCOL.md) (WP etiquette, §7 is
