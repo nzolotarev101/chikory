@@ -186,13 +186,24 @@ the `buildVerdict`/`evaluateBaselinePrecheck` analog over the frozen
 friction; input tokens 410k, a new series low (021–028: 862k → 969k → 451k →
 976k → 467k → 807k → 527k → 410k) — cost stays noisy, not monotonic. The
 non-pure interception + `store.put` + injection wiring is the hand-design
-follow-up. Next: dogfood-029 takes **WP-203 S2 — the pure compaction
-digest-prompt half** (`DIGEST_SYSTEM_PROMPT` + `buildDigestMessages(toDigest)` in
-a new `src/runner/compaction-prompt.ts`, the `planner/prompt.ts`/`judge/prompt.ts`
-analog over the frozen `CompactionPlan.toDigest` + `Message`, no contract
-change) — the remaining pure piece of the WP-203 S2 digest path (the router fold
-→ `store.put` behind a Memory Pointer → journal `CompactionResult` stays
-non-pure hand-design).
+follow-up. Dogfood-029 (`docs/reports/dogfood-029.md`) then delivered **WP-203 S2
+— the pure compaction digest-prompt half** (`DIGEST_SYSTEM_PROMPT` +
+`buildDigestMessages(toDigest): Message[]` in a new
+`src/runner/compaction-prompt.ts`, the `planner/prompt.ts`/`judge/prompt.ts`
+analog over the frozen `CompactionPlan.toDigest` + `Message`, type-only `Message`,
+no schema/contract change): an **eighth** straight one-step no-probe SUCCESS, no
+new friction; input tokens 462k, low band (021–029: 862k → 969k → 451k → 976k →
+467k → 807k → 527k → 410k → 462k) — cost stays noisy, not monotonic. **WP-203's
+entire pure surface is now exhausted** (S4 trace + S2 digest-prompt); the digest
+wiring (router fold → `store.put` behind a Memory Pointer → journal
+`CompactionResult`) stays non-pure hand-design, blocked on the WP-202 store.
+Next: with the TS pure surface exhausted, dogfood-030 takes **WP-201 Python-SDK
+parity — the pure compaction digest-prompt half** (`DIGEST_SYSTEM_PROMPT` +
+`build_digest_messages(to_digest) -> list[Message]` in a new
+`packages/sdk-py/src/chikory/compaction_prompt.py`, the Python parity of
+dogfood-029; mirrors the TS `compaction-prompt.ts` source-of-truth, `Message`
+already ported, no contract change) — dual-SDK parity (vendor-neutral launch
+requirement) is the standing dogfoodable thread.
 
 Related docs: [`docs/spec/task-spec.md`](spec/task-spec.md) (schema
 reference) · [`docs/TASK-PROTOCOL.md`](TASK-PROTOCOL.md) (WP etiquette, §7 is

@@ -1,0 +1,135 @@
+# Dogfood-030: WP-201 Python-SDK parity — port the pure compaction
+# digest-prompt half (`DIGEST_SYSTEM_PROMPT` + `build_digest_messages`) to
+# `packages/sdk-py`, the Python parity of the TS slice landed in dogfood-029.
+#
+# WHY THIS IS THE PRIORITY: the TS pure surface is now exhausted — WP-202/CM-3
+# (Memory Pointer decision + renderer, dogfood-028), WP-203 S4 (compaction-trace
+# renderer, dogfood-026) and S2 (this digest-prompt half, dogfood-029 `run-74f88081`),
+# WP-219 (planner + plan meta-judge), and WP-228 S1 (baseline precheck) all
+# landed their pure halves; every remainder is non-pure hand-design wiring
+# (router calls, `child_process`, `store.put`, journal writes; TASK-PROTOCOL §4).
+# WP-201 Python parity (🟢, plan.md §6) is the standing dogfoodable thread:
+# vendor-neutral dual-SDK is a launch requirement and the core contracts already
+# landed in `sdk-py` (dogfood-002 `run-2899005b`, commit eb5c57e). This slice is
+# the direct Python parity of dogfood-029: the same pure prompt regime
+# (frozen system prompt + pure message builder over `Message`), mirroring the
+# source-of-truth TS module `packages/sdk-ts/src/runner/compaction-prompt.ts`.
+# No contract change — `Message` is already ported (`chikory/types.py:87`).
+#
+# Zero-secrets launch:
+#   node scripts/cli-judge-proxy.mjs 8787 gemini &
+#   OPENAI_COMPAT_BASE_URL=http://127.0.0.1:8787 pnpm chikory run examples/dogfood/dogfood-030.yaml --watch
+#
+# Commit everything before launching — workspaces clone HEAD, so the run must
+# see the dogfood-029 TS module (the parity source-of-truth) and the ported
+# `chikory/types.py` `Message`. Launch ONCE and watch to terminal (F-30). Run
+# Devbox commands sequentially (F-22). F-11 is closed (dogfood-022..029): a clean
+# one-step finish should seal SUCCESS with NO empty-diff probe step — watch the
+# step count stay at 1.
+name: dogfood-030-wp-201-python-compaction-digest-prompt-parity
+goal: >
+  Port the WP-203 S2 PURE compaction digest-prompt half to the Python SDK
+  (plan.md WP-201) — the Python parity of the TS module landed in dogfood-029
+  (`packages/sdk-ts/src/runner/compaction-prompt.ts`, the source-of-truth
+  artifact): a frozen digest system prompt and a pure message builder that turns
+  the older summaries set aside for compaction into the chat messages that ask a
+  model to fold them into one digest. This is a pure transform from
+  already-collected facts to chat `Message`s, with NO I/O.
+  Do NOT make any LLM/router call, do NOT read/write the filesystem, do NOT touch
+  the network, clock, or randomness, do NOT implement new runtime behavior in
+  `runner.py`/`judge.py`/`router.py`, do NOT change `types.py` or any contract
+  model, and do NOT wire this into any compaction/checkpoint path (the router
+  call + external store + journal write is the non-pure hand-design follow-up).
+  The digest call returns PROSE, not structured JSON, so define NO response
+  schema — system prompt + builder only. You MAY import ONLY the existing
+  `Message` model from `.types` (the builder's return element; a type reuse, NOT
+  a contract change). Add exactly one new source file and one new test file, and
+  edit exactly one existing file (`__init__.py`) for the re-export — three files
+  total, no other file changed.
+
+  1. packages/sdk-py/src/chikory/compaction_prompt.py — a NEW pure module,
+     Python 3.11+, fully type-annotated, async-free (pure sync), ruff-clean, no
+     `Any`, no new dependency. Docstring each export citing WP-203 / WP-201 /
+     ADR-006 / CM-1. It must perform NO I/O, clock read, randomness, or mutation
+     of its inputs:
+       - `DIGEST_SYSTEM_PROMPT: str` — a frozen multi-line system prompt that
+         MIRRORS the TS `DIGEST_SYSTEM_PROMPT` text VERBATIM (the source-of-truth
+         is `packages/sdk-ts/src/runner/compaction-prompt.ts`): instruct the
+         model to fold the provided older step summaries into one faithful prose
+         digest that preserves decisions, file/symbol names, and open threads,
+         preserve oldest→newest causality where it matters, drop redundancy and
+         transient chatter, keep concrete implementation facts, mention
+         unresolved questions / failed attempts / follow-up work, and output
+         prose only (no JSON / no schema). Build it as a `"\n".join([...])` of
+         the same lines as the TS module.
+       - `def build_digest_messages(to_digest: Sequence[str]) -> list[Message]:`
+         — pure. Returns exactly
+         `[Message(role="system", content=DIGEST_SYSTEM_PROMPT),
+         Message(role="user", content=<rendered summaries>)]`, where the user
+         content lists the `to_digest` summaries oldest→newest as a numbered
+         block (each line `f"{i + 1}. {summary}"`, joined by "\n", under the same
+         `## Older step summaries to fold (oldest to newest)` header the TS module
+         uses). Do NOT mutate `to_digest`. Import `Message` from `.types` and
+         `Sequence` from `collections.abc`.
+
+  2. packages/sdk-py/src/chikory/__init__.py — re-export `DIGEST_SYSTEM_PROMPT`
+     and `build_digest_messages` from `.compaction_prompt`, following the
+     existing re-export + `__all__` convention in that file (add them to
+     `__all__`). Change nothing else.
+
+  3. packages/sdk-py/tests/test_compaction_prompt.py — a NEW pytest file
+     importing `DIGEST_SYSTEM_PROMPT`, `build_digest_messages`, and the `Message`
+     model from `chikory`, asserting at least:
+       - shape — `build_digest_messages(["a", "b"])` returns a 2-element list;
+         the first message is `Message(role="system", content=DIGEST_SYSTEM_PROMPT)`;
+         the second has `role == "user"`;
+       - ordering — for `["oldest", "newest"]` the user content contains
+         "oldest" at an index BEFORE "newest" (oldest→newest order preserved),
+         and numbers them ("1." before "2.");
+       - empty input — `build_digest_messages([])` still returns the system
+         message and a user message (no raise);
+       - purity — the input sequence is not mutated: capture its length and
+         elements before the call and assert they are unchanged afterward.
+     Keep fixtures type-correct (`Sequence[str]` in, `list[Message]` out).
+
+  After this slice, the compaction digest call's PROMPT half exists in BOTH SDKs
+  as a pure, unit-tested pair — the TS/Python parity WP-201 requires — ready for
+  the non-pure wiring (router call → digest string → external store behind a
+  Memory Pointer → journal a compaction result), which is the hand-design
+  follow-up (TASK-PROTOCOL §4). No runtime behavior changes in this slice.
+
+  Follow AGENTS.md: Python 3.11+, fully type-annotated, ruff-clean (lint +
+  format), pyright-clean, no new dependencies, no default mutable args. Run all
+  Devbox verification commands sequentially.
+repos:
+  - url: /Users/nikitazolotarev/repos/chikory
+    writable: true
+acceptance_criteria:
+  # Checks run by the judge inside the run workspace (fresh clone) under the
+  # worker's devbox env — call uv/ruff directly, 120s cap per check.
+  - id: AC-1
+    description: the new compaction digest-prompt parity test passes
+    check: cd packages/sdk-py && uv sync --quiet && uv run pytest tests/test_compaction_prompt.py -q
+  - id: AC-2
+    description: >
+      the complete Python SDK suite remains green — proving the new pure module
+      breaks no existing behavior
+    check: cd packages/sdk-py && uv run pytest -q
+  - id: AC-3
+    description: pyright typecheck and ruff lint + format are clean
+    check: cd packages/sdk-py && uv run pyright && ruff check . && ruff format --check .
+budget_usd: 5
+max_steps: 4
+executor:
+  adapter: codex
+  family: openai
+judge:
+  family: openai-compat
+  cadence: 2
+  max_cost_share: 0.5
+routing:
+  stages:
+    plan: { provider: openai-compat, model: gpt-5.5 }
+    code: { provider: openai-compat, model: gpt-5.5 }
+    review: { provider: openai-compat, model: gpt-5.5 }
+    judge: { provider: openai-compat, model: gemini-3.1-pro-preview }
