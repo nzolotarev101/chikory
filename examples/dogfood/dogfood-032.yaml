@@ -12,6 +12,11 @@
 #   node scripts/cli-judge-proxy.mjs 8787 gemini &
 #   OPENAI_COMPAT_BASE_URL=http://127.0.0.1:8787 pnpm chikory run examples/dogfood/dogfood-032.yaml --watch
 #
+# Run: run-4f1fbe0a-1d63-407d-a170-c51a208319dc
+# Outcome: SUCCESS (step 1 ESCALATE caught verifier abort risk; step 2 PROCEED)
+# Landed: ded282b
+# Report: docs/reports/dogfood-032.md
+#
 # Commit everything before launching — workspaces clone HEAD. Launch ONCE and
 # watch to terminal (F-30). Run Devbox commands sequentially (F-22). F-11 is
 # closed (dogfood-022..031): a clean one-step finish should seal SUCCESS with

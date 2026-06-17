@@ -1,0 +1,73 @@
+# Dogfood-033: WP-205 branch target parser — first small, dogfoodable slice of
+# `chikory branch <run-id>@<step>` before any workflow forking or git worktree
+# side effects.
+#
+# WHY THIS IS NEXT: dogfood-032 closed the F-31 landing-scope audit gap with no
+# new friction. The next queued Phase 2 item that is dogfoodable under
+# DOGFOODING.md §1 is WP-205, sliced down to a pure CLI target parser. WP-204 is
+# architect work, not a single dogfood run.
+#
+# Zero-secrets launch:
+#   node scripts/cli-judge-proxy.mjs 8787 gemini &
+#   OPENAI_COMPAT_BASE_URL=http://127.0.0.1:8787 pnpm chikory run examples/dogfood/dogfood-033.yaml --watch
+#
+# Commit everything before launching — workspaces clone HEAD. Launch ONCE and
+# watch to terminal (F-30). Run Devbox commands sequentially (F-22). F-11 is
+# closed (dogfood-022..032): a clean one-step finish should seal SUCCESS with
+# NO empty-diff probe step.
+name: dogfood-033-wp-205-branch-target-parser
+goal: >
+  Implement the first WP-205 slice for `chikory branch <run-id>@<step>`: a pure
+  CLI helper that parses and canonicalizes the branch target string, without
+  adding the `branch` command or any workflow/git forking behavior yet.
+
+  Keep this slice limited to the CLI parser and focused tests. Do NOT change
+  product runtime behavior, Temporal workflow code, DurableRunner contracts,
+  TaskSpec schemas, journal format, judge/router/executor code, dogfood scripts,
+  or docs besides this new spec. Do NOT add dependencies.
+
+  Implement exactly two tracked files:
+
+  1. packages/sdk-ts/src/cli/branch-target.ts — NEW pure helper module. Export
+     named interface `BranchTarget` with `runId: string`,
+     `step: number | "base"`, and `checkpointId: string`. Export named function
+     `parseBranchTarget(input: string): BranchTarget`. Accept targets of the
+     form `<run-id>@<positive-integer-step>` and `<run-id>@base`; canonicalize
+     the checkpoint id to `${runId}@${step}`. Reject malformed targets by
+     throwing an `Error` with an actionable message that names the expected
+     `<run-id>@<step|base>` shape.
+
+  2. packages/sdk-ts/test/cli/branch-target.test.ts — NEW focused unit tests.
+     Cover integer-step parsing, base parsing, canonical checkpoint ids, and
+     rejections for missing `@`, empty run id, empty step, zero/negative/non-
+     integer steps, and multiple `@` separators.
+
+  After this slice, WP-205 has the stable pure parser the eventual CLI command
+  can call before starting any branch/fork side effects.
+repos:
+  - url: /Users/nikitazolotarev/repos/chikory
+    writable: true
+acceptance_criteria:
+  - id: AC-1
+    description: the new branch target parser tests pass
+    check: pnpm --filter @chikory/sdk exec vitest run test/cli/branch-target.test.ts
+  - id: AC-2
+    description: SDK typecheck still passes
+    check: pnpm --filter @chikory/sdk typecheck
+  - id: AC-3
+    description: the slice is limited to the pure CLI parser and tests, with no branch command or workflow forking behavior added
+budget_usd: 5
+max_steps: 4
+executor:
+  adapter: codex
+  family: openai
+judge:
+  family: openai-compat
+  cadence: 2
+  max_cost_share: 0.5
+routing:
+  stages:
+    plan: { provider: openai-compat, model: gpt-5.5 }
+    code: { provider: openai-compat, model: gpt-5.5 }
+    review: { provider: openai-compat, model: gpt-5.5 }
+    judge: { provider: openai-compat, model: gemini-3.1-pro-preview }
