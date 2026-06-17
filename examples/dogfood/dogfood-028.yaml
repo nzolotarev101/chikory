@@ -1,0 +1,147 @@
+# Dogfood-028: WP-202 / CM-3 — the PURE Memory Pointer decision + reference
+# rendering (`shouldPointerize` + `formatPointerReference`).
+#
+# WHY THIS IS THE PRIORITY: the pure surfaces of WP-219 (planner + plan
+# meta-judge) and WP-203 (S4 trace renderer) are exhausted, and WP-228 S1 just
+# landed its pure decision (dogfood-027 `run-f97a0e63`) — every remaining piece
+# of those WPs is non-pure / hand-design (router calls, `child_process`,
+# `JSON.parse`, CLI wiring; TASK-PROTOCOL §4). WP-203's S2 digest wiring — the
+# slice the Phase-2 exit needs (compaction events in trace) — stays BLOCKED on
+# the WP-202 Memory Pointer store (`CompactionResult.digestRef`). WP-202 is the
+# designated foundational task (CM-3) and the next clean PURE slice: the local-FS
+# content-addressed `ArtifactStore` already exists (`src/artifacts/local.ts`,
+# `put`/`get`/`excerpt`), but the *Memory Pointer workflow* it was built for is
+# unbuilt — nothing yet DECIDES when a tool output is big enough to store
+# externally instead of inlining it, nor RENDERS the short reference that enters
+# context in its place (project.md "Memory Pointer Pattern: store large tool
+# outputs externally, pass short refs into context"; CONTRACTS.md §5 / CM-3:
+# `summary` is the only part that enters context by default). THIS slice is the
+# PURE half of that workflow — the analog of the judge's `buildVerdict`, the
+# planner's `buildPlanVerdict`, and dogfood-027's `evaluateBaselinePrecheck`: two
+# pure functions, local policy type, importing only the FROZEN `ArtifactRef`
+# type. The non-pure half — intercept a tool output → `shouldPointerize` → if so
+# `store.put` (I/O) and inject `formatPointerReference`, else inline — is the
+# hand-design follow-up that wires this into the executor/loop (TASK-PROTOCOL §4).
+#
+# Zero-secrets launch:
+#   node scripts/cli-judge-proxy.mjs 8787 gemini &
+#   OPENAI_COMPAT_BASE_URL=http://127.0.0.1:8787 pnpm chikory run examples/dogfood/dogfood-028.yaml --watch
+#
+# Commit everything before launching — workspaces clone HEAD, so the run must
+# see the current `src/` (no `runner/memory-pointer.ts` yet) and the
+# `evaluateBaselinePrecheck` re-export already in `src/index.ts`.
+# Launch ONCE and watch to terminal (F-30). Run Devbox commands sequentially
+# (F-22). F-11 is closed (dogfood-022..027): a clean one-step finish should seal
+# SUCCESS with NO empty-diff probe step — watch the step count stay at 1.
+name: dogfood-028-wp-202-memory-pointer-decision
+goal: >
+  Implement the WP-202 / CM-3 PURE Memory Pointer decision + reference-rendering
+  half — two pure functions that decide WHEN a tool output is large enough to
+  store externally and RENDER the short reference that enters context in its
+  place (project.md Memory Pointer Pattern; CONTRACTS.md §5). This is the direct
+  analog of the judge's pure `buildVerdict`, the planner's pure
+  `buildPlanVerdict`, and dogfood-027's pure `evaluateBaselinePrecheck`: a pure
+  transform from already-collected facts to a validated result, with NO I/O.
+  Do NOT make any LLM/router call, do NOT read/write the filesystem or any
+  store, do NOT call `ArtifactStore.put`/`get`/`excerpt` or `createHash` or any
+  `node:` builtin, do NOT touch the router, agent-loop, journal writer, runner
+  loop, executors, CLI, `src/artifacts/*`, or any contract/type/schema in
+  `types.ts`, do NOT add a dependency, and do NOT wire this into the executor or
+  loop (that interception + `store.put` + injection is the non-pure hand-design
+  follow-up). Define the policy type LOCALLY in the new module (the
+  `PlanJudgeReply` precedent in `planner/meta-judge-verdict.ts`) — add NOTHING
+  to `types.ts`. You MAY import ONLY the existing FROZEN `ArtifactRef` type from
+  `../types.js` (it is the input to the renderer; this is a type import, NOT a
+  contract change). Add exactly one new source file and one new test file, and
+  edit exactly one existing file (the barrel `src/index.ts`) for a single
+  re-export — three files total, no other file changed.
+
+  1. packages/sdk-ts/src/runner/memory-pointer.ts — a NEW pure module, named
+     exports only, strict TypeScript, ESM `.js` import extensions, no `any`, no
+     default export. JSDoc each export citing WP-202 / CM-3. It must perform NO
+     I/O, clock read, randomness, or mutation of its inputs:
+       - `export interface MemoryPointerPolicy { maxInlineBytes: number }` — the
+         byte threshold AT OR BELOW which a tool output is small enough to inline
+         verbatim in context; ABOVE it the output is stored externally and only a
+         short reference enters context (CM-3).
+       - `export function shouldPointerize(bytes: number, policy:
+         MemoryPointerPolicy): boolean` — pure. Returns `bytes >
+         policy.maxInlineBytes` (strictly greater ⇒ store externally; exactly at
+         the threshold ⇒ inline). No mutation, no I/O.
+       - `export function formatPointerReference(ref: ArtifactRef): string` —
+         pure. Builds the single-line context-facing reference from the frozen
+         `ArtifactRef` fields, using a 12-char id prefix (the
+         `id.slice(0, 12)` convention already used by the WP-203 S4 compaction
+         trace renderer in `src/cli/trace.ts`). Return EXACTLY:
+           `` `[memory ${ref.kind} ${ref.id.slice(0, 12)}] ${ref.bytes}B — ${ref.summary}` ``
+         Do NOT mutate `ref`. Import `ArtifactRef` as a TYPE from `../types.js`
+         (`import type { ArtifactRef } from "../types.js";`).
+
+  2. packages/sdk-ts/src/index.ts — add EXACTLY ONE re-export line, immediately
+     after the `evaluateBaselinePrecheck` re-export:
+       `export { shouldPointerize, formatPointerReference, type MemoryPointerPolicy } from "./runner/memory-pointer.js";`
+     Change nothing else in the barrel.
+
+  3. packages/sdk-ts/test/runner/memory-pointer.test.ts — a NEW Vitest file
+     importing `shouldPointerize`, `formatPointerReference`, and the
+     `MemoryPointerPolicy` type from "../../src/runner/memory-pointer.js", and
+     the `ArtifactRef` type from "../../src/types.js", asserting at least:
+       - shouldPointerize, above threshold — `shouldPointerize(2048, {
+         maxInlineBytes: 1024 })` ⇒ `true`;
+       - shouldPointerize, AT threshold — `shouldPointerize(1024, {
+         maxInlineBytes: 1024 })` ⇒ `false` (exactly at the threshold inlines);
+       - shouldPointerize, below threshold — `shouldPointerize(512, {
+         maxInlineBytes: 1024 })` ⇒ `false`;
+       - formatPointerReference, exact output — for an `ArtifactRef` fixture
+         `{ id: "abc123def456ghi789", kind: "tool_output", bytes: 8192, summary:
+         "test suite stdout, 412 lines" }`, the returned string EQUALS
+         `"[memory tool_output abc123def456] 8192B — test suite stdout, 412 lines"`
+         (the 12-char id prefix of the 18-char id);
+       - formatPointerReference, purity — the input `ArtifactRef` object is not
+         mutated: capture a shallow copy before the call and assert the ref deep-
+         equals it afterward.
+     Keep fixtures type-correct against `ArtifactRef` (`{ id, kind, bytes,
+     summary }`, `kind` a valid `ArtifactKind` — `"tool_output"` is one).
+
+  After this slice, the Memory Pointer workflow's DECISION + RENDERING half is a
+  pure, unit-tested pair ready for the non-pure wiring (intercept a tool output
+  → `shouldPointerize(output.bytes, policy)` → if true `store.put(...)` then
+  inject `formatPointerReference(ref)`, else inline the output), which is the
+  hand-design follow-up (TASK-PROTOCOL §4) and the first step toward unblocking
+  WP-203 S2 digest wiring. No runtime behavior changes in this slice.
+
+  Follow AGENTS.md: strict TypeScript, ESM `.js` import extensions, named
+  exports only, no `any`, no default exports. The typecheck gate type-checks
+  test/** (WP-230), so the new test must be type-correct. Run all Devbox
+  verification commands sequentially.
+repos:
+  - url: /Users/nikitazolotarev/repos/chikory
+    writable: true
+acceptance_criteria:
+  - id: AC-1
+    description: >
+      the new memory-pointer unit test passes
+    check: pnpm install --prefer-offline --silent && pnpm --filter @chikory/sdk exec vitest run test/runner/memory-pointer.test.ts
+  - id: AC-2
+    description: >
+      the complete TypeScript SDK suite remains green — proving the new pure
+      module breaks no existing behavior
+    check: pnpm --filter @chikory/sdk test
+  - id: AC-3
+    description: strict typecheck (covering test/**, WP-230) and lint are clean
+    check: pnpm --filter @chikory/sdk typecheck && pnpm --filter @chikory/sdk lint
+budget_usd: 5
+max_steps: 4
+executor:
+  adapter: codex
+  family: openai
+judge:
+  family: openai-compat
+  cadence: 2
+  max_cost_share: 0.5
+routing:
+  stages:
+    plan: { provider: openai-compat, model: gpt-5.5 }
+    code: { provider: openai-compat, model: gpt-5.5 }
+    review: { provider: openai-compat, model: gpt-5.5 }
+    judge: { provider: openai-compat, model: gemini-3.1-pro-preview }
