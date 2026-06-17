@@ -1,0 +1,143 @@
+# Dogfood-029: WP-203 S2 — the PURE compaction digest-prompt half
+# (`DIGEST_SYSTEM_PROMPT` + `buildDigestMessages`).
+#
+# WHY THIS IS THE PRIORITY: every other WP's pure surface is exhausted — WP-219
+# (planner + plan meta-judge), WP-228 S1 (baseline precheck), and WP-202 / CM-3
+# (Memory Pointer decision + renderer, dogfood-028 `run-7681a607`) all landed
+# their pure halves; what remains of each is non-pure / hand-design wiring
+# (router calls, `child_process`, `store.put`, journal writes; TASK-PROTOCOL §4).
+# WP-203's pure *trace* surface (S4 renderer) is also done (dogfood-026). The one
+# remaining clean PURE slice on the Phase-2-exit compaction path is the digest
+# call's PROMPT regime: the compaction LLM digest call (fold the older summaries
+# `planCompaction` set aside into one digest string) needs a system prompt and a
+# message builder, exactly as the planner and judge calls do. This slice is that
+# pure prompt half — the analog of `planner/prompt.ts` and `judge/prompt.ts`: a
+# frozen system prompt + a pure message builder over the FROZEN
+# `CompactionPlan.toDigest` (a `string[]`) and the FROZEN `Message` type. The
+# non-pure half — the router call that turns `toDigest` into a digest string,
+# `store.put` of that string behind a Memory Pointer (WP-202), and the
+# `CompactionResult` journal write at the checkpoint boundary — is the
+# hand-design follow-up (TASK-PROTOCOL §4) and the rest of the WP-203 S2 digest
+# wiring.
+#
+# NOTE: the digest call returns PROSE (a summary), not structured JSON — so this
+# slice defines NO response schema (unlike the planner/judge prompt halves, whose
+# calls return JSON). Two pure exports only: the system prompt and the builder.
+#
+# Zero-secrets launch:
+#   node scripts/cli-judge-proxy.mjs 8787 gemini &
+#   OPENAI_COMPAT_BASE_URL=http://127.0.0.1:8787 pnpm chikory run examples/dogfood/dogfood-029.yaml --watch
+#
+# Commit everything before launching — workspaces clone HEAD, so the run must
+# see the current `src/` (the dogfood-028 `runner/memory-pointer.ts` + barrel
+# re-export already landed; no `runner/compaction-prompt.ts` yet).
+# Launch ONCE and watch to terminal (F-30). Run Devbox commands sequentially
+# (F-22). F-11 is closed (dogfood-022..028): a clean one-step finish should seal
+# SUCCESS with NO empty-diff probe step — watch the step count stay at 1.
+name: dogfood-029-wp-203-compaction-digest-prompt
+goal: >
+  Implement the WP-203 S2 PURE compaction digest-prompt half — the prompt regime
+  for the compaction LLM digest call: a frozen system prompt and a pure message
+  builder that turns the older summaries `planCompaction` set aside
+  (`CompactionPlan.toDigest`) into the chat messages that ask a model to fold
+  them into one digest. This is the direct analog of the planner's pure
+  `planner/prompt.ts` and the judge's pure `judge/prompt.ts`: a pure transform
+  from already-collected facts to chat `Message`s, with NO I/O.
+  Do NOT make any LLM/router call, do NOT read/write the filesystem or any
+  store, do NOT call `ArtifactStore.put`/`get`/`excerpt` or `createHash` or any
+  `node:` builtin, do NOT touch the router, agent-loop, journal writer, runner
+  loop, executors, CLI, `src/artifacts/*`, `src/runner/compaction.ts`
+  (`planCompaction` is unchanged), or any contract/type/schema in `types.ts`,
+  do NOT add a dependency, and do NOT wire this into the checkpoint/compaction
+  path (the router call + `store.put` + `CompactionResult` journal write is the
+  non-pure hand-design follow-up). The digest call returns PROSE, not structured
+  JSON, so define NO response schema — system prompt + builder only. You MAY
+  import ONLY the existing FROZEN `Message` type from `../types.js` (the builder's
+  return element; a type import, NOT a contract change). Add exactly one new
+  source file and one new test file, and edit exactly one existing file (the
+  barrel `src/index.ts`) for a single re-export — three files total, no other
+  file changed.
+
+  1. packages/sdk-ts/src/runner/compaction-prompt.ts — a NEW pure module, named
+     exports only, strict TypeScript, ESM `.js` import extensions, no `any`, no
+     default export. JSDoc each export citing WP-203 / ADR-006 / CM-1. It must
+     perform NO I/O, clock read, randomness, or mutation of its inputs:
+       - `export const DIGEST_SYSTEM_PROMPT: string` — a frozen multi-line system
+         prompt (the `PLANNER_SYSTEM_PROMPT` precedent: a `[...].join("\n")`)
+         instructing the model to fold the provided older step summaries into a
+         single faithful digest that preserves decisions, file/symbol names, and
+         open threads, and to drop redundancy — so a resumed run rehydrates the
+         gist, not rotted verbatim context (CM-1/CM-2). Prose output, no JSON.
+       - `export function buildDigestMessages(toDigest: readonly string[]):
+         Message[]` — pure. Returns exactly
+         `[{ role: "system", content: DIGEST_SYSTEM_PROMPT }, { role: "user",
+         content: <rendered summaries> }]`, where the user content lists the
+         `toDigest` summaries oldest→newest as a numbered block (e.g. each line
+         `"${i + 1}. ${summary}"`, joined by "\n", under a short header). Do NOT
+         mutate `toDigest`. Import `Message` as a TYPE from `../types.js`
+         (`import type { Message } from "../types.js";`).
+
+  2. packages/sdk-ts/src/index.ts — add EXACTLY ONE re-export line, immediately
+     after the `shouldPointerize, formatPointerReference` re-export:
+       `export { DIGEST_SYSTEM_PROMPT, buildDigestMessages } from "./runner/compaction-prompt.js";`
+     Change nothing else in the barrel.
+
+  3. packages/sdk-ts/test/runner/compaction-prompt.test.ts — a NEW Vitest file
+     importing `DIGEST_SYSTEM_PROMPT` and `buildDigestMessages` from
+     "../../src/runner/compaction-prompt.js" and the `Message` type from
+     "../../src/types.js", asserting at least:
+       - shape — `buildDigestMessages(["a", "b"])` returns a 2-element array; the
+         first message is `{ role: "system", content: DIGEST_SYSTEM_PROMPT }`;
+         the second has `role === "user"`;
+       - ordering — for `["oldest", "newest"]` the user content contains
+         "oldest" at an index BEFORE "newest" (oldest→newest order preserved),
+         and numbers them (`"1."` before `"2."`);
+       - empty input — `buildDigestMessages([])` still returns the system message
+         and a user message (no throw);
+       - purity — the input array is not mutated: capture its length and
+         elements before the call and assert they are unchanged afterward.
+     Keep fixtures type-correct (`readonly string[]` in, `Message[]` out).
+
+  After this slice, the compaction digest call's PROMPT half is a pure,
+  unit-tested pair ready for the non-pure wiring (at the checkpoint boundary:
+  `planCompaction` → `buildDigestMessages(plan.toDigest)` → router call → digest
+  string → `store.put` behind a Memory Pointer (WP-202) → journal a
+  `CompactionResult` with `digestRef`), which is the hand-design follow-up
+  (TASK-PROTOCOL §4) and the rest of the WP-203 S2 digest wiring. No runtime
+  behavior changes in this slice.
+
+  Follow AGENTS.md: strict TypeScript, ESM `.js` import extensions, named
+  exports only, no `any`, no default exports. The typecheck gate type-checks
+  test/** (WP-230), so the new test must be type-correct. Run all Devbox
+  verification commands sequentially.
+repos:
+  - url: /Users/nikitazolotarev/repos/chikory
+    writable: true
+acceptance_criteria:
+  - id: AC-1
+    description: >
+      the new compaction digest-prompt unit test passes
+    check: pnpm install --prefer-offline --silent && pnpm --filter @chikory/sdk exec vitest run test/runner/compaction-prompt.test.ts
+  - id: AC-2
+    description: >
+      the complete TypeScript SDK suite remains green — proving the new pure
+      module breaks no existing behavior
+    check: pnpm --filter @chikory/sdk test
+  - id: AC-3
+    description: strict typecheck (covering test/**, WP-230) and lint are clean
+    check: pnpm --filter @chikory/sdk typecheck && pnpm --filter @chikory/sdk lint
+budget_usd: 5
+max_steps: 4
+executor:
+  adapter: codex
+  family: openai
+judge:
+  family: openai-compat
+  cadence: 2
+  max_cost_share: 0.5
+routing:
+  stages:
+    plan: { provider: openai-compat, model: gpt-5.5 }
+    code: { provider: openai-compat, model: gpt-5.5 }
+    review: { provider: openai-compat, model: gpt-5.5 }
+    judge: { provider: openai-compat, model: gemini-3.1-pro-preview }

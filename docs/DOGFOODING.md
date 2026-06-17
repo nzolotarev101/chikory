@@ -178,12 +178,21 @@ straight one-step no-probe SUCCESS, no new friction; input tokens 527k (low
 band), the largest diff of the recent set drawing one of the smallest input
 counts — cost tracks neither diff size nor run order. The non-pure
 check-execution + warn/`--force` launch wiring is the hand-design follow-up.
-Next: dogfood-028 takes **WP-202 / CM-3 — the pure Memory Pointer decision +
-reference rendering** (`shouldPointerize` + `formatPointerReference` in a new
-`src/runner/memory-pointer.ts`): the local-FS content-addressed `ArtifactStore`
-exists but the Memory Pointer *workflow* it was built for is unbuilt — local
-policy type, imports only the frozen `ArtifactRef`, no contract change — the
-first step toward unblocking WP-203 S2 digest wiring.
+Dogfood-028 (`docs/reports/dogfood-028.md`) then delivered **WP-202 / CM-3 — the
+pure Memory Pointer decision + reference renderer** (`shouldPointerize(bytes,
+policy)` + `formatPointerReference(ref)` in a new `src/runner/memory-pointer.ts`,
+the `buildVerdict`/`evaluateBaselinePrecheck` analog over the frozen
+`ArtifactRef`): a **seventh** straight one-step no-probe SUCCESS, no new
+friction; input tokens 410k, a new series low (021–028: 862k → 969k → 451k →
+976k → 467k → 807k → 527k → 410k) — cost stays noisy, not monotonic. The
+non-pure interception + `store.put` + injection wiring is the hand-design
+follow-up. Next: dogfood-029 takes **WP-203 S2 — the pure compaction
+digest-prompt half** (`DIGEST_SYSTEM_PROMPT` + `buildDigestMessages(toDigest)` in
+a new `src/runner/compaction-prompt.ts`, the `planner/prompt.ts`/`judge/prompt.ts`
+analog over the frozen `CompactionPlan.toDigest` + `Message`, no contract
+change) — the remaining pure piece of the WP-203 S2 digest path (the router fold
+→ `store.put` behind a Memory Pointer → journal `CompactionResult` stays
+non-pure hand-design).
 
 Related docs: [`docs/spec/task-spec.md`](spec/task-spec.md) (schema
 reference) · [`docs/TASK-PROTOCOL.md`](TASK-PROTOCOL.md) (WP etiquette, §7 is
