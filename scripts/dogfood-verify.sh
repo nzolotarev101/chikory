@@ -75,6 +75,7 @@ echo "- spec:    \`${SPEC_NAME:-?}\` (from journal task_json — checks below ar
 echo "- budget:  \$${SPEC_BUDGET:-?}"
 echo "- HEAD:    \`$(git log --oneline -1)\`"
 HARVEST_COMMIT="$(git log --grep "$RUN_ID" --oneline | head -n 1)"
+HARVEST_REF="${HARVEST_COMMIT%% *}"
 echo "- harvest: ${HARVEST_COMMIT:-'(none — uncommitted on working tree)'}"
 echo
 
@@ -164,8 +165,21 @@ done
 echo '```'
 echo
 
-# ── 6. cost-share ────────────────────────────────────────────────────────────
-echo "## 6. Cost-share"
+# ── 6. landed commit scope (run workspace diff vs landed commit) ─────────────
+echo "## 6. Landed commit scope"
+echo '```'
+if [ -n "$HARVEST_COMMIT" ]; then
+  echo "landed commit lookup: $HARVEST_COMMIT"
+  bash scripts/dogfood-landed-scope.sh "$WORKSPACE" "$HARVEST_REF" || true
+else
+  echo "no landed commit found for run id $RUN_ID"
+  echo "manual check: bash scripts/dogfood-landed-scope.sh \"$WORKSPACE\" <commit-or-ref>"
+fi
+echo '```'
+echo
+
+# ── 7. cost-share ────────────────────────────────────────────────────────────
+echo "## 7. Cost-share"
 echo '```'
 echo "total (header)    : \$${TOTAL_COST:-?} / budget \$${BUDGET:-?}"
 echo "total (exact sum) : \$${PRECISE_TOTAL}  (steps + judge passes — cost-share denominator)"
