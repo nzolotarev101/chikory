@@ -1,0 +1,75 @@
+# Dogfood-034: WP-205 branch-name helper — second small, dogfoodable slice of
+# `chikory branch <run-id>@<step>` before any workflow forking or git worktree
+# side effects.
+#
+# WHY THIS IS NEXT: dogfood-033 added the pure branch-target parser. The next
+# side-effect-free piece is the default branch name the eventual CLI command can
+# use after parsing a target. WP-204 remains architect work, and the branch
+# command/worktree fork is non-pure.
+#
+# Zero-secrets launch:
+#   node scripts/cli-judge-proxy.mjs 8787 gemini &
+#   OPENAI_COMPAT_BASE_URL=http://127.0.0.1:8787 pnpm chikory run examples/dogfood/dogfood-034.yaml --watch
+#
+# Commit everything before launching — workspaces clone HEAD. Launch ONCE and
+# watch to terminal (F-30). Run Devbox commands sequentially (F-22). F-11 is
+# closed (dogfood-022..033): a clean one-step finish should seal SUCCESS with
+# NO empty-diff probe step.
+name: dogfood-034-wp-205-branch-name-helper
+goal: >
+  Implement the second WP-205 pure helper slice for `chikory branch
+  <run-id>@<step>`: derive the default git branch name for a parsed
+  `BranchTarget`, without adding the `branch` CLI command or any workflow/git
+  forking behavior yet.
+
+  Keep this slice limited to the existing branch-target helper module and its
+  focused tests. Do NOT change product runtime behavior, Temporal workflow code,
+  DurableRunner contracts, TaskSpec schemas, journal format, judge/router/
+  executor code, dogfood scripts, docs, or dependencies.
+
+  Modify exactly two tracked files:
+
+  1. packages/sdk-ts/src/cli/branch-target.ts — add named export
+     `branchNameForTarget(target: BranchTarget): string`. It should return the
+     default branch name the later command can use for a parsed target:
+     `branch-<sanitized-run-id>-step-<n>` for numeric steps and
+     `branch-<sanitized-run-id>-base` for `base`. Keep it pure and deterministic.
+     Sanitize the run id by replacing one or more characters outside
+     `[A-Za-z0-9._-]` with `-` and trimming leading/trailing `-`; still reject a
+     target whose run id cannot produce a non-empty sanitized branch segment.
+
+  2. packages/sdk-ts/test/cli/branch-target.test.ts — extend the existing focused
+     tests. Cover numeric-step branch names, base branch names, canonical numeric
+     names after parsing a leading-zero step, sanitization of a run id containing
+     path/space punctuation, and rejection when sanitization would leave an empty
+     run-id segment.
+
+  After this slice, WP-205 has both a parsed branch target and the pure default
+  branch name the eventual side-effectful command can use.
+repos:
+  - url: /Users/nikitazolotarev/repos/chikory
+    writable: true
+acceptance_criteria:
+  - id: AC-1
+    description: the branch-target parser/name helper tests pass
+    check: pnpm --filter @chikory/sdk exec vitest run test/cli/branch-target.test.ts
+  - id: AC-2
+    description: SDK typecheck still passes
+    check: pnpm --filter @chikory/sdk typecheck
+  - id: AC-3
+    description: the slice is limited to pure branch target/name helper code and tests, with no branch command or workflow forking behavior added
+budget_usd: 5
+max_steps: 4
+executor:
+  adapter: codex
+  family: openai
+judge:
+  family: openai-compat
+  cadence: 2
+  max_cost_share: 0.5
+routing:
+  stages:
+    plan: { provider: openai-compat, model: gpt-5.5 }
+    code: { provider: openai-compat, model: gpt-5.5 }
+    review: { provider: openai-compat, model: gpt-5.5 }
+    judge: { provider: openai-compat, model: gemini-3.1-pro-preview }

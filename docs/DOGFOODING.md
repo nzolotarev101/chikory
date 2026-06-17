@@ -217,6 +217,10 @@ section backed by `scripts/dogfood-landed-scope.sh`, which mechanically compares
 "what ran" to "what landed" and reports `MATCH`, `EXTRA_IN_COMMIT`,
 `MISSING_IN_COMMIT`, or `DIFFERS_FROM_RUN`. Its judge made a useful step-1
 ESCALATE on verifier abort behavior, step 2 fixed it, and F-31 is closed.
+Dogfood-033 (`docs/reports/dogfood-033.md`) then opened **WP-205 branching**
+with the pure `parseBranchTarget(input)` helper for `chikory branch
+<run-id>@<step>` targets: another one-step SUCCESS, no probe, no new friction,
+and the branch/worktree side effects still deferred.
 
 Related docs: [`docs/spec/task-spec.md`](spec/task-spec.md) (schema
 reference) · [`docs/TASK-PROTOCOL.md`](TASK-PROTOCOL.md) (WP etiquette, §7 is
