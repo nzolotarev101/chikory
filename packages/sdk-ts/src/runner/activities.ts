@@ -26,6 +26,8 @@ import type {
   ArtifactStore,
   Checkpoint,
   CheckpointId,
+  CompactionPolicy,
+  CompactionResult,
   ContextBundle,
   ExecutorAdapter,
   JudgeForm,
@@ -37,10 +39,23 @@ import type {
   TaskSpec,
   TokenUsage,
 } from "../types.js";
+import { buildDigestMessages } from "./compaction-prompt.js";
+import { planCompaction } from "./compaction.js";
 import { artifactsDir, journalPath, workspaceDir } from "./paths.js";
 
 /** observability.md: one span per checkpoint write (CONTRACTS.md §8). */
 export const SPAN_CHECKPOINT = "chikory.checkpoint";
+
+/**
+ * Compaction default (WP-203 / ADR-006 / CM-1): once the recall tier exceeds
+ * `triggerAfterSteps` summaries, fold everything older than the newest
+ * `keepLastN` into one digest at the checkpoint boundary. Hardcoded default —
+ * the `DEFAULT_STEP_LIMITS` precedent; a TaskSpec knob can come later.
+ */
+export const DEFAULT_COMPACTION_POLICY: CompactionPolicy = {
+  triggerAfterSteps: 8,
+  keepLastN: 5,
+};
 
 const execFileAsync = promisify(execFile);
 
@@ -526,6 +541,94 @@ export function createRunnerActivities(deps: RunnerActivityDeps) {
           span.end();
 
           return checkpoint;
+        } finally {
+          journal.close();
+        }
+      });
+    },
+
+    /**
+     * Compaction digest (WP-203 S2 / ADR-006 / CM-1). At the checkpoint
+     * boundary, fold the older recall-tier summaries into one LLM-generated
+     * prose digest so a resumed run rehydrates the gist, not rotted verbatim
+     * context. The pure `planCompaction` decides WHAT folds; this activity makes
+     * the digest router call, stores the digest behind a Memory Pointer (WP-202,
+     * reusing the `context_snapshot` kind), and journals a `compaction`
+     * `CompactionResult`. Idempotent by stepIndex. Returns undefined — with no
+     * LLM call and no journal row — when there is nothing NEW to fold, so a
+     * best-effort digest never re-summarizes the same prefix every step.
+     */
+    async compactContext(input: {
+      runId: string;
+      stepIndex: number;
+      summaries: string[];
+    }): Promise<CompactionResult | undefined> {
+      return withHeartbeat(async () => {
+        const journal = openJournal(deps, input.runId);
+        try {
+          const existing = journal.findByKey("compaction", "stepIndex", input.stepIndex);
+          if (existing) return existing.payload as CompactionResult;
+
+          const plan = planCompaction(input.summaries, DEFAULT_COMPACTION_POLICY);
+          if (plan.toDigest.length === 0) return undefined;
+
+          // Cost guard: only re-digest when the folded set actually grew since
+          // the last compaction — never re-summarize the same prefix each step.
+          // `foldedCount` rides on the journaled payload (the `stepIndex`-on-
+          // checkpoint-payload precedent) purely as this dedupe signal.
+          const prior = journal.entries("compaction");
+          const lastFolded =
+            prior.length > 0
+              ? ((prior[prior.length - 1]!.payload as { foldedCount?: number }).foldedCount ?? 0)
+              : 0;
+          if (plan.toDigest.length <= lastFolded) return undefined;
+
+          const spec = requireSpec(journal, input.runId);
+          // Single-stage routing off the spec's review model (the judgeStep
+          // precedent): only that provider's adapter is constructed.
+          const reviewModel: ModelChoice = {
+            provider: spec.routing.stages.review.provider,
+            model: spec.routing.stages.review.model,
+          };
+          const routing: RoutingPolicy = {
+            stages: { plan: reviewModel, code: reviewModel, review: reviewModel, judge: reviewModel },
+          };
+          const router = createRouter(routing, deps.routerOptions);
+          const result = await router.complete({
+            stage: "review",
+            messages: buildDigestMessages(plan.toDigest),
+            temperature: 0,
+          });
+          if (result.status !== "SUCCESS") {
+            // Best-effort: a failed digest never fails the run (CM-1 is an
+            // optimization, not a correctness gate).
+            console.warn(
+              `[chikory] compaction digest call failed at step ${input.stepIndex}: ${result.reason}`,
+            );
+            return undefined;
+          }
+
+          const store = createLocalArtifactStore(artifactsDir(deps.dataDir, input.runId));
+          const digestRef = await store.put(result.content, {
+            kind: "context_snapshot",
+            summary: `digest of ${plan.toDigest.length} older step summaries`,
+          });
+          const compaction: CompactionResult = {
+            tokensBefore: result.tokens.input,
+            tokensAfter: result.tokens.output,
+            digestRef,
+          };
+          journal.appendOnce(
+            { field: "stepIndex", value: input.stepIndex },
+            {
+              kind: "compaction",
+              payload: { ...compaction, foldedCount: plan.toDigest.length },
+              costDeltaUsd: result.costUsd,
+              tokens: result.tokens,
+              artifactRefs: [digestRef],
+            },
+          );
+          return compaction;
         } finally {
           journal.close();
         }

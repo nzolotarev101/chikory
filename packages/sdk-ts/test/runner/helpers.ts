@@ -57,6 +57,8 @@ export interface ScriptedConfig {
   tokensPerStep?: number;
   /** 1-based attempt numbers that set `claimsComplete` (WP-221 / F-11 proof). */
   claimsCompleteSteps?: number[];
+  /** Pad each attempt's transcript to this many bytes (WP-202 pointerize gate). */
+  transcriptBytes?: number;
 }
 
 const SCRIPTED_DEFAULTS: ScriptedConfig = {
@@ -120,10 +122,15 @@ export function createScriptedAdapter(ctx: { store: ArtifactStore }): ExecutorAd
           kind: "diff",
           summary: `scripted attempt ${attempt} diff`,
         }),
-        ctx.store.put(`scripted transcript, attempt ${attempt}`, {
-          kind: "transcript",
-          summary: `scripted attempt ${attempt} transcript`,
-        }),
+        ctx.store.put(
+          cfg.transcriptBytes !== undefined
+            ? "T".repeat(cfg.transcriptBytes)
+            : `scripted transcript, attempt ${attempt}`,
+          {
+            kind: "transcript",
+            summary: `scripted attempt ${attempt} transcript`,
+          },
+        ),
       ]);
 
       const base = {
@@ -194,21 +201,40 @@ export interface FakeJudgeWire {
   url: string;
   /** Completed judge LLM calls so far. */
   hits: number;
+  /** Completed compaction-digest LLM calls so far (WP-203 S2 wiring). */
+  digestHits: number;
   close(): Promise<void>;
 }
 
-/** Serves `forms[hit-1]` per call; the last form repeats once exhausted. */
-export async function startFakeJudgeWire(forms: JudgeForm[]): Promise<FakeJudgeWire> {
+/** The compaction digest prompt's user-block header (`buildDigestMessages`). */
+const DIGEST_MARKER = "Older step summaries to fold";
+
+/**
+ * Serves `forms[hit-1]` per judge call (last form repeats once exhausted). A
+ * request whose body carries the digest prompt (WP-203 S2 `buildDigestMessages`)
+ * is answered with `digestContent` prose instead — so the REAL compactContext
+ * activity (router call, store.put, journal write) runs end-to-end while the
+ * judge path is unaffected. Route the spec's `review` stage at this same wire.
+ */
+export async function startFakeJudgeWire(
+  forms: JudgeForm[],
+  opts: { digestContent?: string } = {},
+): Promise<FakeJudgeWire> {
+  const digestContent = opts.digestContent ?? "compacted digest of older steps";
   const server: Server = createServer((req, res) => {
     let body = "";
     req.on("data", (chunk: Buffer) => (body += chunk.toString()));
     req.on("end", () => {
-      const form = forms[Math.min(wire.hits, forms.length - 1)];
-      wire.hits++;
+      const isDigest = body.includes(DIGEST_MARKER);
+      const content = isDigest
+        ? digestContent
+        : JSON.stringify(forms[Math.min(wire.hits, forms.length - 1)]);
+      if (isDigest) wire.digestHits++;
+      else wire.hits++;
       res.setHeader("content-type", "application/json");
       res.end(
         JSON.stringify({
-          choices: [{ message: { content: JSON.stringify(form) } }],
+          choices: [{ message: { content } }],
           usage: { prompt_tokens: 100, completion_tokens: 50 },
         }),
       );
@@ -219,6 +245,7 @@ export async function startFakeJudgeWire(forms: JudgeForm[]): Promise<FakeJudgeW
   const wire: FakeJudgeWire = {
     url: `http://127.0.0.1:${port}`,
     hits: 0,
+    digestHits: 0,
     close: () =>
       new Promise<void>((resolve) => {
         server.closeAllConnections();

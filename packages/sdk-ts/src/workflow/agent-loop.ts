@@ -32,6 +32,7 @@ import {
   tokenBudgetBreached,
 } from "../runner/budget.js";
 import type {
+  ArtifactRef,
   Checkpoint,
   ContextBundle,
   JudgeVerdict,
@@ -40,12 +41,22 @@ import type {
   StepLimits,
   TaskSpec,
 } from "../types.js";
+import { shouldPointerize, type MemoryPointerPolicy } from "../runner/memory-pointer.js";
 import { isCompletionMilestone } from "./judge-trigger.js";
 
 /** Step bound when the TaskSpec doesn't say otherwise (executors.md). */
 export const DEFAULT_STEP_LIMITS: StepLimits = { maxSeconds: 600 };
 /** Recall tier: how many step summaries ride along in context (CM-4). */
 export const RECENT_STEPS_WINDOW = 5;
+/**
+ * Memory Pointer threshold (WP-202 / CM-3): a step output larger than this is
+ * surfaced into the next step's context as a short pointer (the executor asks
+ * for excerpts) rather than left to the one-line summary alone. Hardcoded
+ * default — the `DEFAULT_STEP_LIMITS` precedent; a TaskSpec knob can come later.
+ */
+export const DEFAULT_MEMORY_POLICY: MemoryPointerPolicy = { maxInlineBytes: 16384 };
+/** How many recent artifact pointers ride along in context (bound growth). */
+export const CARRIED_REFS_WINDOW = 6;
 
 const activities = proxyActivities<RunnerActivities>({
   // Must exceed StepLimits.maxSeconds — the adapter owns the step bound.
@@ -99,6 +110,10 @@ export async function agentLoop(spec: TaskSpec): Promise<RunStatus> {
   const recentSummaries: string[] = [];
   const stepCosts: number[] = [];
   const stepTokens: number[] = [];
+  // Memory Pointer carrier (WP-202/203, CM-3): pointers to large prior-step
+  // outputs and the latest compaction digest, surfaced into each step's
+  // context so externalized material is recoverable without rotting context.
+  const carriedRefs: ArtifactRef[] = [];
   const pendingInjections: string[] = [];
   const pendingTopUps: number[] = [];
   const pendingApprovals: ApproveDecision[] = [];
@@ -229,7 +244,7 @@ export async function agentLoop(spec: TaskSpec): Promise<RunStatus> {
       recentSteps: recentSummaries.slice(-RECENT_STEPS_WINDOW),
       judgeFeedback,
       injections,
-      memoryRefs: [],
+      memoryRefs: carriedRefs.slice(-CARRIED_REFS_WINDOW),
     };
 
     const record = await activities.executeStep({
@@ -247,6 +262,14 @@ export async function agentLoop(spec: TaskSpec): Promise<RunStatus> {
     recentSummaries.push(record.summary);
     stepIndex += 1;
     consecutiveFailures = record.status === "FAILED" ? consecutiveFailures + 1 : 0;
+
+    // Memory Pointer interception (WP-202 / CM-3): the step's transcript and
+    // diff are already stored as artifacts; surface a pointer for any that is
+    // large enough that the executor should fetch excerpts rather than rely on
+    // the one-line summary. Small outputs stay summary-only (inline).
+    for (const ref of [record.transcriptRef, record.diffRef]) {
+      if (shouldPointerize(ref.bytes, DEFAULT_MEMORY_POLICY)) carriedRefs.push(ref);
+    }
 
     // Judge on cadence or a completion milestone (JD-2); each pass is one
     // activity (WP-121/131).
@@ -283,6 +306,23 @@ export async function agentLoop(spec: TaskSpec): Promise<RunStatus> {
       lastGood: verdict?.kind === "PROCEED",
     });
     checkpoints.push(checkpoint);
+
+    // Compaction at the checkpoint boundary (WP-203 S2 / CM-1): fold older
+    // recall-tier summaries into one digest and carry its pointer forward, so
+    // history beyond the verbatim window is recoverable without rotting
+    // context. Best-effort and cost-guarded inside the activity.
+    const compaction = await activities.compactContext({
+      runId,
+      stepIndex: stepIndex - 1,
+      summaries: recentSummaries,
+    });
+    if (compaction?.digestRef) {
+      // Carry only the latest digest pointer (drop a superseded one); the
+      // transcript/diff pointers from shouldPointerize keep their own kinds.
+      const kept = carriedRefs.filter((r) => r.kind !== "context_snapshot");
+      carriedRefs.length = 0;
+      carriedRefs.push(...kept, compaction.digestRef);
+    }
 
     // Verdict gating (WP-132). PROCEED advances the diff base and the
     // rollback anchor; HALT seals a resumable FAILED; ESCALATE parks the run

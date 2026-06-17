@@ -4,6 +4,7 @@
  * Large material never appears inline: memory refs render as pointer
  * summaries only (CM-3).
  */
+import { formatPointerReference } from "../runner/memory-pointer.js";
 import type { StepInput } from "../types.js";
 import { COMPLETION_MARKER } from "./step.js";
 
@@ -39,7 +40,7 @@ export function renderStepPrompt(input: StepInput): string {
   if (context.memoryRefs.length > 0) {
     parts.push(
       `# Stored artifacts (pointers — ask for excerpts via your runner, do not guess contents)\n${context.memoryRefs
-        .map((r) => `- ${r.kind} ${r.id.slice(0, 12)} (${r.bytes} bytes): ${r.summary}`)
+        .map((r) => `- ${formatPointerReference(r)}`)
         .join("\n")}`,
     );
   }
