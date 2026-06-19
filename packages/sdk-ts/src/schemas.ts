@@ -445,6 +445,23 @@ export const PlanVerdictSchema = z
   })
   .strict();
 
+/**
+ * The raw planner LLM reply (WP-219 S2 ADR-005 D1). The `plan`-stage call
+ * returns `{ nodes }`; each node is validated structurally here, then
+ * `buildPlan` enforces the graph semantics (non-empty, unique ids, no dangling
+ * `dependsOn`) and injects the non-deterministic `id`/`createdAt`.
+ */
+export const PlannerReplySchema = z.object({ nodes: z.array(PlanNodeSchema) }).strict();
+
+/**
+ * The raw plan meta-judge LLM reply (WP-219 S2b ADR-005 D2). The model fills
+ * `{ kind, rationale }`; `buildPlanVerdict` then applies the deterministic
+ * coverage safety floor (`planCoverageGaps`) before the verdict is final.
+ */
+export const PlanJudgeReplySchema = z
+  .object({ kind: PlanVerdictKindSchema, rationale: z.string().min(1) })
+  .strict();
+
 export const ChainStatusSchema = z.enum([
   "PLANNING",
   "AWAITING_PLAN_APPROVAL",

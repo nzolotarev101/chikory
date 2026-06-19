@@ -69,6 +69,19 @@ export { buildPlannerMessages, PLANNER_SYSTEM_PROMPT, PLAN_RESPONSE_SCHEMA } fro
 export { buildPlan, type BuildPlanOptions } from "./planner/assemble.js";
 export { buildPlanJudgeMessages, PLAN_JUDGE_SYSTEM_PROMPT, PLAN_VERDICT_RESPONSE_SCHEMA } from "./planner/meta-judge-prompt.js";
 export { buildPlanVerdict, type PlanJudgeReply } from "./planner/meta-judge-verdict.js";
+export {
+  runPlannerPass,
+  DecomposingPlanner,
+  PlannerError,
+  type RunPlannerPassInput,
+  type PlannerPassResult,
+  type DecomposingPlannerOptions,
+} from "./planner/harness.js";
+export {
+  runPlanJudgePass,
+  type RunPlanJudgePassInput,
+  type PlanJudgePassResult,
+} from "./planner/meta-judge-harness.js";
 export { evaluateBaselinePrecheck, type PrecheckCheckResult, type BaselinePrecheckResult } from "./cli/precheck.js";
 export { shouldPointerize, formatPointerReference, type MemoryPointerPolicy } from "./runner/memory-pointer.js";
 export {
