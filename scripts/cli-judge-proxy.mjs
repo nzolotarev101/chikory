@@ -11,6 +11,10 @@
  * Not a mock: a real frontier model fills the judge form. P2 candidate:
  * first-class CLI-backed judge adapters so this shim becomes unnecessary.
  *
+ * Token usage: `codex`/`gemini` report provider-metered counts; `agy` print
+ * mode surfaces none, so its usage is an explicit estimate flagged
+ * `estimated: true` (see `estimateTokens`) and never priced as metered.
+ *
  * Usage: node scripts/cli-judge-proxy.mjs [port] [backend]
  *        (defaults: 8787 codex)
  *
@@ -35,6 +39,21 @@ function renderPrompt(messages) {
   return messages
     .map((m) => (m.role === "system" ? `<instructions>\n${m.content}\n</instructions>` : m.content))
     .join("\n\n");
+}
+
+// Heuristic token estimate for backends whose CLI does not report usage
+// (agy print mode). No local BPE tokenizer ships for the Gemini family, so
+// this is an explicit estimate, not a metered count: it blends a word-rate
+// (~0.75 words/token) and a char-rate (~4 chars/token), which tracks
+// GPT/Gemini BPE within ~10-15% on mixed prose+code. Always flagged
+// `estimated` upstream so token budgets/observability never mistake it for a
+// provider-reported figure.
+function estimateTokens(s) {
+  if (!s) return 0;
+  const words = (s.match(/\S+/g) ?? []).length;
+  const byWords = words / 0.75;
+  const byChars = s.length / 4;
+  return Math.max(1, Math.round((byWords + byChars) / 2));
 }
 
 function run(bin, args, opts, stdin) {
@@ -107,7 +126,10 @@ async function agyComplete(prompt, model) {
   const stdout = await run("agy", args, { cwd: sandbox });
   const text = stdout.trim();
   if (!text) throw new Error(`agy produced no response: ${stdout.slice(-500)}`);
-  return { text, tokens: { input: 0, output: 0 } };
+  return {
+    text,
+    tokens: { input: estimateTokens(prompt), output: estimateTokens(text), estimated: true },
+  };
 }
 
 const backends = { codex: codexComplete, gemini: geminiComplete, agy: agyComplete };
@@ -131,7 +153,7 @@ const server = createServer((req, res) => {
       const { text, tokens } = await complete(renderPrompt(messages), model);
       console.log(
         `[cli-judge:${backend}] ${model} · ${Date.now() - startedAt}ms · ` +
-          `${tokens.input}/${tokens.output} tokens`,
+          `${tokens.input}/${tokens.output} tokens${tokens.estimated ? " (estimated)" : ""}`,
       );
       res.setHeader("content-type", "application/json");
       res.end(
@@ -142,7 +164,11 @@ const server = createServer((req, res) => {
           choices: [
             { index: 0, message: { role: "assistant", content: text }, finish_reason: "stop" },
           ],
-          usage: { prompt_tokens: tokens.input, completion_tokens: tokens.output },
+          usage: {
+            prompt_tokens: tokens.input,
+            completion_tokens: tokens.output,
+            ...(tokens.estimated ? { estimated: true } : {}),
+          },
         }),
       );
     } catch (err) {
