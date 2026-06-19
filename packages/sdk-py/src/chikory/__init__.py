@@ -1,3 +1,4 @@
+from .branch_target import BranchTarget, branch_name_for_target, parse_branch_target
 from .compaction_prompt import DIGEST_SYSTEM_PROMPT, build_digest_messages
 from .judge import Judge
 from .router import Router
@@ -43,6 +44,7 @@ __all__ = [
     "AgentRunner",
     "ArtifactKind",
     "ArtifactRef",
+    "BranchTarget",
     "Checkpoint",
     "CheckpointId",
     "CompletionRequest",
@@ -76,5 +78,7 @@ __all__ = [
     "TestResultArtifact",
     "TokenUsage",
     "VerdictKind",
+    "branch_name_for_target",
     "build_digest_messages",
+    "parse_branch_target",
 ]
