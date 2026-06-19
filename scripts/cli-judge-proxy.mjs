@@ -5,10 +5,11 @@
  * CLI — the judge gets a structurally different model family with zero API
  * keys on the machine, through the router's existing openai-compat seam.
  *
- * Backends: `codex` (ChatGPT OAuth, GPT-5 family) and `gemini` (Google
- * OAuth, Gemini family). Not a mock: a real frontier model fills the judge
- * form. P2 candidate: first-class CLI-backed judge adapters so this shim
- * becomes unnecessary.
+ * Backends: `codex` (ChatGPT OAuth, GPT-5 family), `agy` (Antigravity OAuth,
+ * Gemini family — replaces the deprecated standalone `gemini` CLI, whose free
+ * OAuth Google retired in favor of Antigravity), and `gemini` (legacy, dead).
+ * Not a mock: a real frontier model fills the judge form. P2 candidate:
+ * first-class CLI-backed judge adapters so this shim becomes unnecessary.
  *
  * Usage: node scripts/cli-judge-proxy.mjs [port] [backend]
  *        (defaults: 8787 codex)
@@ -98,7 +99,18 @@ async function geminiComplete(prompt, model) {
   };
 }
 
-const backends = { codex: codexComplete, gemini: geminiComplete };
+async function agyComplete(prompt, model) {
+  // Antigravity CLI: pure-text print mode. No structured token stats, so
+  // usage is reported as zero (the judge is keyless/free anyway).
+  const args = ["--print", prompt];
+  if (model !== "default") args.push("--model", model);
+  const stdout = await run("agy", args, { cwd: sandbox });
+  const text = stdout.trim();
+  if (!text) throw new Error(`agy produced no response: ${stdout.slice(-500)}`);
+  return { text, tokens: { input: 0, output: 0 } };
+}
+
+const backends = { codex: codexComplete, gemini: geminiComplete, agy: agyComplete };
 const complete = backends[backend];
 if (!complete) {
   console.error(`unknown backend '${backend}' (have: ${Object.keys(backends).join(", ")})`);

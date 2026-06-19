@@ -65,13 +65,15 @@ PROXY_PORT=8787
 PROXY_STARTED=false
 PROXY_PID=""
 
-# Determine backend from the spec file (gemini or codex)
+# Determine backend from the spec file. Gemini-family judge models now route
+# through the Antigravity CLI (`agy`) — Google retired the standalone `gemini`
+# CLI's free OAuth.
 if grep -q "model:.*gemini" "$SPEC_FILE"; then
-  BACKEND="gemini"
+  BACKEND="agy"
 elif grep -q "model:.*gpt" "$SPEC_FILE" || grep -q "model:.*codex" "$SPEC_FILE"; then
   BACKEND="codex"
 else
-  BACKEND="gemini" # default fallback
+  BACKEND="agy" # default fallback
 fi
 
 # Use node to check if the port is already in use
