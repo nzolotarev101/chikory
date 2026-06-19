@@ -1,0 +1,143 @@
+# Dogfood-035: WP-201 Python-SDK parity — port the two PURE branch-target
+# helpers (`parse_branch_target` + `branch_name_for_target`) to
+# `packages/sdk-py`, the Python parity of the TS WP-205 pure surface landed in
+# dogfood-033 (`parseBranchTarget`) and dogfood-034 (`branchNameForTarget`).
+#
+# WHY THIS IS THE PRIORITY: WP-205's TS pure surface is now COMPLETE — the
+# branch-target parser (dogfood-033 `run-41dd7c98`) and the default branch-name
+# helper (dogfood-034 `run-1634171d`) both landed. Everything left in WP-205 —
+# the `chikory branch` CLI command, the journal fork, the git worktree creation
+# — is non-pure hand-design (TASK-PROTOCOL §4), not a dogfood run. With the TS
+# pure backlog thin, the standing dogfoodable thread is WP-201 Python parity
+# (🟢, plan.md §6): vendor-neutral dual-SDK is a launch requirement and the core
+# contracts already landed in `sdk-py` (dogfood-002 `run-2899005b`). This slice
+# is the direct Python parity of dogfood-033/034 — the same two pure string
+# transforms — mirroring the source-of-truth TS module
+# `packages/sdk-ts/src/cli/branch-target.ts`. The dogfood-030 parity pattern
+# exactly. No contract change.
+#
+# Zero-secrets launch:
+#   node scripts/cli-judge-proxy.mjs 8787 gemini &
+#   OPENAI_COMPAT_BASE_URL=http://127.0.0.1:8787 pnpm chikory run examples/dogfood/dogfood-035.yaml --watch
+#
+# Commit everything before launching — workspaces clone HEAD, so the run must
+# see the dogfood-033/034 TS module (the parity source-of-truth) and the ported
+# `chikory/types.py`. Launch ONCE and watch to terminal (F-30). Run Devbox
+# commands sequentially (F-22). F-11 is closed (dogfood-022..034): a clean
+# one-step finish should seal SUCCESS with NO empty-diff probe step — watch the
+# step count stay at 1.
+name: dogfood-035-wp-201-python-branch-target-parity
+goal: >
+  Port the WP-205 PURE branch-target helpers to the Python SDK (plan.md WP-201)
+  — the Python parity of the TS module landed in dogfood-033/034
+  (`packages/sdk-ts/src/cli/branch-target.ts`, the source-of-truth artifact): a
+  small branch-target value, a parser that canonicalizes a
+  `<run-id>@<step|base>` string, and a helper that derives the default git
+  branch name for a parsed target. These are pure string transforms with NO I/O.
+
+  Do NOT make any LLM/router call, do NOT read/write the filesystem, do NOT touch
+  the network, clock, or randomness, do NOT implement new runtime behavior in
+  `runner.py`/`judge.py`/`router.py`, do NOT change `types.py` or any contract
+  model, and do NOT add the `chikory branch` command or any workflow/git
+  worktree forking behavior (that is the non-pure hand-design follow-up). Add
+  exactly one new source file and one new test file, and edit exactly one
+  existing file (`__init__.py`) for the re-export — three files total, no other
+  file changed.
+
+  1. packages/sdk-py/src/chikory/branch_target.py — a NEW pure module,
+     Python 3.11+, fully type-annotated, async-free (pure sync), ruff-clean, no
+     `Any`, no new dependency. Docstring each export citing WP-205 / WP-201.
+     It must perform NO I/O, clock read, randomness, or input mutation, and must
+     MIRROR the TS module `packages/sdk-ts/src/cli/branch-target.ts` behavior
+     exactly:
+       - A `BranchTarget` value with fields `run_id: str`,
+         `step: int | Literal["base"]`, and `checkpoint_id: str` (the Python
+         parity of the TS `BranchTarget` interface; a `@dataclass(frozen=True)`
+         is fine — keep it local to this module, do NOT add it to `types.py`).
+       - `def parse_branch_target(value: str) -> BranchTarget:` — the parity of
+         the TS `parseBranchTarget`. Split on `@`; require EXACTLY one `@`
+         separator (reject zero or multiple); reject an empty run id; reject an
+         empty step; accept the literal `base` (→ `step="base"`,
+         `checkpoint_id=f"{run_id}@base"`); accept a positive-integer step
+         (digits only, value > 0, must be a safe integer) and canonicalize it
+         through the parsed int so a leading-zero step normalizes
+         (`"run-205@007"` → `step=7`, `checkpoint_id="run-205@7"`); reject zero,
+         negative, decimal, or non-numeric steps. Raise `ValueError` (the SDK's
+         validation-error convention, the parity of the TS thrown `Error`) with
+         a message of the same shape as the TS `branchTargetError`
+         (`f"Invalid branch target '{value}': {detail}. Expected <run-id>@<step|base>."`).
+       - `def branch_name_for_target(target: BranchTarget) -> str:` — the parity
+         of the TS `branchNameForTarget`. Sanitize the run id by replacing each
+         run of characters OUTSIDE `[A-Za-z0-9._-]` with a single `-` (regex
+         `[^A-Za-z0-9._-]+`), then trimming leading/trailing `-`; if the
+         sanitized run id is empty, raise `ValueError` (same message shape,
+         detail `"run id must contain branch-safe characters"`, keyed on
+         `target.checkpoint_id`). Return `f"branch-{sanitized}-step-{step}"` for
+         a numeric step and `f"branch-{sanitized}-base"` for `base`. Pure and
+         deterministic.
+
+  2. packages/sdk-py/src/chikory/__init__.py — re-export `BranchTarget`,
+     `parse_branch_target`, and `branch_name_for_target` from `.branch_target`,
+     following the existing re-export + `__all__` convention in that file (add
+     them to `__all__`). Change nothing else.
+
+  3. packages/sdk-py/tests/test_branch_target.py — a NEW pytest file importing
+     `BranchTarget`, `parse_branch_target`, and `branch_name_for_target` from
+     `chikory`, asserting at least:
+       - parse — `parse_branch_target("run-205@7")` yields `run_id="run-205"`,
+         `step=7`, `checkpoint_id="run-205@7"`; `"run-205@base"` yields
+         `step="base"`, `checkpoint_id="run-205@base"`;
+       - canonical numeric — `parse_branch_target("run-205@007").step == 7` and
+         its `checkpoint_id == "run-205@7"`;
+       - parse rejections — missing `@`, multiple `@`, empty run id, empty step,
+         zero, negative, decimal, and non-numeric steps each raise `ValueError`
+         whose message contains `<run-id>@<step|base>`;
+       - name — `branch_name_for_target(parse_branch_target("run-205@7"))` is
+         `"branch-run-205-step-7"`; `"run-205@base"` →
+         `"branch-run-205-base"`; leading-zero `"run-205@007"` →
+         `"branch-run-205-step-7"`;
+       - name sanitization — a run id with path/space/punctuation
+         (`"team/run 205!*@3"`) → `"branch-team-run-205-step-3"`;
+       - name rejection — a run id that sanitizes to empty (`"!/@1"`) raises
+         `ValueError`.
+
+  After this slice, the WP-205 pure branch-target surface exists in BOTH SDKs as
+  pure, unit-tested helpers — the TS/Python parity WP-201 requires — ready for
+  the non-pure `chikory branch` command + worktree fork, which is the hand-design
+  follow-up (TASK-PROTOCOL §4). No runtime behavior changes in this slice.
+
+  Follow AGENTS.md: Python 3.11+, fully type-annotated, ruff-clean (lint +
+  format), pyright-clean, no new dependencies, no default mutable args. Run all
+  Devbox verification commands sequentially.
+repos:
+  - url: /Users/nikitazolotarev/repos/chikory
+    writable: true
+acceptance_criteria:
+  # Checks run by the judge inside the run workspace (fresh clone) under the
+  # worker's devbox env — call uv/ruff directly, 120s cap per check.
+  - id: AC-1
+    description: the new branch-target parity test passes
+    check: cd packages/sdk-py && uv sync --quiet && uv run pytest tests/test_branch_target.py -q
+  - id: AC-2
+    description: >
+      the complete Python SDK suite remains green — proving the new pure module
+      breaks no existing behavior
+    check: cd packages/sdk-py && uv run pytest -q
+  - id: AC-3
+    description: pyright typecheck and ruff lint + format are clean
+    check: cd packages/sdk-py && uv run pyright && ruff check . && ruff format --check .
+budget_usd: 5
+max_steps: 4
+executor:
+  adapter: codex
+  family: openai
+judge:
+  family: openai-compat
+  cadence: 2
+  max_cost_share: 0.5
+routing:
+  stages:
+    plan: { provider: openai-compat, model: gpt-5.5 }
+    code: { provider: openai-compat, model: gpt-5.5 }
+    review: { provider: openai-compat, model: gpt-5.5 }
+    judge: { provider: openai-compat, model: gemini-3.1-pro-preview }

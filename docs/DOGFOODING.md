@@ -220,7 +220,15 @@ ESCALATE on verifier abort behavior, step 2 fixed it, and F-31 is closed.
 Dogfood-033 (`docs/reports/dogfood-033.md`) then opened **WP-205 branching**
 with the pure `parseBranchTarget(input)` helper for `chikory branch
 <run-id>@<step>` targets: another one-step SUCCESS, no probe, no new friction,
-and the branch/worktree side effects still deferred.
+and the branch/worktree side effects still deferred. Dogfood-034
+(`docs/reports/dogfood-034.md`) completed **WP-205's pure surface** with
+`branchNameForTarget(target)`, deriving the default git branch name
+(`branch-<sanitized-run-id>-step-<n>` / `branch-<…>-base`) for a parsed target:
+an **eleventh** straight one-step no-probe SUCCESS, no new friction, input tokens
+594k (mid-band). The actual `chikory branch` command + journal/worktree fork is
+non-pure hand-design; with the TS pure backlog thin the dogfoodable thread
+shifts back to dual-SDK parity (dogfood-035 ports the two branch-target helpers
+to the Python SDK).
 
 Related docs: [`docs/spec/task-spec.md`](spec/task-spec.md) (schema
 reference) · [`docs/TASK-PROTOCOL.md`](TASK-PROTOCOL.md) (WP etiquette, §7 is

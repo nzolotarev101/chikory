@@ -52,3 +52,19 @@ export function parseBranchTarget(input: string): BranchTarget {
     checkpointId: `${runId}@${step}`,
   };
 }
+
+export function branchNameForTarget(target: BranchTarget): string {
+  const sanitizedRunId = target.runId
+    .replace(/[^A-Za-z0-9._-]+/g, "-")
+    .replace(/^-+|-+$/g, "");
+
+  if (sanitizedRunId === "") {
+    throw branchTargetError(
+      target.checkpointId,
+      "run id must contain branch-safe characters",
+    );
+  }
+
+  const stepSegment = target.step === "base" ? "base" : `step-${target.step}`;
+  return `branch-${sanitizedRunId}-${stepSegment}`;
+}
