@@ -1,0 +1,137 @@
+# Dogfood-036: WP-201 Python-SDK parity — port the two PURE Memory Pointer
+# helpers (`should_pointerize` + `format_pointer_reference`) to
+# `packages/sdk-py`, the Python parity of the TS WP-202 / CM-3 pure surface that
+# landed in dogfood-028 (`packages/sdk-ts/src/runner/memory-pointer.ts`).
+#
+# WHY THIS IS THE PRIORITY: the WP-205 branch-target pure surface now exists in
+# BOTH SDKs (TS dogfood-033/034, Python dogfood-035 `run-b0bc3865`). With the TS
+# pure backlog thin, the standing dogfoodable thread is WP-201 Python parity
+# (🟢, plan.md §6): vendor-neutral dual-SDK is a launch requirement and the core
+# contracts already landed in `sdk-py` (dogfood-002 `run-2899005b`). The Memory
+# Pointer Pattern is a project.md headline thesis concept (store large tool
+# outputs externally, pass a short ref into context) and CONTRACTS.md CM-3 — the
+# direct Python parity of dogfood-028's two pure string/predicate transforms,
+# mirroring the source-of-truth TS module
+# `packages/sdk-ts/src/runner/memory-pointer.ts`. The dogfood-030/035 parity
+# pattern exactly. No contract change — `ArtifactRef` is already ported at
+# `packages/sdk-py/src/chikory/types.py:197`.
+#
+# Zero-secrets launch:
+#   node scripts/cli-judge-proxy.mjs 8787 gemini &
+#   OPENAI_COMPAT_BASE_URL=http://127.0.0.1:8787 pnpm chikory run examples/dogfood/dogfood-036.yaml --watch
+#
+# Commit everything before launching — workspaces clone HEAD, so the run must
+# see the dogfood-028 TS module (the parity source-of-truth) and the ported
+# `chikory/types.py` `ArtifactRef`. Launch ONCE and watch to terminal (F-30).
+# Run Devbox commands sequentially (F-22). F-11 is closed (dogfood-022..035): a
+# clean one-step finish should seal SUCCESS with NO empty-diff probe step —
+# watch the step count stay at 1.
+name: dogfood-036-wp-201-python-memory-pointer-parity
+goal: >
+  Port the WP-202 / CM-3 PURE Memory Pointer helpers to the Python SDK (plan.md
+  WP-201) — the Python parity of the TS module landed in dogfood-028
+  (`packages/sdk-ts/src/runner/memory-pointer.ts`, the source-of-truth
+  artifact): a local policy value, a pure predicate that decides whether a tool
+  output is large enough to store externally, and a pure renderer for the short
+  context-facing pointer reference that replaces externally stored artifact
+  content. These are a pure threshold predicate and a pure string transform with
+  NO I/O.
+
+  Do NOT make any LLM/router call, do NOT read/write the filesystem, do NOT touch
+  the network, clock, or randomness, do NOT implement new runtime behavior in
+  `runner.py`/`judge.py`/`router.py`, do NOT change `types.py` or any contract
+  model, and do NOT add the non-pure interception/`store.put`/injection wiring
+  (that is the hand-design follow-up). Add exactly one new source file and one
+  new test file, and edit exactly one existing file (`__init__.py`) for the
+  re-export — three files total, no other file changed.
+
+  1. packages/sdk-py/src/chikory/memory_pointer.py — a NEW pure module,
+     Python 3.11+, fully type-annotated, async-free (pure sync), ruff-clean, no
+     `Any`, no new dependency. Docstring each export citing WP-202 / CM-3 /
+     WP-201. It must perform NO I/O, clock read, randomness, or input mutation,
+     and must MIRROR the TS module
+     `packages/sdk-ts/src/runner/memory-pointer.ts` behavior exactly:
+       - A `MemoryPointerPolicy` value with a single field
+         `max_inline_bytes: int` (the Python parity of the TS
+         `MemoryPointerPolicy` interface; a `@dataclass(frozen=True)` is fine —
+         keep it local to this module, do NOT add it to `types.py`).
+       - `def should_pointerize(num_bytes: int, policy: MemoryPointerPolicy) -> bool:`
+         — the parity of the TS `shouldPointerize`. Return
+         `num_bytes > policy.max_inline_bytes`: outputs ABOVE the inline byte
+         threshold are pointerized; outputs AT or BELOW the threshold remain
+         inline (exactly-at-threshold inlines — strict `>`, not `>=`).
+       - `def format_pointer_reference(ref: ArtifactRef) -> str:` — the parity of
+         the TS `formatPointerReference`. Import `ArtifactRef` from `.types`
+         (reuse the already-ported contract model — do NOT redefine it). Return
+         the single-line reference
+         `f"[memory {ref.kind} {ref.id[:12]}] {ref.bytes}B — {ref.summary}"`,
+         byte-identical to the TS template literal
+         (`[memory ${ref.kind} ${ref.id.slice(0, 12)}] ${ref.bytes}B — ${ref.summary}`)
+         — note the 12-char id truncation and the em dash (`—`, U+2014) between
+         the byte count and the summary. Pure and deterministic, no I/O.
+
+  2. packages/sdk-py/src/chikory/__init__.py — re-export `MemoryPointerPolicy`,
+     `should_pointerize`, and `format_pointer_reference` from `.memory_pointer`,
+     following the existing re-export + `__all__` convention in that file (add
+     them to `__all__`). Change nothing else.
+
+  3. packages/sdk-py/tests/test_memory_pointer.py — a NEW pytest file importing
+     `MemoryPointerPolicy`, `should_pointerize`, and `format_pointer_reference`
+     from `chikory`, and `ArtifactRef` from `chikory`, asserting at least:
+       - predicate — with `policy = MemoryPointerPolicy(max_inline_bytes=1024)`,
+         `should_pointerize(1025, policy) is True`,
+         `should_pointerize(2048, policy) is True`;
+       - predicate boundary — `should_pointerize(1024, policy) is False`
+         (exactly-at-threshold inlines) and `should_pointerize(0, policy) is False`;
+       - reference render — for
+         `ArtifactRef(id="abcdef0123456789", kind="tool_output", bytes=2048, summary="grep output")`,
+         `format_pointer_reference(ref) == "[memory tool_output abcdef012345] 2048B — grep output"`
+         (id truncated to its first 12 chars, em dash before the summary);
+       - reference render with a short id — an `ArtifactRef` whose `id` is
+         already ≤ 12 chars (e.g. `"abc123"`) renders the full id unchanged
+         (`id[:12]` is a no-op for short ids);
+       - reference render with a different kind — an `ArtifactRef` with
+         `kind="diff"` renders `[memory diff …]`, proving the kind is
+         interpolated verbatim.
+
+  After this slice, the WP-202 / CM-3 Memory Pointer pure surface exists in BOTH
+  SDKs as pure, unit-tested helpers — the TS/Python parity WP-201 requires —
+  ready for the non-pure interception + `store.put` + injection wiring, which is
+  the hand-design follow-up (TASK-PROTOCOL §4). No runtime behavior changes in
+  this slice.
+
+  Follow AGENTS.md: Python 3.11+, fully type-annotated, ruff-clean (lint +
+  format), pyright-clean, no new dependencies, no default mutable args. Run all
+  Devbox verification commands sequentially.
+repos:
+  - url: /Users/nikitazolotarev/repos/chikory
+    writable: true
+acceptance_criteria:
+  # Checks run by the judge inside the run workspace (fresh clone) under the
+  # worker's devbox env — call uv/ruff directly, 120s cap per check.
+  - id: AC-1
+    description: the new Memory Pointer parity test passes
+    check: cd packages/sdk-py && uv sync --quiet && uv run pytest tests/test_memory_pointer.py -q
+  - id: AC-2
+    description: >
+      the complete Python SDK suite remains green — proving the new pure module
+      breaks no existing behavior
+    check: cd packages/sdk-py && uv run pytest -q
+  - id: AC-3
+    description: pyright typecheck and ruff lint + format are clean
+    check: cd packages/sdk-py && uv run pyright && ruff check . && ruff format --check .
+budget_usd: 5
+max_steps: 4
+executor:
+  adapter: codex
+  family: openai
+judge:
+  family: openai-compat
+  cadence: 2
+  max_cost_share: 0.5
+routing:
+  stages:
+    plan: { provider: openai-compat, model: gpt-5.5 }
+    code: { provider: openai-compat, model: gpt-5.5 }
+    review: { provider: openai-compat, model: gpt-5.5 }
+    judge: { provider: openai-compat, model: gemini-3.1-pro-preview }

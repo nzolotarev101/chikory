@@ -8,24 +8,38 @@
 
 ---
 
-**Current dogfood update (2026-06-18)**: dogfood-034
-(`run-1634171d-e4eb-4efb-9851-a826183a7fb6`) delivered the second WP-205 pure
-slice: `branchNameForTarget(target)` in
-`packages/sdk-ts/src/cli/branch-target.ts`, with focused tests in
-`packages/sdk-ts/test/cli/branch-target.test.ts`. It derives the default git
-branch name for a parsed `BranchTarget` — `branch-<sanitized-run-id>-step-<n>`
-for numeric steps, `branch-<sanitized-run-id>-base` for `base` — sanitizing the
-run id (collapse non-`[A-Za-z0-9._-]` runs to `-`, trim edges; reject an empty
-segment via the module's `branchTargetError`), before any branch command,
-workflow fork, or git worktree side effect exists. Clean SUCCESS in one step,
-15 branch-target tests (+5) + SDK typecheck green, harvested byte-`IDENTICAL`
-and staged uncommitted on `main`; no new friction. Input tokens 594k, mid-band.
-**WP-205's pure surface is now complete** (parse + name); the actual
-`chikory branch` command + journal/worktree fork is non-pure hand-design
-(TASK-PROTOCOL §4). Next dogfood is dogfood-035 / WP-201: port the two
-branch-target pure helpers to the Python SDK
-(`packages/sdk-py/src/chikory/branch_target.py`), the parity pattern of
-dogfood-030.
+**Current dogfood update (2026-06-19)**: dogfood-035
+(`run-b0bc3865-e70e-4d26-be7e-13a757808d3b`) delivered the WP-201 Python parity
+of the WP-205 pure branch-target surface: `parse_branch_target` +
+`branch_name_for_target` in a new `packages/sdk-py/src/chikory/branch_target.py`
+(local frozen `BranchTarget` dataclass, NOT in `types.py`), re-exported from
+`__init__.py`, with 16 pytest cases in
+`packages/sdk-py/tests/test_branch_target.py`. It mirrors the source-of-truth TS
+module `packages/sdk-ts/src/cli/branch-target.ts` behavior-for-behavior — same
+`@`-split / exactly-one-separator parse, same leading-zero canonicalization
+through `int()`, the `MAX_SAFE_INTEGER` guard as the parity of TS
+`Number.isSafeInteger`, the same `[^A-Za-z0-9._-]+`→`-` run-id sanitization, and
+byte-identical `ValueError` message shapes (the parity of the TS thrown
+`Error`). No CLI command, workflow fork, or git worktree side effect; no
+contract change. Clean SUCCESS in ONE step, no probe (F-11 stays closed,
+`s0 j@0`, **twelfth** straight run); harvested byte-`IDENTICAL` and **committed
+`88e496c` on `main`** — `dogfood-landed-scope.sh` reports **MATCH** (the F-31
+audit clean: the committed `HEAD` carries only the verified run diff). 16 / 67
+py tests green, pyright + ruff clean; no new friction; F-30 did not recur.
+**Cost-trend update:** input tokens came in at **318k** — a **new series low**,
+just under dogfood-033's 327k; the one-step pure-slice series now reads 021 862k
+→ 022 969k → 023 451k → 024 976k → 025 467k → 026 807k → 027 527k → 028 410k →
+029 462k → 030 434k → 031 375k → 033 327k → 034 594k → 035 318k (032 excluded —
+2-step), tracking neither diff size nor run order; per-step input cost is
+*noisy, not monotonic*; WP-203/WP-207 stay queued as a variance/ceiling lever.
+**The WP-205 pure branch-target surface now exists in BOTH SDKs.** Next dogfood
+is dogfood-036 / WP-201: port the Memory Pointer pure surface
+(`shouldPointerize` + `formatPointerReference`, the TS `runner/memory-pointer.ts`
+from dogfood-028) to `packages/sdk-py/src/chikory/memory_pointer.py`, the same
+dual-SDK parity pattern, no contract change (`ArtifactRef` already in
+`chikory/types.py`). The keystone after the parity thread is the hand-design S3
+durable chain executor, whose dogfoodable pure slice (the chain-state reducer)
+needs the ADR-005 D3/D4 transition rules written by hand first.
 
 ---
 
@@ -189,10 +203,21 @@ verified in one step with no new friction. The remaining WP-205 work — the act
 is non-pure hand-design (TASK-PROTOCOL §4), the architect's next move, not a
 dogfood run. With both the TS WP-205 pure surface and the broader TS pure backlog
 thin, the dogfoodable thread shifts back to dual-SDK parity (the dogfood-030
-pattern): next is WP-201 via `examples/dogfood/dogfood-035.yaml` — port the two
-branch-target pure helpers (`parse_branch_target` + `branch_name_for_target`) to
-a new `packages/sdk-py/src/chikory/branch_target.py`, mirroring the TS
-`src/cli/branch-target.ts` source-of-truth, no contract change.
+pattern). **WP-201 branch-target parity done** (dogfood-035 `run-b0bc3865`,
+harvested IDENTICAL, committed `88e496c` on `main`, landing-scope MATCH —
+`docs/reports/dogfood-035.md`): `parse_branch_target` + `branch_name_for_target`
+in a new `packages/sdk-py/src/chikory/branch_target.py` (local frozen
+`BranchTarget` dataclass, not in `types.py`), mirroring the TS
+`src/cli/branch-target.ts` source-of-truth behavior-for-behavior, re-exported
+from `__init__.py`, 16 pytest cases, no contract change; clean one-step SUCCESS,
+no probe (F-11 closed, twelfth straight), input tokens 318k (series low), no new
+friction. **Next is WP-201 Memory Pointer parity** via
+`examples/dogfood/dogfood-036.yaml` — port `should_pointerize` +
+`format_pointer_reference` (the TS `runner/memory-pointer.ts` from dogfood-028,
+the project.md Memory Pointer Pattern / CONTRACTS.md CM-3) to a new
+`packages/sdk-py/src/chikory/memory_pointer.py`, mirroring the TS
+source-of-truth, no contract change (`ArtifactRef` already ported at
+`chikory/types.py:197`).
 
 | WP | Title | Tag | Notes |
 |---|---|---|---|
@@ -211,7 +236,7 @@ a new `packages/sdk-py/src/chikory/branch_target.py`, mirroring the TS
 | WP-229 | Surface the ESCALATE reason in `--watch` | 🟢 | ✅ **Done** (dogfood-018 `run-59115f35`, harvested + staged on `main` pending commit — `docs/reports/dogfood-018.md`): `followRun`'s `drainJournal()` verdict branch (`commands.ts:120`) now emits `judge escalated: <reason>` before the AWAITING_APPROVAL line when an ESCALATE verdict carries a non-empty `escalateReason`; guarded so a reason-less ESCALATE prints no extra line. Deterministic regression `cli.test.ts` asserts presence, exactly-once, and ordering before AWAITING_APPROVAL; the no-reason final-drain test is untouched. Diff byte-for-byte to spec, 3/3 AC + 4/4 rubric PROCEED. **F-27 closed.** Live ESCALATE-under-watch path proven only by unit test so far (the run itself PROCEEDed). |
 | WP-230 | Typecheck gate covers `test/**` | 🟡 | ✅ **Done** (dogfood-020 `run-3575ba23`, harvested + staged on `main` pending commit — `docs/reports/dogfood-020.md`): new `tsconfig.test.json` (`extends` base, `rootDir: "."`, `noEmit`, includes `src/**/*` + `test/**/*`); `package.json` `typecheck` now runs `tsc --noEmit && tsc --noEmit -p tsconfig.test.json`; dogfood-019's `judge-trigger.test.ts` fixtures corrected to valid `ArtifactRef`. **Verified the gate trips** on a bad fixture (`TS2353`), not just AC-green. **F-29 closed** — the typecheck floor the judge sits on now covers the whole tree. |
 | WP-231 | Dogfood landing-scope audit | 🟢 | ✅ **Done** (dogfood-032 `run-4f1fbe0a`, landed `ded282b` — `docs/reports/dogfood-032.md`): `scripts/dogfood-landed-scope.sh` compares a run workspace diff (`chikory-base..HEAD`) with a landed commit's diff against the same base and reports `MATCH`, `EXTRA_IN_COMMIT`, `MISSING_IN_COMMIT`, or `DIFFERS_FROM_RUN`; `scripts/dogfood-verify.sh` now includes a non-aborting `## 6. Landed commit scope` section; fixture tests cover exact/extra/missing/different cases. **F-31 closed** — contaminated post-run commits are mechanically visible during review. |
-| WP-201 | Python SDK parity | 🟢 | **Slice 1 done** (`eb5c57e`, dogfood-002 run `run-2899005b`): contracts port + shared fixture conformance suite (40 tests; pyright/ruff clean). **Pure compaction digest-prompt parity done** (dogfood-030 `run-1a97e2ca`, harvested IDENTICAL + staged on `main`, pending commit — `docs/reports/dogfood-030.md`): new `packages/sdk-py/src/chikory/compaction_prompt.py` with `DIGEST_SYSTEM_PROMPT` mirroring the TS `compaction-prompt.ts` source-of-truth + pure `build_digest_messages(to_digest) -> list[Message]`, re-exported from `__init__.py`, 4 focused pytest cases; `Message` reused from `chikory/types.py`, no contract/runtime wiring change. **Next parity slice queued** (dogfood-035): port the two branch-target pure helpers — `parse_branch_target` + `branch_name_for_target` in a new `packages/sdk-py/src/chikory/branch_target.py`, mirroring the TS `src/cli/branch-target.ts` source-of-truth (the WP-205 pure surface, dogfood-033/034); no contract change. Remaining slices (router/runtime client parity) deferred until something needs them. |
+| WP-201 | Python SDK parity | 🟢 | **Slice 1 done** (`eb5c57e`, dogfood-002 run `run-2899005b`): contracts port + shared fixture conformance suite (40 tests; pyright/ruff clean). **Pure compaction digest-prompt parity done** (dogfood-030 `run-1a97e2ca`, harvested IDENTICAL + staged on `main`, pending commit — `docs/reports/dogfood-030.md`): new `packages/sdk-py/src/chikory/compaction_prompt.py` with `DIGEST_SYSTEM_PROMPT` mirroring the TS `compaction-prompt.ts` source-of-truth + pure `build_digest_messages(to_digest) -> list[Message]`, re-exported from `__init__.py`, 4 focused pytest cases; `Message` reused from `chikory/types.py`, no contract/runtime wiring change. **Branch-target parity done** (dogfood-035 `run-b0bc3865`, harvested IDENTICAL + committed `88e496c` on `main`, landing-scope MATCH — `docs/reports/dogfood-035.md`): new `packages/sdk-py/src/chikory/branch_target.py` with a local frozen `BranchTarget` dataclass + `parse_branch_target` + `branch_name_for_target`, mirroring the TS `src/cli/branch-target.ts` source-of-truth behavior-for-behavior (the WP-205 pure surface, dogfood-033/034); re-exported from `__init__.py`, 16 pytest cases; no contract/`types.py` change. **Next parity slice queued** (dogfood-036): port the Memory Pointer pure surface — `should_pointerize` + `format_pointer_reference` in a new `packages/sdk-py/src/chikory/memory_pointer.py`, mirroring the TS `runner/memory-pointer.ts` source-of-truth (dogfood-028, project.md Memory Pointer Pattern / CONTRACTS.md CM-3); `ArtifactRef` already ported at `chikory/types.py:197`, no contract change. Remaining slices (router/runtime client parity) deferred until something needs them. |
 | WP-202 | Memory Pointer store | 🟡 | Large tool outputs → blob store (local FS first), short `ArtifactRef` into context. **The designated dogfood-001 task.** Content-addressed local store landed (`src/artifacts/local.ts`, `put`/`get`/`excerpt`). **Pure decision + renderer half done** (dogfood-028 `run-7681a607`, harvested IDENTICAL + staged on `main`, pending commit — `docs/reports/dogfood-028.md`): `shouldPointerize(bytes, policy)` (`bytes > policy.maxInlineBytes`; exactly-at inlines) + `formatPointerReference(ref): string` (`[memory <kind> <12-char id>] <bytes>B — <summary>`, `id.slice(0, 12)`) in a new `src/runner/memory-pointer.ts` — the analog of `buildVerdict`/`evaluateBaselinePrecheck`; local `MemoryPointerPolicy` type, type-only `ArtifactRef` import, no `types.ts`/contract change; 3 files, 5 new tests. **Non-pure interception wiring landed by hand (TASK-PROTOCOL §4, on `main`):** the agent loop now gates each step's stored `transcriptRef`/`diffRef` through `shouldPointerize(ref.bytes, DEFAULT_MEMORY_POLICY)` (16 KB default, `workflow/agent-loop.ts`) and carries the large ones forward in a bounded `carriedRefs` accumulator → `ContextBundle.memoryRefs` (was always `[]`); `executors/prompt.ts` renders them via the pure `formatPointerReference`. No contract change (hardcoded default policy, the `DEFAULT_STEP_LIMITS` precedent). New integration test `test/runner/memory-pointer-interception.test.ts` (large transcript → pointer in next context; small → summary-only). **This unblocked WP-203 S2 digest wiring (now also done).** WP-202 is functionally complete for P2; a TaskSpec policy knob + `store.excerpt` recall path remain optional follow-ups. |
 | WP-203 | Compaction + structured note-taking primitives | 🔴 | Context-rot mitigation co-designed with checkpoints: compaction occurs *at* checkpoint boundaries so a resume never rehydrates rotted context. **Contract landed by hand 2026-06-14 (ADR-006, wall cleared):** `CompactionPolicy`/`CompactionPlan`/`CompactionResult` in `types.ts` (CONTRACTS.md §6a; journal-format `compaction` kind) + the pure, unit-tested `planCompaction(summaries, policy)` (`src/runner/compaction.ts`) — keep-last-N verbatim, fold the rest, gated by a trigger threshold. The `writeCheckpoint` hook (CM-1 co-design point) is documented as the wiring site. **Unblocks the WP-203 dogfoods:** S2 digest wiring (fold `toDigest` behind a Memory Pointer at the checkpoint, journal `CompactionResult`) — **stays BLOCKED on the WP-202 store**; S3 recall-tier projection; S4 compaction trace (🟢). **S4 trace renderer done** (dogfood-026 `run-f9d699d4`, harvested IDENTICAL + uncommitted on `main` — `docs/reports/dogfood-026.md`): `formatEntryLine` (`src/cli/trace.ts`) gains a `case "compaction"` rendering the `CompactionResult` payload `tokensBefore→tokensAfter` + digest-pointer presence (` (digest <12-char id>)` / ` (no digest)`) via the existing `formatTokens`, the WP-209 trace-renderer pattern; 2 files, 2 new tests, no contract change, `CompactionResult` re-checked field-for-field against `types.ts:362`. **WP-203's pure *trace* surface is complete** (S4). **S2 digest-prompt half done** (dogfood-029 `run-74f88081`, harvested IDENTICAL + uncommitted on `main` — `docs/reports/dogfood-029.md`): `DIGEST_SYSTEM_PROMPT` + `buildDigestMessages(toDigest): Message[]` in a new `src/runner/compaction-prompt.ts`, the analog of `planner/prompt.ts`/`judge/prompt.ts`, over the frozen `CompactionPlan.toDigest` + `Message`; type-only `Message`, no response schema (prose output), no contract change; 3 files, 4 new tests. **WP-203's entire pure surface is now exhausted** (S4 trace + S2 digest-prompt). **S2 digest WIRING landed by hand (TASK-PROTOCOL §4, on `main`):** a new idempotent `compactContext` activity (`runner/activities.ts`, called from `agent-loop.ts` after `writeCheckpoint`) runs `planCompaction(recentSummaries, DEFAULT_COMPACTION_POLICY)` (trigger 8 / keepLastN 5), folds `toDigest` via a real `review`-stage router call on `buildDigestMessages`, `store.put`s the digest (reusing `context_snapshot` kind), journals a `compaction` `CompactionResult` (`tokensBefore/After` from the call's `LLMCallResult.tokens`), and the workflow carries `digestRef` forward in `memoryRefs`. Cost-guarded (only re-digests when the folded set grows) + best-effort (a router error never fails the run). No contract change. New integration test `test/runner/compaction-wiring.test.ts`. The S4 renderer shows the events in `chikory trace`. Remaining: S3 recall-tier projection (no frozen pure contract yet); OTel emission later. The Python parity of the pure digest-prompt half is done via dogfood-030 `run-1a97e2ca` (WP-201; `docs/reports/dogfood-030.md`); no compaction runtime wiring changed. |
 | WP-204 | Tiered memory (core/archival/recall) | 🔴 | Cross-session state; poisoning safeguards (provenance on every memory write). |

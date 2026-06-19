@@ -227,8 +227,19 @@ and the branch/worktree side effects still deferred. Dogfood-034
 an **eleventh** straight one-step no-probe SUCCESS, no new friction, input tokens
 594k (mid-band). The actual `chikory branch` command + journal/worktree fork is
 non-pure hand-design; with the TS pure backlog thin the dogfoodable thread
-shifts back to dual-SDK parity (dogfood-035 ports the two branch-target helpers
-to the Python SDK).
+shifts back to dual-SDK parity. Dogfood-035
+(`docs/reports/dogfood-035.md`) ported that WP-205 surface to the Python SDK —
+`parse_branch_target` + `branch_name_for_target` (local frozen `BranchTarget`
+dataclass) in `packages/sdk-py/src/chikory/branch_target.py`, mirroring the TS
+`src/cli/branch-target.ts` source-of-truth behavior-for-behavior, 16 pytest
+cases, no contract change: a **twelfth** straight one-step no-probe SUCCESS, no
+new friction, input tokens 318k (new series low). It was the first
+branch-target-series run committed to `HEAD` (`88e496c`) rather than staged, and
+`dogfood-landed-scope.sh` reported **MATCH** — the F-31 audit confirming the
+committed diff is exactly the verified run diff. The parity thread continues
+with dogfood-036 (Memory Pointer pure surface — `should_pointerize` +
+`format_pointer_reference` ← TS `runner/memory-pointer.ts`); the keystone after
+it is the hand-design S3 durable chain executor.
 
 Related docs: [`docs/spec/task-spec.md`](spec/task-spec.md) (schema
 reference) · [`docs/TASK-PROTOCOL.md`](TASK-PROTOCOL.md) (WP etiquette, §7 is
