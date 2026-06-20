@@ -269,10 +269,20 @@ chain-trace renderer** — `renderChainTrace`, the chain analog of the per-run
 deprioritized pacing parity port onto the critical path; 5 vitest cases, no
 contract change, `src/chain/trace.ts`)**. **WP-219's entire dogfoodable pure
 surface is now exhausted** (`readyNodes` + `hasDependencyCycle` + `advanceChain`
-+ `deriveChainStatus` + `renderChainTrace`), so the next dogfood returns to
-dual-SDK parity: **dogfood-039 — the Python port of the S3 chain-state reducer**
-(`advance_chain` + `derive_chain_status`, `chikory/chain_advance.py`, mirroring
-the TS `src/chain/advance.ts`). Remaining hand-design follow-ups: D3
++ `deriveChainStatus` + `renderChainTrace`), so the dogfood thread returned to
+dual-SDK parity. Dogfood-039 (`docs/reports/dogfood-039.md`) ported the S3
+chain-state reducer to the Python SDK — `derive_chain_status` (the four-rule
+ADR-005 §S3 precedence) + `advance_chain` (pure immutable node-fold) in a new
+`packages/sdk-py/src/chikory/chain_advance.py`, mirroring the TS
+`src/chain/advance.ts` source-of-truth 1:1, `ChainRecord`/`NodeOutcome`/`ChainStatus`
+reused from `chikory/types.py`, 6 pytest cases, no contract change: a
+**sixteenth** straight one-step no-probe SUCCESS, no new friction, input tokens
+755k (Python-parity-series high). The next dogfood stays on parity: **dogfood-040
+— the Python port of the WP-207 context-window pacing decision**
+(`decide_context_window_pacing` + local `ContextWindowUsage`/`ContextWindowPacingPolicy`/`ContextWindowPacingDecision`
+dataclasses, `chikory/pacing.py`, mirroring the TS `src/runner/pacing.ts`); the
+`renderChainTrace` Python parity stays blocked behind it (needs the
+not-yet-ported `ChainEntry` store type). Remaining hand-design follow-ups: D3
 halt-and-replan, S4 context handoff, S5 suspend/resume, and the
 `chikory chain`/`plan` + `chikory trace <chain-id>` CLI glue.
 

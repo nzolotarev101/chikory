@@ -1,4 +1,5 @@
 from .branch_target import BranchTarget, branch_name_for_target, parse_branch_target
+from .chain_advance import advance_chain, derive_chain_status
 from .compaction_prompt import DIGEST_SYSTEM_PROMPT, build_digest_messages
 from .judge import Judge
 from .memory_pointer import MemoryPointerPolicy, format_pointer_reference, should_pointerize
@@ -80,8 +81,10 @@ __all__ = [
     "TestResultArtifact",
     "TokenUsage",
     "VerdictKind",
+    "advance_chain",
     "branch_name_for_target",
     "build_digest_messages",
+    "derive_chain_status",
     "format_pointer_reference",
     "parse_branch_target",
     "should_pointerize",

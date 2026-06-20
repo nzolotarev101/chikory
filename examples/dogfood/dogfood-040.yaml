@@ -1,0 +1,149 @@
+# Dogfood-040: WP-201 Python-SDK parity — port the WP-207 context-window pacing
+# decision. Implement `decide_context_window_pacing(usage, policy)` + the three
+# local types in a new `packages/sdk-py/src/chikory/pacing.py`, the Python parity
+# of the TS `packages/sdk-ts/src/runner/pacing.ts` (`decideContextWindowPacing`).
+# Pure function, NO I/O.
+#
+# WHY THIS IS NEXT (2026-06-20): WP-219's TS chain-executor *pure* surface is
+# exhausted (dogfood-037/038) and its Python parity advanced one module with the
+# chain-state reducer (dogfood-039, `run-6bb8ac7e`). The dogfoodable thread stays
+# on dual-SDK parity (🟢, plan.md §6 — vendor-neutral dual SDK is a launch
+# requirement, IF-2). The WP-207 context-window pacing decision is the natural
+# pick: it is a self-contained pure function over LOCAL types (no contract model,
+# no `types.py` touch), exactly the dogfood-035/036/039 parity pattern (port one
+# pure TS module 1:1, source-of-truth the TS file). The `renderChainTrace` Python
+# parity is the only other pure candidate but it is BLOCKED — it needs the
+# not-yet-ported `ChainEntry` store type — so pacing comes first.
+#
+# Zero-secrets launch:
+#   node scripts/cli-judge-proxy.mjs 8787 gemini &
+#   OPENAI_COMPAT_BASE_URL=http://127.0.0.1:8787 pnpm chikory run examples/dogfood/dogfood-040.yaml --watch
+#
+# Commit everything before launching — workspaces clone HEAD. The TS source of
+# truth (`src/runner/pacing.ts`) is already on the tree; if the dogfood-039 chain
+# work (or any earlier uncommitted parity slice) is still uncommitted, commit it
+# first. Launch ONCE and watch to terminal (F-30). Run Devbox commands
+# sequentially (F-22). F-11 is closed (dogfood-022..039): a clean one-step finish
+# should seal SUCCESS with NO empty-diff probe step — watch the step count stay
+# at 1.
+name: dogfood-040-wp-201-py-pacing-parity
+goal: >
+  Port the WP-207 context-window pacing decision to the Python SDK —
+  `decide_context_window_pacing`, the Python parity of the TypeScript
+  `packages/sdk-ts/src/runner/pacing.ts` (`decideContextWindowPacing`). One pure
+  function that, given the current token usage and a pacing policy, decides
+  whether the next local runner step should `continue`, `compact`, or `park`
+  before it overflows the context window. The TS module is the source of truth —
+  mirror its logic and the three local type shapes exactly.
+
+  Do NOT make any LLM/router call, do NOT read/write the filesystem, do NOT touch
+  the network, clock, or randomness, do NOT mutate the inputs, do NOT change
+  `types.py`, `schemas`, or any contract model (these are LOCAL types — the TS
+  source defines them as plain interfaces in `pacing.ts`, NOT contract models;
+  define their Python parity as local frozen dataclasses in the new module, do
+  NOT add them to `types.py`), and do NOT add any new dependency. Add exactly one
+  new source file and one new test file, and edit exactly one existing file
+  (`packages/sdk-py/src/chikory/__init__.py`) for the re-export — three files
+  total, no other file changed.
+
+  1. packages/sdk-py/src/chikory/pacing.py — a NEW pure module, type-annotated,
+     async-free (a pure sync function). No imports from `.types` are needed (the
+     types are local). Mirror the TS `pacing.ts` source of truth symbol-for-symbol
+     — three local frozen dataclasses (use `@dataclass(frozen=True)`, the
+     `branch_target.py` / `memory_pointer.py` local-type convention) and one
+     function:
+
+       - `ContextWindowUsage` — fields `current_input_tokens: int`,
+         `current_output_tokens: int`, `estimated_next_step_tokens: int`,
+         `context_window_tokens: int` (the TS `currentInputTokens` /
+         `currentOutputTokens` / `estimatedNextStepTokens` / `contextWindowTokens`).
+       - `ContextWindowPacingPolicy` — field `compact_at_fraction: float` (the TS
+         `compactAtFraction`).
+       - `ContextWindowPacingDecision` — fields `action: Literal["continue", "compact", "park"]`,
+         `projected_tokens: int`, `remaining_tokens: int`, `utilization: float`
+         (the TS `action` / `projectedTokens` / `remainingTokens` / `utilization`).
+
+       - `def decide_context_window_pacing(usage: ContextWindowUsage, policy: ContextWindowPacingPolicy) -> ContextWindowPacingDecision`
+         — the pure decision, mirroring the TS body exactly:
+           * `projected_tokens = usage.current_input_tokens + usage.current_output_tokens + usage.estimated_next_step_tokens`
+           * `remaining_tokens = usage.context_window_tokens - projected_tokens`
+           * `utilization = projected_tokens / usage.context_window_tokens`
+           * `compact_threshold = usage.context_window_tokens * policy.compact_at_fraction`
+           * if `usage.estimated_next_step_tokens > usage.context_window_tokens`
+             → `action = "park"` (the single next step cannot fit at all)
+           * elif `projected_tokens > compact_threshold` → `action = "compact"`
+           * else → `action = "continue"`
+           every branch returns the SAME `projected_tokens` / `remaining_tokens` /
+           `utilization`, only `action` differs — exactly as the TS. The `park`
+           check outranks the `compact` check (rule order matters), exactly as the
+           TS.
+
+     Docstring the function citing WP-207 / FA-3 / SE-2, as the TS JSDoc does.
+     Pure: reads only its arguments, returns a value, no I/O / clock / randomness
+     / input mutation.
+
+  2. packages/sdk-py/src/chikory/__init__.py — re-export
+     `decide_context_window_pacing` and the three dataclasses
+     (`ContextWindowUsage`, `ContextWindowPacingPolicy`,
+     `ContextWindowPacingDecision`) from `.pacing` (add the `from .pacing import
+     ...` line alphabetically alongside the existing parity re-exports such as
+     `from .chain_advance import ...`), and add all four names to `__all__` (keep
+     `__all__` sorted as it currently is). Change nothing else.
+
+  3. packages/sdk-py/tests/test_pacing.py — a NEW pytest file importing the four
+     names from the package (`from chikory import ...`). Mirror the TS
+     `test/runner/pacing.test.ts` shape. Assert at least:
+       - `continue` — usage well under the compact threshold returns
+         `action == "continue"` with the correct `projected_tokens`,
+         `remaining_tokens`, and `utilization`.
+       - `compact` — usage whose projected tokens exceed
+         `context_window_tokens * compact_at_fraction` (but whose single next step
+         still fits the window) returns `action == "compact"`.
+       - `park` — usage whose `estimated_next_step_tokens` alone exceeds
+         `context_window_tokens` returns `action == "park"` (and `park` outranks
+         `compact` — a usage that would also breach the compact threshold still
+         parks).
+       - the numeric fields (`projected_tokens` / `remaining_tokens` /
+         `utilization`) are identical across all three branches for the same
+         usage, confirming only `action` varies.
+
+  After this slice, the WP-207 context-window pacing decision has byte-faithful
+  Python parity — the vendor-neutral dual-SDK contract holds one module deeper.
+  No runtime behavior changes; no TS code touched.
+
+  Follow AGENTS.md and the sdk-py conventions: type-annotated, `ruff` clean, no
+  new dependency, mirror the existing pure parity modules
+  (`chain_advance.py` / `branch_target.py` / `memory_pointer.py`). Run all
+  Devbox verification commands sequentially.
+repos:
+  - url: /Users/nikitazolotarev/repos/chikory
+    writable: true
+acceptance_criteria:
+  # Checks run by the judge inside the run workspace (fresh clone) under the
+  # worker's devbox env — call the toolchain directly, 120s cap per check.
+  - id: AC-1
+    description: the new pacing parity test passes
+    check: cd packages/sdk-py && uv sync --quiet && uv run pytest tests/test_pacing.py -q
+  - id: AC-2
+    description: >
+      the complete Python SDK suite remains green — proving the new pure module
+      breaks no existing behavior
+    check: cd packages/sdk-py && uv run pytest -q
+  - id: AC-3
+    description: pyright typecheck and ruff lint + format are clean
+    check: cd packages/sdk-py && uv run pyright && ruff check . && ruff format --check .
+budget_usd: 5
+max_steps: 4
+executor:
+  adapter: codex
+  family: openai
+judge:
+  family: openai-compat
+  cadence: 2
+  max_cost_share: 0.5
+routing:
+  stages:
+    plan: { provider: openai-compat, model: gpt-5.5 }
+    code: { provider: openai-compat, model: gpt-5.5 }
+    review: { provider: openai-compat, model: gpt-5.5 }
+    judge: { provider: openai-compat, model: gemini-3.1-pro-preview }
