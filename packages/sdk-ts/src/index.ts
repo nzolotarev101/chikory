@@ -70,6 +70,7 @@ export { buildPlan, type BuildPlanOptions } from "./planner/assemble.js";
 export { buildPlanJudgeMessages, PLAN_JUDGE_SYSTEM_PROMPT, PLAN_VERDICT_RESPONSE_SCHEMA } from "./planner/meta-judge-prompt.js";
 export { buildPlanVerdict, type PlanJudgeReply } from "./planner/meta-judge-verdict.js";
 export { advanceChain, deriveChainStatus } from "./chain/advance.js";
+export { renderChainTrace } from "./chain/trace.js";
 export { readyNodes } from "./chain/sequencing.js";
 export { hasDependencyCycle } from "./chain/validation.js";
 export {

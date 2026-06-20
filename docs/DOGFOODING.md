@@ -263,10 +263,16 @@ chain store), the `chainLoop` workflow that loops `readyNodes` →
 `executeChild(agentLoop)` per ready node → `advanceChain` fold →
 `node_started`/`node_sealed` journaling, halting on a `FAILED` seal, plus chain
 activities and pure node→TaskSpec helpers (both workflows share a bundle barrel).
-That substrate creates a chain journal, which unblocks the **WP-219 S6 pure
+That substrate created a chain journal, which unblocked the **WP-219 S6 pure
 chain-trace renderer** — `renderChainTrace`, the chain analog of the per-run
-`renderTrace`, the next dogfood (dogfood-037, refocused off the deprioritized
-pacing parity port onto the critical path). Remaining hand-design follow-ups: D3
+`renderTrace` — **delivered via dogfood-037 (`run-295b2947`, refocused off the
+deprioritized pacing parity port onto the critical path; 5 vitest cases, no
+contract change, `src/chain/trace.ts`)**. **WP-219's entire dogfoodable pure
+surface is now exhausted** (`readyNodes` + `hasDependencyCycle` + `advanceChain`
++ `deriveChainStatus` + `renderChainTrace`), so the next dogfood returns to
+dual-SDK parity: **dogfood-039 — the Python port of the S3 chain-state reducer**
+(`advance_chain` + `derive_chain_status`, `chikory/chain_advance.py`, mirroring
+the TS `src/chain/advance.ts`). Remaining hand-design follow-ups: D3
 halt-and-replan, S4 context handoff, S5 suspend/resume, and the
 `chikory chain`/`plan` + `chikory trace <chain-id>` CLI glue.
 

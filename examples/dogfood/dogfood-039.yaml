@@ -1,0 +1,150 @@
+# Dogfood-039: WP-201 Python-SDK parity — port the WP-219 S3 chain-state
+# reducer. Implement `derive_chain_status(record)` + `advance_chain(record,
+# node_id, outcome)` in a new `packages/sdk-py/src/chikory/chain_advance.py`,
+# the Python parity of the TS `packages/sdk-ts/src/chain/advance.ts`
+# (dogfood-038, `run-61e8b0a1`). Pure functions, NO I/O.
+#
+# WHY THIS IS NEXT (2026-06-20): the WP-219 chain executor's *pure* TypeScript
+# surface is now exhausted — `readyNodes` / `hasDependencyCycle` (dogfood-015/016),
+# `advanceChain` / `deriveChainStatus` (dogfood-038), and `renderChainTrace`
+# (dogfood-037, this campaign's predecessor) all landed. Everything left in the
+# chain executor is non-pure hand-design (the `chikory trace <chain-id>` CLI
+# branch, S3-wiring D3 replan, S4 handoff, S5 suspend/resume — TASK-PROTOCOL §4).
+# So the dogfoodable thread returns to dual-SDK parity (🟢, plan.md §6): vendor-
+# neutral dual SDK is a launch requirement, and the chain contracts already
+# landed in `sdk-py` — `ChainRecord` / `NodeOutcome` / `ChainStatus` / `Plan` /
+# `PlanNode` / `VerdictKind` are all present in `chikory/types.py`. This is the
+# dogfood-035/036 parity pattern (port one pure TS module 1:1, source-of-truth
+# the TS file, no contract change). The chain-state reducer is the natural pick:
+# it depends only on the already-ported contracts (unlike `renderChainTrace`,
+# which needs the not-yet-ported `ChainEntry` store type).
+#
+# Zero-secrets launch:
+#   node scripts/cli-judge-proxy.mjs 8787 gemini &
+#   OPENAI_COMPAT_BASE_URL=http://127.0.0.1:8787 pnpm chikory run examples/dogfood/dogfood-039.yaml --watch
+#
+# Commit everything before launching — workspaces clone HEAD. The TS source of
+# truth (`src/chain/advance.ts`) and the py contracts (`chikory/types.py`
+# `ChainRecord`/`NodeOutcome`/`ChainStatus`) are already on the tree; if the
+# dogfood-037/038 chain work is still uncommitted, commit it first. Launch ONCE
+# and watch to terminal (F-30). Run Devbox commands sequentially (F-22). F-11 is
+# closed (dogfood-022..038): a clean one-step finish should seal SUCCESS with NO
+# empty-diff probe step — watch the step count stay at 1.
+name: dogfood-039-wp-201-py-chain-advance-parity
+goal: >
+  Port the WP-219 S3 chain-state reducer to the Python SDK — `advance_chain`
+  and `derive_chain_status`, the Python parity of the TypeScript
+  `packages/sdk-ts/src/chain/advance.ts` (`advanceChain` / `deriveChainStatus`,
+  dogfood-038). Two pure functions that fold a sealed node's `NodeOutcome` into a
+  `ChainRecord` and derive its `ChainStatus` per the ADR-005 §S3 transition
+  rules. The TS module is the source of truth — mirror its logic exactly.
+
+  Do NOT make any LLM/router call, do NOT read/write the filesystem, do NOT touch
+  the network, clock, or randomness, do NOT mutate the input record or its nested
+  dicts, do NOT change `types.py`, `schemas`, or any contract model (the
+  `ChainRecord` / `NodeOutcome` / `ChainStatus` / `Plan` / `PlanNode` /
+  `VerdictKind` models already landed in `chikory/types.py` — reuse them, do NOT
+  redefine them), and do NOT add any new dependency. Add exactly one new source
+  file and one new test file, and edit exactly one existing file
+  (`packages/sdk-py/src/chikory/__init__.py`) for the re-export — three files
+  total, no other file changed.
+
+  1. packages/sdk-py/src/chikory/chain_advance.py — a NEW pure module,
+     type-annotated, async-free (these are pure sync functions). Import
+     `ChainRecord`, `NodeOutcome`, and `ChainStatus` from `.types`. Two exports,
+     mirroring the TS `advance.ts` source of truth symbol-for-symbol:
+
+       - `def derive_chain_status(record: ChainRecord) -> ChainStatus` — the
+         four-rule, first-match-wins precedence of the TS `deriveChainStatus`,
+         over `record.node_outcomes.values()`:
+           1. any outcome whose `verdict == "ESCALATE"` → `"AWAITING_PLAN_APPROVAL"`
+           2. else any outcome whose `status == "FAILED"`  → `"FAILED"`
+           3. else every node in `record.plan.nodes` has an outcome in
+              `record.node_outcomes` with `status == "SUCCESS"` → `"SUCCESS"`
+              (a missing node falls through — use
+              `record.node_outcomes.get(node.id)` and guard for None)
+           4. else → `"RUNNING"`
+         ESCALATE must outrank FAILED (rule 1 before rule 2), exactly as the TS.
+
+       - `def advance_chain(record: ChainRecord, node_id: str, outcome: NodeOutcome) -> ChainRecord`
+         — the pure immutable fold of the TS `advanceChain`: build a NEW
+         `ChainRecord` with `node_outcomes` set to a new dict that is the old map
+         plus `{node_id: outcome}`, then set `status` to
+         `derive_chain_status(...)` computed on that new record. All other fields
+         (`plan_id`, `plan`, `plan_verdict`, `node_runs`) carry through unchanged.
+         Do NOT mutate `record` or `record.node_outcomes` — construct the new dict
+         and the new record fresh (`ChainRecord` is a Pydantic `ContractModel`;
+         use `record.model_copy(update={...})` or an explicit constructor — match
+         how the other `sdk-py` pure modules build models). The returned record
+         must be a different object with the input left untouched.
+
+     Docstring each function citing WP-219 / ADR-005 §S3 (D3/D4), as the TS JSDoc
+     does. Pure: reads only its arguments, returns a value, no I/O / clock /
+     randomness / input mutation.
+
+  2. packages/sdk-py/src/chikory/__init__.py — re-export `advance_chain` and
+     `derive_chain_status` from `.chain_advance` (add the `from .chain_advance
+     import ...` line alongside the existing parity re-exports such as
+     `from .branch_target import ...`), and add both names to `__all__` (keep
+     `__all__` sorted as it currently is). Change nothing else.
+
+  3. packages/sdk-py/tests/test_chain_advance.py — a NEW pytest file importing
+     `advance_chain` / `derive_chain_status` from the package
+     (`from chikory import advance_chain, derive_chain_status`) and the
+     `ChainRecord` / `NodeOutcome` types from `chikory.types`. Build a small
+     `ChainRecord` over a 3-node plan (`N-1` → `N-2` → `N-3` dependency chain)
+     with a builder so the cases read clearly (mirror the TS
+     `test/chain/advance.test.ts` shape). Assert at least:
+       - rule 4 — a record with no outcomes derives `"RUNNING"`.
+       - rule 3 — a record whose three nodes all have SUCCESS outcomes derives
+         `"SUCCESS"`; a record with only some nodes SUCCESS stays `"RUNNING"`.
+       - rule 2 — a record with one FAILED outcome derives `"FAILED"`.
+       - rule 1 precedence — a record holding BOTH a FAILED outcome and an
+         ESCALATE-verdict outcome derives `"AWAITING_PLAN_APPROVAL"` (ESCALATE
+         outranks FAILED).
+       - `advance_chain` fold — folding a SUCCESS `NodeOutcome` for `N-1` into a
+         fresh record returns a record whose `node_outcomes["N-1"]` is that
+         outcome and whose `status` equals `derive_chain_status` of the new
+         record; the input record is unchanged (its `node_outcomes` still lacks
+         `N-1`, same `status`), and the returned record is a different object.
+
+  After this slice, the chain-state reducer has byte-faithful Python parity — the
+  vendor-neutral dual-SDK contract holds one module deeper into the WP-219 chain
+  executor. No runtime behavior changes; no TS code touched.
+
+  Follow AGENTS.md and the sdk-py conventions: type-annotated, `ruff` clean, no
+  new dependency, mirror the existing pure parity modules
+  (`branch_target.py` / `memory_pointer.py` / `compaction_prompt.py`). Run all
+  Devbox verification commands sequentially.
+repos:
+  - url: /Users/nikitazolotarev/repos/chikory
+    writable: true
+acceptance_criteria:
+  # Checks run by the judge inside the run workspace (fresh clone) under the
+  # worker's devbox env — call the toolchain directly, 120s cap per check.
+  - id: AC-1
+    description: the new chain-advance parity test passes
+    check: cd packages/sdk-py && uv sync --quiet && uv run pytest tests/test_chain_advance.py -q
+  - id: AC-2
+    description: >
+      the complete Python SDK suite remains green — proving the new pure module
+      breaks no existing behavior
+    check: cd packages/sdk-py && uv run pytest -q
+  - id: AC-3
+    description: pyright typecheck and ruff lint + format are clean
+    check: cd packages/sdk-py && uv run pyright && ruff check . && ruff format --check .
+budget_usd: 5
+max_steps: 4
+executor:
+  adapter: codex
+  family: openai
+judge:
+  family: openai-compat
+  cadence: 2
+  max_cost_share: 0.5
+routing:
+  stages:
+    plan: { provider: openai-compat, model: gpt-5.5 }
+    code: { provider: openai-compat, model: gpt-5.5 }
+    review: { provider: openai-compat, model: gpt-5.5 }
+    judge: { provider: openai-compat, model: gemini-3.1-pro-preview }
