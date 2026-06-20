@@ -24,6 +24,8 @@ export const PLANNER_SYSTEM_PROMPT: string = [
   "  rejected. You MAY add extra node-specific criteria with new ids, but the id",
   "  of every goal criterion must appear on the node(s) that cover it, and across",
   "  all nodes every goal criterion id must appear at least once.",
+  "- Copy a covered goal criterion's description and executable `check` verbatim.",
+  "  Do not translate package managers, paths, flags, or working directories.",
   "- `dependsOn` lists the ids of nodes that must reach SUCCESS before the node",
   "  can start.",
   "- Per-node `budgetUsd` values must sum to at most the chain budget.",
@@ -69,7 +71,14 @@ export const PLAN_RESPONSE_SCHEMA = {
 
 function renderCriteria(criteria: AcceptanceCriterion[]): string {
   if (criteria.length === 0) return "(none defined)";
-  return criteria.map((criterion) => `- ${criterion.id}: ${criterion.description}`).join("\n");
+  return criteria
+    .map((criterion) =>
+      [
+        `- ${criterion.id}: ${criterion.description}`,
+        ...(criterion.check === undefined ? [] : [`  check: ${criterion.check}`]),
+      ].join("\n"),
+    )
+    .join("\n");
 }
 
 /** Builds pure planner messages for WP-219 S2 and ADR-005 D1. */
@@ -80,7 +89,7 @@ export function buildPlannerMessages(input: PlanInput): Message[] {
     "",
     "## ACCEPTANCE CRITERIA the plan must cover",
     "Reuse each id below VERBATIM on the node(s) that cover it (coverage is",
-    "matched by id, not wording).",
+    "matched by id, not wording). Copy each description and check verbatim too.",
     renderCriteria(input.acceptanceCriteria),
     "",
     "## CHAIN BUDGET (node `budgetUsd` values must sum within this amount)",

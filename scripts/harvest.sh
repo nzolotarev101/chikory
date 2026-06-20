@@ -40,7 +40,11 @@ SOURCE_RUN_IDS=()
 if [ -f ".chikory/chains/$TARGET_ID/chain.db" ]; then
   CHAIN_ID="$TARGET_ID"
   echo "Harvesting: chain-id $CHAIN_ID"
-  CHAIN_JSON=$(pnpm chikory trace "$CHAIN_ID" --json)
+  if [ -n "${HARVEST_CHAIN_JSON:-}" ]; then
+    CHAIN_JSON="$HARVEST_CHAIN_JSON"
+  else
+    CHAIN_JSON=$(node scripts/read-chain-record.mjs ".chikory/chains/$CHAIN_ID/chain.db" "$CHAIN_ID")
+  fi
   SOURCE_RUNS_STR=$(node -e '
     const record = JSON.parse(process.argv[1]);
     if (record.status !== "SUCCESS") {

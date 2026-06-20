@@ -46,6 +46,40 @@ describe("buildPlan (WP-219 S2, ADR-005 D1)", () => {
     expect(plan.nodes.map((node) => node.id)).toEqual(["N-1", "N-2"]);
   });
 
+  it("preserves goal-level criteria and executable checks verbatim", () => {
+    const checkedInput: PlanInput = {
+      ...input,
+      acceptanceCriteria: [
+        {
+          id: "AC-1",
+          description: "Run the focused test from the package directory",
+          check: "cd packages/sdk-ts && pnpm exec vitest run test/chain/cost.test.ts",
+        },
+        input.acceptanceCriteria[1]!,
+      ],
+    };
+    const rewrittenByPlanner: PlanNode[] = [
+      {
+        ...nodes[0]!,
+        acceptanceCriteria: [
+          {
+            id: "AC-1",
+            description: "planner paraphrase",
+            check: "npm run test packages/sdk-ts/test/chain/cost.test.ts",
+          },
+        ],
+      },
+      nodes[1]!,
+    ];
+
+    const plan = buildPlan({ nodes: rewrittenByPlanner }, checkedInput, opts);
+
+    expect(plan.nodes[0]!.acceptanceCriteria[0]).toEqual(
+      checkedInput.acceptanceCriteria[0],
+    );
+    expect(rewrittenByPlanner[0]!.acceptanceCriteria[0]!.check).toContain("npm run test");
+  });
+
   it("rejects an empty node list", () => {
     expect(() => buildPlan({ nodes: [] }, input, opts)).toThrow("no nodes");
   });

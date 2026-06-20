@@ -10,7 +10,11 @@ import type { PlanInput } from "../../src/types.js";
 const input: PlanInput = {
   goal: "Ship a reliable goal planner",
   acceptanceCriteria: [
-    { id: "AC-1", description: "Every criterion is assigned to a node" },
+    {
+      id: "AC-1",
+      description: "Every criterion is assigned to a node",
+      check: "cd packages/sdk-ts && pnpm exec vitest run test/planner/prompt.test.ts",
+    },
     { id: "AC-2", description: "Node budgets stay within the chain budget" },
   ],
   budgetUsd: 12.5,
@@ -45,6 +49,10 @@ describe("planner prompt (WP-219 S2, ADR-005 D1)", () => {
     expect(PLANNER_SYSTEM_PROMPT).toContain("EXACTLY that goal criterion's");
     expect(PLANNER_SYSTEM_PROMPT).toContain("matched by id");
     expect(buildPlannerMessages(input)[1]?.content).toContain("VERBATIM");
+    expect(buildPlannerMessages(input)[1]?.content).toContain(
+      input.acceptanceCriteria[0]!.check,
+    );
+    expect(PLANNER_SYSTEM_PROMPT).toContain("executable `check` verbatim");
   });
 
   it("forbids verification-only nodes (every node must produce a diff)", () => {
