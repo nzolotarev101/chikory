@@ -1,0 +1,114 @@
+# Dogfood-043: WP-239 first artifact-backed fan-in proof (READY, not yet run).
+# Launch with `chikory chain`; ADR-007 and the prerequisites below are in HEAD.
+#
+# BINDING ASSESSOR VERDICT: dogfood-040 is VETOED as Track-B busy work. This is
+# the required thesis-stressing replacement: two independent predecessor nodes
+# whose code must both reach one dependent node through the WP-239 handoff.
+#
+# LANDED ARCHITECT PREREQUISITES:
+#   1. ADR-005 (or a successor ADR) defines deterministic fan-in ordering,
+#      conflict behavior, provenance, and the artifact-store transport model.
+#   2. The frozen ChainLink/TaskSpec contracts are updated consistently across
+#      CONTRACTS.md, TypeScript, Zod, Python, and fixtures if the ADR requires a
+#      multi-parent/reference field. Follow TASK-PROTOCOL §4; this contract PR
+#      is hand-designed and separate from the dogfood campaign.
+#   3. The runtime implementation no longer reads predecessor workspaces as its
+#      transport. It exports sealed predecessor trees/deltas to the ArtifactStore,
+#      materializes every dependsOn input deterministically, and journals enough
+#      artifact/provenance evidence to prove what was consumed.
+#   4. `packages/sdk-ts/test/chain/fan-in-handoff.test.ts` is committed as the
+#      canonical real-git integration test for: two-parent materialization,
+#      deterministic parent ordering, the ADR's conflict outcome (including
+#      fail-closed behavior if that is the decision), and no shared-workspace
+#      dependency.
+#   5. `devbox run harvest` supports a successful non-linear chain, applies each
+#      node delta exactly once in dependency order, detects conflicts according
+#      to the same ADR, reconciles the final host tree, and stages all outputs.
+#
+# WHY THE PREREQUISITE WAS REQUIRED: the running Temporal worker loads committed
+# workflow/activity code before this campaign starts. A chain cannot implement
+# and exercise its own fan-in substrate in the same execution. ADR-007 and the
+# additive handoff contracts are now committed with the runtime under test.
+#
+# LIVE FAILURE SURFACE AFTER UNBLOCKING:
+#   node A creates the left module/test from committed baseline HEAD;
+#   node B independently creates the right module/test from the SAME baseline;
+#   node C depends on BOTH, imports BOTH, and cannot typecheck unless WP-239
+#   materialized both predecessor artifacts. The canonical runtime integration
+#   test simultaneously gates the ADR-defined ordering/conflict semantics.
+#
+# Post-run sequence (mandatory):
+#   devbox run dogfood
+#   devbox run harvest
+#   /dogfood-review <chain-id>
+name: dogfood-043-wp-239-artifact-fan-in-proof
+goal: >
+  Prove the ALREADY-LANDED WP-239 artifact-backed multi-predecessor handoff with
+  exactly three diff-producing nodes: two independent predecessors and one
+  dependent consumer. This campaign validates the committed runtime; do not
+  redesign or modify the chain runner, contracts, schemas, ADRs, artifact store,
+  harvest scripts, or fan-in integration harness inside this run.
+
+  The planner MUST emit this topology: node A and node B both have empty
+  `dependsOn`; node C has both node ids in `dependsOn`. Do not serialize A behind
+  B or B behind A, do not combine their deliverables, and do not add a
+  verification-only node. Every node must produce a non-empty code-and-test diff.
+
+  Node A: add packages/sdk-ts/src/chain/fan-in-left.ts exporting the named pure
+  function `leftFanInFixture(): string`, returning exactly `left-artifact`. Add
+  packages/sdk-ts/test/chain/fan-in-left.test.ts with a focused passing test.
+  Touch only those two files. This node is an independent predecessor.
+
+  Node B: add packages/sdk-ts/src/chain/fan-in-right.ts exporting the named pure
+  function `rightFanInFixture(): string`, returning exactly `right-artifact`.
+  Add packages/sdk-ts/test/chain/fan-in-right.test.ts with a focused passing
+  test. Touch only those two files. This node is an independent predecessor and
+  must start from the same committed baseline as node A, not from node A's tree.
+
+  Node C: only after BOTH predecessors seal SUCCESS, add
+  packages/sdk-ts/src/chain/fan-in-report.ts. Import `leftFanInFixture` from
+  `./fan-in-left.js` and `rightFanInFixture` from `./fan-in-right.js`; export the
+  named pure function `formatFanInReport(): string`, returning exactly
+  `left-artifact + right-artifact`. Add
+  packages/sdk-ts/test/chain/fan-in-report.test.ts proving that exact result.
+  Touch only those two files. Do not recreate either predecessor module: their
+  presence must come from WP-239's artifact-backed handoff.
+
+  Keep all modules minimal: strict TypeScript, ESM `.js` relative imports,
+  named exports only, no default exports, no I/O, and no new dependencies. Run
+  project commands sequentially inside the existing Devbox environment.
+repos:
+  - url: /Users/nikitazolotarev/repos/chikory
+    writable: true
+acceptance_criteria:
+  - id: AC-1
+    description: >
+      independent node A adds only the left fixture module/test and its focused
+      test passes
+    check: cd packages/sdk-ts && pnpm exec vitest run test/chain/fan-in-left.test.ts
+  - id: AC-2
+    description: >
+      independent node B adds only the right fixture module/test and its focused
+      test passes
+    check: cd packages/sdk-ts && pnpm exec vitest run test/chain/fan-in-right.test.ts
+  - id: AC-3
+    description: >
+      node C imports both independently produced modules, the combined report
+      passes, and the committed WP-239 runtime integration test proves
+      artifact-backed materialization plus deterministic conflict behavior
+    check: cd packages/sdk-ts && pnpm exec vitest run test/chain/fan-in-report.test.ts test/chain/fan-in-handoff.test.ts && pnpm exec tsc --noEmit && pnpm exec eslint .
+budget_usd: 20
+max_steps: 8
+executor:
+  adapter: codex
+  family: openai
+judge:
+  family: openai-compat
+  cadence: 2
+  max_cost_share: 0.5
+routing:
+  stages:
+    plan: { provider: openai-compat, model: gpt-5.5 }
+    code: { provider: openai-compat, model: gpt-5.5 }
+    review: { provider: openai-compat, model: gpt-5.5 }
+    judge: { provider: openai-compat, model: gemini-3.1-pro-preview }

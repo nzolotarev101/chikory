@@ -23,6 +23,7 @@ import { existsSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 
 import { ChainJournal, chainRecordFrom, type ChainEntry } from "../chain/store.js";
+import { serializeWriteConflicts } from "../chain/write-set.js";
 import type { ChainNodeTemplate } from "../chain/node-spec.js";
 import { renderChainTrace } from "../chain/trace.js";
 import { FamilyDiversityError } from "../judge/family.js";
@@ -90,11 +91,23 @@ export async function planAndGateChain(
     return { ok: false, phase: "plan", message: planned.reason, costUsd: planned.costUsd };
   }
 
+  let normalizedPlan: Plan;
+  try {
+    normalizedPlan = serializeWriteConflicts(planned.plan, { requireWriteSets: true });
+  } catch (err) {
+    return {
+      ok: false,
+      phase: "plan",
+      message: err instanceof Error ? err.message : String(err),
+      costUsd: planned.costUsd,
+    };
+  }
+
   let gated;
   try {
     gated = await runPlanJudgePass({
       router,
-      plan: planned.plan,
+      plan: normalizedPlan,
       goalCriteria: spec.acceptanceCriteria,
       plannerFamily: spec.executor.family,
       judgeModel: spec.routing.stages.judge,
@@ -115,7 +128,7 @@ export async function planAndGateChain(
   if (gated.verdict.kind !== "PROCEED") {
     return { ok: false, phase: "gate", message: gated.verdict.rationale, verdict: gated.verdict, costUsd };
   }
-  return { ok: true, plan: planned.plan, verdict: gated.verdict, costUsd };
+  return { ok: true, plan: normalizedPlan, verdict: gated.verdict, costUsd };
 }
 
 function templateFromSpec(spec: TaskSpec): ChainNodeTemplate {

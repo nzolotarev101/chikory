@@ -155,10 +155,28 @@ class ExecutorConfig(ContractModel):
     family: LLMProvider
 
 
+class RepoHandoff(ContractModel):
+    repo_url: str
+    source_commit: str
+    base_commit: str
+    head_commit: str
+    changed_paths: list[str]
+    bundle_ref: ArtifactRef
+
+
+class ChainNodeHandoff(ContractModel):
+    node_id: str
+    run_id: str
+    repos: list[RepoHandoff] = Field(min_length=1)
+
+
 class ChainLink(ContractModel):
     plan_id: str
     node_id: str
+    chain_id: str | None = None
+    write_set: list[str] | None = None
     parent_run_id: str | None = None
+    parent_handoffs: list[ChainNodeHandoff] | None = None
 
 
 class TaskSpec(ContractModel):
@@ -334,6 +352,7 @@ class PlanNode(ContractModel):
     goal: str
     acceptance_criteria: list[AcceptanceCriterion] = Field(min_length=1)
     depends_on: list[str]
+    write_set: list[str] | None = None
     budget_usd: float = Field(gt=0)
 
 
@@ -361,4 +380,5 @@ class ChainRecord(ContractModel):
     plan_verdict: PlanVerdict | None = None
     node_runs: dict[str, str]
     node_outcomes: dict[str, NodeOutcome]
+    node_handoffs: dict[str, ChainNodeHandoff] | None = None
     status: ChainStatus

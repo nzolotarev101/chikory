@@ -28,6 +28,10 @@ export const PLANNER_SYSTEM_PROMPT: string = [
   "  Do not translate package managers, paths, flags, or working directories.",
   "- `dependsOn` lists the ids of nodes that must reach SUCCESS before the node",
   "  can start.",
+  "- `writeSet` lists every repo-relative file path the node may create, modify,",
+  "  rename, or delete. Use exact POSIX paths, not globs or directories. Chikory",
+  "  deterministically serializes otherwise-independent nodes whose write sets",
+  "  overlap, and rejects runtime writes outside the declared set.",
   "- Per-node `budgetUsd` values must sum to at most the chain budget.",
   "",
   "Respond with a single JSON object matching the requested schema.",
@@ -44,7 +48,7 @@ export const PLAN_RESPONSE_SCHEMA = {
       items: {
         type: "object",
         additionalProperties: false,
-        required: ["id", "goal", "acceptanceCriteria", "dependsOn", "budgetUsd"],
+        required: ["id", "goal", "acceptanceCriteria", "dependsOn", "writeSet", "budgetUsd"],
         properties: {
           id: { type: "string", minLength: 1 },
           goal: { type: "string" },
@@ -62,6 +66,7 @@ export const PLAN_RESPONSE_SCHEMA = {
             },
           },
           dependsOn: { type: "array", items: { type: "string" } },
+          writeSet: { type: "array", minItems: 1, items: { type: "string" } },
           budgetUsd: { type: "number" },
         },
       },

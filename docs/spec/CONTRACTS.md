@@ -338,6 +338,7 @@ export interface PlanNode {
   goal: string;                        // self-contained 1–3-step brief; the child run's goal
   acceptanceCriteria: AcceptanceCriterion[];
   dependsOn: string[];                 // node ids that must reach SUCCESS first
+  writeSet?: string[];                 // exact repo-relative paths; required for newly planned chains
   budgetUsd: number;                   // per-node cap; chain budget = Σ nodes
 }
 
@@ -359,7 +360,25 @@ export interface PlanVerdict {
 export interface ChainLink {           // run → chain back-reference (on TaskSpec)
   planId: string;
   nodeId: string;
+  chainId?: string;                    // shared artifact namespace / owning chain
+  writeSet?: string[];                 // node publication boundary
   parentRunId?: string;                // run whose checkpoint this node started from
+  parentHandoffs?: ChainNodeHandoff[]; // ordered like dependsOn; new artifact path
+}
+
+export interface RepoHandoff {
+  repoUrl: string;
+  sourceCommit: string;                // original chain baseline
+  baseCommit: string;                  // this node's chikory-base
+  headCommit: string;                  // sealed node tree
+  changedPaths: string[];
+  bundleRef: ArtifactRef;              // repo_snapshot in the configured shared store
+}
+
+export interface ChainNodeHandoff {
+  nodeId: string;
+  runId: string;
+  repos: RepoHandoff[];
 }
 
 export type ChainStatus =
@@ -377,6 +396,7 @@ export interface ChainRecord {
   planVerdict?: PlanVerdict;
   nodeRuns: Record<string, string>;    // node id → child run id
   nodeOutcomes: Record<string, NodeOutcome>;  // node id → terminal outcome (chain reducer input)
+  nodeHandoffs?: Record<string, ChainNodeHandoff>; // sealed artifact provenance
   status: ChainStatus;
 }
 ```

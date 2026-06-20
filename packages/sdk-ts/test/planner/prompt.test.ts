@@ -77,6 +77,7 @@ describe("planner prompt (WP-219 S2, ADR-005 D1)", () => {
       "goal",
       "acceptanceCriteria",
       "dependsOn",
+      "writeSet",
       "budgetUsd",
     ]);
   });

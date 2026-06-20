@@ -7,6 +7,7 @@
  * (`advanceChain`) consumes. No I/O, no clock, no mutation.
  */
 import type {
+  ChainNodeHandoff,
   ChainLink,
   JudgePolicy,
   NodeOutcome,
@@ -59,9 +60,16 @@ export function planNodeToTaskSpec(
   planId: string,
   parentRunId?: string,
   handoffNote?: string,
+  chainId?: string,
+  parentHandoffs?: ChainNodeHandoff[],
 ): TaskSpec {
   const chainLink: ChainLink = { planId, nodeId: node.id };
+  if (chainId !== undefined) chainLink.chainId = chainId;
+  if (node.writeSet !== undefined) chainLink.writeSet = node.writeSet;
   if (parentRunId !== undefined) chainLink.parentRunId = parentRunId;
+  if (parentHandoffs !== undefined && parentHandoffs.length > 0) {
+    chainLink.parentHandoffs = parentHandoffs;
+  }
 
   const spec: TaskSpec = {
     name: `${planId}-${node.id}`,

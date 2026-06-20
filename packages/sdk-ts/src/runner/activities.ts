@@ -9,7 +9,7 @@
  */
 import { execFile } from "node:child_process";
 import { existsSync } from "node:fs";
-import { mkdir } from "node:fs/promises";
+import { mkdir, readFile, unlink, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { promisify } from "node:util";
 
@@ -24,6 +24,7 @@ import type {
   AcceptanceCriterion,
   ArtifactRef,
   ArtifactStore,
+  ChainNodeHandoff,
   Checkpoint,
   CheckpointId,
   CompactionPolicy,
@@ -41,7 +42,8 @@ import type {
 } from "../types.js";
 import { buildDigestMessages } from "./compaction-prompt.js";
 import { planCompaction } from "./compaction.js";
-import { artifactsDir, journalPath, workspaceDir } from "./paths.js";
+import { artifactsDir, journalPath, runDir, sharedArtifactsDir, workspaceDir } from "./paths.js";
+import { undeclaredWritePaths } from "../chain/write-set.js";
 
 /** observability.md: one span per checkpoint write (CONTRACTS.md §8). */
 export const SPAN_CHECKPOINT = "chikory.checkpoint";
@@ -68,6 +70,8 @@ export interface RunnerActivityDeps {
   adapters: AdapterRegistry;
   /** Router construction options for judge passes (test seam: env/baseUrls). */
   routerOptions?: RouterOptions;
+  /** All workers on a distributed task queue must point this at one namespace. */
+  handoffStore?: ArtifactStore;
 }
 
 export interface StepPayload {
@@ -135,6 +139,10 @@ function requireSpec(journal: Journal, runId: string): TaskSpec {
   return run.task;
 }
 
+function sharedHandoffStore(deps: RunnerActivityDeps): ArtifactStore {
+  return deps.handoffStore ?? createLocalArtifactStore(sharedArtifactsDir(deps.dataDir));
+}
+
 /** Git tag marking the workspace state right after prepareRun (= `<runId>@base`). */
 const BASE_TAG = "chikory-base";
 
@@ -182,15 +190,73 @@ export function createRunnerActivities(deps: RunnerActivityDeps) {
     async prepareRun(input: {
       runId: string;
       spec: TaskSpec;
-    }): Promise<{ workspaceDir: string; baseCommit: string }> {
+    }): Promise<
+      | { status: "SUCCESS"; workspaceDir: string; baseCommit: string }
+      | { status: "FAILED"; reason: string }
+    > {
       return withHeartbeat(async () => {
         const ws = workspaceDir(deps.dataDir, input.runId);
         const repo = input.spec.repos[0];
         if (!repo) throw new Error("TaskSpec.repos is empty");
+        const setupJournal = openJournal(deps, input.runId);
+        try {
+          setupJournal.createRun(input.runId, input.spec);
+        } finally {
+          setupJournal.close();
+        }
         const parentRunId = input.spec.chainLink?.parentRunId;
+        const parentHandoffs = input.spec.chainLink?.parentHandoffs ?? [];
         if (!existsSync(join(ws, ".git"))) {
           await mkdir(ws, { recursive: true });
-          if (parentRunId !== undefined) {
+          if (parentHandoffs.length > 0) {
+            await execFileAsync("git", ["clone", repo.url, ws]);
+            if (repo.ref) await git(ws, ["checkout", repo.ref]);
+            await git(ws, ["config", "user.name", "chikory"]);
+            await git(ws, ["config", "user.email", "runner@chikory.local"]);
+
+            for (const [index, parent] of parentHandoffs.entries()) {
+              const parentRepo = parent.repos.find((candidate) => candidate.repoUrl === repo.url);
+              if (!parentRepo) {
+                return {
+                  status: "FAILED",
+                  reason: `parent ${parent.nodeId} has no handoff for ${repo.url}`,
+                };
+              }
+              const bundlePath = join(runDir(deps.dataDir, input.runId), `parent-${index}.bundle`);
+              await writeFile(bundlePath, await sharedHandoffStore(deps).get(parentRepo.bundleRef));
+              const parentRef = `refs/chikory/parents/${index}`;
+              await git(ws, [
+                "fetch",
+                bundlePath,
+                `refs/heads/chikory/run-${parent.runId}:${parentRef}`,
+              ]);
+              await unlink(bundlePath);
+              const fetchedHead = await git(ws, ["rev-parse", `${parentRef}^{commit}`]);
+              if (fetchedHead !== parentRepo.headCommit) {
+                return {
+                  status: "FAILED",
+                  reason: `parent ${parent.nodeId} bundle head mismatch: ${fetchedHead} != ${parentRepo.headCommit}`,
+                };
+              }
+              if (index === 0) {
+                await git(ws, ["checkout", "--detach", parentRef]);
+              } else {
+                try {
+                  await git(ws, ["merge", "--no-ff", "--no-edit", parentRef]);
+                } catch {
+                  try {
+                    await git(ws, ["merge", "--abort"]);
+                  } catch {
+                    // Git may fail before creating merge state.
+                  }
+                  return {
+                    status: "FAILED",
+                    reason: `artifact fan-in conflict while merging parent ${parent.nodeId}`,
+                  };
+                }
+              }
+            }
+          } else if (parentRunId !== undefined) {
             const parentWs = workspaceDir(deps.dataDir, parentRunId);
             // --no-tags is correctness-critical: inheriting the predecessor's
             // chikory-base tag would make this node's judge diff include the
@@ -215,13 +281,7 @@ export function createRunnerActivities(deps: RunnerActivityDeps) {
           await git(ws, ["tag", BASE_TAG]);
           baseCommit = await git(ws, ["rev-parse", `${BASE_TAG}^{commit}`]);
         }
-        const journal = openJournal(deps, input.runId);
-        try {
-          journal.createRun(input.runId, input.spec);
-        } finally {
-          journal.close();
-        }
-        return { workspaceDir: ws, baseCommit };
+        return { status: "SUCCESS", workspaceDir: ws, baseCommit };
       });
     },
 
@@ -749,6 +809,100 @@ export function createRunnerActivities(deps: RunnerActivityDeps) {
       }
     },
 
+    /** Publish a self-contained repository bundle before a chain node seals SUCCESS. */
+    async publishChainHandoff(input: {
+      runId: string;
+    }): Promise<
+      | { status: "SUCCESS"; handoff: ChainNodeHandoff }
+      | { status: "FAILED"; reason: string }
+    > {
+      return withHeartbeat(async () => {
+        const journal = openJournal(deps, input.runId);
+        try {
+          const spec = requireSpec(journal, input.runId);
+          const link = spec.chainLink;
+          const repo = spec.repos[0];
+          if (!link || !repo) return { status: "FAILED", reason: "chain handoff metadata is absent" };
+          if (spec.repos.length !== 1) {
+            return { status: "FAILED", reason: "chain handoff currently supports exactly one repo" };
+          }
+
+          const ws = workspaceDir(deps.dataDir, input.runId);
+          const baseCommit = await git(ws, ["rev-parse", `${BASE_TAG}^{commit}`]);
+          const headCommit = await git(ws, ["rev-parse", "HEAD"]);
+          const changedPaths = (await git(ws, ["diff", "--name-only", `${BASE_TAG}..HEAD`]))
+            .split("\n")
+            .filter(Boolean)
+            .sort();
+          if (changedPaths.length === 0) {
+            return { status: "FAILED", reason: `node ${link.nodeId} produced no repository changes` };
+          }
+          const undeclared =
+            link.writeSet === undefined
+              ? []
+              : undeclaredWritePaths(
+                  {
+                    id: link.nodeId,
+                    goal: spec.goal,
+                    acceptanceCriteria: spec.acceptanceCriteria,
+                    dependsOn: [],
+                    writeSet: link.writeSet,
+                    budgetUsd: spec.budgetUsd,
+                  },
+                  changedPaths,
+                );
+          if (undeclared.length > 0) {
+            return {
+              status: "FAILED",
+              reason: `node ${link.nodeId} wrote outside its declared writeSet: ${undeclared.join(", ")}`,
+            };
+          }
+
+          const parentSources = new Set(
+            (link.parentHandoffs ?? []).flatMap((parent) =>
+              parent.repos.map((parentRepo) => parentRepo.sourceCommit),
+            ),
+          );
+          if (parentSources.size > 1) {
+            return { status: "FAILED", reason: "parent handoffs do not share one source commit" };
+          }
+          const sourceCommit = [...parentSources][0] ?? baseCommit;
+          const bundlePath = join(runDir(deps.dataDir, input.runId), "handoff.bundle");
+          try {
+            await unlink(bundlePath);
+          } catch {
+            // First publication attempt.
+          }
+          await git(ws, ["bundle", "create", bundlePath, `refs/heads/chikory/run-${input.runId}`]);
+          const bundleRef = await sharedHandoffStore(deps).put(await readFile(bundlePath), {
+            kind: "repo_snapshot",
+            summary: `sealed repository snapshot for ${link.nodeId}`,
+          });
+          await unlink(bundlePath);
+
+          return {
+            status: "SUCCESS",
+            handoff: {
+              nodeId: link.nodeId,
+              runId: input.runId,
+              repos: [
+                {
+                  repoUrl: repo.url,
+                  sourceCommit,
+                  baseCommit,
+                  headCommit,
+                  changedPaths,
+                  bundleRef,
+                },
+              ],
+            },
+          };
+        } finally {
+          journal.close();
+        }
+      });
+    },
+
     /**
      * Terminal seal — every run ends with an explicit journal terminal
      * entry; runs never end ambiguously (CG-1, durable-runner.md).
@@ -758,6 +912,7 @@ export function createRunnerActivities(deps: RunnerActivityDeps) {
       status: "SUCCESS" | "FAILED" | "CANCELLED";
       reason?: string;
       lastCheckpoint?: string;
+      handoff?: ChainNodeHandoff;
     }): Promise<void> {
       const journal = openJournal(deps, input.runId);
       try {
@@ -768,9 +923,11 @@ export function createRunnerActivities(deps: RunnerActivityDeps) {
               status: input.status,
               reason: input.reason,
               lastCheckpoint: input.lastCheckpoint,
+              ...(input.handoff !== undefined ? { handoff: input.handoff } : {}),
             },
             costDeltaUsd: 0,
-            artifactRefs: [],
+            artifactRefs:
+              input.handoff?.repos.map((repo) => repo.bundleRef) ?? [],
           });
         }
         journal.sealRun(input.status);

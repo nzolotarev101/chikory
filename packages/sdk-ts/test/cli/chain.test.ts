@@ -35,9 +35,9 @@ const SPEC: TaskSpec = {
 
 const THREE_NODES = {
   nodes: [
-    { id: "N-1", goal: "slice one", acceptanceCriteria: [{ id: "AC-1", description: "one" }], dependsOn: [], budgetUsd: 10 },
-    { id: "N-2", goal: "slice two", acceptanceCriteria: [{ id: "AC-1", description: "two" }], dependsOn: ["N-1"], budgetUsd: 10 },
-    { id: "N-3", goal: "slice three", acceptanceCriteria: [{ id: "AC-1", description: "three" }], dependsOn: ["N-2"], budgetUsd: 10 },
+    { id: "N-1", goal: "slice one", acceptanceCriteria: [{ id: "AC-1", description: "one" }], dependsOn: [], writeSet: ["one.ts"], budgetUsd: 10 },
+    { id: "N-2", goal: "slice two", acceptanceCriteria: [{ id: "AC-1", description: "two" }], dependsOn: ["N-1"], writeSet: ["two.ts"], budgetUsd: 10 },
+    { id: "N-3", goal: "slice three", acceptanceCriteria: [{ id: "AC-1", description: "three" }], dependsOn: ["N-2"], writeSet: ["three.ts"], budgetUsd: 10 },
   ],
 };
 

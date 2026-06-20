@@ -44,7 +44,7 @@ The persisted/exported form of a run's journal. Single format consumed by: `chik
 | `budget_event` | `{ event: "estimate"\|"halt"\|"top_up", remainingUsd, details }` + WP-218 additive token fields `cause?: "usd"\|"tokens"` (absent ⇒ `"usd"`, back-compatible) and `remainingTokens?` on a token HALT; token figures (`spentTokens`/`budgetTokens`/`estimateTokens`) ride `details`. The USD path omits both, so pre-WP-218 journals stay byte-identical |
 | `compaction` | `{ tokensBefore, tokensAfter, digestRef }` (WP-203 — emitted at the checkpoint boundary; see CONTRACTS.md §6a) |
 | `pacing` | `{ decision, batchSize, reasoning }` (P2) |
-| `terminal` | `{ status: "SUCCESS"\|"FAILED"\|"CANCELLED", reason, lastCheckpoint }` |
+| `terminal` | `{ status: "SUCCESS"\|"FAILED"\|"CANCELLED", reason, lastCheckpoint, handoff? }`; successful chain nodes attach their artifact-backed `ChainNodeHandoff` and bundle refs |
 
 Every payload carries enough human rationale to render the decision tree without external lookups (NF-2).
 

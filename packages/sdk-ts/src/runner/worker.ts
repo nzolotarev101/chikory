@@ -9,8 +9,9 @@ import { fileURLToPath } from "node:url";
 
 import { NativeConnection, Worker, DefaultLogger, Runtime } from "@temporalio/worker";
 
-import { createChainActivities } from "../chain/activities.js";
+import { createChainActivities, type ChainActivities } from "../chain/activities.js";
 import type { RouterOptions } from "../router.js";
+import type { ArtifactStore } from "../types.js";
 import {
   createRunnerActivities,
   type AdapterRegistry,
@@ -29,8 +30,12 @@ export interface RunnerWorkerOptions {
   workflowBundlePath?: string;
   /** Router construction options for judge passes (test seam: env/baseUrls). */
   routerOptions?: RouterOptions;
+  /** Shared cross-run artifact namespace (remote-backed on multi-worker deployments). */
+  handoffStore?: ArtifactStore;
   /** Test seam: swap individual activities (e.g. a deciding judge). */
   activitiesOverride?: Partial<RunnerActivities>;
+  /** Test/deployment seam for chain-scope activities. */
+  chainActivitiesOverride?: Partial<ChainActivities>;
 }
 
 export interface RunnerWorker {
@@ -68,8 +73,10 @@ export async function createRunnerWorker(opts: RunnerWorkerOptions): Promise<Run
       dataDir,
       adapters: opts.adapters,
       routerOptions: opts.routerOptions,
+      handoffStore: opts.handoffStore,
     }),
     ...createChainActivities({ dataDir }),
+    ...opts.chainActivitiesOverride,
     ...opts.activitiesOverride,
   };
   const worker = await Worker.create({

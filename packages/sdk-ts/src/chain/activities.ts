@@ -8,7 +8,7 @@
  */
 import { Journal, reportFromJournal } from "../journal/journal.js";
 import { chainJournalPath, journalPath } from "../runner/paths.js";
-import type { NodeOutcome, Plan } from "../types.js";
+import type { ChainNodeHandoff, NodeOutcome, Plan } from "../types.js";
 import { deriveNodeOutcome } from "./node-spec.js";
 import { ChainJournal } from "./store.js";
 
@@ -64,14 +64,23 @@ export function createChainActivities(deps: ChainActivityDeps) {
      * map it to the `NodeOutcome` the reducer folds. The chain never re-judges;
      * it records what the child run already sealed.
      */
-    async readNodeOutcome(input: { childRunId: string }): Promise<NodeOutcome> {
+    async readNodeResult(input: {
+      childRunId: string;
+    }): Promise<{ outcome: NodeOutcome; handoff?: ChainNodeHandoff }> {
       const journal = new Journal(journalPath(deps.dataDir, input.childRunId));
       try {
         const report = reportFromJournal(journal);
         if (!report) {
           throw new Error(`child run ${input.childRunId} has no journal — cannot seal node`);
         }
-        return deriveNodeOutcome(report.status, report.lastVerdict?.kind);
+        const terminal = journal.entries("terminal").at(-1)?.payload as
+          | { handoff?: ChainNodeHandoff }
+          | undefined;
+        const result: { outcome: NodeOutcome; handoff?: ChainNodeHandoff } = {
+          outcome: deriveNodeOutcome(report.status, report.lastVerdict?.kind),
+        };
+        if (terminal?.handoff !== undefined) result.handoff = terminal.handoff;
+        return result;
       } finally {
         journal.close();
       }
@@ -82,13 +91,18 @@ export function createChainActivities(deps: ChainActivityDeps) {
       chainId: string;
       nodeId: string;
       outcome: NodeOutcome;
+      handoff?: ChainNodeHandoff;
     }): Promise<void> {
       const journal = openChain(deps, input.chainId);
       try {
         journal.appendOnce(
           "node_sealed",
           { field: "nodeId", value: input.nodeId },
-          { nodeId: input.nodeId, outcome: input.outcome },
+          {
+            nodeId: input.nodeId,
+            outcome: input.outcome,
+            ...(input.handoff !== undefined ? { handoff: input.handoff } : {}),
+          },
         );
       } finally {
         journal.close();

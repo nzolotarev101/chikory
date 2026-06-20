@@ -1,5 +1,32 @@
 {
+  "chainId": "chain-7f3a",
   "nodeId": "N-2",
+  "parentHandoffs": [
+    {
+      "nodeId": "N-1",
+      "repos": [
+        {
+          "baseCommit": "1111111111111111111111111111111111111111",
+          "bundleRef": {
+            "bytes": 512,
+            "id": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "kind": "repo_snapshot",
+            "summary": "sealed repository snapshot for N-1"
+          },
+          "changedPaths": [
+            "packages/sdk-ts/src/chain/left.ts"
+          ],
+          "headCommit": "2222222222222222222222222222222222222222",
+          "repoUrl": "/repo/chikory",
+          "sourceCommit": "1111111111111111111111111111111111111111"
+        }
+      ],
+      "runId": "run-7f3a-n1"
+    }
+  ],
   "parentRunId": "run-7f3a-n1",
-  "planId": "plan-7f3a"
+  "planId": "plan-7f3a",
+  "writeSet": [
+    "packages/sdk-ts/src/chain/right.ts"
+  ]
 }

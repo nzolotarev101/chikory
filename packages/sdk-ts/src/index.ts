@@ -73,6 +73,7 @@ export { advanceChain, deriveChainStatus } from "./chain/advance.js";
 export { renderChainTrace } from "./chain/trace.js";
 export { readyNodes } from "./chain/sequencing.js";
 export { hasDependencyCycle } from "./chain/validation.js";
+export { serializeWriteConflicts, undeclaredWritePaths } from "./chain/write-set.js";
 export {
   ChainJournal,
   chainRecordFrom,

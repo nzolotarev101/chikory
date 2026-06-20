@@ -9,5 +9,8 @@
   "budgetUsd": 5,
   "dependsOn": [],
   "goal": "Add the ArtifactStore interface and a local FS backend with put/get.",
-  "id": "N-1"
+  "id": "N-1",
+  "writeSet": [
+    "packages/sdk-ts/src/artifacts/local.ts"
+  ]
 }

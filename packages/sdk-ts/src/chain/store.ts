@@ -17,6 +17,7 @@ import { dirname } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 
 import type {
+  ChainNodeHandoff,
   ChainRecord,
   ChainStatus,
   NodeOutcome,
@@ -49,6 +50,7 @@ export interface NodeStartedPayload {
 export interface NodeSealedPayload {
   nodeId: string;
   outcome: NodeOutcome;
+  handoff?: ChainNodeHandoff;
 }
 
 interface ChainEntryRow {
@@ -203,9 +205,11 @@ export function chainRecordFrom(journal: ChainJournal): ChainRecord | undefined 
   }
 
   const nodeOutcomes: Record<string, NodeOutcome> = {};
+  const nodeHandoffs: Record<string, ChainNodeHandoff> = {};
   for (const e of journal.entries("node_sealed")) {
     const p = e.payload as NodeSealedPayload;
     nodeOutcomes[p.nodeId] = p.outcome;
+    if (p.handoff !== undefined) nodeHandoffs[p.nodeId] = p.handoff;
   }
 
   const verdicts = journal.entries("plan_verdict");
@@ -216,6 +220,7 @@ export function chainRecordFrom(journal: ChainJournal): ChainRecord | undefined 
     plan,
     nodeRuns,
     nodeOutcomes,
+    ...(Object.keys(nodeHandoffs).length > 0 ? { nodeHandoffs } : {}),
     status: chain.status as ChainStatus,
   };
   if (lastVerdict) record.planVerdict = lastVerdict;

@@ -18,6 +18,11 @@ export function artifactsDir(dataDir: string, runId: string): string {
   return join(runDir(dataDir, runId), "artifacts");
 }
 
+/** Shared content-addressed namespace for cross-run repository handoffs. */
+export function sharedArtifactsDir(dataDir: string): string {
+  return join(dataDir, "artifacts");
+}
+
 export function workspaceDir(dataDir: string, runId: string): string {
   return join(runDir(dataDir, runId), "workspace");
 }

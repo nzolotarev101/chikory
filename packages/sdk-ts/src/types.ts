@@ -426,6 +426,8 @@ export interface PlanNode {
   acceptanceCriteria: AcceptanceCriterion[];
   /** Node ids that must reach SUCCESS before this node starts. */
   dependsOn: string[];
+  /** Exact repo-relative paths this node may create, modify, rename, or delete. */
+  writeSet?: string[];
   /** Per-node cap; chain budget = Σ nodes. */
   budgetUsd: number;
 }
@@ -483,8 +485,31 @@ export interface PlanVerdict {
 export interface ChainLink {
   planId: string;
   nodeId: string;
+  /** Owning chain; locates the shared handoff artifact namespace. */
+  chainId?: string;
+  /** Planner-declared boundary enforced before publishing this node. */
+  writeSet?: string[];
   /** The run whose checkpoint this node started from (predecessor). */
   parentRunId?: string;
+  /** Ordered exactly like the node's dependsOn list. */
+  parentHandoffs?: ChainNodeHandoff[];
+}
+
+/** One repository snapshot published by a sealed chain node. */
+export interface RepoHandoff {
+  repoUrl: string;
+  sourceCommit: string;
+  baseCommit: string;
+  headCommit: string;
+  changedPaths: string[];
+  bundleRef: ArtifactRef;
+}
+
+/** Artifact-backed output of one sealed chain node. */
+export interface ChainNodeHandoff {
+  nodeId: string;
+  runId: string;
+  repos: RepoHandoff[];
 }
 
 export type ChainStatus =
@@ -518,6 +543,8 @@ export interface ChainRecord {
   nodeRuns: Record<string, string>;
   /** node id → terminal outcome of its sealed child run (empty until a node seals). */
   nodeOutcomes: Record<string, NodeOutcome>;
+  /** node id → sealed, artifact-backed repository snapshots. */
+  nodeHandoffs?: Record<string, ChainNodeHandoff>;
   status: ChainStatus;
 }
 

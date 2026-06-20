@@ -86,8 +86,11 @@ Every requirement in [`project.md`](../project.md), assigned a stable ID, mapped
 > handoff is implemented and proven by dogfood-042
 > `chain-1cde6ae3-d05f-438e-b818-8af76419d6ae` SUCCESS 2/2: node B imported
 > node A's handed-off module while retaining an isolated base/diff; cumulative
-> chain harvest landed `b1b825d`. True fan-in, structured compaction/ref
-> handoff, and distributed artifact transport are top-priority WP-239 (F-39).
+> chain harvest landed `b1b825d`. WP-239 artifact-backed fan-in is now
+> implemented under ADR-007: ordered Git-bundle refs, shared-store injection,
+> conflict-safe write ownership (WP-242/F-43), provenance, and topological
+> cumulative harvest. Dogfood-043 is queued for live proof. Structured WP-203
+> compaction notes remain a follow-up.
 > Child approval/resume visibility is WP-241 (F-42); chain-aware verification
 > remains WP-232 (F-41).
 

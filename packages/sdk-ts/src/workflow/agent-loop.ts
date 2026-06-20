@@ -33,6 +33,7 @@ import {
 } from "../runner/budget.js";
 import type {
   ArtifactRef,
+  ChainNodeHandoff,
   Checkpoint,
   ContextBundle,
   JudgeVerdict,
@@ -148,15 +149,29 @@ export async function agentLoop(spec: TaskSpec): Promise<RunStatus> {
     reason?: string,
   ): Promise<RunStatus> {
     const lastCheckpoint = checkpoints[checkpoints.length - 1]?.id ?? "";
+    let handoff: ChainNodeHandoff | undefined;
+    if (terminal === "SUCCESS" && spec.chainLink !== undefined) {
+      const published = await activities.publishChainHandoff({ runId });
+      if (published.status === "FAILED") return seal("FAILED", published.reason);
+      handoff = published.handoff;
+    }
     if (terminal === "FAILED") {
       failure = { reason: reason ?? "unknown", lastCheckpoint };
     }
-    await activities.sealRun({ runId, status: terminal, reason, lastCheckpoint });
+    await activities.sealRun({
+      runId,
+      status: terminal,
+      reason,
+      lastCheckpoint,
+      ...(handoff !== undefined ? { handoff } : {}),
+    });
     status = terminal;
     return status;
   }
 
-  const { baseCommit } = await activities.prepareRun({ runId, spec });
+  const prepared = await activities.prepareRun({ runId, spec });
+  if (prepared.status === "FAILED") return seal("FAILED", prepared.reason);
+  const { baseCommit } = prepared;
   // Judge diffs cover everything since the last verdict (or the run base).
   let sinceCommit = baseCommit;
 

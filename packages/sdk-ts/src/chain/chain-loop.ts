@@ -11,12 +11,11 @@
  * write/read is a proxied chain activity, and child runs go through
  * `executeChild`. A crashed worker replays deterministically from history.
  *
- * S3-wiring v1 (the incremental SUCCESS-path slice): dispatch is sequential,
+ * S3 wiring dispatches sequentially,
  * each node runs as a fresh TaskSpec, and a `FAILED` node halts the chain
- * (`deriveChainStatus` → FAILED). S4 hands a dependent node the first
- * predecessor's sealed workspace plus a static note. The D3 halt-and-replan
- * re-invoke, structured compaction handoff, true fan-in merge, and parallel
- * ready-node fan-out are deferred follow-ups.
+ * (`deriveChainStatus` → FAILED). ADR-007 S4 passes every predecessor as an
+ * artifact-backed Git bundle plus a static note. D3 halt-and-replan,
+ * structured compaction notes, and parallel ready-node fan-out remain deferred.
  */
 import { executeChild, proxyActivities, workflowInfo } from "@temporalio/workflow";
 
@@ -56,6 +55,7 @@ export async function chainLoop(input: ChainLoopInput): Promise<ChainStatus> {
     plan,
     nodeRuns: {},
     nodeOutcomes: {},
+    nodeHandoffs: {},
     status: "RUNNING",
   };
   // An empty (or already-complete) plan resolves immediately.
@@ -85,21 +85,22 @@ export async function chainLoop(input: ChainLoopInput): Promise<ChainStatus> {
     const runId = childRunId(chainId, node.id);
     await activities.recordNodeStarted({ chainId, nodeId: node.id, childRunId: runId });
 
-    // WP-237 v1 carries one linear predecessor. Additional dependencies still
-    // gate scheduling, but their git trees are not merged; true fan-in needs a
-    // deterministic merge/artifact protocol (F-39 / WP-239).
     const predecessorId = node.dependsOn[0];
     const parentRunId =
       predecessorId !== undefined ? record.nodeRuns[predecessorId] : undefined;
-    const predecessor =
-      predecessorId !== undefined
-        ? plan.nodes.find((candidate) => candidate.id === predecessorId)
-        : undefined;
-    const handoffNote = predecessor
+    const parentHandoffs = node.dependsOn.flatMap((id) => {
+      const handoff = record.nodeHandoffs?.[id];
+      return handoff === undefined ? [] : [handoff];
+    });
+    const predecessors = node.dependsOn.flatMap((id) => {
+      const predecessor = plan.nodes.find((candidate) => candidate.id === id);
+      return predecessor === undefined ? [] : [predecessor];
+    });
+    const handoffNote = predecessors.length > 0
       ? [
           "## Already completed by predecessor nodes (do not redo)",
-          `- ${predecessor.id}: ${predecessor.goal}`,
-          "The code from this node is ALREADY PRESENT in your workspace. Build on it.",
+          ...predecessors.map((predecessor) => `- ${predecessor.id}: ${predecessor.goal}`),
+          "The code from these nodes is ALREADY PRESENT in your workspace. Build on it.",
         ].join("\n")
       : undefined;
     const childSpec = planNodeToTaskSpec(
@@ -108,6 +109,8 @@ export async function chainLoop(input: ChainLoopInput): Promise<ChainStatus> {
       plan.id,
       parentRunId,
       handoffNote,
+      chainId,
+      parentHandoffs,
     );
     const runStatus: RunStatus = await executeChild(agentLoop, {
       workflowId: runId,
@@ -115,12 +118,25 @@ export async function chainLoop(input: ChainLoopInput): Promise<ChainStatus> {
       taskQueue,
     });
 
-    const outcome = await activities.readNodeOutcome({ childRunId: runId });
-    await activities.recordNodeSealed({ chainId, nodeId: node.id, outcome });
+    const result = await activities.readNodeResult({ childRunId: runId });
+    const { outcome } = result;
+    await activities.recordNodeSealed({
+      chainId,
+      nodeId: node.id,
+      outcome,
+      ...(result.handoff !== undefined ? { handoff: result.handoff } : {}),
+    });
 
     // Fold: record the node→run linkage and the sealed outcome, recompute status.
     record = advanceChain(
-      { ...record, nodeRuns: { ...record.nodeRuns, [node.id]: runId } },
+      {
+        ...record,
+        nodeRuns: { ...record.nodeRuns, [node.id]: runId },
+        nodeHandoffs:
+          result.handoff === undefined
+            ? record.nodeHandoffs
+            : { ...record.nodeHandoffs, [node.id]: result.handoff },
+      },
       node.id,
       outcome,
     );

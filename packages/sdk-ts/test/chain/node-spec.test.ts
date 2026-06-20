@@ -72,6 +72,43 @@ describe("planNodeToTaskSpec", () => {
     expect(spec.chainLink?.parentRunId).toBe("run-parent");
   });
 
+  it("carries ordered artifact handoffs and the node write boundary", () => {
+    const parent = {
+      nodeId: "N-1",
+      runId: "run-parent",
+      repos: [
+        {
+          repoUrl: "/tmp/repo",
+          sourceCommit: "source",
+          baseCommit: "base",
+          headCommit: "head",
+          changedPaths: ["src/one.ts"],
+          bundleRef: {
+            id: "a".repeat(64),
+            kind: "repo_snapshot" as const,
+            bytes: 100,
+            summary: "parent snapshot",
+          },
+        },
+      ],
+    };
+    const spec = planNodeToTaskSpec(
+      { ...node, writeSet: ["src/two.ts"] },
+      template,
+      "plan-1",
+      "run-parent",
+      undefined,
+      "chain-1",
+      [parent],
+    );
+
+    expect(spec.chainLink).toMatchObject({
+      chainId: "chain-1",
+      writeSet: ["src/two.ts"],
+      parentHandoffs: [parent],
+    });
+  });
+
   it("does not alter the node goal when no handoff note is supplied", () => {
     expect(planNodeToTaskSpec(node, template, "plan-1", "run-parent").goal).toBe(
       node.goal,

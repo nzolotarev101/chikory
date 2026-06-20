@@ -6,10 +6,9 @@
 #   devbox run -- bash scripts/harvest.sh [<run-id|chain-id>] [<branch-name>]
 #
 # A run contributes its final file versions relative to `chikory-base`. A
-# successful linear chain contributes each child run's delta in dependency
-# order: the terminal child's base already includes its predecessor, so using
-# only the terminal diff would silently omit earlier nodes. Non-linear chain
-# merge semantics are deliberately fail-closed pending WP-239.
+# successful chain contributes each child run's delta exactly once in stable
+# topological order. A dependent child's base already includes its parents, so
+# using only terminal-node diffs would silently omit predecessor work.
 
 set -euo pipefail
 
@@ -51,17 +50,28 @@ if [ -f ".chikory/chains/$TARGET_ID/chain.db" ]; then
       throw new Error(`chain ${record.chainId ?? record.planId} is ${record.status}; only SUCCESS chains can be harvested`);
     }
     const nodes = record.plan.nodes;
-    for (let i = 0; i < nodes.length; i++) {
-      const expected = i === 0 ? [] : [nodes[i - 1].id];
-      if (JSON.stringify(nodes[i].dependsOn) !== JSON.stringify(expected)) {
-        throw new Error("chain harvest v1 supports one linear dependency path only; fan-in/fan-out/independent merges require WP-239");
+    const ids = new Set(nodes.map((node) => node.id));
+    if (ids.size !== nodes.length) throw new Error("chain plan contains duplicate node ids");
+    for (const node of nodes) {
+      for (const dependency of node.dependsOn) {
+        if (!ids.has(dependency)) throw new Error(`node ${node.id} depends on unknown node ${dependency}`);
       }
-      if (record.nodeOutcomes[nodes[i].id]?.status !== "SUCCESS") {
-        throw new Error(`node ${nodes[i].id} is not SUCCESS`);
+    }
+    const completed = new Set();
+    while (completed.size < nodes.length) {
+      const ready = nodes.filter((node) =>
+        !completed.has(node.id) && node.dependsOn.every((dependency) => completed.has(dependency))
+      );
+      if (ready.length === 0) throw new Error("chain plan contains a dependency cycle");
+      for (const node of ready) {
+        if (record.nodeOutcomes[node.id]?.status !== "SUCCESS") {
+          throw new Error(`node ${node.id} is not SUCCESS`);
+        }
+        const runId = record.nodeRuns[node.id];
+        if (!runId) throw new Error(`node ${node.id} has no child run id`);
+        process.stdout.write(`${runId}\n`);
+        completed.add(node.id);
       }
-      const runId = record.nodeRuns[nodes[i].id];
-      if (!runId) throw new Error(`node ${nodes[i].id} has no child run id`);
-      process.stdout.write(`${runId}\n`);
     }
   ' "$CHAIN_JSON") || {
     echo "Error: chain is not safely harvestable" >&2

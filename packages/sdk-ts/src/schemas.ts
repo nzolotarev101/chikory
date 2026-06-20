@@ -13,6 +13,7 @@ import type {
   AcceptanceCriterion,
   ArtifactRef,
   ChainLink,
+  ChainNodeHandoff,
   ChainRecord,
   Checkpoint,
   CompletionRequest,
@@ -32,6 +33,7 @@ import type {
   PlanNode,
   PlanVerdict,
   RepoSpec,
+  RepoHandoff,
   RouterError,
   RoutingPolicy,
   RunStatusReport,
@@ -168,12 +170,34 @@ export const NotificationPolicySchema = z
   })
   .strict();
 
+export const RepoHandoffSchema = z
+  .object({
+    repoUrl: z.string().min(1),
+    sourceCommit: z.string().min(1),
+    baseCommit: z.string().min(1),
+    headCommit: z.string().min(1),
+    changedPaths: z.array(z.string().min(1)),
+    bundleRef: z.lazy(() => ArtifactRefSchema),
+  })
+  .strict();
+
+export const ChainNodeHandoffSchema = z
+  .object({
+    nodeId: z.string().min(1),
+    runId: z.string().min(1),
+    repos: z.array(RepoHandoffSchema).min(1),
+  })
+  .strict();
+
 /** WP-219 (ADR-005) — run → chain back-reference; defined here for TaskSpec. */
 export const ChainLinkSchema = z
   .object({
     planId: z.string().min(1),
     nodeId: z.string().min(1),
+    chainId: z.string().min(1).optional(),
+    writeSet: z.array(z.string().min(1)).optional(),
     parentRunId: z.string().min(1).optional(),
+    parentHandoffs: z.array(ChainNodeHandoffSchema).optional(),
   })
   .strict();
 
@@ -423,6 +447,7 @@ export const PlanNodeSchema = z
     goal: z.string().min(1),
     acceptanceCriteria: z.array(AcceptanceCriterionSchema).min(1),
     dependsOn: z.array(z.string().min(1)),
+    writeSet: z.array(z.string().min(1)).optional(),
     budgetUsd: z.number().gt(0),
   })
   .strict();
@@ -496,6 +521,7 @@ export const ChainRecordSchema = z
     planVerdict: PlanVerdictSchema.optional(),
     nodeRuns: z.record(z.string(), z.string()),
     nodeOutcomes: z.record(z.string(), NodeOutcomeSchema),
+    nodeHandoffs: z.record(z.string(), ChainNodeHandoffSchema).optional(),
     status: ChainStatusSchema,
   })
   .strict();
@@ -537,6 +563,8 @@ export type ContractTypeChecks = [
   AssertAccepts<Plan, z.infer<typeof PlanSchema>>,
   AssertAccepts<PlanVerdict, z.infer<typeof PlanVerdictSchema>>,
   AssertAccepts<ChainLink, z.infer<typeof ChainLinkSchema>>,
+  AssertAccepts<RepoHandoff, z.infer<typeof RepoHandoffSchema>>,
+  AssertAccepts<ChainNodeHandoff, z.infer<typeof ChainNodeHandoffSchema>>,
   AssertAccepts<NodeOutcome, z.infer<typeof NodeOutcomeSchema>>,
   AssertAccepts<ChainRecord, z.infer<typeof ChainRecordSchema>>,
 ];
@@ -571,6 +599,8 @@ export const contractSchemas = {
   PlanNode: PlanNodeSchema,
   Plan: PlanSchema,
   PlanVerdict: PlanVerdictSchema,
+  RepoHandoff: RepoHandoffSchema,
+  ChainNodeHandoff: ChainNodeHandoffSchema,
   ChainLink: ChainLinkSchema,
   NodeOutcome: NodeOutcomeSchema,
   ChainRecord: ChainRecordSchema,
