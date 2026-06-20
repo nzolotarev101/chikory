@@ -1,0 +1,108 @@
+# Dogfood-041: THE FIRST CHAIN DOGFOOD (WP-219 S3 end-to-end, ADR-005 §S3).
+# ─────────────────────────────────────────────────────────────────────────────
+# This is NOT a single-run dogfood. It is launched with the NEW `chikory chain`
+# command (hand-built 2026-06-20, the unlock): the goal below is DECOMPOSED into
+# a multi-node Plan by the planner, GATED by the different-family plan
+# meta-judge, then each node runs as its own judge-gated child run through the
+# durable `chainLoop` Temporal workflow, folded via the pure `advanceChain`
+# reducer, halting on the first FAILED node (D3 replan deferred).
+#
+# WHY THIS IS THE RIGHT NEXT DOGFOOD (2026-06-20): the first 39 dogfoods were all
+# 1-step pure-function ports — they never exercised Chikory's actual thesis
+# (durable multi-run execution + long-horizon self-correction + a judge with a
+# real surface to catch regressions on). Every prior run was structurally
+# unable to fail. This run is the opposite: 2–3 dependent runs where later nodes
+# build on earlier ones (compounding error), each independently judge-gated, and
+# a real chance the judge catches a bad node before its dependents run. The
+# launch path itself (`chikory chain`) did not exist until this session; building
+# it was the unblock, because the deferred non-pure wiring is exactly why the
+# queue kept falling back to pure leaves.
+#
+# THE GOAL (a genuinely decomposable, real, needed task): wire the deferred
+# `chikory trace <chain-id>` CLI branch so chain forensics are legible — load a
+# `ChainJournal` and render it with the EXISTING pure `renderChainTrace`
+# (dogfood-037). This naturally splits into: detect a chain-id vs run-id in
+# cmdTrace → branch to the chain renderer → add a test. The planner decides the
+# exact node split; do not hand-decompose it.
+#
+# LAUNCH (zero-secrets, NOTE the `chain` verb, not `run`):
+#   devbox run temporal-dev    # the chain executor needs a live Temporal server
+#   node scripts/cli-judge-proxy.mjs 8787 gemini &
+#   OPENAI_COMPAT_BASE_URL=http://127.0.0.1:8787 \
+#     pnpm chikory chain examples/dogfood/dogfood-041.yaml --watch
+#
+# KNOWN FRONTIER (expected, and the point):
+#   - The dogfood-review tooling (`scripts/dogfood-verify.sh`, `chikory trace
+#     <run-id>`) assumes ONE run journal; a chain produces a ChainJournal +
+#     per-node run journals under `.chikory/chains/<chain-id>` and
+#     `.chikory/runs/<chain-id>-node-<id>`. Review tooling adaptation is a
+#     follow-up WP — this run will surface exactly what's missing (new friction
+#     is a SUCCESS here, not a regression).
+#   - The planner invents per-node acceptance `check`s; if it writes a check that
+#     overruns the 120 s cap or shells out to devbox, a node may stall — that is
+#     real data about the planner's prompt, not a spec bug.
+#   - A non-PROCEED plan meta-judge verdict stops the chain before any node runs
+#     (v1: no auto-replan). That is a legitimate, informative terminal state.
+#
+# Commit everything before launching — the per-node workspaces clone HEAD.
+name: dogfood-041-chain-trace-cli-e2e
+goal: >
+  Wire the `chikory trace <chain-id>` CLI branch so a finished chain's forensics
+  are legible, reusing the EXISTING pure `renderChainTrace` (in
+  `packages/sdk-ts/src/chain/trace.ts`, dogfood-037) — do not reimplement the
+  renderer.
+
+  Today `chikory trace <id>` (`packages/sdk-ts/src/cli/commands.ts`, `cmdTrace`)
+  only understands a per-run journal. Extend it so that when `<id>` resolves to a
+  chain (a `ChainJournal` exists at `chainJournalPath(dataDir, id)` —
+  `packages/sdk-ts/src/runner/paths.js`) rather than a run journal, it loads the
+  chain via `chainRecordFrom` and prints `renderChainTrace(record, entries)`
+  instead of the per-run trace. A plain run id keeps its current behavior
+  exactly (no regression). Prefer the run-journal path when both somehow exist,
+  or pick the unambiguous resolution and document it in a comment.
+
+  Keep the change minimal and in-scope: touch only the CLI trace path and its
+  test; do NOT change the chain executor, the journal/store formats, the pure
+  `renderChainTrace`, or any contract/`types.ts`. No new dependency. Follow
+  AGENTS.md and the sdk-ts conventions (strict TS, ESM, named exports). Run all
+  Devbox verification commands sequentially.
+
+  The work decomposes naturally into a short dependency chain (detect/resolve a
+  chain id → branch `cmdTrace` to the chain renderer → cover it with a test);
+  let the planner choose the exact node split and per-node acceptance criteria.
+repos:
+  - url: /Users/nikitazolotarev/repos/chikory
+    writable: true
+# Goal-level acceptance criteria — the plan meta-judge's coverage floor. The
+# planner derives per-node criteria; these bound the whole chain.
+acceptance_criteria:
+  - id: AC-1
+    description: >
+      `chikory trace <chain-id>` renders a chain via `renderChainTrace`
+      (chain header + per-node rows), distinct from the per-run trace.
+    check: cd packages/sdk-ts && pnpm exec tsc --noEmit
+  - id: AC-2
+    description: >
+      a plain `chikory trace <run-id>` still renders the per-run trace
+      unchanged — no regression to existing behavior.
+    check: cd packages/sdk-ts && pnpm exec vitest run test/cli/trace.test.ts
+  - id: AC-3
+    description: the full TS suite, typecheck, and lint stay green.
+    check: cd packages/sdk-ts && pnpm exec eslint .
+# Chain budget = Σ node budgets; the planner sizes each node within this.
+budget_usd: 15
+# Per-node cap (template.maxSteps): each child run gets up to this many steps.
+max_steps: 8
+executor:
+  adapter: codex
+  family: openai
+judge:
+  family: openai-compat
+  cadence: 2
+  max_cost_share: 0.5
+routing:
+  stages:
+    plan: { provider: openai-compat, model: gpt-5.5 }
+    code: { provider: openai-compat, model: gpt-5.5 }
+    review: { provider: openai-compat, model: gpt-5.5 }
+    judge: { provider: openai-compat, model: gemini-3.1-pro-preview }

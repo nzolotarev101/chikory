@@ -44,17 +44,27 @@ primitive set stays complete** (`readyNodes` + `hasDependencyCycle` +
 `chainLoop` workflow (`readyNodes` → `executeChild(agentLoop)` → `advanceChain`
 fold → `node_started`/`node_sealed` journaling, halt on `FAILED`), chain
 activities, and pure node→TaskSpec helpers; 360 TS pass (+15 chain tests).
-Deferred hand-design follow-ups: D3 halt-and-replan, S4 context handoff, parallel
-fan-out, S5 suspend/resume, the `chikory chain`/`plan` + `chikory trace <chain-id>`
-CLI glue. **Next dogfood is dogfood-040 / WP-201 dual-SDK parity — the Python
-context-window pacing port** (`decide_context_window_pacing` + local
-`ContextWindowUsage`/`ContextWindowPacingPolicy`/`ContextWindowPacingDecision`
-dataclasses in a new `packages/sdk-py/src/chikory/pacing.py`, mirroring the TS
-`src/runner/pacing.ts` source-of-truth — the WP-207 `continue`/`compact`/`park`
-decision over projected context-window pressure; all local types, no contract
-change; 🟢 the dogfood-035/036/039 parity pattern). The `renderChainTrace` Python
-parity stays blocked behind it (it needs the not-yet-ported `ChainEntry` store
-type).
+**`chikory chain` CLI launch path hand-landed (2026-06-20, this session,
+TASK-PROTOCOL §4):** the unlock that makes the chain executor dogfoodable
+end-to-end — `cmdChain` (`src/cli/chain.ts`) parses a goal spec, decomposes it
+host-side via `runPlannerPass`, gates it with the different-family
+`runPlanJudgePass` (a non-PROCEED verdict stops the chain — v1, no auto-replan),
+then `runner.startChain` drives the durable `chainLoop` and `followChain` polls
+the `ChainJournal` to a terminal `ChainStatus`. New `chain` command wired in
+`main.ts`; `startChain` added to the TemporalRunner; 4 new unit tests over the
+decompose→gate seam (`test/cli/chain.test.ts`, 369 TS pass); no contract change.
+Deferred: D3 halt-and-replan, S4 context handoff, parallel fan-out, S5
+suspend/resume, the `chikory trace <chain-id>` branch (itself dogfood-041's
+goal). **Next dogfood is dogfood-041 — THE FIRST CHAIN DOGFOOD** (WP-219 S3
+end-to-end, launched with `chikory chain`): decompose a goal → gate → run each
+node as a judge-gated child run through `chainLoop`. This breaks the 39-run
+pure-leaf streak that never tested the thesis (durable multi-run execution +
+compounding error + a real judge surface). **dogfood-040 (Python pacing parity)
+is demoted to track-B regression coverage** — parity ports are not thesis
+evidence; land them as normal PRs, not the dogfood headline. _Recommended KPI
+change: retire "N straight one-step SUCCESS" as the health signal (it rewards
+triviality); track real regressions the judge caught pre-land, successful
+resumes, and measured per-step reliability over long horizons instead._
 
 ---
 
@@ -208,6 +218,21 @@ Five parallel lanes after WP-002/WP-005 land. Lane docs contain full technical d
 
 Goal: survive *real* long horizons (days, big contexts, multi-repo) and close every remaining §5 requirement that isn't benchmark- or cloud-shaped. Built **using** v0.1 wherever practical — each WP here is a candidate dogfood run.
 
+**Dogfood-priority legend (DOGFOODING §1 — read before queueing a run).** A
+headline dogfood must have a *failure surface*; pure leaves are track-B and the
+`/dogfood-assessor` skill `⛔ VETO`s a busy pick when a 🎯 slice is unblocked:
+- 🎯 **Thesis-pillar** (headline-worthy — exercises the differentiators):
+  durable multi-run chains (**WP-219**, `chikory chain`), context-rot mitigation
+  / compaction (**WP-203/204**), crash→resume HITL (**WP-206**), the judge
+  catching a real regression, and the non-pure *wiring* of any 🔴 WP (where
+  agents actually fail). These outrank everything below.
+- 🅱️ **Track-B** (necessary, NOT a headline — land as a normal PR): pure
+  single-file ports with deterministic tests — **WP-201** dual-SDK parity, pure
+  formatters/helpers, the pure halves already exhausted across WP-203/219.
+- ⛓️ **Unblock-first** (hand-design, then the 🎯 slice it opens): frozen-contract
+  changes and architect wiring (TASK-PROTOCOL §4) — e.g. the `chikory chain`
+  launch path (hand-landed 2026-06-20) unblocked the first chain dogfood.
+
 **Historical queue order through dogfood-029**: dogfood findings outrank the original listing. ~~WP-217~~, ~~WP-218 slice 1~~, ~~WP-220~~, ~~WP-222 slice 1~~, ~~WP-223 initial fix~~, ~~WP-224~~, ~~WP-225~~, ~~WP-209 trace slices~~, ~~WP-208 pure delivery slices~~, ~~WP-219 S1 contracts~~, ~~WP-219 `readyNodes`~~, ~~WP-219 `hasDependencyCycle`~~, ~~WP-226~~, ~~WP-227~~ (hand-landed `26b9964`), ~~WP-229~~ (dogfood-018 `run-59115f35`, F-27 closed), ~~WP-221 Slice A~~ (pure trigger half, dogfood-019 `run-d836635b`), ~~WP-230~~ (typecheck covers `test/**`, dogfood-020 `run-3575ba23`, F-29 closed), ~~WP-221 Slice B~~ (runner consumes the marker → `claimsComplete`, dogfood-021 `run-91eced6b` — the F-11 cost win), ~~WP-221 / F-11~~ (**closed by observation**, dogfood-022 `run-499218ef` — first marker-emitting run, one step, no probe), ~~WP-219 S2 prompt half~~ (`planner/prompt.ts`, dogfood-022 `run-499218ef`), ~~WP-219 S2 assembly half~~ (`planner/assemble.ts` `buildPlan`, dogfood-023 `run-2d40ded5` — S2 pure surface complete), ~~WP-219 S2b plan-judge prompt half~~ (`planner/meta-judge-prompt.ts` `buildPlanJudgeMessages`, dogfood-024 `run-28073328` — mirrors `judge/prompt.ts`), ~~WP-219 S2b verdict-assembly half~~ (`planner/meta-judge-verdict.ts` `buildPlanVerdict`, dogfood-025 `run-0d39fd12` — mirrors `buildVerdict`; **WP-219's pure surface complete**), ~~WP-203 S4 compaction-trace renderer~~ (`formatEntryLine` `case "compaction"`, dogfood-026 `run-f9d699d4` — **WP-203's pure trace surface complete**), ~~WP-228 S1 baseline-precheck decision~~ (`evaluateBaselinePrecheck`, `src/cli/precheck.ts`, dogfood-027 `run-f97a0e63` — the analog of `buildVerdict`/`buildPlanVerdict`; the non-pure check-execution + warn/`--force` wiring stays hand-design), ~~WP-202 / CM-3 Memory Pointer decision + renderer~~ (`shouldPointerize` + `formatPointerReference`, `src/runner/memory-pointer.ts`, dogfood-028 `run-7681a607` — the analog of `buildVerdict`/`evaluateBaselinePrecheck`; type-only `ArtifactRef`, no contract change; the interception + `store.put` + injection wiring stays non-pure hand-design), ~~WP-203 S2 compaction digest-prompt half~~ (`DIGEST_SYSTEM_PROMPT` + `buildDigestMessages(toDigest)`, `src/runner/compaction-prompt.ts`, dogfood-029 `run-74f88081` — the analog of `planner/prompt.ts`/`judge/prompt.ts`; type-only `Message`, no schema, no contract change; **WP-203's pure surface now exhausted**; the digest wiring stays non-pure hand-design, blocked on the WP-202 store), ~~WP-201 Python compaction digest-prompt parity~~ (`compaction_prompt.py`, dogfood-030 `run-1a97e2ca`), ~~WP-201 Python branch-target parity~~ (`branch_target.py`, dogfood-035 `run-b0bc3865`, committed `88e496c`, landing-scope MATCH), ~~WP-201 Python Memory Pointer parity~~ (`memory_pointer.py` `should_pointerize` + `format_pointer_reference` + local `MemoryPointerPolicy`, dogfood-036 `run-51645fbb` — mirrors the TS `runner/memory-pointer.ts`, `ArtifactRef` reused, no contract change; uncommitted on the working tree), ~~WP-219 S3-pure chain-state reducer~~ (`advanceChain` + `deriveChainStatus`, `src/chain/advance.ts`, dogfood-038 `run-61e8b0a1` — the `computeVerdict` analog per ADR-005 §S3; type-only contract imports, no contract change; uncommitted on the working tree), ~~WP-219 S6-pure chain-trace renderer~~ (`renderChainTrace`, `src/chain/trace.ts`, dogfood-037 `run-295b2947` — the pure chain analog of the per-run `renderTrace`; type-only `ChainRecord`/`PlanNode`/`ChainEntry` imports, no contract change; **WP-219's dogfoodable pure surface now exhausted**; uncommitted on the working tree), ~~WP-201 Python chain-state reducer parity~~ (`advance_chain` + `derive_chain_status`, `packages/sdk-py/src/chikory/chain_advance.py`, dogfood-039 `run-6bb8ac7e` — 1:1 port of the TS `src/chain/advance.ts` from dogfood-038; `ChainRecord`/`NodeOutcome`/`ChainStatus` reused, no contract change; harvested IDENTICAL + uncommitted on the working tree), and the **2026-06-14 hand-landed wall-clear** (~~WP-218 token gate~~ math+wiring+event-shape, the ~~F-11 e2e probe-retirement proof~~, the ~~WP-219 S2 planner contract~~, the ~~WP-203 compaction contract~~ ADR-006) are delivered. **Architect wall cleared by hand (2026-06-14)** — the four blocking items are landed (see the Status line): WP-218 token gate (math+wiring+event shape+test), the F-11 e2e probe-retirement proof, the WP-219 S2 planner function contract, and the WP-203 compaction contract (ADR-006). All green (TS 263 / py 47). **WP-228 S1 done** (dogfood-027 `run-f97a0e63`, harvested IDENTICAL + staged on `main`, pending commit): the pure launch-baseline-precheck decision `evaluateBaselinePrecheck(results): BaselinePrecheckResult` in `src/cli/precheck.ts` — turns the exit codes of a spec's acceptance `check`s, run against the clean baseline, into a `{ satisfied, passedIds, failedIds, summary }` verdict so a redundant run can be warned/refused (dogfood-017 F-25); local result types, no `types.ts` change; the non-pure half (run each `check` against the baseline `child_process` → `evaluateBaselinePrecheck` → warn / refuse unless `--force`) is the hand-design follow-up (TASK-PROTOCOL §4). **WP-202 / CM-3 pure decision+renderer done** (dogfood-028 `run-7681a607`, harvested IDENTICAL + staged on `main`, pending commit): `shouldPointerize(bytes, policy)` + `formatPointerReference(ref)` in a new `src/runner/memory-pointer.ts` — the pure decision of *when* a tool output is large enough to store externally and *how* to render the short context-facing reference (project.md Memory Pointer Pattern; CONTRACTS.md §5 / CM-3), the analog of `buildVerdict`/`evaluateBaselinePrecheck`; local policy type, type-only `ArtifactRef` import, no `types.ts` change; the non-pure half (intercept a tool output → `shouldPointerize` → `store.put` → inject `formatPointerReference`, else inline) is the hand-design follow-up (TASK-PROTOCOL §4) and the **first step toward unblocking WP-203 S2 digest wiring** (the Phase-2-exit compaction path). **WP-203 S2 pure digest-prompt half done** (dogfood-029 `run-74f88081`, harvested IDENTICAL + staged on `main`, pending commit): `DIGEST_SYSTEM_PROMPT` + `buildDigestMessages(toDigest): Message[]` in a new `src/runner/compaction-prompt.ts` — the pure prompt regime for the compaction LLM digest call over the already-frozen `CompactionPlan.toDigest` + `Message`, the analog of `planner/prompt.ts`/`judge/prompt.ts`; type-only `Message`, no response schema (prose output), no `types.ts` change. **WP-203's entire pure surface is now exhausted** (S4 trace renderer dogfood-026 + this S2 digest-prompt half); the non-pure S2 digest wiring (router fold `toDigest` → digest string → `store.put` behind a Memory Pointer → journal `CompactionResult`) is the hand-design follow-up (TASK-PROTOCOL §4) and **stays blocked on the WP-202 store**; S3 recall-tier projection has no frozen pure contract yet. **Next dogfood: WP-201 Python-SDK parity — port the pure compaction digest-prompt half** (`DIGEST_SYSTEM_PROMPT` + `build_digest_messages(to_digest)` in a new `packages/sdk-py/src/chikory/compaction_prompt.py`, the Python parity of dogfood-029; source-of-truth the TS `compaction-prompt.ts`; `Message` already ported at `chikory/types.py:87`, no contract change) — dogfood-030. The TS pure surface is exhausted, so the dogfoodable thread shifts to dual-SDK parity (🟢, plan.md §6, vendor-neutral launch requirement; the core contracts already landed in `sdk-py` via dogfood-002 `run-2899005b`). WP-219's pure surface is likewise exhausted (S2 planner + S2b plan meta-judge complete through dogfood-025). **WP-219 S2/S2b non-pure harnesses landed by hand 2026-06-19 (on `main`, staged):** `runPlannerPass` + `DecomposingPlanner` (`src/planner/harness.ts`) and `runPlanJudgePass` (`src/planner/meta-judge-harness.ts`) — the `decompose` router call + the family-diversity-enforced plan-judge pass, both failures-as-values, 15 new tests, no contract change. **Goal decomposition is now end-to-end runnable.** **Next value-driving work (hand-design, the keystone after dogfood-035): the S3 durable chain executor** — the Temporal workflow that loops the landed pure `readyNodes` over a meta-judge-gated `Plan`, spawns one child run per node from the predecessor checkpoint, threads `ChainRecord` state across runs, and halt-and-replans on node failure (ADR-005 D3/D4). The dogfoodable pure slice that falls out of it: a pure chain-state reducer (`advanceChain`/`deriveChainStatus` over `ChainRecord` + a node terminal result, the `computeVerdict` analog) — write the ADR D3/D4 transition rules by hand first, then dogfood the reducer. (dogfood-022 pure token-math spec withdrawn — the math landed with the wiring.) **Stale-text correction (2026-06-19):** the WP-202 interception wiring and WP-203 S2 digest wiring are **landed on `main`** (not on the obsolete `feat/wp-202-203-memory-compaction-wiring` branch, which is behind `main`). Rationale: `docs/reports/dogfood-002.md` through `docs/reports/dogfood-027.md`.
 
 **Current queue note (dogfood-034 review)**: WP-205's pure surface is now
@@ -274,16 +299,25 @@ TASK-PROTOCOL §4). **WP-201 Python chain-state reducer parity DONE** (dogfood-0
 pure immutable node-fold, `ChainRecord`/`NodeOutcome`/`ChainStatus` reused from
 `chikory/types.py`, re-export from `__init__.py`, 6 pytest cases (80 py green,
 +6), no contract change; clean one-step SUCCESS, no probe (F-11 closed, sixteenth
-straight), input tokens 755k (series high), no new friction. **Next is
-dogfood-040 / WP-201 dual-SDK parity — the Python context-window pacing port**:
-`decide_context_window_pacing` + local
-`ContextWindowUsage`/`ContextWindowPacingPolicy`/`ContextWindowPacingDecision`
-dataclasses in a new `packages/sdk-py/src/chikory/pacing.py`, mirroring the TS
-`src/runner/pacing.ts` source-of-truth (the WP-207 `continue`/`compact`/`park`
-decision over projected context-window pressure); all local types, no contract
-change — 🟢-dogfoodable, the dogfood-035/036/039 parity pattern. The
-`renderChainTrace` Python parity stays blocked behind it (needs the not-yet-ported
-`ChainEntry` store type).
+straight), input tokens 755k (series high), no new friction. **The `chikory
+chain` CLI launch path then landed by hand (2026-06-20, TASK-PROTOCOL §4) so the
+chain executor is dogfoodable end-to-end** — `cmdChain` (`src/cli/chain.ts`)
+decomposes a goal host-side (`runPlannerPass`), gates it with the
+different-family `runPlanJudgePass`, then `runner.startChain` drives the durable
+`chainLoop` and `followChain` polls the `ChainJournal` to terminal; `chain`
+command wired in `main.ts`, `startChain` added to the TemporalRunner, 4 unit
+tests over the decompose→gate seam (369 TS pass), no contract change. **Next is
+dogfood-041 — THE FIRST CHAIN DOGFOOD**, launched with `chikory chain`: a goal
+(wire the deferred `chikory trace <chain-id>` branch to the pure
+`renderChainTrace`) decomposes into a multi-node Plan, the plan meta-judge gates
+it, and each node runs as a judge-gated child run through `chainLoop`. This is
+the deliberate break from the 39-run pure-leaf streak that never exercised
+durable multi-run execution, compounding error, or a real judge surface.
+**dogfood-040 (Python pacing parity) demotes to track-B regression coverage** —
+parity is essential but it is not thesis evidence and should not be the dogfood
+headline. _Recommended KPI change: retire "N straight one-step SUCCESS" as the
+health signal; track real regressions caught pre-land, successful resumes, and
+measured per-step reliability over long horizons instead._
 
 | WP | Title | Tag | Notes |
 |---|---|---|---|

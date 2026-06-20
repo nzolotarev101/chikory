@@ -42,6 +42,30 @@ This skill is run to analyze the latest planned dogfooding run in the `examples/
    - **Acyclic Dependency / Pure Preconditions**: The run is a pure helper or precondition slice (like cycle detection `hasDependencyCycle` or sequencing `readyNodes`) unblocked by a landed contract PR.
    - **Other reason**: Clarify any other technical or ordering reason why this item is next.
 
+### Step 6: Issue a BINDING verdict (the veto)
+
+This skill is a **gate, not advice** (DOGFOODING §1.2). After classifying:
+
+1. Apply the **failure-surface test** (DOGFOODING §1.1): could a competent agent
+   *plausibly fail* this candidate? A pure, single-file function with a
+   deterministic test (a 1:1 parity port, a formatter, a pure helper) has **no
+   failure surface** → it is **track-B**, never a headline dogfood, regardless of
+   which WP it serves.
+2. Scan `plan.md §6` for any **unblocked thesis-stressing slice** — one that
+   exercises a thesis pillar (durable execution, multi-run chains / WP-219,
+   judge-catching a regression, crash→resume / WP-206, context-rot / WP-203/204)
+   or has a real bug surface, and needs no un-landed contract.
+3. **Emit the verdict explicitly:**
+   - `✅ PROCEED` — the candidate is mission-critical / has a real failure
+     surface. Queue it.
+   - `⛔ VETO` — the candidate is busy work / track-B **and** an unblocked
+     thesis slice exists. **Name that slice and require it be queued instead.**
+   - `🟡 ALLOW (fallback)` — the candidate is busy work but **nothing
+     thesis-stressing is unblocked**; permit it as the headline, and say what
+     contract/architect work must land to unblock a real run next.
+
+The caller (`dogfood-review` phase-5) MUST honor a `⛔ VETO`.
+
 ## Output
 
 End your analysis with a structured summary formatted for readability. To ensure it is simple to read, visually clear, and detailed while conserving full context, adhere strictly to these rules:
@@ -50,5 +74,8 @@ End your analysis with a structured summary formatted for readability. To ensure
 2. **Context Conservation**: Maintain all exact details (WP identifiers, spec file paths, preceding run numbers/reports).
 3. **Structured Visual Layout**:
    - Use clear visual indicators for classification (e.g., `🔴 Mission Critical` or `🟡 Busy Work`).
+   - **Lead the summary with the binding verdict** (Step 6): `✅ PROCEED`,
+     `⛔ VETO` (name the thesis slice to queue instead), or `🟡 ALLOW (fallback)`
+     (state what must land to unblock a real run).
    - If classified as Busy Work, present the comparison table of the three preceding runs (run number, classification, report link, and outcome) using a markdown table.
 4. **Prioritization Rationale & Terminology Explanations**: Provide a detailed explanation of the prioritization rationale. Explain any complex domain terms (e.g., "Frozen Contract Wall", "Acyclic Dependency", "Friction Loop") clearly, so that the developer does not need external references to understand the decision.

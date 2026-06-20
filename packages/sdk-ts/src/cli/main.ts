@@ -16,6 +16,7 @@ import {
   cmdTrace,
   type CommonFlags,
 } from "./commands.js";
+import { cmdChain } from "./chain.js";
 import { cmdLand, type LandDeps } from "./land.js";
 
 export const HELP = `chikory — vendor-neutral control plane for long-running, self-correcting agents
@@ -25,6 +26,9 @@ usage: chikory <command> [options]
 commands:
   run <task.yaml>     validate the TaskSpec, start a gated run, follow it to
                       its terminal state (hosts the runner worker in-process)
+  chain <goal.yaml>   decompose a goal into a plan, gate it with the
+                      different-family plan meta-judge, then run each node as a
+                      child run through the durable chain executor (WP-219)
   resume <run-id>     reattach a worker and continue a run from its last
                       checkpoint (budget halts, escalations, machine moves)
   status [<run-id>]   live run state: current step, spend vs budget, last
@@ -44,6 +48,9 @@ options (every command):
 
 run options:
   --watch               stream journal entries live while following the run
+
+chain options:
+  --watch               stream chain entries live (node dispatched/sealed)
 
 resume options:
   --add-budget <usd>    top up the budget (continues a budget-halted run)
@@ -125,6 +132,7 @@ export async function main(argv: string[], deps: LandDeps = {}): Promise<number>
   try {
     switch (command) {
       case "run":
+      case "chain":
         parsed = parseCommand(rest, { watch: { type: "boolean" } });
         break;
       case "resume":
@@ -170,6 +178,11 @@ export async function main(argv: string[], deps: LandDeps = {}): Promise<number>
       const file = requireArg(positionals, "task spec file", io);
       if (file === undefined) return 1;
       return cmdRun({ file, watch: values["watch"] === true, ...flags }, deps);
+    }
+    case "chain": {
+      const file = requireArg(positionals, "goal spec file", io);
+      if (file === undefined) return 1;
+      return cmdChain({ file, watch: values["watch"] === true, ...flags }, deps);
     }
     case "resume": {
       const runId = requireArg(positionals, "run-id", io);

@@ -125,16 +125,34 @@ docs in `docs/` listed as living docs must not drift from code.
 
 ## 5. Ready the next run
 
-Pick the top of the plan.md §6 queue that is dogfoodable per DOGFOODING §1
-(🟢 mechanical, or a 🟡 slice needing no contracts change — contracts work
-is hand-done first, TASK-PROTOCOL §4). Write
-`examples/dogfood/dogfood-<NNN+1>.yaml` per DOGFOODING §3: goal as a
-self-contained 1–3-step brief naming exact files/symbols/tests; judge-
-executed checks that fit the 120 s cap (time them — bare toolchain
+**Pick by thesis value, not by safety — and prove it before writing the spec.**
+The loop's standing failure mode is defaulting to the safest slice (a pure
+1-file parity port an agent can't fail), which greens the dashboard but tests
+none of the thesis (durable multi-run execution, a judge that catches real
+regressions, long-horizon reliability). Two gates, in order, before you write
+any YAML:
+
+1. **Mission-critical gate (mandatory veto).** Run the `/dogfood-assessor`
+   skill on your intended candidate. If it returns **🟡 Busy Work** AND any
+   thesis-stressing slice is unblocked (🟢/🟡, no un-landed contract), the busy
+   candidate is **VETOED** — queue the thesis slice instead. Busy work is a
+   headline dogfood ONLY when nothing thesis-stressing is unblocked. Record the
+   assessor verdict in your output.
+2. **Failure-surface test (DOGFOODING §1.1).** A headline run must be something
+   a competent agent could *plausibly fail*: 2–6 steps, cross-file or a thesis
+   pillar (durable execution / multi-run chains WP-219 / judge-catching /
+   crash→resume WP-206 / context-rot WP-203/204) or a real bug surface. A pure
+   single-file deterministic-test port is **track-B** — land it as a normal PR,
+   never the dogfood headline.
+
+Then write `examples/dogfood/dogfood-<NNN+1>.yaml` per DOGFOODING §3: goal a
+self-contained brief naming exact files/symbols/tests (for a chain dogfood, a
+goal that genuinely decomposes — launched with `chikory chain`, not `run`);
+judge-executed checks that fit the 120 s cap (time them — bare toolchain
 binaries, not `devbox run`); zero-secrets routing block if no API keys.
-Validate it parses (`parseTaskSpec` over the file, or `pnpm chikory run`
-which validates first). Add the README index row ("not yet run"). Remind
-the user: commit everything before launching — the workspace clones HEAD.
+Validate it parses (`parseTaskSpec` over the file, or `pnpm chikory run`/`chain`
+which validate first). Add the README index row ("not yet run"). Remind the
+user: commit everything before launching — the workspace clones HEAD.
 
 ## Output
 

@@ -295,15 +295,55 @@ reference).
 
 ## 1. When to dogfood a WP
 
+A dogfood run exists to **stress the thesis** — durable multi-run execution, a
+real-time judge that catches a bad change *before* it lands, and reliability
+over long horizons. A task a competent agent cannot plausibly fail tests none of
+that; greening it is theater. (The tell: dogfood-002…039 were 38/39 one-step
+SUCCESSes — that streak meant the picks were too trivial to fail, **not** that
+the product was reliable.) Selection has three gates, in order.
+
+### 1.1 Failure-surface test — is this WORTH dogfooding?
+
+A slice is a **headline dogfood** only if a competent agent could *plausibly
+fail* it — it has a real failure surface:
+
+- multi-step / cross-file work where context accumulates (context rot), **or**
+- a **thesis pillar**: durable execution, multi-run chains (WP-219, launched
+  with `chikory chain`), the judge catching a regression, crash→resume (WP-206),
+  context-rot mitigation (WP-203/204), **or**
+- a genuine bug surface (a refactor, a tricky edge case, a non-obvious contract).
+
+A **pure single-file function with a deterministic test** — a 1:1 parity port, a
+formatter, a pure helper — is **track-B**: necessary, but not thesis evidence.
+Land it as a normal PR or batch it. It must **not** be the dogfood headline.
+
+### 1.2 Mission-critical gate — is this the RIGHT thing now? (mandatory veto)
+
+Before queueing the next run, run `/dogfood-assessor` on the candidate. It
+issues a **binding verdict**: a `⛔ VETO` (the candidate is busy work / track-B
+**and** a thesis-stressing slice is unblocked) means queue the named thesis
+slice instead. Busy work is allowed as a headline **only** when nothing
+thesis-stressing is unblocked (`🟡 ALLOW (fallback)`), in which case the gap to
+unblock a real run is itself the priority.
+
+### 1.3 WP-tag readiness — CAN it run as one campaign?
+
 | WP tag | Dogfood? |
 |---|---|
-| 🟢 Mechanical | **Yes — ideal.** Pattern-following with machine-checkable output (WP-201 Python parity, WP-208 notifications, WP-209 process metrics, WP-216 adapters). |
-| 🟡 Builder | **Yes**, sliced. One run = one well-specified slice with checkable criteria. If the WP needs a contracts change (`types.ts`), do that part by hand first — contracts PRs need architect review (TASK-PROTOCOL §4). |
-| 🔴 Architect | **Not as one run.** Do the design by hand (ADR/component doc update), then dogfood the implementation slices that fall out of it. |
+| 🟢 Mechanical | Runnable, but apply §1.1 — a pure leaf with no failure surface is **track-B**, not a headline. |
+| 🟡 Builder | **The sweet spot.** Slice to a real, checkable surface. A contracts change (`types.ts`) is hand-done first (TASK-PROTOCOL §4). |
+| 🔴 Architect | **Not as one run** — design by hand, then dogfood the slices that fall out, **including the non-pure wiring** (that's where agents fail and the judge earns its keep — e.g. the `chikory chain` launch path that unblocked the first chain dogfood). |
 
-Rule of thumb from dogfood-001: a run converges fastest when the goal is
-completable in **1–3 executor steps** (one step ≈ one focused agent session,
-≤10 min, ≤25 turns). Bigger WPs → several runs, one slice each.
+**Rule of thumb:** a headline run should be **2–6 executor steps with a real
+chance of a wrong turn** — enough rope for compounding error and for the judge
+to have something to catch. A goal that always finishes clean in one step is
+track-B (one step ≈ one focused agent session, ≤10 min, ≤25 turns).
+
+**Success signal (KPI):** judge "N straight one-step SUCCESS" as a *warning*,
+not a win — it means the picks stopped being hard. Track instead: regressions
+the judge caught **pre-land**, successful crash→resumes, and measured per-step
+reliability over long (10+ step) horizons. Reward catching failure, and
+selection follows.
 
 ## 2. One-time setup
 

@@ -22,7 +22,8 @@ import {
   TASK_QUEUE_DEFAULT,
 } from "./runner/api.js";
 import { DEFAULT_DATA_DIR, journalPath } from "./runner/paths.js";
-import type { DurableRunner, RunHandle, RunStatusReport, TaskSpec } from "./types.js";
+import type { ChainNodeTemplate } from "./chain/node-spec.js";
+import type { DurableRunner, Plan, RunHandle, RunStatusReport, TaskSpec } from "./types.js";
 
 export interface TemporalRunnerOptions {
   address?: string;
@@ -32,6 +33,13 @@ export interface TemporalRunnerOptions {
 }
 
 export interface TemporalRunner extends DurableRunner {
+  /**
+   * Start a WP-219 chain executor (`chainLoop` workflow, ADR-005 §S3) over an
+   * already-decomposed, plan-meta-judge-PROCEED'd `Plan`. workflowId = chain-id
+   * (mirrors `start`'s workflowId = run-id). The chain's progress is followed
+   * through the `ChainJournal` on disk, not a workflow query.
+   */
+  startChain(input: { plan: Plan; template: ChainNodeTemplate }): Promise<{ chainId: string }>;
   close(): Promise<void>;
 }
 
@@ -99,6 +107,17 @@ export function createTemporalRunner(opts: TemporalRunnerOptions = {}): Temporal
         args: [spec],
       });
       return makeHandle(runId);
+    },
+
+    async startChain(input): Promise<{ chainId: string }> {
+      const client = await getClient();
+      const chainId = `chain-${randomUUID()}`;
+      await client.workflow.start("chainLoop", {
+        workflowId: chainId,
+        taskQueue,
+        args: [{ plan: input.plan, template: input.template }],
+      });
+      return { chainId };
     },
 
     async resume(runId, runOpts): Promise<RunHandle> {
