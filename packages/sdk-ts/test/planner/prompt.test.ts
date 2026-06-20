@@ -37,6 +37,16 @@ describe("planner prompt (WP-219 S2, ADR-005 D1)", () => {
     expect(userContent).toContain(String(input.budgetUsd));
   });
 
+  it("instructs the planner to reuse goal criterion ids verbatim (coverage floor contract)", () => {
+    // Regression for dogfood-041 attempt 4 (F-36): the coverage floor matches a
+    // goal criterion as covered ONLY when a node carries an acceptance criterion
+    // with the same id. If the prompt does not tell the planner to reuse the id
+    // verbatim, the planner invents node-specific ids and every plan is rejected.
+    expect(PLANNER_SYSTEM_PROMPT).toContain("EXACTLY that goal criterion's");
+    expect(PLANNER_SYSTEM_PROMPT).toContain("matched by id");
+    expect(buildPlannerMessages(input)[1]?.content).toContain("VERBATIM");
+  });
+
   it("renders a placeholder when no acceptance criteria are defined", () => {
     const messages = buildPlannerMessages({ ...input, acceptanceCriteria: [] });
 

@@ -422,3 +422,97 @@ tests (masks real failure modes)" — Do-not list).
   attempt 4 is the first launch where a PROCEED verdict can actually flow into
   `startChain`. **The first real chain run is owed and now unblocked** — re-launch
   `devbox run dogfood` (the SDK rebuild will pick up the schema fix).
+
+---
+
+## Addendum — Attempt 4 (2026-06-20): the gate parsed the verdict, then the deterministic coverage floor overrode the LLM's PROCEED — on an id convention the planner was never told
+
+F-35 fixed → the meta-judge reply parsed cleanly. Attempt 4 went one layer deeper:
+the judge LLM returned **PROCEED** with a rationale that explicitly maps every
+node to every goal criterion — then the deterministic coverage floor flipped it
+to REVISE and the chain stopped:
+
+```text
+[cli-judge:agy] gpt-5.5 · 8036ms · 649/311 tokens (estimated)
+[cli-judge:agy] gemini-3.1-pro-preview · 5500ms · 841/88 tokens (estimated)
+chikory: plan meta-judge gate stopped the chain: The plan's nodes fully cover all
+requested goal acceptance criteria. Node 1 ('detect-and-branch') handles the chain
+detection and rendering using renderChainTrace (AC-1) and ensures the run-id
+fallback is preserved (AC-2). Node 2 ('verify-and-test') ensures comprehensive
+test coverage and runs typing and linting checks (AC-3). The dependency structure
+is clean and coherent. [coverage override: plan leaves goal criteria uncovered:
+AC-1, AC-2, AC-3 - cannot PROCEED]
+uncovered goal criteria: AC-1, AC-2, AC-3
+```
+
+### What actually happened (sequence)
+
+1. ✅ Planner SUCCEEDED — `gpt-5.5 · 8036ms · 649/311 tok` — decomposed into a
+   clean 2-node plan (`detect-and-branch` → `verify-and-test`).
+2. ✅ Meta-judge LLM SUCCEEDED and **PROCEEDed** — `gemini-3.1-pro-preview ·
+   5500ms · 841/88 tok` — its rationale *correctly* maps N-1→AC-1/AC-2,
+   N-2→AC-3 and calls the dependency structure coherent.
+3. 🔴 **`buildPlanVerdict`'s deterministic coverage floor overrode PROCEED→REVISE**
+   (`meta-judge-verdict.ts:25-31`). `planCoverageGaps(plan, goalCriteria)`
+   (`coverage.ts:16-22`) marks a goal criterion covered **iff some node carries
+   an acceptance criterion with the *same id***. The planner — told by both the
+   spec ("the planner derives per-node criteria … let the planner choose … the
+   per-node acceptance criteria") and the planner prompt to invent node criteria —
+   gave its nodes **its own ids**, none of which equal `AC-1/AC-2/AC-3`. Zero id
+   overlap → all three reported uncovered → override fires → REVISE.
+4. 🔴 `cmdChain` fail-closed (v1: no auto-replan, D3 deferred). Zero durable state
+   (still host-side before `startChain`; F-33 unchanged, not re-counted).
+
+The override message is actively misleading: it asserts "plan leaves goal criteria
+uncovered: AC-1, AC-2, AC-3" immediately after the LLM's own text says all three
+ARE covered. The floor and the LLM are measuring two different things — id-equality
+vs. semantic coverage — and the floor silently wins.
+
+### New friction
+
+#### 🔴 F-36 — the coverage floor requires nodes to reuse goal criterion ids verbatim, but nothing told the planner that → a correct plan is rejected 100% of the time (FIXED this session → WP-236)
+
+**Evidence.** Attempt 4 above. The coverage contract is split across four places
+that disagreed:
+| Surface | File | Reality |
+|---|---|---|
+| Coverage floor | `coverage.ts:19-21` | covered ⇔ a node AC `id` **equals** the goal criterion id |
+| Planner prompt | `prompt.ts` (pre-fix) | "Every goal acceptance criterion must be covered…" — **never said "reuse the id"** |
+| Planner response schema | `prompt.ts` `PLAN_RESPONSE_SCHEMA` | node AC `id` is `string minLength 1` — **no constraint to match goal ids** |
+| The spec itself | `dogfood-041.yaml` | "the planner derives per-node criteria … let the planner choose … the per-node acceptance criteria" — actively tells the planner to invent ids |
+
+So the floor enforced an id-reuse convention the planner was explicitly steered
+*against*. Like F-35, this is a deterministic 100%-fail trap: any plan whose node
+criteria use fresh ids (the documented expectation) is rejected, even when
+coverage is genuinely complete. The floor — meant as a safety net against a plan
+that truly drops a criterion — instead blocked every plan.
+
+**Fix landed this session (WP-236).** Thread the goal criterion ids through to the
+nodes so the floor measures real coverage:
+- `prompt.ts` `PLANNER_SYSTEM_PROMPT` — new rule: a node COVERS a goal criterion
+  ONLY by including an acceptance criterion whose `id` is **exactly** that goal
+  criterion's id (copy verbatim; coverage is matched by id, not wording); extra
+  node-specific criteria with new ids are allowed; across all nodes every goal id
+  must appear ≥ once.
+- `prompt.ts` `buildPlannerMessages` — the user criteria block now says
+  "Reuse each id below VERBATIM on the node(s) that cover it."
+- `prompt.test.ts` — regression case asserting the id-reuse contract is in both
+  the system prompt and the user message.
+- Verified: `tsc --noEmit` exit 0; `vitest run test/planner/` → **41 passed**.
+
+The floor itself is unchanged — it stays a real safety net; with the planner now
+threading ids, it trips only when a criterion is genuinely dropped. (Residual
+risk: a model that still ignores the instruction is rejected with no auto-replan
+until D3/WP-219 lands; a follow-up could soften the override to a warning or add
+D3 replan-on-REVISE. The prompt contract is the correct primary fix.)
+
+### Verdict on attempt 4
+
+- 🟢 **The full plan→judge→verdict path now executes end to end** — planner
+  decomposed, meta-judge PROCEEDed with a sound rationale, the verdict parsed.
+  Every prior blocker (F-32, F-33, F-34, F-35) stayed closed.
+- 🟢 **F-36 fixed** — the coverage floor will now see the planner's threaded ids.
+- 🔴 **The thesis is STILL unproven — but this was the last *gating* blocker.**
+  With F-36 fixed, a PROCEED can finally flow into `startChain`/`chainLoop` and
+  the nodes can execute. **The first real chain run is owed and now unblocked** —
+  re-launch `devbox run dogfood` (the SDK rebuild picks up the prompt fix).
