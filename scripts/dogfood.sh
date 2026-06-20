@@ -77,9 +77,24 @@ else
 fi
 
 # Use node to check if the port is already in use
+PROXY_HEALTHY=false
 if node -e "require('net').connect($PROXY_PORT, '127.0.0.1').on('error', () => process.exit(1)).on('connect', () => process.exit(0))" 2>/dev/null; then
-  echo "Setup: Proxy port $PROXY_PORT is already in use. Assuming proxy is already running."
-else
+  echo "Setup: Proxy port $PROXY_PORT is in use. Probing health..."
+  if curl -s -o /dev/null --connect-timeout 2 --max-time 3 http://127.0.0.1:$PROXY_PORT; then
+    echo "Setup: Proxy is responding and healthy."
+    PROXY_HEALTHY=true
+  else
+    echo "Setup: Proxy is non-responsive. Clearing port $PROXY_PORT..."
+    PID_TO_KILL=$(lsof -t -i :$PROXY_PORT || true)
+    if [ -n "$PID_TO_KILL" ]; then
+      echo "Setup: Killing stale process(es) on port $PROXY_PORT (PIDs: $PID_TO_KILL)"
+      kill -9 $PID_TO_KILL 2>/dev/null || true
+      sleep 1
+    fi
+  fi
+fi
+
+if [ "$PROXY_HEALTHY" = "false" ]; then
   echo "Setup: Starting cli-judge-proxy on port $PROXY_PORT with backend '$BACKEND'..."
   node scripts/cli-judge-proxy.mjs "$PROXY_PORT" "$BACKEND" &
   PROXY_PID=$!
@@ -87,7 +102,7 @@ else
 
   # Wait for proxy to start up
   for i in $(seq 1 10); do
-    if node -e "require('net').connect($PROXY_PORT, '127.0.0.1').on('error', () => process.exit(1)).on('connect', () => process.exit(0))" 2>/dev/null; then
+    if curl -s -o /dev/null --connect-timeout 1 http://127.0.0.1:$PROXY_PORT; then
       break
     fi
     sleep 0.5

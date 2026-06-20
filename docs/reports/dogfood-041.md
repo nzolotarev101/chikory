@@ -211,3 +211,114 @@ to track-B and pick a fresh chain goal).
 - **Process finding → WP-232.** A `run`/`chain` launch mismatch must be mechanically
   visible. Until then, every "chain dogfood" is one fat-fingered verb away from
   silently regressing to a single run. The next run **must** be an actual chain.
+
+---
+
+## Addendum — Attempt 2 (2026-06-20): the chain path finally engaged, then died at the gate
+
+Per the Path-A recovery, the single-run delivery was reverted (`git restore`) and
+the docs landed (`a6880f3`), then the SAME spec was re-launched — this time the
+`chikory chain` verb actually ran (`dogfood.sh:115` auto-detects `chain` by
+grepping the spec for the string "chikory chain"). **This is real progress past
+F-32: the chain executor was finally invoked.** It then failed:
+
+```text
+$ chikory chain examples/dogfood/dogfood-041.yaml --watch
+chikory: plan meta-judge gate stopped the chain: plan meta-judge LLM call failed
+after 5 attempts: transport error: fetch failed
+[ELIFECYCLE] Command failed with exit code 1.
+```
+
+### What actually happened (sequence)
+
+1. ✅ **Spec parsed** and `chikory chain` entered `cmdChain` (`src/cli/chain.ts:215`).
+2. ✅ **The planner LLM call SUCCEEDED** — `runPlannerPass` (the `plan`-stage call
+   through the shim) returned a valid multi-node `Plan`. We know it succeeded
+   because the failure message is the *meta-judge* phase, not "goal decomposition
+   stopped the chain" (chain.ts:253). **This is the first time a real goal was
+   decomposed into a Plan by the chain launcher.**
+3. 🔴 **The plan meta-judge LLM call FAILED transport** — `runPlanJudgePass` (the
+   `judge`-stage call) hit a retriable `transport error: fetch failed`; the router
+   retried **5×** (`router.ts:41` `DEFAULT_RETRY.maxAttempts = 5`, exp backoff),
+   all 5 failed. The harness (`meta-judge-harness.ts:80`) folds a router failure
+   into an **ESCALATE `PlanVerdict` as a value** (invariant #4 — never throw,
+   `costUsd: 0`).
+4. 🔴 **`cmdChain` fail-closed** — `gate.verdict.kind !== "PROCEED"` → "plan
+   meta-judge gate stopped the chain" (chain.ts:252-258), exit 1. *(Fail-closing
+   is correct — ADR-005 D2: never run nodes ungated.)*
+5. 🔴 **Zero durable state persisted.** All of the above runs **host-side, before
+   `startChain`** (chain.ts:239-259 → `hostChainAndFollow` only on PROCEED). No
+   `ChainJournal` was created (`.chikory/chains/` does not exist), no run journal,
+   no new `.chikory/runs/` entry. The decomposed Plan from step 2 was computed and
+   **thrown away**. There is nothing to resume, nothing to inspect.
+
+Setup note: `dogfood.sh` printed `Proxy port 8787 is already in use. Assuming
+proxy is already running.` — it did **not** start or health-check the proxy. The
+planner call got a reply but the meta-judge call got `fetch failed`, consistent
+with a stale/unhealthy listener on :8787 (or a flaky shim backend) — see F-34.
+
+### New friction
+
+#### 🔴 F-33 — host-side decompose+gate is non-durable: a transient meta-judge transport error is fatal, unrecoverable, and indistinguishable from a substantive plan rejection
+
+**Evidence.** Attempt 2 above: a `transport error: fetch failed` (a transient
+*infrastructure* failure to reach the shim) on the meta-judge call, after 5
+router retries, aborted the entire chain launch with exit 1 and **zero persisted
+state** — no `ChainJournal`, no record of the successfully-decomposed Plan. By
+ADR-005's deliberate design (chain.ts:17-20) decomposition + gating run in the
+host process so the workflow body stays deterministic; the cost is that the
+*planning layer itself is not durable*. Two distinct problems compound:
+1. **No durability/resume at the planning layer.** Chikory's entire thesis is
+   durable execution that survives transient failures — yet the first two LLM
+   calls of every chain (decompose, gate) are outside the durable substrate. A
+   network blip here = total loss + manual full re-run. The expensive,
+   successful planner output (step 2) is discarded.
+2. **Transport failure conflated with a substantive verdict.** The meta-judge
+   harness turns *both* "the plan is bad / needs a human" (a true ESCALATE) and
+   "I couldn't reach the judge" (an infra error) into the same ESCALATE-and-stop
+   path. The user message says "plan meta-judge gate stopped the chain" — which
+   reads like the plan was rejected, when in fact the judge was simply
+   unreachable. These need different handling: a transport error should be a
+   retryable/resumable infra fault ("re-run, the judge was down"), not a plan
+   verdict.
+
+**WP it spawns → WP-233.** Make the chain planning layer survive transient
+faults: (a) classify router transport/infra failures distinctly from substantive
+non-PROCEED verdicts in `planAndGateChain`, surfacing "infra error — safe to
+re-run" instead of a verdict-shaped stop; and (b) persist the decomposed Plan +
+gate attempt before/around the gate (a pre-chain record, or run decompose+gate in
+a short-lived durable activity) so a transient gate failure is resumable and the
+successful plan is not thrown away. Until then, a flaky shim makes the chain
+un-launchable with no diagnostic trail.
+
+#### 🟡 F-34 — `dogfood.sh` assumes any in-use :8787 is a healthy judge proxy, with no health check
+
+**Evidence.** `dogfood.sh:79-84`: if port 8787 is in use the script prints
+"Assuming proxy is already running" and skips startup — it never probes that the
+listener is actually the `cli-judge-proxy` and actually serves. A stale/dead
+process, a half-crashed proxy, or one whose backend CLI is failing all present as
+an in-use port, then yield `transport error: fetch failed` mid-run (the F-33
+trigger this attempt). The proxy was also already torn down by the time review
+started (no `cli-judge-proxy` process running), consistent with an unhealthy or
+short-lived listener.
+
+**WP it spawns → WP-234.** `dogfood.sh` should health-probe the existing proxy
+(a cheap request to `http://127.0.0.1:8787` expecting a known response) before
+assuming it is usable; on a failed probe, kill+restart it (or abort with a clear
+message) rather than launching a run that will die at the first LLM call.
+Operational sibling of the WP-228 baseline-precheck / WP-232 chain-launch guard.
+
+### Verdict on attempt 2
+
+- 🟢 **The chain launcher works up to the gate.** `chikory chain` parsed the
+  spec, invoked the planner, and decomposed a real goal into a multi-node Plan —
+  the first genuine exercise of the decomposition path end-to-end. F-32's "ran as
+  a plain run" failure did not recur.
+- 🔴 **The thesis is still unproven, and a new durability gap is exposed.** No
+  node ever ran; the durable `chainLoop` was never reached. Worse, the failure
+  revealed that the planning layer itself is non-durable (F-33) — a transient
+  shim error is fatal with no resume and no trail, which is precisely the failure
+  mode Chikory claims to eliminate.
+- **The first real chain run is STILL owed.** Next: fix the proxy health (F-34 /
+  WP-234, the immediate unblock), re-launch `chikory chain` once the shim is
+  verified healthy, and — separately — harden the planning layer (F-33 / WP-233).
