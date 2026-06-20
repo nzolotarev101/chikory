@@ -1,4 +1,14 @@
-# Dogfood-041 — WP-219 S3 "first chain dogfood": DELIVERY SUCCESS, but the chain path was NOT exercised (F-32: launched with `chikory run`, not `chikory chain`)
+# Dogfood-041 — WP-219 S3 "first chain dogfood": across 5 attempts, the chain finally RAN end-to-end (attempt 5) — durable 2-node chain, plan gate PROCEED, per-node judge gating, and the judge HALTing a bad node all worked; it FAILED only on the deferred S4 context handoff (F-37). (Attempts 1–4 closed F-32/F-35/F-36; F-34 fixed.)
+
+> ℹ️ **This report spans 5 attempts; the addenda below tell the story in order.**
+> Attempt 1 shipped the deliverable as a single `run` (F-32). Attempt 2 engaged
+> the chain but died on a transient proxy fault (F-33/F-34). Attempt 3 got both
+> LLM calls through but hit a meta-judge schema bug (F-35, fixed). Attempt 4
+> passed the schema but tripped the coverage-floor id trap (F-36, fixed).
+> **Attempt 5 (the headline win): the chain executed end-to-end** — plan gate
+> PROCEED → node 1 SUCCESS → node 2 HALT → chain FAILED — proving the durable
+> multi-run machinery and exposing the one deferred gap that actually blocks a
+> green chain: **S4 context handoff (F-37)**.
 
 **WP**: WP-219 (Goal decomposition & run chaining, ADR-005 §S3) · **Date**: 2026-06-20 · **Task spec**: [`examples/dogfood/dogfood-041.yaml`](../../examples/dogfood/dogfood-041.yaml) · **Run**: `run-a28655c9-3e5e-456a-bd90-becfdeddff2a` · **Outcome**: **SUCCESS** (judge PROCEED 3/3) — *as a single run* · **Landed**: harvested byte-`IDENTICAL`, staged + uncommitted on the working tree (pending the user's review)
 
@@ -516,3 +526,133 @@ D3 replan-on-REVISE. The prompt contract is the correct primary fix.)
   With F-36 fixed, a PROCEED can finally flow into `startChain`/`chainLoop` and
   the nodes can execute. **The first real chain run is owed and now unblocked** —
   re-launch `devbox run dogfood` (the SDK rebuild picks up the prompt fix).
+
+---
+
+## Addendum — Attempt 5 (2026-06-20): 🎉 THE CHAIN RAN END-TO-END. Durable 2-node chain, gate PROCEED, per-node judge, HALT-on-stuck-node, halt-on-FAILED — all worked. It FAILED only on the deferred S4 context handoff.
+
+This is the run dogfood-041 was written for. Every gating blocker (F-32, F-33,
+F-34, F-35, F-36) stayed closed and the durable chain machinery executed:
+
+```text
+plan plan-6d618e76-… · 2 nodes · plan-judge PROCEED
+  resolve-id-and-render-trace — Modify chikory trace CLI branch to detect chain-id and render chain trace.
+  verify-and-test (after resolve-id-and-render-trace) — Verify implementation with tests, verify typecheck and lint stay green.
+chain-id: chain-d3794c24-c99f-4250-8f8a-ba6e8ba3e992
+[…] node resolve-id-and-render-trace started → …-node-resolve-id-and-render-trace
+[…] node resolve-id-and-render-trace sealed SUCCESS (PROCEED)
+[…] node verify-and-test started → …-node-verify-and-test
+[…] node verify-and-test sealed FAILED (HALT)
+[…] chain FAILED
+chain plan-6d618e76-… · FAILED · 2 nodes · 1/2 succeeded
+```
+
+### 🟢 What worked (the thesis pillars, finally exercised)
+
+| Pillar | Evidence |
+|---|---|
+| Durable multi-run chain | `.chikory/chains/chain-d3794c24…/chain.db` + 2 per-node run journals (`…-node-resolve-id-and-render-trace`, `…-node-verify-and-test`), deterministic `chain-<id>-node-<nodeId>` ids |
+| Plan decompose → meta-judge gate | `2 nodes · plan-judge PROCEED` (F-35/F-36 fixes held — planner `gpt-5.5 · 815/136`, judge `gemini-3.1-pro-preview · 765/73`) |
+| Per-node judge gating | node 1 sealed `SUCCESS (PROCEED 2/2 criteria)`, 1 step, **changes made 1**, $1.44/$8.00 |
+| **Judge caught a bad node** | node 2: 3 steps, **changes made 0** every step, executor kept claiming "Verification is complete. AC-3 is met", judge scored **0/1** each time → `criterion AC-3 failed 3+ consecutive verdicts → HALT (goal drift / budget-waste guard)`. The HALT guard stopped an empty-diff node from spinning forever — Agent-as-a-Judge doing exactly its job. |
+| halt-on-FAILED chain semantics | `deriveChainStatus` → chain sealed FAILED at 1/2; no phantom further nodes |
+| `renderChainTrace` on a real chain | the `chain … · FAILED · 2 nodes · 1/2 succeeded` trace + per-node rows + `failed:` line all rendered (the dogfood-037/041 deliverable, now exercised against a live chain) |
+
+### 🔴 Why node 2 FAILED — the root cause
+
+Node 2 (`verify-and-test`) depended on node 1 but ran against a **fresh clone of
+HEAD that did not contain node 1's diff**, so the implementation it was told to
+"verify" was not present. With nothing to do, it produced an empty diff, claimed
+completion, and the judge correctly refused it three times → HALT.
+
+- `chain-loop.ts:87` spawns each node via `planNodeToTaskSpec(node, template,
+  plan.id)` with **no `parentRunId`**; `node-spec.ts:68` gives every node the
+  shared `template.repos` (the original HEAD). Nodes are fully independent
+  fresh-HEAD clones.
+- This is the **deferred S4 context handoff** (`chain-loop.ts:16-17`: "S4 context
+  handoff (predecessor checkpoint + compaction note) … deferred"). The v1 chain
+  executor runs each node as a fresh TaskSpec by design.
+
+### New friction
+
+#### 🔴 F-37 — no S4 context handoff: a dependent node clones HEAD and cannot see its predecessor's work, so any genuinely dependent multi-node plan fails (→ WP-237, the now-top-priority keystone; NOT fixed this session — real Temporal/checkpoint engineering)
+
+**Evidence.** Attempt 5 above. Node 2 `verify-and-test` (`dependsOn:
+resolve-id-and-render-trace`) sealed FAILED/HALT with `changes made 0` across all
+3 steps because node 1's chain-trace branch was absent from node 2's workspace.
+`planNodeToTaskSpec` (`node-spec.ts:56-79`) bases every node on the same
+`template.repos`; `chainLoop` (`chain-loop.ts:88`) never threads node 1's sealed
+checkpoint into node 2's spec. The `parentRunId` field exists on `chainLink` for
+D4 traceability but is not even passed at the call site.
+
+**Why it matters.** Context handoff is the *whole point* of chaining for
+compounding work: later nodes build on earlier ones. Without S4, the only
+decompositions that can pass are a single node or fully independent (parallel)
+nodes — exactly the shapes that don't exercise compounding error, the thesis. The
+chain machinery is proven (this run), but it can only chain *independent* work
+until S4 lands. This makes WP-219 S4 the critical-path keystone, no longer an
+optional follow-up.
+
+**WP it spawns → WP-237** (chain S4 context handoff): when a node's `dependsOn`
+predecessor sealed SUCCESS, base the node's workspace on that predecessor's sealed
+checkpoint (its run-private branch / harvested commit) instead of HEAD, and pass a
+short predecessor digest into the node's context (ADR-005 §S4: "predecessor
+checkpoint + compaction note"). This is hand-design keystone work (TASK-PROTOCOL
+§4) — a Temporal-deterministic activity that resolves the predecessor run's final
+tree and seeds the child run's clone — **not** a review-time patch.
+
+#### 🟡 F-38 — the planner emitted a verification-only node, which has no diff of its own and is both unsatisfiable and redundant with the per-node judge (FIXED this session → WP-238)
+
+**Evidence.** The planner split the goal into `resolve-id-and-render-trace` (does
+the work) + `verify-and-test` (a pure "verify tests/typecheck/lint pass" node).
+The second node has no code change to make — every node is *already*
+independently judge-gated and its acceptance `check`s run automatically, so a
+verification-only node has nothing to deliver and cannot PROCEED (node 2's `issues
+found 3 · changes made 0`). Even with S4 handoff it would be redundant with the
+per-node judge. The planner prompt did not forbid this shape.
+
+**Note:** F-38 is the *trigger* the planner happened to pick; F-37 is the
+underlying gap. Forbidding verify-only nodes (F-38) makes the planner fold
+verification into the working node, which both removes this dead node AND means a
+2-node plan only survives if its nodes are independent — so a passing *dependent*
+multi-node chain still needs F-37/WP-237.
+
+**Fix landed this session (WP-238).** `PLANNER_SYSTEM_PROMPT` (`prompt.ts`) now
+requires every node to produce a concrete code change (a non-empty diff) and
+explicitly forbids verification-only / testing-only / review-only nodes, telling
+the planner to fold tests and verification into the node that makes the change
+(each node is independently judge-gated). Regression test in `prompt.test.ts`.
+Verified `tsc --noEmit` exit 0; `vitest run test/planner/prompt.test.ts` → 6 passed.
+
+### Other anomaly checks
+
+- **Cost**: node 1 $1.44/$8.00 (1089k in / 7.4k out, 1 step); node 2 $0.57/$7.00
+  (224k+99k+100k in / 1.9k+0.71k+0.73k out, 3 stuck steps). Chain total ≈ $2.01.
+  Node 2 burned $0.57 spinning on an impossible task before HALT — the budget
+  guard worked, but F-37 is what made the spend unavoidable. Per-node judge share
+  tiny ($0.01 each, ~0.5–1.7%).
+- **Judge behavior**: node 2's HALT is a **true positive** — the executor's
+  "verification complete" claims over an empty diff were correctly rejected. No
+  false ESCALATE/ROLLBACK. Family diversity real (judge `gemini-3.1-pro-preview` ≠
+  executor `codex`/openai).
+- **Loop integrity**: each node journaled `node_started`/`node_sealed`; chain
+  folded via `advanceChain`; no duplicate entries; checkpoints per node
+  (`…-node-verify-and-test@11` last good).
+- **Review tooling gap (still F-32/WP-232 family)**: `dogfood-verify.sh` and
+  `chikory trace` assume one run journal; a chain produces a `ChainJournal` +
+  per-node run journals. `chikory trace <node-run-id>` works (per-run), but a
+  chain-aware verify pass is still owed.
+
+### Verdict on attempt 5
+
+- 🟢 **The thesis pillar is PROVEN to run.** Durable multi-run execution, a gated
+  plan, per-node judge gating, a judge catching and HALTing a bad node, and
+  halt-on-FAILED chain semantics all worked end-to-end for the first time in 41
+  campaigns. dogfood-041's core purpose is met: the chain machinery is real.
+- 🔴 **A passing *dependent* chain still needs S4 context handoff (F-37 → WP-237).**
+  Until a node can see its predecessor's work, only single/independent-node chains
+  can go green. This is now the critical-path keystone.
+- 🟢 **F-38 fixed** — the planner will no longer emit dead verification-only nodes.
+- **Next:** build WP-237 (S4 handoff) by hand, then re-launch dogfood-041 for the
+  first *green* dependent chain. A re-launch *before* S4 lands will, with the F-38
+  fix, likely produce a single working node (green but not a compounding test).

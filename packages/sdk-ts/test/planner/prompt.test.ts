@@ -47,6 +47,15 @@ describe("planner prompt (WP-219 S2, ADR-005 D1)", () => {
     expect(buildPlannerMessages(input)[1]?.content).toContain("VERBATIM");
   });
 
+  it("forbids verification-only nodes (every node must produce a diff)", () => {
+    // Regression for dogfood-041 attempt 5 (F-38): the planner created a
+    // separate `verify-and-test` node with no diff of its own; it could never
+    // pass (no work product) and the run HALTed. Each node is independently
+    // judge-gated, so verification-only nodes are redundant and unsatisfiable.
+    expect(PLANNER_SYSTEM_PROMPT).toContain("non-empty diff");
+    expect(PLANNER_SYSTEM_PROMPT).toContain("verification-only");
+  });
+
   it("renders a placeholder when no acceptance criteria are defined", () => {
     const messages = buildPlannerMessages({ ...input, acceptanceCriteria: [] });
 

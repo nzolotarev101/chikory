@@ -22,7 +22,7 @@ cd "$(dirname "$0")/.."
 # ── 1. Locate the run ───────────────────────────────────────────────────────
 RUN_ID="${1:-}"
 if [ -z "$RUN_ID" ]; then
-  LATEST_DIR=$(ls -td .chikory/runs/run-* 2>/dev/null | head -n 1)
+  LATEST_DIR=$(ls -td .chikory/runs/run-* .chikory/runs/chain-* 2>/dev/null | head -n 1)
   [ -n "$LATEST_DIR" ] && [ -d "$LATEST_DIR" ] || { echo "Error: no run dir in .chikory/runs/" >&2; exit 1; }
   RUN_ID=$(basename "$LATEST_DIR")
 fi
