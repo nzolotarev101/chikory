@@ -13,9 +13,10 @@
  *
  * S3-wiring v1 (the incremental SUCCESS-path slice): dispatch is sequential,
  * each node runs as a fresh TaskSpec, and a `FAILED` node halts the chain
- * (`deriveChainStatus` → FAILED). The D3 halt-and-replan re-invoke, S4 context
- * handoff (predecessor checkpoint + compaction note), and parallel ready-node
- * fan-out are deferred follow-ups.
+ * (`deriveChainStatus` → FAILED). S4 hands a dependent node the first
+ * predecessor's sealed workspace plus a static note. The D3 halt-and-replan
+ * re-invoke, structured compaction handoff, true fan-in merge, and parallel
+ * ready-node fan-out are deferred follow-ups.
  */
 import { executeChild, proxyActivities, workflowInfo } from "@temporalio/workflow";
 
@@ -84,7 +85,30 @@ export async function chainLoop(input: ChainLoopInput): Promise<ChainStatus> {
     const runId = childRunId(chainId, node.id);
     await activities.recordNodeStarted({ chainId, nodeId: node.id, childRunId: runId });
 
-    const childSpec = planNodeToTaskSpec(node, template, plan.id);
+    // WP-237 v1 carries one linear predecessor. Additional dependencies still
+    // gate scheduling, but their git trees are not merged; true fan-in needs a
+    // deterministic merge/artifact protocol (F-39 / WP-239).
+    const predecessorId = node.dependsOn[0];
+    const parentRunId =
+      predecessorId !== undefined ? record.nodeRuns[predecessorId] : undefined;
+    const predecessor =
+      predecessorId !== undefined
+        ? plan.nodes.find((candidate) => candidate.id === predecessorId)
+        : undefined;
+    const handoffNote = predecessor
+      ? [
+          "## Already completed by predecessor nodes (do not redo)",
+          `- ${predecessor.id}: ${predecessor.goal}`,
+          "The code from this node is ALREADY PRESENT in your workspace. Build on it.",
+        ].join("\n")
+      : undefined;
+    const childSpec = planNodeToTaskSpec(
+      node,
+      template,
+      plan.id,
+      parentRunId,
+      handoffNote,
+    );
     const runStatus: RunStatus = await executeChild(agentLoop, {
       workflowId: runId,
       args: [childSpec],

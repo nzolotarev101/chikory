@@ -187,10 +187,20 @@ export function createRunnerActivities(deps: RunnerActivityDeps) {
         const ws = workspaceDir(deps.dataDir, input.runId);
         const repo = input.spec.repos[0];
         if (!repo) throw new Error("TaskSpec.repos is empty");
+        const parentRunId = input.spec.chainLink?.parentRunId;
         if (!existsSync(join(ws, ".git"))) {
           await mkdir(ws, { recursive: true });
-          await execFileAsync("git", ["clone", repo.url, ws]);
-          if (repo.ref) await git(ws, ["checkout", repo.ref]);
+          if (parentRunId !== undefined) {
+            const parentWs = workspaceDir(deps.dataDir, parentRunId);
+            // --no-tags is correctness-critical: inheriting the predecessor's
+            // chikory-base tag would make this node's judge diff include the
+            // predecessor's work and make <runId>@base roll back too far.
+            await execFileAsync("git", ["clone", "--no-tags", parentWs, ws]);
+            await git(ws, ["checkout", `chikory/run-${parentRunId}`]);
+          } else {
+            await execFileAsync("git", ["clone", repo.url, ws]);
+            if (repo.ref) await git(ws, ["checkout", repo.ref]);
+          }
           await git(ws, ["checkout", "-b", `chikory/run-${input.runId}`]);
           await git(ws, ["config", "user.name", "chikory"]);
           await git(ws, ["config", "user.email", "runner@chikory.local"]);

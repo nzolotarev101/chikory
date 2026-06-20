@@ -201,7 +201,10 @@ runs again, now against a real chaining substrate):
   per node from the predecessor checkpoint, folds each sealed node through
   `advanceChain`, halts-and-replans on a `FAILED` seal (D3), and journals
   `node_started` / `node_sealed`.
-- **S4** — context handoff: WP-203 compaction note + WP-202 refs between nodes.
+- **S4** — context handoff: **partially landed via WP-237** — a local
+  dependent node clones `dependsOn[0]`'s sealed git tree and receives a static
+  predecessor id+goal note. WP-203 compacted notes, WP-202 refs, deterministic
+  fan-in merge, and artifact-backed distributed handoff remain WP-239 work.
 - **S5** — WP-206 suspend/resume between nodes (Temporal signal).
 - **S6** — `chikory trace` renders the chain (plan tree + per-node verdicts) —
   pure-renderer, **dogfoodable 🟢**.

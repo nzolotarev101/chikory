@@ -1,0 +1,71 @@
+#!/usr/bin/env bash
+# Integration coverage for chain-aware harvest resolution and ordered deltas.
+set -euo pipefail
+
+ROOT=$(cd "$(dirname "$0")/.." && pwd)
+TMP=$(mktemp -d "${TMPDIR:-/tmp}/chikory-harvest-chain.XXXXXX")
+trap 'rm -rf "$TMP"' EXIT
+
+mkdir -p "$TMP/repo/scripts" "$TMP/fake-bin"
+cp "$ROOT/scripts/harvest.sh" "$TMP/repo/scripts/harvest.sh"
+chmod +x "$TMP/repo/scripts/harvest.sh"
+
+git -C "$TMP/repo" init -q -b main
+git -C "$TMP/repo" config user.name test
+git -C "$TMP/repo" config user.email test@chikory.local
+printf '# harvest fixture\n' > "$TMP/repo/README.md"
+git -C "$TMP/repo" add README.md
+git -C "$TMP/repo" commit -q -m init
+
+cat > "$TMP/fake-bin/pnpm" <<'EOF'
+#!/usr/bin/env bash
+printf '%s\n' "$HARVEST_CHAIN_JSON"
+EOF
+cat > "$TMP/fake-bin/devbox" <<'EOF'
+#!/usr/bin/env bash
+exit 0
+EOF
+chmod +x "$TMP/fake-bin/pnpm" "$TMP/fake-bin/devbox"
+
+node1="$TMP/repo/.chikory/runs/chain-test-node-N-1/workspace"
+node2="$TMP/repo/.chikory/runs/chain-test-node-N-2/workspace"
+mkdir -p "$(dirname "$node1")" "$(dirname "$node2")" "$TMP/repo/.chikory/chains/chain-test"
+touch "$TMP/repo/.chikory/chains/chain-test/chain.db"
+
+git clone -q "$TMP/repo" "$node1"
+git -C "$node1" config user.name chikory
+git -C "$node1" config user.email runner@chikory.local
+git -C "$node1" checkout -q -b chikory/run-chain-test-node-N-1
+git -C "$node1" tag chikory-base
+mkdir -p "$node1/packages"
+printf 'node one\n' > "$node1/packages/a.txt"
+git -C "$node1" add -A
+git -C "$node1" commit -q -m 'chikory: step 0'
+
+git clone -q --no-tags "$node1" "$node2"
+git -C "$node2" config user.name chikory
+git -C "$node2" config user.email runner@chikory.local
+git -C "$node2" checkout -q -b chikory/run-chain-test-node-N-2
+git -C "$node2" tag chikory-base
+printf 'node two\n' > "$node2/packages/b.txt"
+git -C "$node2" add -A
+git -C "$node2" commit -q -m 'chikory: step 0'
+
+export PATH="$TMP/fake-bin:$PATH"
+export HARVEST_CHAIN_JSON='{"chainId":"chain-test","planId":"plan-test","status":"SUCCESS","plan":{"nodes":[{"id":"N-1","dependsOn":[]},{"id":"N-2","dependsOn":["N-1"]}]},"nodeRuns":{"N-1":"chain-test-node-N-1","N-2":"chain-test-node-N-2"},"nodeOutcomes":{"N-1":{"status":"SUCCESS"},"N-2":{"status":"SUCCESS"}}}'
+
+(cd "$TMP/repo" && bash scripts/harvest.sh chain-test main >/dev/null)
+cmp -s "$TMP/repo/packages/a.txt" "$node1/packages/a.txt"
+cmp -s "$TMP/repo/packages/b.txt" "$node2/packages/b.txt"
+staged=$(git -C "$TMP/repo" diff --cached --name-only)
+printf '%s\n' "$staged" | grep -qx 'packages/a.txt'
+printf '%s\n' "$staged" | grep -qx 'packages/b.txt'
+
+# A non-linear topology must fail before pretending it can merge workspaces.
+export HARVEST_CHAIN_JSON='{"chainId":"chain-test","planId":"plan-test","status":"SUCCESS","plan":{"nodes":[{"id":"N-1","dependsOn":[]},{"id":"N-2","dependsOn":[]}]},"nodeRuns":{"N-1":"chain-test-node-N-1","N-2":"chain-test-node-N-2"},"nodeOutcomes":{"N-1":{"status":"SUCCESS"},"N-2":{"status":"SUCCESS"}}}'
+if (cd "$TMP/repo" && bash scripts/harvest.sh chain-test main >/dev/null 2>&1); then
+  echo "expected non-linear chain harvest to fail" >&2
+  exit 1
+fi
+
+echo "chain-aware harvest integration: PASS"

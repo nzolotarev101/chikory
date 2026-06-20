@@ -1,0 +1,62 @@
+# Dogfood-042: first dependent two-node chain (WP-237 S4 context handoff).
+# Launch via `chikory chain`; scripts/dogfood.sh detects that literal marker.
+#
+# This is a falsifying handoff test, not two independent chores. Node B must
+# import node A's new module. Without predecessor git-state handoff its test and
+# TypeScript compilation fail, so SUCCESS proves the dependent workspace was
+# seeded from node A's sealed tree. Commit the WP-237 implementation before
+# launch because every child workspace ultimately derives from committed HEAD.
+name: dogfood-042-dependent-cost-report-chain
+goal: >
+  Implement exactly two sequential, diff-producing deliverables in
+  packages/sdk-ts. The second deliverable MUST depend on and import code from
+  the first; do not combine them into one node, make them independent, or add a
+  verification-only node.
+
+  First, add a pure module at packages/sdk-ts/src/chain/cost.ts exporting the
+  named function `formatUsd(n: number): string`. It formats a numeric USD value
+  with a dollar sign and exactly two decimal places (for example, 1.07 becomes
+  `$1.07`). Add packages/sdk-ts/test/chain/cost.test.ts covering representative
+  values. This is node A's concrete code-and-test diff.
+
+  Second, after the first deliverable, add
+  packages/sdk-ts/src/chain/cost-report.ts. It MUST import `formatUsd` from
+  `./cost.js` and export the named function
+  `formatCostShare(part: number, total: number): string`, returning the
+  formatted part plus its percentage of total with one decimal place (for
+  example, 0.01 and 1.5 becomes `$0.01 (0.7%)`). Add
+  packages/sdk-ts/test/chain/cost-report.test.ts. This is node B's concrete
+  code-and-test diff and must build on node A's module already present in its
+  workspace.
+
+  Keep both functions pure and minimal. Use strict TypeScript, ESM `.js`
+  relative imports, named exports only, and no new dependencies. Do not change
+  contracts, schemas, the chain runner, or unrelated files. Run project
+  commands sequentially inside the existing Devbox environment.
+repos:
+  - url: /Users/nikitazolotarev/repos/chikory
+    writable: true
+acceptance_criteria:
+  - id: AC-1
+    description: cost.ts exports formatUsd and its focused unit test passes.
+    check: cd packages/sdk-ts && pnpm exec vitest run test/chain/cost.test.ts
+  - id: AC-2
+    description: >
+      cost-report.ts imports formatUsd from ./cost.js, exports formatCostShare,
+      its focused test passes, and the complete SDK remains type- and lint-clean.
+    check: cd packages/sdk-ts && pnpm exec vitest run test/chain/cost-report.test.ts && pnpm exec tsc --noEmit && pnpm exec eslint .
+budget_usd: 15
+max_steps: 8
+executor:
+  adapter: codex
+  family: openai
+judge:
+  family: openai-compat
+  cadence: 2
+  max_cost_share: 0.5
+routing:
+  stages:
+    plan: { provider: openai-compat, model: gpt-5.5 }
+    code: { provider: openai-compat, model: gpt-5.5 }
+    review: { provider: openai-compat, model: gpt-5.5 }
+    judge: { provider: openai-compat, model: gemini-3.1-pro-preview }

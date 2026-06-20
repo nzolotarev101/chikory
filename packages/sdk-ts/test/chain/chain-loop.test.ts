@@ -8,10 +8,12 @@
  *   - a node that seals FAILED halts the chain (FAILED) and its dependents are
  *     never dispatched (the halt-and-resume semantics, replan deferred).
  */
+import { execFile } from "node:child_process";
 import { randomUUID } from "node:crypto";
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { promisify } from "node:util";
 
 import { Client, Connection } from "@temporalio/client";
 import { afterEach, describe, expect, inject, test } from "vitest";
@@ -25,11 +27,13 @@ import {
   Journal,
   journalPath,
   type Plan,
+  workspaceDir,
 } from "../../src/index.js";
 import { initSourceRepo, judgeForm, scriptedRegistry, startFakeJudgeWire } from "../runner/helpers.js";
 
 const address = inject("temporalAddress");
 const bundlePath = inject("workflowBundlePath");
+const execFileAsync = promisify(execFile);
 
 function linearPlan(): Plan {
   return {
@@ -142,6 +146,56 @@ describe.skipIf(address === null)("chain executor (WP-219 S3-wiring)", () => {
       } finally {
         runJournal.close();
       }
+    }
+  }, 150_000);
+
+  test("hands a predecessor's sealed git tree to its dependent node", async () => {
+    const { dataDir, taskQueue, repoUrl, client } = await harness({});
+    const fullPlan = linearPlan();
+    const plan: Plan = { ...fullPlan, nodes: fullPlan.nodes.slice(0, 2) };
+    const chainId = `chain-${randomUUID()}`;
+
+    const status = await client.workflow.execute("chainLoop", {
+      workflowId: chainId,
+      taskQueue,
+      args: [{ plan, template: template(repoUrl) }],
+      workflowExecutionTimeout: "2 minutes",
+    });
+    expect(status).toBe("SUCCESS");
+
+    const parentRunId = `${chainId}-node-N-1`;
+    const childRunId = `${chainId}-node-N-2`;
+    const parentWs = workspaceDir(dataDir, parentRunId);
+    const childWs = workspaceDir(dataDir, childRunId);
+
+    // The scripted executor's first-node output is committed and physically
+    // present in the dependent workspace. Its counter also advances from the
+    // inherited state, proving node two did not start from origin HEAD.
+    expect(await readFile(join(childWs, "step-1.txt"), "utf8")).toContain("slice one");
+    expect(await readFile(join(childWs, "scripted-count.txt"), "utf8")).toBe("2");
+
+    const git = async (dir: string, ...args: string[]) =>
+      (await execFileAsync("git", ["-C", dir, ...args])).stdout.trim();
+    const parentHead = await git(parentWs, "rev-parse", "HEAD");
+    const childBase = await git(childWs, "rev-parse", "chikory-base^{commit}");
+    expect(childBase).toBe(parentHead);
+
+    // Node two's judge/harvest delta is only its own work; inherited node-one
+    // files sit below chikory-base and therefore do not contaminate the diff.
+    const childChanges = (await git(childWs, "diff", "--name-only", "chikory-base..HEAD"))
+      .split("\n")
+      .filter(Boolean);
+    expect(childChanges).toContain("step-2.txt");
+    expect(childChanges).not.toContain("step-1.txt");
+
+    const childJournal = new Journal(journalPath(dataDir, childRunId));
+    try {
+      const childSpec = childJournal.getRun()!.task;
+      expect(childSpec.chainLink?.parentRunId).toBe(parentRunId);
+      expect(childSpec.goal).toContain("- N-1: slice one");
+      expect(childSpec.goal).toContain("ALREADY PRESENT");
+    } finally {
+      childJournal.close();
     }
   }, 150_000);
 

@@ -58,13 +58,14 @@ export function planNodeToTaskSpec(
   template: ChainNodeTemplate,
   planId: string,
   parentRunId?: string,
+  handoffNote?: string,
 ): TaskSpec {
   const chainLink: ChainLink = { planId, nodeId: node.id };
   if (parentRunId !== undefined) chainLink.parentRunId = parentRunId;
 
   const spec: TaskSpec = {
     name: `${planId}-${node.id}`,
-    goal: node.goal,
+    goal: handoffNote === undefined ? node.goal : `${node.goal}\n\n${handoffNote}`,
     repos: template.repos,
     acceptanceCriteria: node.acceptanceCriteria,
     budgetUsd: node.budgetUsd,

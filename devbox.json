@@ -17,7 +17,7 @@
       "temporal-dev": "temporal server start-dev",
       "lint": "pnpm -r lint && ruff check packages/sdk-py && ruff format --check packages/sdk-py",
       "typecheck": "pnpm -r typecheck && (cd packages/sdk-py && uv run pyright)",
-      "test": "pnpm -r test && (cd packages/sdk-py && uv run pytest)",
+      "test": "pnpm -r test && (cd packages/sdk-py && uv run pytest) && bash scripts/test-harvest-chain.sh",
       "smoke": "bash scripts/smoke.sh",
       "dogfood": "bash scripts/dogfood.sh",
       "dogfood-verify": "bash scripts/dogfood-verify.sh",

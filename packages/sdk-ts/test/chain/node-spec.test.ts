@@ -60,6 +60,24 @@ describe("planNodeToTaskSpec", () => {
     });
   });
 
+  it("appends a static predecessor handoff note when supplied", () => {
+    const note = [
+      "## Already completed by predecessor nodes (do not redo)",
+      "- N-1: Implement the first slice",
+      "The code from this node is ALREADY PRESENT in your workspace. Build on it.",
+    ].join("\n");
+    const spec = planNodeToTaskSpec(node, template, "plan-1", "run-parent", note);
+
+    expect(spec.goal).toBe(`${node.goal}\n\n${note}`);
+    expect(spec.chainLink?.parentRunId).toBe("run-parent");
+  });
+
+  it("does not alter the node goal when no handoff note is supplied", () => {
+    expect(planNodeToTaskSpec(node, template, "plan-1", "run-parent").goal).toBe(
+      node.goal,
+    );
+  });
+
   it("carries optional template budgetTokens/maxSteps only when present", () => {
     const bare = planNodeToTaskSpec(node, template, "plan-1");
     expect(bare.budgetTokens).toBeUndefined();
