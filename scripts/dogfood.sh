@@ -110,5 +110,11 @@ trap cleanup EXIT SIGINT SIGTERM
 
 # 5. Run the dogfood spec
 export OPENAI_COMPAT_BASE_URL="http://127.0.0.1:$PROXY_PORT"
-echo "Running Chikory dogfooding command..."
-pnpm chikory run "$SPEC_FILE" --watch
+
+CHIKORY_CMD="run"
+if grep -q "chikory chain" "$SPEC_FILE"; then
+  CHIKORY_CMD="chain"
+fi
+
+echo "Running Chikory dogfooding command: pnpm chikory $CHIKORY_CMD ..."
+pnpm chikory "$CHIKORY_CMD" "$SPEC_FILE" --watch
