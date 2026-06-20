@@ -456,11 +456,20 @@ export const PlannerReplySchema = z.object({ nodes: z.array(PlanNodeSchema) }).s
 
 /**
  * The raw plan meta-judge LLM reply (WP-219 S2b ADR-005 D2). The model fills
- * `{ kind, rationale }`; `buildPlanVerdict` then applies the deterministic
- * coverage safety floor (`planCoverageGaps`) before the verdict is final.
+ * `{ kind, rationale, uncoveredCriteria }` — `uncoveredCriteria` is REQUIRED by
+ * the response schema sent to the model (`PLAN_VERDICT_RESPONSE_SCHEMA`) and the
+ * system prompt instructs the model to enumerate it, so the parse must accept
+ * it. It is advisory only: `buildPlanVerdict` recomputes the authoritative
+ * coverage gap deterministically via `planCoverageGaps` (the coverage safety
+ * floor) before the verdict is final, so the model's value is never trusted.
+ * Defaulted to `[]` to tolerate a provider that omits the field.
  */
 export const PlanJudgeReplySchema = z
-  .object({ kind: PlanVerdictKindSchema, rationale: z.string().min(1) })
+  .object({
+    kind: PlanVerdictKindSchema,
+    rationale: z.string().min(1),
+    uncoveredCriteria: z.array(z.string()).default([]),
+  })
   .strict();
 
 export const ChainStatusSchema = z.enum([

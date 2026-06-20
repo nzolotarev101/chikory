@@ -322,3 +322,103 @@ Operational sibling of the WP-228 baseline-precheck / WP-232 chain-launch guard.
 - **The first real chain run is STILL owed.** Next: fix the proxy health (F-34 /
   WP-234, the immediate unblock), re-launch `chikory chain` once the shim is
   verified healthy, and — separately — harden the planning layer (F-33 / WP-233).
+
+---
+
+## Addendum — Attempt 3 (2026-06-20): proxy healthy, BOTH LLM calls succeeded, then the gate died on its OWN schema bug
+
+The `dogfood.sh` proxy health-check (lines 80–95 — F-34 addressed: it now probes
+`http://127.0.0.1:8787` and kills+restarts a non-responsive listener) cleared the
+F-33/F-34 infra failure mode. Attempt 3 got the **furthest yet**:
+
+```text
+Setup: Starting cli-judge-proxy on port 8787 with backend 'agy'...
+[cli-judge] OpenAI-compat shim on http://127.0.0.1:8787 (backend: agy CLI)
+$ chikory chain examples/dogfood/dogfood-041.yaml --watch
+[cli-judge:agy] gpt-5.5 · 13845ms · 649/358 tokens (estimated)
+[cli-judge:agy] gemini-3.1-pro-preview · 5468ms · 886/97 tokens (estimated)
+chikory: plan meta-judge gate stopped the chain: plan meta-judge reply failed schema validation: [
+  {
+    "code": "unrecognized_keys",
+    "keys": [ "uncoveredCriteria" ],
+    "path": [],
+    "message": "Unrecognized key(s) in object: 'uncoveredCriteria'"
+  }
+]
+[ELIFECYCLE] Command failed with exit code 1.
+```
+
+### What actually happened (sequence)
+
+1. ✅ **Spec parsed**, `chikory chain` entered `cmdChain`.
+2. ✅ **The planner LLM call SUCCEEDED** — `gpt-5.5 · 13845ms · 649/358 tok`
+   (the `plan`-stage call) decomposed the goal into a real multi-node `Plan`.
+3. ✅ **The plan meta-judge LLM call SUCCEEDED** — `gemini-3.1-pro-preview ·
+   5468ms · 886/97 tok` (the `judge`-stage call). **No transport error** — F-33's
+   trigger did not recur; the shim served both calls. Family diversity held
+   (planner `gpt-5.5` openai-family ≠ judge `gemini-3.1-pro-preview`).
+4. 🔴 **The reply FAILED schema validation deterministically.** The meta-judge
+   returned a well-formed JSON object **including** `uncoveredCriteria` — because
+   the response schema sent to the model (`PLAN_VERDICT_RESPONSE_SCHEMA`,
+   `meta-judge-prompt.ts:4-19`) lists it as `required` and the system prompt
+   (lines 36-37) instructs the model to enumerate it — but the **parse schema**
+   `PlanJudgeReplySchema` (`schemas.ts:462`) was `.strict()` over only
+   `{ kind, rationale }`, so it rejected the very field it had asked for.
+5. 🔴 **`runPlanJudgePass` folded the parse error into an ESCALATE value**
+   (`meta-judge-harness.ts:106-115`, invariant #4 — never throw), and `cmdChain`
+   fail-closed (`gate.verdict.kind !== "PROCEED"` → exit 1). Fail-closing is
+   correct; the verdict it fail-closed on was a self-inflicted contract bug.
+6. 🔴 **Zero durable state persisted** — same as attempt 2 (host-side, before
+   `startChain`): no `.chikory/chains/`, no node runs, the decomposed Plan thrown
+   away. (This is still F-33; not re-counted.)
+
+### New friction
+
+#### 🔴 F-35 — the plan meta-judge gate has a self-contradictory `uncoveredCriteria` contract: the response schema REQUIRES the field, the parse schema REJECTS it → the gate fails 100% of the time a provider honors the schema (FIXED this session → WP-235)
+
+**Evidence.** Three contracts in the same feature disagreed:
+| Surface | File | Says about `uncoveredCriteria` |
+|---|---|---|
+| Response schema (sent TO the model) | `meta-judge-prompt.ts:7,14` | `required`, `additionalProperties:false` |
+| System prompt | `meta-judge-prompt.ts:36-37` | "List in `uncoveredCriteria` every goal criterion id…" |
+| Parse schema (validates the reply) | `schemas.ts:462-464` | `.strict()` over `{ kind, rationale }` only — **rejects it** |
+
+A schema-honoring provider (gemini-3.1-pro-preview here) dutifully emits
+`uncoveredCriteria` → the strict Zod parse throws `unrecognized_keys` → ESCALATE →
+chain stops. This is **deterministic**: every compliant judge reply fails. The
+field is also **dead data** — `buildPlanVerdict` (`meta-judge-verdict.ts:24`)
+**recomputes** the authoritative coverage gap via `planCoverageGaps` and never
+reads the model's value. So the gate demanded a field, then rejected it, then
+would have ignored it anyway.
+
+**Why the unit tests missed it.** `meta-judge-harness.test.ts` fed the harness
+replies shaped `{ kind, rationale }` — **without** `uncoveredCriteria` — i.e. a
+shape the production prompt + response schema never produce. The mock masked the
+real failure mode exactly as CLAUDE.md warns ("Mock the LLM layer in integration
+tests (masks real failure modes)" — Do-not list).
+
+**Fix landed this session (WP-235).**
+- `schemas.ts` — `PlanJudgeReplySchema` now accepts
+  `uncoveredCriteria: z.array(z.string()).default([])` (accepts the real shape;
+  `.default([])` tolerates a provider that omits it; existing `{ kind, rationale }`
+  tests stay green). The deterministic floor (`planCoverageGaps`) remains the
+  authoritative source — the model's value stays advisory. Stale doc-comment
+  corrected.
+- `meta-judge-harness.test.ts` — new regression case
+  *"accepts the real reply shape that includes uncoveredCriteria"* drives the
+  harness with the production reply shape and asserts PROCEED.
+- Verified: `tsc --noEmit` exit 0; `vitest run test/planner/meta-judge-*.test.ts`
+  → **13 passed** (harness 8, was 7).
+
+### Verdict on attempt 3
+
+- 🟢 **The chain launcher now works through the full plan→gate path.** `chikory
+  chain` parsed, decomposed a real goal (planner OK), AND got a real meta-judge
+  reply back (judge OK) — both LLM calls succeeded for the first time. F-32, F-33,
+  F-34 all did not recur.
+- 🟢 **F-35 is fixed** — the gate can now accept a schema-compliant verdict.
+- 🔴 **The thesis is STILL unproven — but the last *code* blocker to a PROCEED is
+  removed.** No node has run yet; `chainLoop` is still untouched. With F-35 fixed,
+  attempt 4 is the first launch where a PROCEED verdict can actually flow into
+  `startChain`. **The first real chain run is owed and now unblocked** — re-launch
+  `devbox run dogfood` (the SDK rebuild will pick up the schema fix).

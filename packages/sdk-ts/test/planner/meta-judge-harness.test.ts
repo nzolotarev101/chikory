@@ -82,6 +82,24 @@ describe("runPlanJudgePass", () => {
     expect(result.costUsd).toBe(0.03);
   });
 
+  it("accepts the real reply shape that includes uncoveredCriteria (the response schema requires it)", async () => {
+    // The model is REQUIRED by PLAN_VERDICT_RESPONSE_SCHEMA to emit
+    // `uncoveredCriteria`; the parse must accept it (regression for the schema
+    // mismatch that stopped the chain in dogfood-041 attempt 3 — F-35).
+    const result = await runPlanJudgePass({
+      router: router(
+        ok(JSON.stringify({ kind: "PROCEED", rationale: "sound", uncoveredCriteria: [] })),
+      ),
+      plan: PLAN,
+      goalCriteria: GOAL_CRITERIA,
+      plannerFamily: "openai",
+      judgeModel: GEMINI_JUDGE,
+    });
+
+    expect(result.verdict.kind).toBe("PROCEED");
+    expect(result.verdict.uncoveredCriteria).toEqual([]);
+  });
+
   it("applies the deterministic coverage floor: PROCEED with a gap becomes REVISE", async () => {
     const result = await runPlanJudgePass({
       router: router(ok(JSON.stringify({ kind: "PROCEED", rationale: "looks fine to me" }))),
