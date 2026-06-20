@@ -1,6 +1,7 @@
 from .branch_target import BranchTarget, branch_name_for_target, parse_branch_target
 from .compaction_prompt import DIGEST_SYSTEM_PROMPT, build_digest_messages
 from .judge import Judge
+from .memory_pointer import MemoryPointerPolicy, format_pointer_reference, should_pointerize
 from .router import Router
 from .runner import AgentRunner
 from .types import (
@@ -60,6 +61,7 @@ __all__ = [
     "LLMCallResult",
     "LLMProvider",
     "Message",
+    "MemoryPointerPolicy",
     "ModelChoice",
     "NotificationPolicy",
     "PacingPolicy",
@@ -80,5 +82,7 @@ __all__ = [
     "VerdictKind",
     "branch_name_for_target",
     "build_digest_messages",
+    "format_pointer_reference",
     "parse_branch_target",
+    "should_pointerize",
 ]

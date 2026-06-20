@@ -350,9 +350,15 @@ class PlanVerdict(ContractModel):
     uncovered_criteria: list[str]
 
 
+class NodeOutcome(ContractModel):
+    status: TerminalStatus
+    verdict: VerdictKind
+
+
 class ChainRecord(ContractModel):
     plan_id: str
     plan: Plan
     plan_verdict: PlanVerdict | None = None
     node_runs: dict[str, str]
+    node_outcomes: dict[str, NodeOutcome]
     status: ChainStatus

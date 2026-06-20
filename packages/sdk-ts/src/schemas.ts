@@ -25,6 +25,7 @@ import type {
   LLMCallResult,
   Message,
   ModelChoice,
+  NodeOutcome,
   NotificationPolicy,
   PacingPolicy,
   Plan,
@@ -472,12 +473,20 @@ export const ChainStatusSchema = z.enum([
   "CANCELLED",
 ]);
 
+export const NodeOutcomeSchema = z
+  .object({
+    status: TerminalStatusSchema,
+    verdict: VerdictKindSchema,
+  })
+  .strict();
+
 export const ChainRecordSchema = z
   .object({
     planId: z.string().min(1),
     plan: PlanSchema,
     planVerdict: PlanVerdictSchema.optional(),
     nodeRuns: z.record(z.string(), z.string()),
+    nodeOutcomes: z.record(z.string(), NodeOutcomeSchema),
     status: ChainStatusSchema,
   })
   .strict();
@@ -519,6 +528,7 @@ export type ContractTypeChecks = [
   AssertAccepts<Plan, z.infer<typeof PlanSchema>>,
   AssertAccepts<PlanVerdict, z.infer<typeof PlanVerdictSchema>>,
   AssertAccepts<ChainLink, z.infer<typeof ChainLinkSchema>>,
+  AssertAccepts<NodeOutcome, z.infer<typeof NodeOutcomeSchema>>,
   AssertAccepts<ChainRecord, z.infer<typeof ChainRecordSchema>>,
 ];
 
@@ -553,6 +563,7 @@ export const contractSchemas = {
   Plan: PlanSchema,
   PlanVerdict: PlanVerdictSchema,
   ChainLink: ChainLinkSchema,
+  NodeOutcome: NodeOutcomeSchema,
   ChainRecord: ChainRecordSchema,
 } as const;
 

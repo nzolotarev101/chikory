@@ -1,4 +1,10 @@
 {
+  "nodeOutcomes": {
+    "N-1": {
+      "status": "SUCCESS",
+      "verdict": "PROCEED"
+    }
+  },
   "nodeRuns": {
     "N-1": "run-7f3a-n1"
   },

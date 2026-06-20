@@ -496,6 +496,18 @@ export type ChainStatus =
   | "FAILED"
   | "CANCELLED";
 
+/**
+ * A sealed PlanNode's terminal outcome — the chain-state reducer's per-node
+ * input (ADR-005 D3/D4). `status` is the child run's terminal seal; `verdict`
+ * is its final judge ruling (the reducer reads `verdict` to separate an
+ * ESCALATE park from a FAILED halt). The child run id stays in
+ * `ChainRecord.nodeRuns`.
+ */
+export interface NodeOutcome {
+  status: TerminalStatus;
+  verdict: VerdictKind;
+}
+
 /** Chain-level state — spans runs, lives above any one run's journal (D4). */
 export interface ChainRecord {
   planId: string;
@@ -504,6 +516,8 @@ export interface ChainRecord {
   planVerdict?: PlanVerdict;
   /** node id → child run id (the reverse of TaskSpec.chainLink). */
   nodeRuns: Record<string, string>;
+  /** node id → terminal outcome of its sealed child run (empty until a node seals). */
+  nodeOutcomes: Record<string, NodeOutcome>;
   status: ChainStatus;
 }
 

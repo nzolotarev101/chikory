@@ -1,0 +1,142 @@
+# Dogfood-038: WP-219 S3-pure — the chain-state reducer. Implement the two PURE
+# chain-state functions (`advanceChain` + `deriveChainStatus`) in
+# `packages/sdk-ts/src/chain/advance.ts`, the `computeVerdict` analog for the
+# durable chain executor (ADR-005 D3/D4, §S3 transition rules).
+#
+# WHY THIS IS THE PRIORITY: the dogfood queue had drifted into mechanical WP-201
+# parity ports (dogfood-035/036/037) because the real next value lever — the S3
+# durable chain executor (WP-219, ADR-005) — was gated behind hand-design. That
+# wall is now cleared: the architect wrote the §S3 transition rules into ADR-005
+# and froze the `NodeOutcome` + `ChainRecord.nodeOutcomes` contract by hand
+# (TASK-PROTOCOL §4, the `contracts:` change). The chain-state reducer is the one
+# DOGFOODABLE pure slice that falls out of S3 — the sibling of the already-landed
+# pure `readyNodes` / `hasDependencyCycle` (dogfood-015/016) and the analog of
+# the judge's `computeVerdict` (`src/judge/verdict.ts`) and the planner's
+# `buildPlanVerdict` (`src/planner/meta-judge-verdict.ts`). It outranks the
+# remaining parity ports: it unblocks the S3-wiring keystone (the Temporal chain
+# executor), not just dual-SDK surface.
+#
+# Zero-secrets launch:
+#   node scripts/cli-judge-proxy.mjs 8787 gemini &
+#   OPENAI_COMPAT_BASE_URL=http://127.0.0.1:8787 pnpm chikory run examples/dogfood/dogfood-038.yaml --watch
+#
+# Commit everything before launching — workspaces clone HEAD, so the run must see
+# the frozen `NodeOutcome` contract (types.ts/schemas.ts/CONTRACTS.md) and the
+# ADR-005 §S3 transition rules. Launch ONCE and watch to terminal (F-30). Run
+# Devbox commands sequentially (F-22). F-11 is closed (dogfood-022..036): a clean
+# one-step finish should seal SUCCESS with NO empty-diff probe step — watch the
+# step count stay at 1.
+name: dogfood-038-wp-219-s3-chain-state-reducer
+goal: >
+  Implement the WP-219 S3-pure chain-state reducer — the two PURE functions that
+  fold a sealed PlanNode's terminal outcome into the chain and derive the chain
+  status, per ADR-005 §S3 transition rules (the `computeVerdict` analog for run
+  chaining). These are a pure fold + a pure status-derivation with NO I/O.
+
+  Do NOT make any LLM/router call, do NOT read/write the filesystem, do NOT touch
+  the network, clock, or randomness, do NOT implement new runtime behavior in the
+  agent loop / runner / Temporal workflow, do NOT change `types.ts`,
+  `schemas.ts`, or any contract model (the `NodeOutcome` + `ChainRecord`
+  `nodeOutcomes` contract already landed by hand — reuse it, do NOT redefine it),
+  and do NOT add the non-pure S3-wiring (child-run dispatch, halt-and-replan,
+  `node_started`/`node_sealed` journaling — that is the hand-design follow-up).
+  Add exactly one new source file and one new test file, and edit exactly one
+  existing file (`src/index.ts`) for the re-export — three files total, no other
+  file changed.
+
+  1. packages/sdk-ts/src/chain/advance.ts — a NEW pure module, TypeScript strict,
+     ESM, named exports only, no default export. It must perform NO I/O, clock
+     read, randomness, or input mutation, and must implement ADR-005 §S3
+     transition rules exactly. Import `ChainRecord`, `ChainStatus`, and
+     `NodeOutcome` type-only from `../types.js`. JSDoc each export citing
+     WP-219 / ADR-005 D3/D4. Mirror the pure-reducer shape of
+     `src/judge/verdict.ts` `computeVerdict` and `src/planner/meta-judge-verdict.ts`
+     `buildPlanVerdict`:
+       - `export function deriveChainStatus(record: ChainRecord): ChainStatus`
+         — computes the chain status from `record.plan.nodes` and
+         `record.nodeOutcomes`, first match wins, in this precedence:
+           1. any node outcome with `verdict === "ESCALATE"` → `"AWAITING_PLAN_APPROVAL"`
+              (a node ESCALATE parks the whole chain for the human gate).
+           2. else any node outcome with `status === "FAILED"` → `"FAILED"`
+              (the chain halts at the failed node, resumable; replan is the
+              non-pure follow-up — the reducer only seals the halt).
+           3. else every `record.plan.nodes` id is present in
+              `record.nodeOutcomes` with `status === "SUCCESS"` → `"SUCCESS"`.
+           4. else → `"RUNNING"`.
+         Pure: reads only its argument, returns one of exactly those four
+         `ChainStatus` values, no mutation, no I/O.
+       - `export function advanceChain(record: ChainRecord, nodeId: string, outcome: NodeOutcome): ChainRecord`
+         — folds one sealed node into the chain. Returns a NEW `ChainRecord`
+         (do NOT mutate `record` or its nested objects/maps) with
+         `nodeOutcomes` extended by `{ [nodeId]: outcome }` and `status`
+         recomputed by calling `deriveChainStatus` on the new record. All other
+         fields (`planId`, `plan`, `planVerdict`, `nodeRuns`) carried through
+         unchanged. No clock, no id generation, no I/O.
+
+  2. packages/sdk-ts/src/index.ts — re-export `advanceChain` and
+     `deriveChainStatus` from `./chain/advance.js`, following the existing
+     explicit named re-export convention used for `buildPlan` /
+     `buildPlanVerdict` (around the planner re-export block). Change nothing else.
+
+  3. packages/sdk-ts/test/chain/advance.test.ts — a NEW vitest file importing
+     `advanceChain` and `deriveChainStatus` from the package barrel
+     (`../../src/index.js`) and the `ChainRecord` / `NodeOutcome` types from
+     `../../src/types.js`. Use a small builder for a `ChainRecord` over a 3-node
+     plan (`N-1`, `N-2`, `N-3` with a simple dependency chain) so the cases are
+     readable. Assert at least:
+       - `deriveChainStatus` rule 4 (RUNNING) — a record with one `SUCCESS`
+         outcome and uncompleted nodes returns `"RUNNING"`.
+       - `deriveChainStatus` rule 3 (SUCCESS) — every plan node present in
+         `nodeOutcomes` with `status === "SUCCESS"` returns `"SUCCESS"`.
+       - `deriveChainStatus` rule 2 (FAILED) — a `{ status: "FAILED", verdict: "HALT" }`
+         outcome among otherwise-SUCCESS nodes returns `"FAILED"`.
+       - `deriveChainStatus` rule 1 precedence — a `{ verdict: "ESCALATE" }`
+         outcome returns `"AWAITING_PLAN_APPROVAL"` EVEN WHEN another node is
+         `FAILED` (ESCALATE outranks FAILED).
+       - `advanceChain` folds an outcome — the returned record has the new
+         outcome in `nodeOutcomes` and a `status` consistent with
+         `deriveChainStatus` of the result.
+       - `advanceChain` immutability — the input `record` is unchanged after the
+         call (same `nodeOutcomes` keys, same `status`); the returned record is a
+         different object.
+
+  After this slice, the S3 chain-state reducer exists as a pure, unit-tested
+  function pair — the `computeVerdict` analog the durable chain executor consumes.
+  The non-pure S3-wiring (Temporal child-run dispatch, halt-and-replan, chain
+  journaling) is the hand-design follow-up (TASK-PROTOCOL §4). No runtime
+  behavior changes in this slice.
+
+  Follow AGENTS.md: TypeScript strict, ESM, named exports, no default export, no
+  new dependency. Run all Devbox verification commands sequentially.
+repos:
+  - url: /Users/nikitazolotarev/repos/chikory
+    writable: true
+acceptance_criteria:
+  # Checks run by the judge inside the run workspace (fresh clone) under the
+  # worker's devbox env — call the toolchain directly, 120s cap per check.
+  - id: AC-1
+    description: the new chain-state reducer unit test passes
+    check: pnpm install --prefer-offline --silent && pnpm --filter @chikory/sdk exec vitest run test/chain/advance.test.ts
+  - id: AC-2
+    description: >
+      the complete TypeScript SDK suite remains green — proving the new pure
+      module breaks no existing behavior
+    check: pnpm --filter @chikory/sdk test
+  - id: AC-3
+    description: strict typecheck (covering test/**, WP-230) and lint are clean
+    check: pnpm --filter @chikory/sdk typecheck && pnpm --filter @chikory/sdk lint
+budget_usd: 5
+max_steps: 4
+executor:
+  adapter: codex
+  family: openai
+judge:
+  family: openai-compat
+  cadence: 2
+  max_cost_share: 0.5
+routing:
+  stages:
+    plan: { provider: openai-compat, model: gpt-5.5 }
+    code: { provider: openai-compat, model: gpt-5.5 }
+    review: { provider: openai-compat, model: gpt-5.5 }
+    judge: { provider: openai-compat, model: gemini-3.1-pro-preview }

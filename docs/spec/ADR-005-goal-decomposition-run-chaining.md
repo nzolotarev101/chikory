@@ -111,6 +111,52 @@ layer *above* the run loop — never a change to it.**
 | D3 | Static vs adaptive plan. | **Static decomposition + halt-and-replan on node failure.** Decompose once; on failure re-plan from the failed node with the failure as evidence. |
 | D4 | Plan storage. | **Chain-level record** referencing child run-ids (mirrors the per-run SQLite journal pattern). A chain spans runs, so plan state lives above any one run's journal. |
 
+## S3 transition rules (D3/D4 reducer)
+
+D3 ("static + halt-and-replan") and D4 ("chain-level record") fix *what* the
+chain remembers and *how* it reacts to a node failure, but the per-node state
+machine they imply has to be spelled out before the chain executor can be built.
+This section is that enumeration — the analog of the judge's
+`CONTRACTS.md §4` verdict rules that `computeVerdict` implements. The whole
+state machine is a **pure reducer** over the frozen `ChainRecord`; the LLM/
+Temporal/git side effects are the S3-wiring layer above it, never inside it.
+
+To make the reducer pure over `ChainRecord`, each sealed node's terminal
+outcome is recorded on the chain (the `contracts:` PR adds `NodeOutcome`
+`{ status, verdict }` + `ChainRecord.nodeOutcomes: Record<nodeId, NodeOutcome>`;
+the child run id stays in `nodeRuns`). Two pure functions consume it:
+
+- **`advanceChain(record, nodeId, outcome): ChainRecord`** — folds one sealed
+  node into the chain. Returns a *new* record with
+  `nodeOutcomes[nodeId] = outcome` and `status` recomputed via
+  `deriveChainStatus`; it does not mutate its input, read the clock, or perform
+  I/O (the `buildPlan` / `buildPlanVerdict` discipline). The verdict is supplied
+  by the sealed child run; the reducer never re-judges.
+
+- **`deriveChainStatus(record): ChainStatus`** — computes the chain status from
+  `record.plan.nodes` and `record.nodeOutcomes`, in this precedence (first match
+  wins, mirroring the §4 rule-ordering style):
+
+  1. **any node `verdict === "ESCALATE"` → `AWAITING_PLAN_APPROVAL`.** A node's
+     ESCALATE parks the *whole* chain for the human gate (§8). Highest
+     precedence: a human question outranks a mechanical failure.
+  2. **else any node `status === "FAILED"` → `FAILED`.** The chain halts at the
+     failed node, resumable — identical to how a single run seals (§4). The
+     planner re-invoke ("halt-and-replan", D3) is the **non-pure S3-wiring**
+     follow-up that reads this `FAILED` seal and the failed node's evidence; the
+     reducer only seals the halt, it does not replan.
+  3. **else every `plan.nodes` id present in `nodeOutcomes` with
+     `status === "SUCCESS"` → `SUCCESS`.** All slices delivered and gated.
+  4. **else → `RUNNING`.** Work remains and nothing has failed/escalated;
+     `readyNodes(plan, completed)` (already landed) drives what dispatches next.
+
+The reducer's output domain is exactly those four `ChainStatus` values. The
+remaining three — `PLANNING`, `SUSPENDED`, `CANCELLED` (and the *entry* into
+`AWAITING_PLAN_APPROVAL` from a plan-meta-judge ESCALATE before any node runs) —
+are set by the orchestrator for non-node transitions (decomposition, WP-206
+between-node suspend, cancel), **never by this reducer**. Keeping that boundary
+crisp is what makes the reducer a pure, fully unit-testable slice.
+
 ## Contract surface (the PR that falls out — WP-219 slice 1, hand-done)
 
 Architect-reviewed contracts change (TASK-PROTOCOL §4), `types.ts` + zod +
@@ -145,8 +191,16 @@ runs again, now against a real chaining substrate):
 - **S2b** — plan meta-judge: gates the decomposition (different family than the
   planner) → PROCEED/REVISE/ESCALATE before any node executes; consumes
   `planCoverageGaps` for the coverage half of its verdict. *(now dogfoodable)*
-- **S3** — chain executor: run nodes in dep order, gate on verdicts, carry the
-  predecessor checkpoint git state forward; halt-and-replan on node failure (D3).
+- **S3-pure** — the chain-state reducer: `advanceChain` + `deriveChainStatus`
+  (§S3 transition rules), pure over the frozen `ChainRecord` + `NodeOutcome`,
+  the `computeVerdict` analog. **Dogfoodable 🟢** (the `NodeOutcome` contract
+  landed by hand first — `contracts:` PR — so the slice itself adds no contract
+  change). Sibling of the landed pure `readyNodes` / `hasDependencyCycle`.
+- **S3-wiring** — chain executor (hand-design, TASK-PROTOCOL §4): the Temporal
+  workflow that loops `readyNodes` over the gated `Plan`, spawns one child run
+  per node from the predecessor checkpoint, folds each sealed node through
+  `advanceChain`, halts-and-replans on a `FAILED` seal (D3), and journals
+  `node_started` / `node_sealed`.
 - **S4** — context handoff: WP-203 compaction note + WP-202 refs between nodes.
 - **S5** — WP-206 suspend/resume between nodes (Temporal signal).
 - **S6** — `chikory trace` renders the chain (plan tree + per-node verdicts) —

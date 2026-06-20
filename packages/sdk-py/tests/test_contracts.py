@@ -23,6 +23,7 @@ from chikory.types import (
     LLMCallResult,
     Message,
     ModelChoice,
+    NodeOutcome,
     NotificationPolicy,
     PacingPolicy,
     Plan,
@@ -77,6 +78,7 @@ MODELS: dict[str, ModelType] = {
         Plan,
         PlanVerdict,
         ChainLink,
+        NodeOutcome,
         ChainRecord,
     )
 }

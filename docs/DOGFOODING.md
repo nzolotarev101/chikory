@@ -236,10 +236,22 @@ cases, no contract change: a **twelfth** straight one-step no-probe SUCCESS, no
 new friction, input tokens 318k (new series low). It was the first
 branch-target-series run committed to `HEAD` (`88e496c`) rather than staged, and
 `dogfood-landed-scope.sh` reported **MATCH** — the F-31 audit confirming the
-committed diff is exactly the verified run diff. The parity thread continues
-with dogfood-036 (Memory Pointer pure surface — `should_pointerize` +
-`format_pointer_reference` ← TS `runner/memory-pointer.ts`); the keystone after
-it is the hand-design S3 durable chain executor.
+committed diff is exactly the verified run diff. Dogfood-036
+(`docs/reports/dogfood-036.md`) ported the WP-202 / CM-3 Memory Pointer pure
+surface to the Python SDK — `should_pointerize` + `format_pointer_reference` +
+a local frozen `MemoryPointerPolicy` dataclass in
+`packages/sdk-py/src/chikory/memory_pointer.py`, mirroring the TS
+`runner/memory-pointer.ts` source-of-truth byte-for-byte (12-char id truncation,
+em dash U+2014), `ArtifactRef` reused, 5 pytest cases, no contract change: a
+**thirteenth** straight one-step no-probe SUCCESS, no new friction, input tokens
+398k (low-mid band). **The S3 wall was then cleared by hand (2026-06-19):** the
+architect wrote the ADR-005 §S3 transition rules and froze the `NodeOutcome` +
+`ChainRecord.nodeOutcomes` contract across all langs, so the WP-219 **S3-pure
+chain-state reducer** (`advanceChain` + `deriveChainStatus`, the `computeVerdict`
+analog) is now the next dogfood — **dogfood-038**, ahead of the deprioritized
+WP-207 pacing parity port (dogfood-037). The keystone after the reducer is the
+hand-design S3-wiring: the Temporal chain executor that folds sealed nodes
+through `advanceChain` and halt-and-replans on a `FAILED` seal.
 
 Related docs: [`docs/spec/task-spec.md`](spec/task-spec.md) (schema
 reference) · [`docs/TASK-PROTOCOL.md`](TASK-PROTOCOL.md) (WP etiquette, §7 is

@@ -366,11 +366,17 @@ export type ChainStatus =
   | "PLANNING" | "AWAITING_PLAN_APPROVAL" | "RUNNING"
   | "SUSPENDED" | "SUCCESS" | "FAILED" | "CANCELLED";
 
+export interface NodeOutcome {          // a sealed PlanNode's terminal outcome (D3/D4)
+  status: TerminalStatus;              // the child run's terminal seal
+  verdict: VerdictKind;                // final judge ruling — ESCALATE parks, FAILED halts
+}
+
 export interface ChainRecord {
   planId: string;
   plan: Plan;
   planVerdict?: PlanVerdict;
   nodeRuns: Record<string, string>;    // node id → child run id
+  nodeOutcomes: Record<string, NodeOutcome>;  // node id → terminal outcome (chain reducer input)
   status: ChainStatus;
 }
 ```
