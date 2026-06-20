@@ -41,3 +41,14 @@ This skill is run to analyze the latest planned dogfooding run in the `examples/
    - **Friction / Feedback Loop**: The run directly addresses a friction point (F-n) from a previous dogfood report (e.g., F-21 spawning WP-226).
    - **Acyclic Dependency / Pure Preconditions**: The run is a pure helper or precondition slice (like cycle detection `hasDependencyCycle` or sequencing `readyNodes`) unblocked by a landed contract PR.
    - **Other reason**: Clarify any other technical or ordering reason why this item is next.
+
+## Output
+
+End your analysis with a structured summary formatted for readability. To ensure it is simple to read, visually clear, and detailed while conserving full context, adhere strictly to these rules:
+
+1. **Vibe Check (Simplified Summary First)**: Begin with a 1–2 sentence high-level, jargon-free summary classifying the planned run. Clearly state the target Work Package (WP) and what the task aims to achieve in plain English.
+2. **Context Conservation**: Maintain all exact details (WP identifiers, spec file paths, preceding run numbers/reports).
+3. **Structured Visual Layout**:
+   - Use clear visual indicators for classification (e.g., `🔴 Mission Critical` or `🟡 Busy Work`).
+   - If classified as Busy Work, present the comparison table of the three preceding runs (run number, classification, report link, and outcome) using a markdown table.
+4. **Prioritization Rationale & Terminology Explanations**: Provide a detailed explanation of the prioritization rationale. Explain any complex domain terms (e.g., "Frozen Contract Wall", "Acyclic Dependency", "Friction Loop") clearly, so that the developer does not need external references to understand the decision.

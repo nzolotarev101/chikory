@@ -85,6 +85,18 @@ See `docs/spec/` for ADRs. Settled:
 Open:
 - First target segment: indie devs vs. AI-native startups vs. enterprise
 
+## Communication Style and User Output Conventions
+
+To ensure the developer can quickly digest your output, follow these communication guidelines for every response, report, or status update:
+
+1. **Simplified Summary First**: Always start with a brief, high-level summary explaining *what* happened, *why* it matters, and *what* the next steps are, using clear and simple language. Avoid immediate jargon.
+2. **Conserve Context Fully**: Never omit critical technical details or values. You must keep and present exact:
+   - Run IDs, commit SHAs, file paths, line numbers/ranges
+   - Cost metrics (USD, token count, duration, percentage of budget)
+   - Specific failure errors or test exit codes
+3. **Structured Visual Presentation**: Use tables for comparisons (e.g., comparing runs, metrics, budgets, or file diffs). Use visual indicators (like `🟢`, `🟡`, `🔴`, `⚠️`, `ℹ️`) and structured bullet points to break up text and avoid walls of prose.
+4. **Explain in Great Detail**: When discussing complex architectures, domain concepts, or technical terms (e.g., "Compounding errors", "Context rot", "OTel span", "Temporal workflows"), explain them clearly and thoroughly so the reader does not have to guess or look up background context.
+
 ## Reference
 
 - Master plan (what to build, work packages): `plan.md`

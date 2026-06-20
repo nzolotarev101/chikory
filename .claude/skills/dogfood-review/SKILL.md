@@ -138,6 +138,13 @@ the user: commit everything before launching — the workspace clones HEAD.
 
 ## Output
 
-End with a summary: verdict on the delivery, friction items found (F-n →
-WP-n mapping), docs touched, next spec ready + its launch command. Leave
-changes uncommitted for the user's review unless told otherwise.
+Your output must end with a structured summary formatted for readability. To ensure it is simple to read, visually clear, and detailed while conserving full context, adhere strictly to these rules:
+
+1. **Vibe Check (Simplified Summary First)**: Begin with a 1–2 sentence high-level, jargon-free summary of the run's verdict. Explain what was completed and what it means in plain English (e.g., "The run successfully implemented the logic, but highlighted that a precheck script is needed to prevent wasted runs").
+2. **Context Conservation**: Maintain all exact numbers, including:
+   - Run ID, commit SHA, file paths, and exact line ranges.
+   - Cost details: Total cost in USD, input/output tokens per step, and execution duration.
+3. **Structured Visual Layout**: Present cost metrics, step progress, or comparisons using markdown tables and bullet points. Avoid walls of text. Use visual status indicators (e.g., `🟢`, `🟡`, `🔴`, `⚠️`, `ℹ️`).
+4. **Acronym & Terminology Explanations**: Explain any complex domain terms (e.g., WP, AC, OTel spans, probe steps) in detail when summarizing, so a reader can digest it without needing external documentation.
+5. **Clear Call-to-Action**: End with the exact command to run the next spec (unblocked and verified). Leave all edits uncommitted for the user's review.
+

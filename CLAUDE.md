@@ -71,6 +71,13 @@ All project tasks (build, lint, test, run, Temporal, scripts) run **inside devbo
 - **Terminal states**: explicit SUCCESS/FAILED in tool responses to break infinite loops
 - **Agent-as-a-Judge**: inspects diffs, runs tests, compares UI snapshots — not text grading
 
+## Communication Guidelines
+
+To make updates, plans, and summaries easy to read while retaining full context:
+- **Lead with a high-level summary**: Explain the outcome or state in plain, simplified human terms first, using clear explanations of any complex domain concepts (like Context Rot, Compounding Errors, OTel spans, or Temporal workflow states).
+- **Conserve all context**: Always output exact identifiers such as Run IDs, commit SHAs, file names, line numbers, execution costs in USD, token statistics, and test exit statuses.
+- **Structure outputs visually**: Avoid large blocks of dense text. Always use bullet points, tables for comparing metrics or runs, and visual flags (e.g., `🟢`, `🟡`, `🔴`, `⚠️`, `ℹ️`) to format your response.
+
 ## Do not
 
 - Run project commands outside devbox (no host pnpm/node/python/temporal)
