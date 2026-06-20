@@ -83,11 +83,13 @@ Every requirement in [`project.md`](../project.md), assigned a stable ID, mapped
 ## FA — Full-application scope (spec §5.8)
 
 > **FA-1 update (WP-237, 2026-06-20):** local single-predecessor S4 code
-> handoff is implemented: a dependent run starts from `dependsOn[0]`'s sealed
-> tree with a static predecessor note, while its own base/diff remains isolated.
-> Dogfood-042 is queued as the first green dependent-chain proof. True fan-in,
-> structured compaction/ref handoff, and distributed artifact transport are the
-> top-priority WP-239 follow-up (F-39), not claimed complete by this local v1.
+> handoff is implemented and proven by dogfood-042
+> `chain-1cde6ae3-d05f-438e-b818-8af76419d6ae` SUCCESS 2/2: node B imported
+> node A's handed-off module while retaining an isolated base/diff; cumulative
+> chain harvest landed `b1b825d`. True fan-in, structured compaction/ref
+> handoff, and distributed artifact transport are top-priority WP-239 (F-39).
+> Child approval/resume visibility is WP-241 (F-42); chain-aware verification
+> remains WP-232 (F-41).
 
 | ID | Requirement | WP(s) | Phase | Status |
 |---|---|---|---|---|
