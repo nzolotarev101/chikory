@@ -63,7 +63,7 @@ export default async function setup(project: TestProject): Promise<() => Promise
 
   const { bundleWorkflowCode } = await import("@temporalio/worker");
   const bundle = await bundleWorkflowCode({
-    workflowsPath: fileURLToPath(new URL("../../src/workflow/agent-loop.ts", import.meta.url)),
+    workflowsPath: fileURLToPath(new URL("../../src/workflow/index.ts", import.meta.url)),
   });
   const bundleDir = mkdtempSync(join(tmpdir(), "chikory-wf-bundle-"));
   const bundlePath = join(bundleDir, "workflow-bundle.js");

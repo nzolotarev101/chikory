@@ -8,46 +8,56 @@
 
 ---
 
-**Current dogfood update (2026-06-19)**: dogfood-036
-(`run-51645fbb-eee1-41a2-92c6-a4edfff7fafa`) delivered the WP-201 Python parity
-of the WP-202 / CM-3 pure Memory Pointer surface: a local frozen
-`MemoryPointerPolicy` dataclass (`max_inline_bytes: int`, NOT in `types.py`) +
-`should_pointerize` + `format_pointer_reference` in a new
-`packages/sdk-py/src/chikory/memory_pointer.py`, re-exported from `__init__.py`,
-with 5 pytest cases in `packages/sdk-py/tests/test_memory_pointer.py`. It mirrors
-the source-of-truth TS module `packages/sdk-ts/src/runner/memory-pointer.ts`
-behavior-for-behavior — `num_bytes > policy.max_inline_bytes` (strict `>`,
-exactly-at-threshold inlines) and the byte-identical reference template
-`f"[memory {ref.kind} {ref.id[:12]}] {ref.bytes}B — {ref.summary}"` (12-char id
-truncation, em dash U+2014). `ArtifactRef` reused from `chikory/types.py:197`; no
-contract change, no runtime wiring. Clean SUCCESS in ONE step, no probe (F-11
-stays closed, `s0 j@0`, **thirteenth** straight run); harvested byte-`IDENTICAL`,
-uncommitted on the working tree (pending the user's review). 5 / 72 py tests
-green, pyright + ruff clean; no new friction (highest stays F-31); F-30 did not
-recur. **Cost-trend update:** input tokens came in at **398k** — low-mid band;
-the one-step pure-slice series now reads 021 862k → 022 969k → 023 451k →
-024 976k → 025 467k → 026 807k → 027 527k → 028 410k → 029 462k → 030 434k →
-031 375k → 033 327k → 034 594k → 035 318k → 036 398k (032 excluded — 2-step),
-tracking neither diff size nor run order; per-step input cost is *noisy, not
-monotonic*; WP-203/WP-207 stay queued as a variance/ceiling lever. **The WP-202
-/ CM-3 Memory Pointer pure surface now exists in BOTH SDKs.** **S3 wall cleared
-by hand (2026-06-19, this session):** the dogfood queue had drifted into
-mechanical WP-201 parity ports because the real value lever — the WP-219 S3
-durable chain executor — was gated behind hand-design. That gate is now open: the
-architect wrote the **ADR-005 §S3 transition rules** (the `advanceChain` /
-`deriveChainStatus` precedence — ESCALATE→AWAITING_PLAN_APPROVAL, FAILED→FAILED,
-all-SUCCESS→SUCCESS, else RUNNING) and froze the **`NodeOutcome` +
-`ChainRecord.nodeOutcomes` contract** by hand (TASK-PROTOCOL §4, all langs:
-`types.ts`/`schemas.ts`/`CONTRACTS.md §7a`/`sdk-py`/`fixtures/contracts`; TS 339
-+ py 74 green). **Next dogfood is dogfood-038 / WP-219 S3-pure: the chain-state
-reducer** — `advanceChain` + `deriveChainStatus` in a new
-`packages/sdk-ts/src/chain/advance.ts`, the `computeVerdict` analog and the
-sibling of the landed pure `readyNodes`/`hasDependencyCycle`; no contract change
-(the `NodeOutcome` surface just landed). The WP-201 pacing parity port
-(`decide_context_window_pacing`, dogfood-037) is **deprioritized behind 038**, not
-dropped. The keystone after the reducer is the hand-design **S3-wiring** — the
-Temporal chain executor that folds sealed nodes through `advanceChain` and
-halt-and-replans on a `FAILED` seal (D3).
+**Current dogfood update (2026-06-20)**: dogfood-038
+(`run-61e8b0a1-74a0-4b3c-aec7-1d0d09d72880`) delivered **WP-219 S3-pure — the
+chain-state reducer**, the first slice off the just-cleared S3 wall and the
+queue's break out of the mechanical WP-201 parity series: `deriveChainStatus(record): ChainStatus`
+(four-rule, first-match-wins precedence — ESCALATE→AWAITING_PLAN_APPROVAL,
+FAILED→FAILED, all-nodes-SUCCESS→SUCCESS, else RUNNING) + `advanceChain(record, nodeId, outcome): ChainRecord`
+(a pure immutable fold of one sealed node's `NodeOutcome` into
+`nodeOutcomes`, then recompute `status`) in a new
+`packages/sdk-ts/src/chain/advance.ts`, the `computeVerdict` analog and sibling
+of the landed pure `readyNodes`/`hasDependencyCycle` (dogfood-015/016).
+`ChainRecord`/`ChainStatus`/`NodeOutcome` imported **type-only**; re-exported at
+`index.ts:72` after the planner block; 6 vitest cases in a new
+`test/chain/advance.test.ts`. No `types.ts`/`schemas.ts`/contract change (the
+`NodeOutcome` + `ChainRecord.nodeOutcomes` surface landed by hand this session).
+Clean SUCCESS in ONE step, no probe (F-11 stays closed, `s0 j@0`, **fourteenth**
+straight run); harvested byte-`IDENTICAL`, uncommitted on the working tree
+(pending the user's review). 345 / 364 TS tests green (+6), typecheck + lint
+clean; no new friction (highest stays F-31); F-30 did not recur. **Cost-trend
+update:** input tokens came in at **625k** — high-mid band, within the sawtooth
+(well under the 022/024 ~970k peaks); the one-step pure-slice series now reads
+021 862k → 022 969k → 023 451k → 024 976k → 025 467k → 026 807k → 027 527k →
+028 410k → 029 462k → 030 434k → 031 375k → 033 327k → 034 594k → 035 318k →
+036 398k → 038 625k (032 excluded — 2-step; 037 not yet run), tracking neither
+diff size nor run order; per-step input cost is *noisy, not monotonic*;
+WP-203/WP-207 stay queued as a variance/ceiling lever. **The WP-219 S3-pure
+primitive set is now complete** (`readyNodes` + `hasDependencyCycle` +
+`advanceChain` + `deriveChainStatus`) — the chain dependency-graph,
+status-derivation, and node-fold logic are all pure, unit-tested, contract-free.
+Everything left in WP-219 is the non-pure **S3-wiring** keystone (hand-design,
+TASK-PROTOCOL §4): the Temporal chain executor that loops `readyNodes` over the
+meta-judge-gated `Plan`, spawns a child run per node from the predecessor
+checkpoint, folds each sealed node through `advanceChain`, and halt-and-replans
+on a `FAILED` seal (D3), plus `node_started`/`node_sealed` journaling. **S3-wiring
+slice 1 hand-landed (2026-06-20, this session, TASK-PROTOCOL §4, uncommitted on
+the working tree):** the Temporal-native chain executor substrate — `ChainJournal`
++ `chainRecordFrom` (D4 chain store, `src/chain/store.ts`), the `chainLoop`
+workflow (`src/chain/chain-loop.ts`) that loops `readyNodes` →
+`executeChild(agentLoop)` per ready node → `advanceChain` fold →
+`node_started`/`node_sealed` journaling, halting on a `FAILED` seal, the chain
+activities (`src/chain/activities.ts`), and pure node→TaskSpec/outcome helpers
+(`src/chain/node-spec.ts`); both workflows now share a bundle barrel
+(`src/workflow/index.ts`). 360 TS pass / 19 skip (+15 chain tests incl. a Temporal
+integration test: 3-node plan → SUCCESS, FAILED node halts the chain). Deferred
+follow-ups: D3 halt-and-replan re-invoke, S4 context handoff, parallel ready-node
+fan-out, S5 suspend/resume, the `chikory chain`/`plan` CLI glue. **Next dogfood is
+dogfood-037 / WP-219 S6 — the pure chain-trace renderer** (`renderChainTrace` in
+a new `src/chain/trace.ts`, the chain analog of the per-run `renderTrace`,
+rendering a `ChainRecord` from the now-existing chain journal; 🟢, no contract
+change) — refocused from the deprioritized WP-201 pacing parity port onto the
+critical path the S3-wiring unblock opened.
 
 ---
 
@@ -227,17 +237,34 @@ harvested IDENTICAL + uncommitted on the working tree —
 `runner/memory-pointer.ts` source-of-truth byte-for-byte, `ArtifactRef` reused
 from `chikory/types.py:197`, 5 pytest cases, no contract change; clean one-step
 SUCCESS, no probe (F-11 closed, thirteenth straight), input tokens 398k, no new
-friction (highest stays F-31). **Next is WP-201 context-window pacing parity**
-via `examples/dogfood/dogfood-037.yaml` — port `decide_context_window_pacing`
-(the TS `runner/pacing.ts` from dogfood-031, WP-207) to a new
-`packages/sdk-py/src/chikory/pacing.py`, mirroring the TS source-of-truth, no
-contract change (all local types).
+friction (highest stays F-31). **WP-219 S3-pure chain-state reducer done**
+(dogfood-038 `run-61e8b0a1`, harvested IDENTICAL + uncommitted on the working
+tree — `docs/reports/dogfood-038.md`): `deriveChainStatus` (four-rule precedence
+ESCALATE→AWAITING_PLAN_APPROVAL / FAILED→FAILED / all-SUCCESS→SUCCESS / RUNNING)
++ `advanceChain` (pure immutable node-fold) in a new
+`packages/sdk-ts/src/chain/advance.ts`, the `computeVerdict` analog and sibling
+of the landed `readyNodes`/`hasDependencyCycle`; type-only contract imports,
+re-export at `index.ts:72`, 6 vitest cases; no contract change. Clean one-step
+SUCCESS, no probe (F-11 closed, fourteenth straight), input tokens 625k, no new
+friction (highest stays F-31). **WP-219 S3-wiring substrate hand-landed**
+(2026-06-20, TASK-PROTOCOL §4, uncommitted on the working tree): the
+Temporal-native chain executor — `ChainJournal`/`chainRecordFrom` (D4 store),
+the `chainLoop` workflow (`readyNodes` → `executeChild(agentLoop)` →
+`advanceChain` fold → `node_started`/`node_sealed` → halt on FAILED), chain
+activities, and pure node→TaskSpec helpers; 360 TS pass (+15 chain tests). D3
+replan, S4 handoff, parallel fan-out, S5, and CLI glue deferred. **Next is
+WP-219 S6 — the pure chain-trace renderer** via
+`examples/dogfood/dogfood-037.yaml` (refocused from the deprioritized pacing
+parity port): `renderChainTrace(record, entries)` in a new
+`packages/sdk-ts/src/chain/trace.ts`, the chain analog of the per-run
+`renderTrace`, rendering a `ChainRecord` from the now-existing chain journal —
+🟢-dogfoodable, no contract change, unblocked by the S3-wiring substrate.
 
 | WP | Title | Tag | Notes |
 |---|---|---|---|
 | WP-217 | Completion signal → off-cadence judge pass | 🟡 | ✅ **Done** (dogfood-003 run `run-b2f3504d`, landed `ef4b16f`): SUCCESS + empty diff triggers an immediate judge pass; milestone PROCEED rationale rides forward as judgeFeedback. The deferred `claimsComplete` half split out → WP-221. |
 | WP-218 | Token-denominated budget + honest $0 metering | 🟡 | **Slice 1 done** (dogfood-004 run `run-9edbcd28`, landed `2a4dd21` — note: commit also carries the dogfood-004 review docs, an F-13 impurity `chikory land` now prevents; meter proven live on dogfood-005 run `run-34926e85`, $2.14 metered): pricing table prices `gpt-5.5`/`gpt-5.5-mini`/`gemini-3.1-pro-preview`/`gemini-3.1-flash` (version `2026-06-12`); trace flags `UNPRICED` steps and warns `⚠ cost meter blind` on the run header when `costEstimated` ∧ cost=$0 ∧ tokens>0. Remaining slice: `budget_tokens` cap enforced by the pre-step gate. **Contract landed** (`TaskSpec.budgetTokens?: number` in `types.ts`/`schemas.ts`/`CONTRACTS.md`/`sdk-py`). **Token gate done — landed by hand 2026-06-14 (wall cleared):** pure `estimateNextStepTokens`/`tokenBudgetBreached` in `runner/budget.ts` (re-exported, unit-tested in `budget-gate.test.ts`); the agent-loop pre-step gate, armed only when `spec.budgetTokens` is set, tracks `spentTokens`/`stepTokens` and on breach records a token HALT (`recordBudgetEvent` with additive `cause: "tokens"` + `remainingTokens`, token figures riding `details`) then seals a resumable FAILED — tokens have no top-up channel (unlike the USD SUSPEND+top-up), so a breach is a hard cap (re-launch with a higher `budgetTokens`). Integration test asserts the token HALT + one-step FAILED. The USD path omits both new fields so pre-WP-218 journals stay byte-identical. **Makes CG-2 real on $0-metered subscription runs (F-9 blind meter).** WP-218 complete. |
-| WP-219 | Goal decomposition & run chaining (ADR-005) | 🔴 | **ADR-005 accepted; S1 contracts landed** (`d56f35a`). S3 pure core now has both dependency primitives: `readyNodes(plan, completed)` landed via dogfood-015 (`40ada45`), and `hasDependencyCycle(plan)` delivered via dogfood-016 (`run-2418f473`, staged pending commit). Both consume the frozen `Plan` contracts and keep the 77-test conformance suite green. **S2 planner function contract landed by hand 2026-06-14 (wall cleared):** `PlanInput` + `GoalPlanner.decompose(input): Promise<Plan>` in `types.ts` (CONTRACTS.md §7a; ADR-005 §S2-contract), plus the pure, unit-tested `planCoverageGaps(plan, goalCriteria)` (`src/planner/coverage.ts`) feeding `PlanVerdict.uncoveredCriteria`. **Unblocks the S2/S2b dogfoods.** **S2 prompt half done** (dogfood-022 `run-499218ef`, harvested IDENTICAL + staged on `main` pending commit — `docs/reports/dogfood-022.md`): `src/planner/prompt.ts` adds the three pure exports `PLANNER_SYSTEM_PROMPT` + `PLAN_RESPONSE_SCHEMA` + `buildPlannerMessages(input)`, a symbol-for-symbol mirror of `judge/prompt.ts`; the schema's node shape was verified field-for-field against `PlanNode` (`types.ts:421`). 3 files, no contract/router/loop change, 4 new tests. **S2 plan-assembly half done** (dogfood-023 `run-2d40ded5`, harvested IDENTICAL + uncommitted on `main` — `docs/reports/dogfood-023.md`): `src/planner/assemble.ts` adds the pure `buildPlan(reply, input, opts): Plan` + `BuildPlanOptions`, mirroring `buildVerdict` — three structural checks (non-empty nodes / unique ids / no dangling `dependsOn`) then assembles exactly the frozen `Plan` (`types.ts:434`); no mutation, no I/O/clock/id-gen. 3 files, 5 new tests, no contract/router/loop change. **S2's pure surface is complete** (prompt + assembly). **S2b plan-judge prompt half done** (dogfood-024 `run-28073328`, harvested IDENTICAL + uncommitted on `main` — `docs/reports/dogfood-024.md`): `src/planner/meta-judge-prompt.ts` adds the three pure exports `PLAN_JUDGE_SYSTEM_PROMPT` + `PLAN_VERDICT_RESPONSE_SCHEMA` + `buildPlanJudgeMessages(input)`, a symbol-for-symbol mirror of `judge/prompt.ts`; the schema was verified field-for-field against the frozen `PlanVerdict` (`types.ts:475`). 3 files, 5 new tests, no contract/router/loop/judge/planner-impl change. **S2b verdict-assembly half done** (dogfood-025 `run-0d39fd12`, harvested IDENTICAL + uncommitted on `main` — `docs/reports/dogfood-025.md`): `src/planner/meta-judge-verdict.ts` adds the pure `buildPlanVerdict(reply, plan, goalCriteria): PlanVerdict` + `interface PlanJudgeReply`, mirroring `buildVerdict` — turns a schema-valid `{ kind, rationale }` reply into a validated `PlanVerdict`, folding `planCoverageGaps` in as a **deterministic coverage override** (downgrades `PROCEED`→`REVISE`, appends the override clause, populates `uncoveredCriteria` when a goal criterion is uncovered); no mutation/I/O/clock/id-gen; shape re-checked field-for-field against `types.ts:475`. 3 files, 5 new tests, no contract/router/loop/judge/coverage change. **WP-219's entire pure surface is now complete** (S2 planner prompt+assembly, S2b plan meta-judge prompt+verdict-assembly — all mirror the executor judge symbol-for-symbol). **S2/S2b non-pure harnesses landed by hand 2026-06-19 (TASK-PROTOCOL §4, on `main`, staged):** `src/planner/harness.ts` adds `runPlannerPass(input): PlannerPassResult` (one `plan`-stage router call → `PlannerReplySchema` validate → pure `buildPlan`; every failure — router fail, non-JSON, schema-invalid, unassemblable graph — a value, never a throw, invariant #4) plus the `DecomposingPlanner implements GoalPlanner` contract adapter (throws `PlannerError` to satisfy the frozen `Promise<Plan>`); `src/planner/meta-judge-harness.ts` adds `runPlanJudgePass(input): PlanJudgePassResult` (enforces plan-judge ≠ planner family via `enforceFamilyDiversity` BEFORE any call, ADR-005 D2; one `judge`-stage call → `PlanJudgeReplySchema` validate → pure `buildPlanVerdict` with the deterministic coverage floor; LLM failures ESCALATE as values). Two new reply schemas (`PlannerReplySchema`/`PlanJudgeReplySchema`, `schemas.ts`), exported from `index.ts`, 15 new tests (`test/planner/harness.test.ts` + `meta-judge-harness.test.ts`, fake-Router unit seam), no contract change. **Goal decomposition is now end-to-end runnable** (decompose → meta-judge-gate a `Plan`). **S3 wall cleared by hand 2026-06-19 (TASK-PROTOCOL §4):** ADR-005 gained the **§S3 transition rules** (the `advanceChain`/`deriveChainStatus` precedence — ESCALATE→AWAITING_PLAN_APPROVAL, FAILED→FAILED, all-SUCCESS→SUCCESS, else RUNNING) and the **`NodeOutcome` + `ChainRecord.nodeOutcomes` contract** was frozen across all langs (`types.ts`/`schemas.ts`/`CONTRACTS.md §7a`/`sdk-py`/`fixtures/contracts`; TS 339 + py 74 green). This splits S3: **S3-pure — the chain-state reducer** (`advanceChain` + `deriveChainStatus`, `src/chain/advance.ts`, the `computeVerdict` analog and sibling of the landed `readyNodes`/`hasDependencyCycle`) is now **dogfoodable 🟢** (dogfood-038 queued, ahead of the WP-201 pacing parity port); **S3-wiring** — the Temporal chain executor that loops `readyNodes` over the gated `Plan`, spawns a child run per node from the predecessor checkpoint, folds each sealed node through `advanceChain`, and halt-and-replans on a `FAILED` seal (D3) — stays the non-pure hand-design keystone. Then S4 context handoff, S5 suspend/resume, S6 chain trace. |
+| WP-219 | Goal decomposition & run chaining (ADR-005) | 🔴 | **ADR-005 accepted; S1 contracts landed** (`d56f35a`). S3 pure core now has both dependency primitives: `readyNodes(plan, completed)` landed via dogfood-015 (`40ada45`), and `hasDependencyCycle(plan)` delivered via dogfood-016 (`run-2418f473`, staged pending commit). Both consume the frozen `Plan` contracts and keep the 77-test conformance suite green. **S2 planner function contract landed by hand 2026-06-14 (wall cleared):** `PlanInput` + `GoalPlanner.decompose(input): Promise<Plan>` in `types.ts` (CONTRACTS.md §7a; ADR-005 §S2-contract), plus the pure, unit-tested `planCoverageGaps(plan, goalCriteria)` (`src/planner/coverage.ts`) feeding `PlanVerdict.uncoveredCriteria`. **Unblocks the S2/S2b dogfoods.** **S2 prompt half done** (dogfood-022 `run-499218ef`, harvested IDENTICAL + staged on `main` pending commit — `docs/reports/dogfood-022.md`): `src/planner/prompt.ts` adds the three pure exports `PLANNER_SYSTEM_PROMPT` + `PLAN_RESPONSE_SCHEMA` + `buildPlannerMessages(input)`, a symbol-for-symbol mirror of `judge/prompt.ts`; the schema's node shape was verified field-for-field against `PlanNode` (`types.ts:421`). 3 files, no contract/router/loop change, 4 new tests. **S2 plan-assembly half done** (dogfood-023 `run-2d40ded5`, harvested IDENTICAL + uncommitted on `main` — `docs/reports/dogfood-023.md`): `src/planner/assemble.ts` adds the pure `buildPlan(reply, input, opts): Plan` + `BuildPlanOptions`, mirroring `buildVerdict` — three structural checks (non-empty nodes / unique ids / no dangling `dependsOn`) then assembles exactly the frozen `Plan` (`types.ts:434`); no mutation, no I/O/clock/id-gen. 3 files, 5 new tests, no contract/router/loop change. **S2's pure surface is complete** (prompt + assembly). **S2b plan-judge prompt half done** (dogfood-024 `run-28073328`, harvested IDENTICAL + uncommitted on `main` — `docs/reports/dogfood-024.md`): `src/planner/meta-judge-prompt.ts` adds the three pure exports `PLAN_JUDGE_SYSTEM_PROMPT` + `PLAN_VERDICT_RESPONSE_SCHEMA` + `buildPlanJudgeMessages(input)`, a symbol-for-symbol mirror of `judge/prompt.ts`; the schema was verified field-for-field against the frozen `PlanVerdict` (`types.ts:475`). 3 files, 5 new tests, no contract/router/loop/judge/planner-impl change. **S2b verdict-assembly half done** (dogfood-025 `run-0d39fd12`, harvested IDENTICAL + uncommitted on `main` — `docs/reports/dogfood-025.md`): `src/planner/meta-judge-verdict.ts` adds the pure `buildPlanVerdict(reply, plan, goalCriteria): PlanVerdict` + `interface PlanJudgeReply`, mirroring `buildVerdict` — turns a schema-valid `{ kind, rationale }` reply into a validated `PlanVerdict`, folding `planCoverageGaps` in as a **deterministic coverage override** (downgrades `PROCEED`→`REVISE`, appends the override clause, populates `uncoveredCriteria` when a goal criterion is uncovered); no mutation/I/O/clock/id-gen; shape re-checked field-for-field against `types.ts:475`. 3 files, 5 new tests, no contract/router/loop/judge/coverage change. **WP-219's entire pure surface is now complete** (S2 planner prompt+assembly, S2b plan meta-judge prompt+verdict-assembly — all mirror the executor judge symbol-for-symbol). **S2/S2b non-pure harnesses landed by hand 2026-06-19 (TASK-PROTOCOL §4, on `main`, staged):** `src/planner/harness.ts` adds `runPlannerPass(input): PlannerPassResult` (one `plan`-stage router call → `PlannerReplySchema` validate → pure `buildPlan`; every failure — router fail, non-JSON, schema-invalid, unassemblable graph — a value, never a throw, invariant #4) plus the `DecomposingPlanner implements GoalPlanner` contract adapter (throws `PlannerError` to satisfy the frozen `Promise<Plan>`); `src/planner/meta-judge-harness.ts` adds `runPlanJudgePass(input): PlanJudgePassResult` (enforces plan-judge ≠ planner family via `enforceFamilyDiversity` BEFORE any call, ADR-005 D2; one `judge`-stage call → `PlanJudgeReplySchema` validate → pure `buildPlanVerdict` with the deterministic coverage floor; LLM failures ESCALATE as values). Two new reply schemas (`PlannerReplySchema`/`PlanJudgeReplySchema`, `schemas.ts`), exported from `index.ts`, 15 new tests (`test/planner/harness.test.ts` + `meta-judge-harness.test.ts`, fake-Router unit seam), no contract change. **Goal decomposition is now end-to-end runnable** (decompose → meta-judge-gate a `Plan`). **S3 wall cleared by hand 2026-06-19 (TASK-PROTOCOL §4):** ADR-005 gained the **§S3 transition rules** (the `advanceChain`/`deriveChainStatus` precedence — ESCALATE→AWAITING_PLAN_APPROVAL, FAILED→FAILED, all-SUCCESS→SUCCESS, else RUNNING) and the **`NodeOutcome` + `ChainRecord.nodeOutcomes` contract** was frozen across all langs (`types.ts`/`schemas.ts`/`CONTRACTS.md §7a`/`sdk-py`/`fixtures/contracts`; TS 339 + py 74 green). This splits S3: **S3-pure — the chain-state reducer is DONE** (dogfood-038 `run-61e8b0a1`, harvested IDENTICAL + uncommitted on the working tree — `docs/reports/dogfood-038.md`): `deriveChainStatus(record): ChainStatus` (four-rule, first-match-wins precedence ESCALATE→AWAITING_PLAN_APPROVAL / FAILED→FAILED / all-nodes-SUCCESS→SUCCESS / else RUNNING) + `advanceChain(record, nodeId, outcome): ChainRecord` (pure immutable fold of one sealed `NodeOutcome` into `nodeOutcomes`, then recompute `status`) in a new `src/chain/advance.ts`, the `computeVerdict` analog and sibling of the landed `readyNodes`/`hasDependencyCycle`; type-only contract imports, re-export at `index.ts:72`, 6 vitest cases (345 TS pass / 19 skip, +6), no contract change; clean one-step SUCCESS, no probe (F-11 closed, fourteenth straight), input tokens 625k. **WP-219's S3-pure primitive set is now complete** (`readyNodes` + `hasDependencyCycle` + `advanceChain` + `deriveChainStatus`). What remains is **S3-wiring** — the Temporal chain executor that loops `readyNodes` over the gated `Plan`, spawns a child run per node from the predecessor checkpoint, folds each sealed node through `advanceChain`, and halt-and-replans on a `FAILED` seal (D3), plus `node_started`/`node_sealed` journaling — the non-pure hand-design keystone. Then S4 context handoff, S5 suspend/resume, S6 chain trace. |
 | WP-220 | `chikory land <run-id>` | 🟢 | ✅ **Done** (dogfood-005 run `run-34926e85`, diff verified + applied on `wp-220-chikory-land`, commit pending review): `cmdLand` — workspace diff (`chikory-base..HEAD`, `main..HEAD` fallback) → branch + one squashed `feat: land <run-id>` commit citing run-id/workspace/verification commands; three guarded failure modes; verified by landing **its own run** into a clean clone. Deferred tail: `--pr` via gh; `--verify` split out → WP-224 (dogfood-005 F-17). |
 | WP-221 | Explicit `claimsComplete` completion signal | ✅ | **DONE — F-11 closed by observation** (dogfood-022 `run-499218ef`, `docs/reports/dogfood-022.md`): the first real run on post-Slice-B code where the executor emitted `CHIKORY_TASK_COMPLETE` sealed SUCCESS in **ONE step, no probe** (`components over time: s0 j@0`). The chain fired end-to-end — step-0 summary marker → `claimsComplete === true` → `isCompletionMilestone` fired the judge off-cadence on the productive step → terminal, no empty-diff probe. The probe-step tax (5.4 %–35.1 % over twenty data points) is retired. **Slice A done** (dogfood-019 `run-d836635b` — `docs/reports/dogfood-019.md`): `agent-loop.ts:211`'s inline `completionMilestone` is now the pure exported `isCompletionMilestone(record)` (`src/workflow/judge-trigger.ts`) returning `status === "SUCCESS" && (diffRef.bytes === 0 || claimsComplete === true)`, unit-tested (six cases). **Slice B done** (dogfood-021 `run-91eced6b`, harvested IDENTICAL + staged on `main` pending commit — `docs/reports/dogfood-021.md`): completion-marker protocol **cleared by hand** (2026-06-14) — `COMPLETION_MARKER = "CHIKORY_TASK_COMPLETE"` exported from `executors/step.ts`, `renderStepPrompt` (`executors/prompt.ts`) instructs the agent to end its final message with that line iff fully complete (vendor-neutral — detected centrally from `parsed.summary`, no per-adapter change). The runner-side consumption now lands: pure `claimsCompleteFromSummary(summary)` in `step.ts` sets `StepRecord.claimsComplete` (already `?: boolean` on the type, no contract change) on the SUCCESS branch only; `isCompletionMilestone` (Slice A) ORs it in → the productive step is judged directly, F-11 probe step retires. **The F-11 cost win is now complete in code.** Twenty probe data points span 5.4%-35.1%; dogfood-021 paid 26.6% (last run on pre-Slice-B HEAD; its own step 1 emitted the marker correctly, so the consumption would have retired the probe). **End-to-end probe-retirement proof** (fake executor emits the marker through the Temporal loop → assert no probe step) is a hand-design follow-up (needs a fake-executor seam; the runner suite boots a real dev server) — landed by hand in the 2026-06-14 wall-clear. **F-11 closure is now confirmed by observation: dogfood-022 (`run-499218ef`) was the first marker-emitting real run and took zero probe steps.** |
 | WP-222 | Executor subprocess env allowlist | 🟡 | **Slice 1 done** (dogfood-006 run `run-559ea904`, landed `18fae43` — `docs/reports/dogfood-006.md`): `scrubExecutorEnv` in `src/executors/env.ts`; codex keeps only `OPENAI_API_KEY`, claude-code only `ANTHROPIC_API_KEY`; spawn-level leak tests via `FAKE_ECHO_ENV` fake bin. Self-falsified live: the F-14 leak fired inside the delivering run's own executor steps (shim HTTP 500 ×2); **closure confirmed** by dogfood-007's clean executor transcript (zero shim noise, `docs/reports/dogfood-007.md`). Remaining slice: explicit TaskSpec pass-through opt-in — contracts, rides WP-221's PR. |

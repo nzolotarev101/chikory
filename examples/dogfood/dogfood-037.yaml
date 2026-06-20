@@ -1,138 +1,142 @@
-# Dogfood-037: WP-201 Python-SDK parity — port the PURE WP-207 context-window
-# pacing helper (`decide_context_window_pacing`) to `packages/sdk-py`, the Python
-# parity of the TS pure surface that landed in dogfood-031
-# (`packages/sdk-ts/src/runner/pacing.ts`).
+# Dogfood-037: WP-219 S6 — the PURE chain-trace renderer. Implement
+# `renderChainTrace(record, entries)` in `packages/sdk-ts/src/chain/trace.ts`,
+# the chain-level analog of the per-run `renderTrace` (`src/cli/trace.ts`):
+# render a `ChainRecord` (plan tree + per-node run + outcome) as legible text.
 #
-# WHY THIS IS THE PRIORITY: the WP-202 / CM-3 Memory Pointer pure surface now
-# exists in BOTH SDKs (TS dogfood-028, Python dogfood-036 `run-51645fbb`). With
-# the TS pure backlog thin, the standing dogfoodable thread is WP-201 Python
-# parity (🟢, plan.md §6): vendor-neutral dual-SDK is a launch requirement and
-# the core contracts already landed in `sdk-py` (dogfood-002 `run-2899005b`).
-# WP-207 context-window pacing is a context-rot mitigation lever (project.md:
-# model perf degrades over long sessions; first-class mitigation required) — the
-# direct Python parity of dogfood-031's pure pacing decision, mirroring the
-# source-of-truth TS module `packages/sdk-ts/src/runner/pacing.ts`. The
-# dogfood-030/035/036 parity pattern exactly. No contract change — `pacing.ts`
-# uses only LOCAL types (`ContextWindowUsage`/`ContextWindowPacingPolicy`/
-# `ContextWindowPacingDecision`), none in `types.ts`, so the Python port keeps
-# them local too.
+# WHY THIS IS THE PRIORITY (refocused 2026-06-20): the dogfood queue had drifted
+# into mechanical WP-201 parity ports (dogfood-035/036, and the WP-207 pacing
+# parity this spec used to hold). The real critical path is the WP-219 durable
+# chain executor (ADR-005 §S3). The S3-pure reducer landed (dogfood-038), and the
+# S3-WIRING substrate was just hand-landed (TASK-PROTOCOL §4): the chain store
+# (`ChainJournal`/`chainRecordFrom`, `src/chain/store.ts`), the `chainLoop`
+# Temporal workflow, and the chain activities that emit `node_started`/
+# `node_sealed`. That substrate UNBLOCKS S6 — there is now a chain journal to
+# render. S6 is the one DOGFOODABLE pure slice that falls out of the chain
+# executor (ADR-005 §Consequences marks it "🟢"): the chain's forensics surface,
+# the chain analog of `chikory trace`, and a P2-exit-gate input (the 24h chain
+# must be legible in trace). It is the sibling of the landed pure per-run
+# renderer and of the WP-203 S4 compaction-trace case (dogfood-026).
 #
 # Zero-secrets launch:
 #   node scripts/cli-judge-proxy.mjs 8787 gemini &
 #   OPENAI_COMPAT_BASE_URL=http://127.0.0.1:8787 pnpm chikory run examples/dogfood/dogfood-037.yaml --watch
 #
-# Commit everything before launching — workspaces clone HEAD, so the run must
-# see the dogfood-031 TS module (the parity source-of-truth). Launch ONCE and
-# watch to terminal (F-30). Run Devbox commands sequentially (F-22). F-11 is
-# closed (dogfood-022..036): a clean one-step finish should seal SUCCESS with NO
+# Commit everything before launching — workspaces clone HEAD, so the run MUST see
+# the hand-landed S3-wiring substrate (`src/chain/store.ts` exporting
+# `ChainJournal`/`chainRecordFrom`/`ChainEntry`, the frozen `ChainRecord`/
+# `NodeOutcome` contract, and `src/chain/advance.ts` from dogfood-038). If those
+# are still uncommitted on the working tree, commit them first or the run sees a
+# tree without the types this slice consumes. Launch ONCE and watch to terminal
+# (F-30). Run Devbox commands sequentially (F-22). F-11 is closed
+# (dogfood-022..038): a clean one-step finish should seal SUCCESS with NO
 # empty-diff probe step — watch the step count stay at 1.
-name: dogfood-037-wp-201-python-context-window-pacing-parity
+name: dogfood-037-wp-219-s6-chain-trace-renderer
 goal: >
-  Port the WP-207 PURE context-window pacing helper to the Python SDK (plan.md
-  WP-201) — the Python parity of the TS module landed in dogfood-031
-  (`packages/sdk-ts/src/runner/pacing.ts`, the source-of-truth artifact): a pure
-  decision function that, given the current token usage and a pacing policy,
-  decides whether the next local runner step should `continue`, trigger
-  `compact`ion, or `park` (cannot fit). This is a pure arithmetic + branch
-  decision with NO I/O.
+  Implement the WP-219 S6 PURE chain-trace renderer — `renderChainTrace`, the
+  chain-level analog of the per-run `renderTrace` (`src/cli/trace.ts`). Given a
+  `ChainRecord` (the chain state — plan tree, node→run map, per-node outcomes)
+  and the chain journal's `ChainEntry[]`, return a single multi-line string a
+  person who didn't run the chain can read to reconstruct it. This is a pure
+  string-building function with NO I/O.
 
   Do NOT make any LLM/router call, do NOT read/write the filesystem, do NOT touch
-  the network, clock, or randomness, do NOT implement new runtime behavior in
-  `runner.py`/`judge.py`/`router.py`, do NOT change `types.py` or any contract
-  model, and do NOT add the non-pure agent-loop/journal integration (that is the
-  hand-design follow-up). Add exactly one new source file and one new test file,
-  and edit exactly one existing file (`__init__.py`) for the re-export — three
-  files total, no other file changed.
+  the network, clock, or randomness, do NOT implement new runtime behavior in the
+  chain executor / agent loop / runner / Temporal workflow, do NOT change
+  `types.ts`, `schemas.ts`, or any contract model (the `ChainRecord` / `Plan` /
+  `NodeOutcome` contract and the `ChainEntry` / `ChainJournal` store already
+  landed — reuse them, do NOT redefine them), and do NOT add CLI command wiring
+  (the `chikory trace` chain branch is the hand-design follow-up). Add exactly one
+  new source file and one new test file, and edit exactly one existing file
+  (`src/index.ts`) for the re-export — three files total, no other file changed.
 
-  1. packages/sdk-py/src/chikory/pacing.py — a NEW pure module, Python 3.11+,
-     fully type-annotated, async-free (pure sync), ruff-clean, no `Any`, no new
-     dependency. Docstring each export citing WP-207 / WP-201. It must perform NO
-     I/O, clock read, randomness, or input mutation, and must MIRROR the TS
-     module `packages/sdk-ts/src/runner/pacing.ts` behavior exactly:
-       - A `ContextWindowUsage` value with int fields `current_input_tokens`,
-         `current_output_tokens`, `estimated_next_step_tokens`,
-         `context_window_tokens` (the Python parity of the TS
-         `ContextWindowUsage` interface; a `@dataclass(frozen=True)` is fine —
-         keep it local to this module, do NOT add it to `types.py`).
-       - A `ContextWindowPacingPolicy` value with a single float field
-         `compact_at_fraction` (the parity of the TS interface; local
-         `@dataclass(frozen=True)`).
-       - A `ContextWindowPacingDecision` value with fields
-         `action: Literal["continue", "compact", "park"]`,
-         `projected_tokens: int`, `remaining_tokens: int`,
-         `utilization: float` (the parity of the TS interface; local
-         `@dataclass(frozen=True)`).
-       - `def decide_context_window_pacing(usage: ContextWindowUsage, policy: ContextWindowPacingPolicy) -> ContextWindowPacingDecision:`
-         — the parity of the TS `decideContextWindowPacing`. Compute
-         `projected_tokens = usage.current_input_tokens + usage.current_output_tokens + usage.estimated_next_step_tokens`,
-         `remaining_tokens = usage.context_window_tokens - projected_tokens`,
-         `utilization = projected_tokens / usage.context_window_tokens`, and
-         `compact_threshold = usage.context_window_tokens * policy.compact_at_fraction`.
-         Then, in this exact order (the TS branch order):
-           1. if `usage.estimated_next_step_tokens > usage.context_window_tokens`
-              → `action="park"` (a single step cannot fit the whole window);
-           2. elif `projected_tokens > compact_threshold` → `action="compact"`
-              (strict `>`, the parity of the TS `>`);
-           3. else → `action="continue"`.
-         Every branch returns a decision carrying the same computed
-         `projected_tokens` / `remaining_tokens` / `utilization`. Pure and
-         deterministic, no I/O.
+  1. packages/sdk-ts/src/chain/trace.ts — a NEW pure module, TypeScript strict,
+     ESM, named exports only, no default export. It must perform NO I/O, clock
+     read, randomness, or input mutation. Import `ChainRecord` and `PlanNode`
+     type-only from `../types.js`, and `ChainEntry` type-only from `./store.js`.
+     JSDoc the export citing WP-219 / ADR-005 §S6. Mirror the pure-renderer shape
+     of `src/cli/trace.ts` `renderTrace`:
+       - `export function renderChainTrace(record: ChainRecord, entries: ChainEntry[]): string`
+         — builds an array of lines joined by "\n", in this order:
+           1. A header line:
+              `chain <record.planId> · <record.status> · <N> nodes · <S>/<N> succeeded`
+              where `N = record.plan.nodes.length` and `S` = the count of
+              `record.plan.nodes` whose `record.nodeOutcomes[node.id]?.status`
+              is `"SUCCESS"`.
+           2. A `goal: <record.plan.goal>` line.
+           3. A rule line of "─" repeated 60 times.
+           4. One row per node in `record.plan.nodes` ORDER (not outcome order),
+              each:
+              `<nodeId> · depends-on <deps> · run <run> · <outcomeCell>`
+              where `<deps>` is `node.dependsOn.join(",")` or `"—"` when empty;
+              `<run>` is `record.nodeRuns[node.id]` or `"—"` when absent; and
+              `<outcomeCell>` derives from `record.nodeOutcomes[node.id]`:
+                - absent            → `· pending`
+                - status "SUCCESS"  → `✓ SUCCESS (<verdict>)`
+                - status "FAILED"   → `⛔ FAILED (<verdict>)`
+              using the outcome's `verdict` (a `VerdictKind`) inside the parens.
+           5. A totals footer line:
+              `totals: nodes <N> · succeeded <S> · failed <F> · pending <P>`
+              where `F` = nodes whose outcome status is `"FAILED"`, `P` = nodes
+              with no outcome, and `N = S + F + P`.
+           6. IF the chain journal holds a `terminal` `ChainEntry` whose payload
+              `status === "FAILED"` with a non-empty `reason`, append a final
+              line `failed: <reason>`. (Read the terminal entry from `entries`;
+              a chain with no terminal entry, or a SUCCESS terminal, appends
+              nothing.)
+         Pure: reads only its two arguments, returns the joined string, no
+         mutation, no I/O. Keep any small glyph/cell helper local and unexported.
 
-  2. packages/sdk-py/src/chikory/__init__.py — re-export
-     `ContextWindowUsage`, `ContextWindowPacingPolicy`,
-     `ContextWindowPacingDecision`, and `decide_context_window_pacing` from
-     `.pacing`, following the existing re-export + `__all__` convention in that
-     file (add them to `__all__`). Change nothing else.
+  2. packages/sdk-ts/src/index.ts — re-export `renderChainTrace` from
+     `./chain/trace.js`, alongside the existing chain re-exports (the
+     `advanceChain` / `chainRecordFrom` block). Change nothing else.
 
-  3. packages/sdk-py/tests/test_pacing.py — a NEW pytest file importing
-     `ContextWindowUsage`, `ContextWindowPacingPolicy`,
-     `ContextWindowPacingDecision`, and `decide_context_window_pacing` from
-     `chikory`, asserting at least:
-       - continue — with a policy `compact_at_fraction=0.8` and usage well under
-         the threshold (e.g. input 1000, output 500, next 1000, window 10000),
-         `action == "continue"`, and `projected_tokens == 2500`,
-         `remaining_tokens == 7500`, `utilization == 0.25`;
-       - compact — usage whose projected tokens exceed the compact threshold but
-         whose next-step alone still fits the window (e.g. input 7000, output
-         1000, next 1000, window 10000, fraction 0.8 → projected 9000 > 8000)
-         → `action == "compact"`;
-       - compact boundary — projected exactly AT the threshold continues
-         (e.g. projected 8000 with threshold 8000 → `action == "continue"`,
-         strict `>` not `>=`);
-       - park — `estimated_next_step_tokens` greater than the whole window
-         (e.g. next 12000, window 10000) → `action == "park"`, even when the
-         other fields would otherwise read as compact/continue (the park branch
-         takes precedence);
-       - arithmetic — for one case assert `remaining_tokens` can be negative
-         when projected exceeds the window, proving it is a raw subtraction, not
-         clamped.
+  3. packages/sdk-ts/test/chain/trace.test.ts — a NEW vitest file importing
+     `renderChainTrace` from the package barrel (`../../src/index.js`) and the
+     `ChainRecord` / `ChainEntry` / `NodeOutcome` types from the barrel or
+     `../../src/types.js` as needed. Build a small `ChainRecord` over a 3-node
+     plan (`N-1` → `N-2` → `N-3` dependency chain) with a builder so the cases
+     read clearly. Assert at least:
+       - header — for a record with one SUCCESS outcome among 3 nodes, the first
+         line contains `3 nodes` and `1/3 succeeded` and the record's `planId`
+         and `status`.
+       - node rows in plan order — the output lists `N-1`, `N-2`, `N-3` in that
+         order; a node with a SUCCESS outcome renders `✓ SUCCESS (PROCEED)` and
+         shows its `nodeRuns` run id; a node with no outcome renders `· pending`
+         and `run —`; a node with no deps renders `depends-on —`.
+       - failed node — a `{ status: "FAILED", verdict: "HALT" }` outcome renders
+         `⛔ FAILED (HALT)`.
+       - totals footer — `totals: nodes 3 · succeeded 1 · failed 1 · pending 1`
+         for a record with one SUCCESS, one FAILED, one absent outcome.
+       - terminal reason — when `entries` includes a `terminal` ChainEntry with
+         `{ status: "FAILED", reason: "chain stuck" }`, the output ends with a
+         `failed: chain stuck` line; when there is no terminal entry, no
+         `failed:` line appears.
 
-  After this slice, the WP-207 context-window pacing pure surface exists in BOTH
-  SDKs as pure, unit-tested helpers — the TS/Python parity WP-201 requires —
-  ready for the non-pure agent-loop integration + journal wiring, which is the
-  hand-design follow-up (TASK-PROTOCOL §4). No runtime behavior changes in this
-  slice.
+  After this slice, the chain has a pure, unit-tested forensics renderer — the
+  `chikory trace` analog for a chain, ready for the non-pure CLI wiring (the
+  `chikory trace <chain-id>` branch that loads the `ChainJournal` and calls
+  `renderChainTrace`), which is the hand-design follow-up (TASK-PROTOCOL §4). No
+  runtime behavior changes in this slice.
 
-  Follow AGENTS.md: Python 3.11+, fully type-annotated, ruff-clean (lint +
-  format), pyright-clean, no new dependencies, no default mutable args. Run all
-  Devbox verification commands sequentially.
+  Follow AGENTS.md: TypeScript strict, ESM, named exports, no default export, no
+  new dependency. Run all Devbox verification commands sequentially.
 repos:
   - url: /Users/nikitazolotarev/repos/chikory
     writable: true
 acceptance_criteria:
   # Checks run by the judge inside the run workspace (fresh clone) under the
-  # worker's devbox env — call uv/ruff directly, 120s cap per check.
+  # worker's devbox env — call the toolchain directly, 120s cap per check.
   - id: AC-1
-    description: the new context-window pacing parity test passes
-    check: cd packages/sdk-py && uv sync --quiet && uv run pytest tests/test_pacing.py -q
+    description: the new chain-trace renderer unit test passes
+    check: pnpm install --prefer-offline --silent && pnpm --filter @chikory/sdk exec vitest run test/chain/trace.test.ts
   - id: AC-2
     description: >
-      the complete Python SDK suite remains green — proving the new pure module
-      breaks no existing behavior
-    check: cd packages/sdk-py && uv run pytest -q
+      the complete TypeScript SDK suite remains green — proving the new pure
+      module breaks no existing behavior
+    check: pnpm --filter @chikory/sdk test
   - id: AC-3
-    description: pyright typecheck and ruff lint + format are clean
-    check: cd packages/sdk-py && uv run pyright && ruff check . && ruff format --check .
+    description: strict typecheck (covering test/**, WP-230) and lint are clean
+    check: pnpm --filter @chikory/sdk typecheck && pnpm --filter @chikory/sdk lint
 budget_usd: 5
 max_steps: 4
 executor:

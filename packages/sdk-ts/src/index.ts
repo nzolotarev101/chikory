@@ -69,6 +69,32 @@ export { buildPlannerMessages, PLANNER_SYSTEM_PROMPT, PLAN_RESPONSE_SCHEMA } fro
 export { buildPlan, type BuildPlanOptions } from "./planner/assemble.js";
 export { buildPlanJudgeMessages, PLAN_JUDGE_SYSTEM_PROMPT, PLAN_VERDICT_RESPONSE_SCHEMA } from "./planner/meta-judge-prompt.js";
 export { buildPlanVerdict, type PlanJudgeReply } from "./planner/meta-judge-verdict.js";
+export { advanceChain, deriveChainStatus } from "./chain/advance.js";
+export { readyNodes } from "./chain/sequencing.js";
+export { hasDependencyCycle } from "./chain/validation.js";
+export {
+  ChainJournal,
+  chainRecordFrom,
+  type ChainEntry,
+  type ChainEntryKind,
+  type NodeStartedPayload,
+  type NodeSealedPayload,
+} from "./chain/store.js";
+export {
+  childRunId,
+  deriveNodeOutcome,
+  planNodeToTaskSpec,
+  type ChainNodeTemplate,
+} from "./chain/node-spec.js";
+export {
+  createChainActivities,
+  type ChainActivities,
+  type ChainActivityDeps,
+} from "./chain/activities.js";
+// chainLoop itself is a Temporal workflow — loaded via the workflow bundle
+// (resolveWorkflowsPath), never imported into the SDK barrel (the agentLoop
+// convention). Only its input type is part of the public surface.
+export type { ChainLoopInput } from "./chain/chain-loop.js";
 export {
   runPlannerPass,
   DecomposingPlanner,
@@ -122,6 +148,8 @@ export {
 } from "./runner/api.js";
 export {
   artifactsDir,
+  chainDir,
+  chainJournalPath,
   DEFAULT_DATA_DIR,
   journalPath,
   runDir,

@@ -9,6 +9,7 @@ import { fileURLToPath } from "node:url";
 
 import { NativeConnection, Worker, DefaultLogger, Runtime } from "@temporalio/worker";
 
+import { createChainActivities } from "../chain/activities.js";
 import type { RouterOptions } from "../router.js";
 import {
   createRunnerActivities,
@@ -45,11 +46,11 @@ export interface RunnerWorker {
  * compiles TypeScript).
  */
 export function resolveWorkflowsPath(): string {
-  const js = fileURLToPath(new URL("../workflow/agent-loop.js", import.meta.url));
+  const js = fileURLToPath(new URL("../workflow/index.js", import.meta.url));
   if (existsSync(js)) return js;
-  const ts = fileURLToPath(new URL("../workflow/agent-loop.ts", import.meta.url));
+  const ts = fileURLToPath(new URL("../workflow/index.ts", import.meta.url));
   if (existsSync(ts)) return ts;
-  throw new Error("cannot locate workflow code (agent-loop.js/.ts)");
+  throw new Error("cannot locate workflow code (workflow/index.js/.ts)");
 }
 
 export async function createRunnerWorker(opts: RunnerWorkerOptions): Promise<RunnerWorker> {
@@ -61,12 +62,14 @@ export async function createRunnerWorker(opts: RunnerWorkerOptions): Promise<Run
   const connection = await NativeConnection.connect({
     address: opts.address ?? process.env["TEMPORAL_ADDRESS"] ?? "localhost:7233",
   });
+  const dataDir = opts.dataDir ?? DEFAULT_DATA_DIR;
   const activities = {
     ...createRunnerActivities({
-      dataDir: opts.dataDir ?? DEFAULT_DATA_DIR,
+      dataDir,
       adapters: opts.adapters,
       routerOptions: opts.routerOptions,
     }),
+    ...createChainActivities({ dataDir }),
     ...opts.activitiesOverride,
   };
   const worker = await Worker.create({

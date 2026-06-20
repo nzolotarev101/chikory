@@ -246,12 +246,29 @@ em dash U+2014), `ArtifactRef` reused, 5 pytest cases, no contract change: a
 **thirteenth** straight one-step no-probe SUCCESS, no new friction, input tokens
 398k (low-mid band). **The S3 wall was then cleared by hand (2026-06-19):** the
 architect wrote the ADR-005 §S3 transition rules and froze the `NodeOutcome` +
-`ChainRecord.nodeOutcomes` contract across all langs, so the WP-219 **S3-pure
-chain-state reducer** (`advanceChain` + `deriveChainStatus`, the `computeVerdict`
-analog) is now the next dogfood — **dogfood-038**, ahead of the deprioritized
-WP-207 pacing parity port (dogfood-037). The keystone after the reducer is the
-hand-design S3-wiring: the Temporal chain executor that folds sealed nodes
-through `advanceChain` and halt-and-replans on a `FAILED` seal.
+`ChainRecord.nodeOutcomes` contract across all langs, unblocking the WP-219
+**S3-pure chain-state reducer**. Dogfood-038
+(`docs/reports/dogfood-038.md`) then delivered it — `deriveChainStatus`
+(four-rule precedence ESCALATE→AWAITING_PLAN_APPROVAL / FAILED→FAILED /
+all-SUCCESS→SUCCESS / RUNNING) + a pure immutable `advanceChain` node-fold in a
+new `packages/sdk-ts/src/chain/advance.ts`, the `computeVerdict` analog and
+sibling of the landed `readyNodes`/`hasDependencyCycle`, type-only contract
+imports, re-export at `index.ts:72`, 6 vitest cases, no contract change: a
+**fourteenth** straight one-step no-probe SUCCESS, no new friction, input tokens
+625k (high-mid band). **WP-219's S3-pure primitive set is now complete**
+(`readyNodes` + `hasDependencyCycle` + `advanceChain` + `deriveChainStatus`).
+**The S3-wiring substrate was then hand-landed (2026-06-20, TASK-PROTOCOL §4):**
+the Temporal-native chain executor — `ChainJournal`/`chainRecordFrom` (the D4
+chain store), the `chainLoop` workflow that loops `readyNodes` →
+`executeChild(agentLoop)` per ready node → `advanceChain` fold →
+`node_started`/`node_sealed` journaling, halting on a `FAILED` seal, plus chain
+activities and pure node→TaskSpec helpers (both workflows share a bundle barrel).
+That substrate creates a chain journal, which unblocks the **WP-219 S6 pure
+chain-trace renderer** — `renderChainTrace`, the chain analog of the per-run
+`renderTrace`, the next dogfood (dogfood-037, refocused off the deprioritized
+pacing parity port onto the critical path). Remaining hand-design follow-ups: D3
+halt-and-replan, S4 context handoff, S5 suspend/resume, and the
+`chikory chain`/`plan` + `chikory trace <chain-id>` CLI glue.
 
 Related docs: [`docs/spec/task-spec.md`](spec/task-spec.md) (schema
 reference) · [`docs/TASK-PROTOCOL.md`](TASK-PROTOCOL.md) (WP etiquette, §7 is
