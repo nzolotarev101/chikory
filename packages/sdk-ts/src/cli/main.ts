@@ -16,7 +16,7 @@ import {
   cmdTrace,
   type CommonFlags,
 } from "./commands.js";
-import { cmdChain } from "./chain.js";
+import { cmdChain, cmdChainApprove, cmdChainResume } from "./chain.js";
 import { cmdLand, type LandDeps } from "./land.js";
 
 export const HELP = `chikory — vendor-neutral control plane for long-running, self-correcting agents
@@ -29,6 +29,10 @@ commands:
   chain <goal.yaml>   decompose a goal into a plan, gate it with the
                       different-family plan meta-judge, then run each node as a
                       child run through the durable chain executor (WP-219)
+  chain approve <chain-id>  answer a parked chain node's ESCALATE and follow the
+                      chain to its terminal state (default approves; WP-241)
+  chain resume <chain-id>   clear a parked chain node's budget cap (--add-budget)
+                      and follow the chain to its terminal state (WP-241)
   resume <run-id>     reattach a worker and continue a run from its last
                       checkpoint (budget halts, escalations, machine moves)
   status [<run-id>]   live run state: current step, spend vs budget, last
@@ -50,7 +54,10 @@ run options:
   --watch               stream journal entries live while following the run
 
 chain options:
-  --watch               stream chain entries live (node dispatched/sealed)
+  --watch               stream chain entries live (node dispatched/sealed); a
+                        parked node (ESCALATE/budget) is always surfaced
+  --add-budget <usd>    (chain resume) top up a budget-capped chain node
+  --reject <reason>     (chain approve) reject the escalation instead of approving
 
 resume options:
   --add-budget <usd>    top up the budget (continues a budget-halted run)
@@ -132,8 +139,16 @@ export async function main(argv: string[], deps: LandDeps = {}): Promise<number>
   try {
     switch (command) {
       case "run":
-      case "chain":
         parsed = parseCommand(rest, { watch: { type: "boolean" } });
+        break;
+      case "chain":
+        // `chain <spec>` plus the `chain approve|resume <chain-id>` subcommands
+        // share one option set (the subcommands consume add-budget / reject).
+        parsed = parseCommand(rest, {
+          watch: { type: "boolean" },
+          "add-budget": { type: "string" },
+          reject: { type: "string" },
+        });
         break;
       case "resume":
         parsed = parseCommand(rest, {
@@ -180,6 +195,35 @@ export async function main(argv: string[], deps: LandDeps = {}): Promise<number>
       return cmdRun({ file, watch: values["watch"] === true, ...flags }, deps);
     }
     case "chain": {
+      // `chain approve|resume <chain-id>` unblock a parked child at chain level
+      // (WP-241); anything else is a goal spec file to launch.
+      const sub = positionals[0];
+      if (sub === "approve" || sub === "resume") {
+        const chainId = positionals[1];
+        if (chainId === undefined) {
+          io.err(`chikory: missing chain-id (see chikory --help)`);
+          return 1;
+        }
+        if (sub === "approve") {
+          const reject = typeof values["reject"] === "string" ? values["reject"] : undefined;
+          return cmdChainApprove(
+            { chainId, reject, watch: values["watch"] === true, ...flags },
+            deps,
+          );
+        }
+        let addBudgetUsd: number | undefined;
+        if (typeof values["add-budget"] === "string") {
+          addBudgetUsd = Number.parseFloat(values["add-budget"]);
+          if (!Number.isFinite(addBudgetUsd) || addBudgetUsd <= 0) {
+            io.err(`chikory: --add-budget must be a positive number of USD`);
+            return 1;
+          }
+        }
+        return cmdChainResume(
+          { chainId, addBudgetUsd, watch: values["watch"] === true, ...flags },
+          deps,
+        );
+      }
       const file = requireArg(positionals, "goal spec file", io);
       if (file === undefined) return 1;
       return cmdChain({ file, watch: values["watch"] === true, ...flags }, deps);

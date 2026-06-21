@@ -26,13 +26,14 @@ import { ChainJournal, chainRecordFrom, type ChainEntry } from "../chain/store.j
 import { serializeWriteConflicts } from "../chain/write-set.js";
 import type { ChainNodeTemplate } from "../chain/node-spec.js";
 import { renderChainTrace } from "../chain/trace.js";
+import { Journal } from "../journal/journal.js";
 import { FamilyDiversityError } from "../judge/family.js";
 import { runPlannerPass } from "../planner/harness.js";
 import { runPlanJudgePass } from "../planner/meta-judge-harness.js";
 import { createRouter } from "../router.js";
 import { createTemporalRunner } from "../runner.js";
 import { createRunnerWorker } from "../runner/worker.js";
-import { chainJournalPath } from "../runner/paths.js";
+import { chainJournalPath, journalPath } from "../runner/paths.js";
 import { parseTaskSpec, TaskSpecValidationError } from "../taskspec.js";
 import type { ChainRecord, ChainStatus, Plan, PlanVerdict, Router, TaskSpec } from "../types.js";
 import { DEFAULT_ADAPTERS, type CliDeps, type CommonFlags } from "./commands.js";
@@ -164,11 +165,115 @@ function formatChainEntryLine(entry: ChainEntry): string {
   }
 }
 
+/** A chain node's child run that is parked awaiting a human (WP-241, F-42). */
+export interface ChildParked {
+  nodeId: string;
+  childRunId: string;
+  kind: "AWAITING_APPROVAL" | "SUSPENDED";
+  reason: string;
+}
+
+/**
+ * The node the chain is currently waiting on: it has a child run id
+ * (`node_started`) but no sealed outcome (`node_sealed`). A RUNNING chain under
+ * the v1 sequential dispatcher (ADR-005 §S3) has at most one.
+ */
+export function inflightNode(
+  record: ChainRecord,
+): { nodeId: string; childRunId: string } | undefined {
+  for (const [nodeId, childRunId] of Object.entries(record.nodeRuns)) {
+    if (record.nodeOutcomes[nodeId] === undefined) return { nodeId, childRunId };
+  }
+  return undefined;
+}
+
+/**
+ * Whether a chain node's child run is currently parked awaiting a human — the
+ * F-42 visibility gap. A child workflow that ESCALATEs (judge or loop-breaker)
+ * or SUSPENDs (budget cap) blocks *inside* `executeChild`, so the chain
+ * workflow stalls with nothing new to journal at chain scope; the only durable
+ * signal is in the child's own per-run journal. Fold oldest→newest so a later
+ * resolution (a resolving verdict, a budget top-up, or a terminal seal) clears
+ * an earlier park. Mirrors the per-run `followRun` drain (commands.ts).
+ */
+export function childParkedState(
+  dataDir: string,
+  nodeId: string,
+  childRunId: string,
+): ChildParked | undefined {
+  const path = journalPath(dataDir, childRunId);
+  if (!existsSync(path)) return undefined;
+  const journal = new Journal(path);
+  try {
+    let parked: ChildParked | undefined;
+    for (const entry of journal.entries()) {
+      if (entry.kind === "terminal") return undefined; // sealed → not parked
+      if (entry.kind === "verdict") {
+        const v = (
+          entry.payload as { verdict?: { kind: string; escalateReason?: string; rationale?: string } }
+        ).verdict;
+        parked =
+          v?.kind === "ESCALATE"
+            ? {
+                nodeId,
+                childRunId,
+                kind: "AWAITING_APPROVAL",
+                reason: v.escalateReason ?? v.rationale ?? "escalation",
+              }
+            : undefined; // any later resolving verdict clears the escalation
+      } else if (entry.kind === "budget_event") {
+        const p = entry.payload as {
+          event: string;
+          details?: { spentUsd?: number; budgetUsd?: number };
+        };
+        if (p.event === "halt") {
+          const spent = p.details?.spentUsd;
+          const budget = p.details?.budgetUsd;
+          parked = {
+            nodeId,
+            childRunId,
+            kind: "SUSPENDED",
+            reason:
+              spent !== undefined && budget !== undefined
+                ? `budget cap ($${spent.toFixed(2)} / $${budget.toFixed(2)})`
+                : "budget cap",
+          };
+        } else if (p.event === "top_up") {
+          parked = undefined; // funds added → gate cleared
+        }
+      }
+    }
+    return parked;
+  } finally {
+    journal.close();
+  }
+}
+
+/** The chain-level command that unblocks a parked child (WP-241). */
+function unblockHint(chainId: string, parked: ChildParked): string {
+  return parked.kind === "AWAITING_APPROVAL"
+    ? `unblock with: chikory chain approve ${chainId} [--reject "<reason>"]`
+    : `unblock with: chikory chain resume ${chainId} --add-budget <usd>`;
+}
+
+function readChainRecord(dataDir: string, chainId: string): ChainRecord | undefined {
+  const path = chainJournalPath(dataDir, chainId);
+  if (!existsSync(path)) return undefined;
+  const journal = new ChainJournal(path);
+  try {
+    return chainRecordFrom(journal);
+  } finally {
+    journal.close();
+  }
+}
+
 /**
  * Poll the chain journal to a terminal `ChainStatus`. The chain is durable —
  * detaching this process only stops the local worker; the node runs continue
  * and the journal is the offline source of truth. With --watch, surface each
- * new chain entry (node dispatched/sealed, chain sealed) as it lands.
+ * new chain entry (node dispatched/sealed, chain sealed) as it lands. Always
+ * (watch or not) surface a parked in-flight child once per distinct park — the
+ * F-42 fix, so the chain never *appears* hung while a node awaits a human.
  */
 export async function followChain(
   chainId: string,
@@ -178,20 +283,43 @@ export async function followChain(
   const interval = opts.deps.pollIntervalMs ?? 1000;
   const path = chainJournalPath(flags.dataDir, chainId);
   let nextIdx = 0;
+  let announcedPark: string | undefined;
 
   function drain(): ChainRecord | undefined {
     if (!existsSync(path)) return undefined;
     const journal = new ChainJournal(path);
+    let record: ChainRecord | undefined;
     try {
       for (const entry of journal.entries()) {
         if (entry.idx < nextIdx) continue;
         nextIdx = entry.idx + 1;
         if (opts.watch) opts.io.out(formatChainEntryLine(entry));
       }
-      return chainRecordFrom(journal);
+      record = chainRecordFrom(journal);
     } finally {
       journal.close();
     }
+
+    // F-42: surface a parked in-flight child. The chain workflow is blocked
+    // inside executeChild with nothing new to journal at chain scope, so
+    // without this the follow stream goes silent for the whole human wait.
+    if (record) {
+      const inflight = inflightNode(record);
+      const parked = inflight
+        ? childParkedState(flags.dataDir, inflight.nodeId, inflight.childRunId)
+        : undefined;
+      const sig = parked ? `${parked.childRunId}:${parked.kind}:${parked.reason}` : undefined;
+      if (parked && sig !== announcedPark) {
+        announcedPark = sig;
+        opts.io.out(
+          `node ${parked.nodeId} child ${parked.childRunId} ⏸ ${parked.kind} — ${parked.reason}`,
+        );
+        opts.io.out(unblockHint(chainId, parked));
+      } else if (!parked) {
+        announcedPark = undefined;
+      }
+    }
+    return record;
   }
 
   for (;;) {
@@ -322,6 +450,118 @@ async function hostChainAndFollow(
     worker.shutdown();
     await workerDone.catch(() => {});
     await runner.close();
+  }
+}
+
+/**
+ * Deliver a decision to a chain's parked in-flight child and follow the chain
+ * to its terminal status — the WP-241 chain-level approve/resume that keeps the
+ * parent orchestration attached (F-42). The chain workflow is blocked inside
+ * `executeChild`; signalling the child (by its deterministic child run id, read
+ * from the ChainJournal) lets that child seal, which unblocks the parent. We
+ * host a worker for the duration so the unblocked chain actually progresses —
+ * no separate "detach, approve, restart, resume" dance.
+ */
+async function hostChainControlAndFollow(
+  chainId: string,
+  flags: CommonFlags & { watch: boolean },
+  deps: CliDeps,
+  ioPair: Io,
+  action:
+    | { kind: "approve"; approved: boolean; reason?: string }
+    | { kind: "resume"; addBudgetUsd?: number },
+): Promise<number> {
+  const record = readChainRecord(flags.dataDir, chainId);
+  if (!record) {
+    ioPair.err(`chikory: no chain journal for '${chainId}' under ${flags.dataDir}`);
+    return 1;
+  }
+  if (CHAIN_TERMINAL.has(record.status)) {
+    ioPair.out(`chain ${chainId} already ${record.status} — nothing to ${action.kind}`);
+    return record.status === "SUCCESS" ? 0 : 1;
+  }
+  const inflight = inflightNode(record);
+  if (!inflight) {
+    ioPair.err(`chikory: chain ${chainId} has no in-flight node awaiting a decision`);
+    return 1;
+  }
+
+  const worker = await createRunnerWorker({
+    adapters: deps.adapters ?? DEFAULT_ADAPTERS,
+    address: flags.address,
+    dataDir: flags.dataDir,
+    taskQueue: deps.taskQueue,
+    routerOptions: deps.routerOptions,
+    workflowBundlePath: deps.workflowBundlePath,
+  });
+  const workerDone = worker.run();
+  const runner = createTemporalRunner({
+    address: flags.address,
+    dataDir: flags.dataDir,
+    taskQueue: deps.taskQueue,
+  });
+  try {
+    if (action.kind === "approve") {
+      const handle = await runner.get(inflight.childRunId);
+      await handle.approve({
+        approved: action.approved,
+        ...(action.reason !== undefined ? { reason: action.reason } : {}),
+      });
+      ioPair.out(
+        `${action.approved ? "approval" : "rejection"} delivered to node ${inflight.nodeId} ` +
+          `(${inflight.childRunId})`,
+      );
+    } else {
+      await runner.resume(
+        inflight.childRunId,
+        action.addBudgetUsd !== undefined ? { addBudgetUsd: action.addBudgetUsd } : undefined,
+      );
+      ioPair.out(
+        `resume delivered to node ${inflight.nodeId} (${inflight.childRunId})` +
+          (action.addBudgetUsd !== undefined ? ` (+$${action.addBudgetUsd.toFixed(2)})` : ""),
+      );
+    }
+    const final = await followChain(chainId, flags, { watch: flags.watch, deps, io: ioPair });
+    return finishChain(chainId, final, flags, ioPair);
+  } finally {
+    worker.shutdown();
+    await workerDone.catch(() => {});
+    await runner.close();
+  }
+}
+
+/** `chikory chain approve <chain-id>` — answer a parked child's ESCALATE (WP-241). */
+export async function cmdChainApprove(
+  args: { chainId: string; reject?: string; watch: boolean } & CommonFlags,
+  deps: CliDeps = {},
+): Promise<number> {
+  const ioPair = io(deps);
+  try {
+    return await hostChainControlAndFollow(args.chainId, args, deps, ioPair, {
+      kind: "approve",
+      approved: args.reject === undefined,
+      ...(args.reject !== undefined ? { reason: args.reject } : {}),
+    });
+  } catch (err) {
+    ioPair.err(`chikory: ${actionable(err)}`);
+    return 1;
+  }
+}
+
+/** `chikory chain resume <chain-id>` — clear a parked child's budget cap (WP-241). */
+export async function cmdChainResume(
+  args: { chainId: string; addBudgetUsd?: number; watch: boolean } & CommonFlags,
+  deps: CliDeps = {},
+): Promise<number> {
+  const ioPair = io(deps);
+  try {
+    return await hostChainControlAndFollow(args.chainId, args, deps, ioPair, {
+      kind: "resume",
+      ...(args.addBudgetUsd !== undefined ? { addBudgetUsd: args.addBudgetUsd } : {}),
+    });
+  } catch (err) {
+    ioPair.err(`chikory: ${actionable(err)}`);
+    return 1;
   }
 }
 

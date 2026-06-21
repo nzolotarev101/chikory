@@ -1,0 +1,108 @@
+# Dogfood-044: WP-241 chain-level child approval/resume proof (READY, not yet run).
+# Launch with `chikory chain`; the WP-241 substrate below is in HEAD.
+#
+# WHAT THIS PROVES (dogfood-042 F-42 → WP-241): when a chain node's child run
+# parks awaiting a human, the chain `--watch` stream must SURFACE it (node id,
+# reason, the exact unblock command) instead of going silent, and a single
+# chain-level command must unblock it WITHOUT the dogfood-042 "detach → approve
+# child id → restart proxy → resume child" dance. The node runs are durable, so
+# the park survives a detached worker; the chain-level command re-attaches a
+# worker, signals the parked child, and follows the chain to its terminal state.
+#
+# LANDED WP-241 SUBSTRATE (in HEAD, the runtime under test — same prerequisite
+# discipline as dogfood-043: the Temporal worker loads committed code before the
+# chain starts, so the chain cannot build its own approval substrate mid-run):
+#   1. `followChain` (src/cli/chain.ts) surfaces a parked in-flight child once
+#      per distinct park: `node <id> child <run> ⏸ <AWAITING_APPROVAL|SUSPENDED>
+#      — <reason>` plus `unblock with: chikory chain <approve|resume> <chain-id>`.
+#      It reads the child's own per-run journal (`childParkedState`), since the
+#      chain workflow is blocked inside `executeChild` with nothing new to
+#      journal at chain scope.
+#   2. `chikory chain approve <chain-id> [--reject "<reason>"]` and
+#      `chikory chain resume <chain-id> [--add-budget <usd>]` resolve the
+#      in-flight node's deterministic child run id from the ChainJournal, host a
+#      worker, signal the child, and follow the chain to terminal — the parent
+#      orchestration stays attached.
+#   3. Unit coverage: `packages/sdk-ts/test/cli/chain-control.test.ts`
+#      (inflightNode + childParkedState over journal fixtures).
+#
+# THE TRIGGER (and its known risk — read before running). The reliably parkable
+# state in the current runtime is the USD budget SUSPENDED gate (it waits for a
+# top-up signal; a token breach instead seals FAILED, and a judge/loop-breaker
+# ESCALATE depends on the model). The budget gate is checked at the TOP of the
+# run loop, BEFORE each step — so it can only park a node that does NOT complete
+# in its first step. Node B below is therefore deliberately a TWO-FILE task with
+# a tight per-node budget, so its first step's cost pushes the second step's
+# pre-step estimate over the cap → SUSPENDED. Recover with:
+#     chikory chain resume <chain-id> --add-budget 5 --watch
+# ⚠️ TRIGGER RISK: if the executor finishes node B in a single step, it seals
+# SUCCESS before the budget gate runs and NO park occurs. That is itself a
+# first-class finding — it means proving F-42 live needs a deterministic
+# park-injection seam (a WP-241 follow-up), which the dogfood-review should file.
+# Either outcome (park surfaced + chain-resumed, OR no-park → seam needed) is a
+# valid, plan-advancing result.
+#
+# Post-run sequence (mandatory):
+#   devbox run dogfood
+#   # if node B parks: chikory chain resume <chain-id> --add-budget 5 --watch
+#   devbox run harvest
+#   /dogfood-review <chain-id>
+name: dogfood-044-wp-241-chain-approval-resume-proof
+goal: >
+  Implement exactly two sequential, diff-producing deliverables in
+  packages/sdk-ts. The second deliverable MUST depend on and import code from
+  the first; do not combine them into one node, make them independent, or add a
+  verification-only node. Node B must be given a strict, very small per-node
+  budget (budget_usd 0.05) so it parks on the budget gate; node A keeps an
+  ordinary budget.
+
+  Node A (independent predecessor, ordinary budget): add a pure module at
+  packages/sdk-ts/src/chain/resume-fixture-a.ts exporting the named pure
+  function `resumeFixtureA(): string`, returning exactly `resume-a`. Add
+  packages/sdk-ts/test/chain/resume-fixture-a.test.ts with a focused passing
+  test. Touch only those two files.
+
+  Node B (dependent consumer, strict budget_usd 0.05): only after node A seals
+  SUCCESS, add packages/sdk-ts/src/chain/resume-fixture-b.ts. It MUST import
+  `resumeFixtureA` from `./resume-fixture-a.js` and export the named pure
+  function `formatResumeReport(): string`, returning exactly `resume-a +
+  resume-b`. Add packages/sdk-ts/test/chain/resume-fixture-b.test.ts proving
+  that exact result. Touch only those two files. Node A's module is already
+  present in node B's workspace via the WP-239 handoff — build on it, do not
+  recreate it.
+
+  Keep both functions pure and minimal. Use strict TypeScript, ESM `.js`
+  relative imports, named exports only, no default exports, no I/O, and no new
+  dependencies. Do not change contracts, schemas, the chain runner, the CLI, or
+  unrelated files. Run project commands sequentially inside the existing Devbox
+  environment.
+repos:
+  - url: /Users/nikitazolotarev/repos/chikory
+    writable: true
+acceptance_criteria:
+  - id: AC-1
+    description: >
+      independent node A adds only the resume-fixture-a module/test and its
+      focused test passes.
+    check: cd packages/sdk-ts && pnpm exec vitest run test/chain/resume-fixture-a.test.ts
+  - id: AC-2
+    description: >
+      node B imports node A's module, exports formatResumeReport returning the
+      combined string, its focused test passes, and the SDK stays type- and
+      lint-clean.
+    check: cd packages/sdk-ts && pnpm exec vitest run test/chain/resume-fixture-b.test.ts && pnpm exec tsc --noEmit && pnpm exec eslint .
+budget_usd: 12
+max_steps: 8
+executor:
+  adapter: codex
+  family: openai
+judge:
+  family: openai-compat
+  cadence: 2
+  max_cost_share: 0.5
+routing:
+  stages:
+    plan: { provider: openai-compat, model: gpt-5.5 }
+    code: { provider: openai-compat, model: gpt-5.5 }
+    review: { provider: openai-compat, model: gpt-5.5 }
+    judge: { provider: openai-compat, model: gemini-3.1-pro-preview }
