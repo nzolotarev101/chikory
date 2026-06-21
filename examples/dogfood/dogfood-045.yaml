@@ -1,0 +1,161 @@
+# Dogfood-045: THE JUDGE-CATCHES-A-REGRESSION proof (Agent-as-a-Judge core thesis).
+# Launch with `chikory run` (single durable run, NOT a chain).
+#
+# WHY THIS IS NEXT (2026-06-21): WP-241 + WP-243 closed the chain park→surface→
+# resume pillar live (dogfood-044 re-run `chain-1bfb9d13-…`). The next unproven
+# thesis pillar — and the product's entire reason to exist — is the **real-time
+# Agent-as-a-Judge catching a bad change BEFORE it lands** (DOGFOODING §1.1 KPI:
+# "regressions the judge caught pre-land"). Every dogfood to date has been the
+# judge PROCEEDing clean work; none has shown a true-positive ROLLBACK on a wrong
+# diff. This spec manufactures a real failure surface: a small pure function with
+# a cluster of classic edge-case traps, gated by a STRICT acceptance check the
+# executor cannot weaken.
+#
+# HOW THE JUDGE-CATCH IS FORCED (and why it's a fair test, not a rigged one):
+#   * The function `truncateMiddle` has five independent edge traps (below). The
+#     "obvious" implementation a hasty agent writes will plausibly miss at least
+#     one (inclusive `<=` boundary, odd-split-favours-HEAD, the ellipsis counting
+#     toward maxLength, the maxLength===1 → "…" case, or the maxLength<1 throw).
+#   * AC-1 is independent of the executor's good faith: it `grep`s that the THREE
+#     hardest canonical assertions are present VERBATIM in the test file (so the
+#     executor cannot silently weaken the suite to match a buggy impl), AND THEN
+#     runs vitest (so those assertions must actually PASS against the real impl).
+#     A wrong edge ⇒ vitest red ⇒ judge verdict ROLLBACK/REVISE on that step
+#     (the catch) ⇒ executor gets the failure feedback ⇒ fixes it ⇒ SUCCESS.
+#   * `judge.cadence: 1` runs the judge after EVERY step, so a buggy "I'm done"
+#     claim is caught immediately rather than slipping through.
+#
+# EITHER OUTCOME IS A VALID, PLAN-ADVANCING RESULT (DOGFOODING §1.1):
+#   * 🟢 BEST: the executor's first attempt trips a trap → judge ROLLBACK/REVISE
+#     (a true positive, the thesis proof) → executor corrects → SUCCESS in ≥2
+#     steps. The dogfood-review records the exact verdict + the criterion that
+#     failed as the first measured "regression the judge caught pre-land".
+#   * 🟡 ALSO VALID: the executor one-shots every trap correctly → clean SUCCESS,
+#     no catch. That is itself data (the traps were not hard enough for THIS
+#     executor); the review notes it and the next judge-catch spec raises the bar.
+#   The run must NOT be re-run hoping for a catch — launch once, watch to terminal.
+#
+# Zero-secrets launch (no API keys on this machine — CLI-OAuth judge via the shim):
+#   node scripts/cli-judge-proxy.mjs 8787 gemini &
+#   OPENAI_COMPAT_BASE_URL=http://127.0.0.1:8787 pnpm chikory run examples/dogfood/dogfood-045.yaml --watch
+#
+# Pre-launch discipline:
+#   * COMMIT EVERYTHING first — the workspace clones HEAD (F-30: launch ONCE).
+#   * `packages/sdk-ts/src/util/truncate-middle.ts` and its test MUST NOT already
+#     exist on HEAD, or the run clones a baseline that already satisfies the goal
+#     → empty diff → FAILED (dogfood-044 F-45). Confirm they are absent before
+#     launching.
+#   * Run Devbox commands sequentially (F-22). F-11 is closed — a clean one-shot
+#     would seal in ONE step with no empty-diff probe; a judge-catch shows ≥2.
+name: dogfood-045-judge-catches-a-regression
+goal: >
+  Add ONE small, pure, well-tested string utility to the TypeScript SDK:
+  `truncateMiddle`. This is deliberately a function with several easy-to-miss
+  edge cases — implement EVERY rule below exactly, because a strict acceptance
+  test enforces each one.
+
+  Touch exactly TWO files, both NEW; change no other file (do not edit
+  `index.ts`, any barrel, `types.ts`, configs, or unrelated code), add no new
+  dependency, and make no I/O, network, clock, or randomness call.
+
+  1. packages/sdk-ts/src/util/truncate-middle.ts — a NEW module exporting a
+     single named pure function (named export only, NO default export; strict
+     TypeScript, ESM):
+
+       export function truncateMiddle(value: string, maxLength: number): string
+
+     It shortens `value` to at most `maxLength` characters by replacing the
+     MIDDLE with a single ellipsis character `…` (U+2026, ONE code unit), keeping
+     the start and end of the string. Implement these rules EXACTLY — each is a
+     test case:
+
+       R1 (inclusive boundary). If `value.length <= maxLength`, return `value`
+          UNCHANGED. The comparison is `<=`, not `<` (a string whose length
+          equals maxLength is returned as-is; the empty string is always
+          returned as-is).
+       R2 (the ellipsis counts toward maxLength). When truncation happens, the
+          returned string's length is EXACTLY `maxLength`, and the `…` is one of
+          those characters. So the number of ORIGINAL characters kept is
+          `maxLength - 1`.
+       R3 (odd split favours the HEAD). Let `keep = maxLength - 1` be the count
+          of kept original characters. The head keeps `Math.ceil(keep / 2)`
+          characters and the tail keeps `Math.floor(keep / 2)` characters — so on
+          an odd split the HEAD gets the extra character. Result =
+          `value.slice(0, headLen) + "…" + value.slice(value.length - tailLen)`
+          (when `tailLen` is 0 the tail contributes the empty string).
+       R4 (maxLength === 1). Returns just the ellipsis `"…"` (keep = 0, head = 0,
+          tail = 0).
+       R5 (invalid maxLength). If `maxLength < 1`, throw a `RangeError` (do not
+          return a string).
+
+     Add a short JSDoc describing the head-favoured odd split and that the
+     ellipsis counts toward maxLength. Pure: reads only its arguments, returns a
+     value, mutates nothing.
+
+  2. packages/sdk-ts/test/util/truncate-middle.test.ts — a NEW Vitest file
+     importing `truncateMiddle` from `../../src/util/truncate-middle.js` (ESM
+     `.js` relative import). Encode AT LEAST these exact cases, with these EXACT
+     expected values (reproduce the literals verbatim — the acceptance check
+     greps for the hardest three and they must remain present AND passing; do not
+     weaken, delete, or loosen any of them):
+
+       - truncateMiddle("abcdefgh", 8)  === "abcdefgh"   // R1 inclusive boundary
+       - truncateMiddle("hi", 2)        === "hi"          // R1
+       - truncateMiddle("", 3)          === ""            // R1 empty string
+       - truncateMiddle("abcdefghij", 8) === "abcd…hij"   // R2+R3 (keep 7 → head 4, tail 3)
+       - truncateMiddle("abcdefghij", 7) === "abc…hij"    // keep 6 → head 3, tail 3
+       - truncateMiddle("hello", 4)     === "he…o"        // keep 3 → head 2, tail 1
+       - truncateMiddle("hello", 3)     === "h…o"         // keep 2 → head 1, tail 1
+       - truncateMiddle("hello", 1)     === "…"           // R4
+       - expect truncateMiddle("hi", 0) to throw a RangeError    // R5
+       - expect truncateMiddle("hi", -2) to throw a RangeError   // R5
+       - assert truncateMiddle("abcdefghij", 8) has length 8     // R2 length invariant
+
+     Keep the assertions exactly as specified; the result of "abcdefghij" at
+     maxLength 8 is "abcd…hij" (head-favoured), NOT "abc…hij".
+
+  Follow AGENTS.md and the sdk-ts conventions: strict TypeScript, ESM, named
+  exports only, no default export, no new dependency. Run all Devbox verification
+  commands sequentially.
+repos:
+  - url: /Users/nikitazolotarev/repos/chikory
+    writable: true
+acceptance_criteria:
+  # Checks run by the judge inside the run workspace (fresh clone) under the
+  # worker's devbox env — call the toolchain directly, 120s cap per check.
+  # AC-1 is regression-proof against a weakened suite: the greps assert the three
+  # hardest canonical assertions are present VERBATIM, then vitest proves they
+  # pass against the real implementation. A wrong edge => vitest red => the judge
+  # must NOT PROCEED.
+  - id: AC-1
+    description: >
+      the strict truncate-middle suite keeps its three hardest canonical
+      assertions verbatim AND passes — the head-favoured odd split
+      ("abcd…hij"), the maxLength===1 ellipsis ("…"), and the inclusive
+      boundary ("abcdefgh")
+    check: >
+      cd packages/sdk-ts &&
+      grep -q 'toBe("abcd…hij")' test/util/truncate-middle.test.ts &&
+      grep -q 'toBe("…")' test/util/truncate-middle.test.ts &&
+      grep -q 'toBe("abcdefgh")' test/util/truncate-middle.test.ts &&
+      pnpm exec vitest run test/util/truncate-middle.test.ts
+  - id: AC-2
+    description: >
+      the SDK stays type- and lint-clean and the full existing suite remains
+      green — proving the new module breaks nothing
+    check: cd packages/sdk-ts && pnpm exec tsc --noEmit && pnpm exec eslint . && pnpm exec vitest run
+budget_usd: 5
+max_steps: 5
+executor:
+  adapter: codex
+  family: openai
+judge:
+  family: openai-compat
+  cadence: 1
+  max_cost_share: 0.5
+routing:
+  stages:
+    plan: { provider: openai-compat, model: gpt-5.5 }
+    code: { provider: openai-compat, model: gpt-5.5 }
+    review: { provider: openai-compat, model: gpt-5.5 }
+    judge: { provider: openai-compat, model: gemini-3.1-pro-preview }
