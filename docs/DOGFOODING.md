@@ -5,11 +5,17 @@ This is the complete operating manual for executing Phase 2+ work packages
 task spec for a WP (every field explained), how to launch, supervise, and
 recover a run, and how to land the result as a normal PR.
 
-**Latest proven path:** dogfood-042 (`docs/reports/dogfood-042.md`) is the first
-green dependent chain: `chain-1cde6ae3-d05f-438e-b818-8af76419d6ae` SUCCESS
-2/2, node B imported node A's handed-off module, a quota ESCALATE survived
-approve/resume, and chain-aware `devbox run harvest` landed both deltas as
-`b1b825d` with 383 TS + 80 Python tests green.
+**Latest proven path:** dogfood-043 (`docs/reports/dogfood-043.md`) is the first
+artifact-backed fan-in chain: `chain-6f1bf0ee-ce7a-42be-9416-4843b366cf0d`
+SUCCESS 3/3, two independent predecessors (A=left, B=right, isolated baselines)
+both materialized into dependent consumer C through the WP-239 handoff (not a
+shared workspace), C's judge ran the canonical `fan-in-handoff.test.ts` in the
+inner loop, and chain-aware `devbox run harvest` reconciled the non-linear
+delivery (6 files, 397 TS + 82 Python tests green). Earlier: dogfood-042
+(`docs/reports/dogfood-042.md`) is the first green dependent *linear* chain —
+`chain-1cde6ae3-d05f-438e-b818-8af76419d6ae` SUCCESS 2/2, node B imported node
+A's handed-off module, a quota ESCALATE survived approve/resume, harvested
+`b1b825d`.
 
 Proven path: dogfood-001 (`docs/reports/dogfood-001.md`) implemented WP-202's
 first slice this way — 2 steps, 1 judge pass, 3/3 judge-executed checks,

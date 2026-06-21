@@ -89,8 +89,13 @@ Every requirement in [`project.md`](../project.md), assigned a stable ID, mapped
 > chain harvest landed `b1b825d`. WP-239 artifact-backed fan-in is now
 > implemented under ADR-007: ordered Git-bundle refs, shared-store injection,
 > conflict-safe write ownership (WP-242/F-43), provenance, and topological
-> cumulative harvest. Dogfood-043 is queued for live proof. Structured WP-203
-> compaction notes remain a follow-up.
+> cumulative harvest. **Proven live by dogfood-043
+> `chain-6f1bf0ee-ce7a-42be-9416-4843b366cf0d` SUCCESS 3/3** (`docs/reports/dogfood-043.md`):
+> two independent predecessors converging into one consumer, predecessors
+> provably isolated, both deterministically materialized into the consumer, the
+> canonical conflict/ordering runtime test judge-gated in the inner loop, and
+> chain-aware harvest reconstructed the non-linear delivery (6 files). Structured
+> WP-203 compaction notes remain a follow-up.
 > Child approval/resume visibility is WP-241 (F-42); chain-aware verification
 > remains WP-232 (F-41).
 
