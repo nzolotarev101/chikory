@@ -115,6 +115,32 @@ describe("planNodeToTaskSpec", () => {
     );
   });
 
+  it("WP-243: arms the park seam only on the targeted dispatch index", () => {
+    const parkTemplate: ChainNodeTemplate = {
+      ...template,
+      debugPark: { beforeStep: 0, nodeIndex: 1 },
+    };
+    // node A (dispatch index 0) runs normally; node B (index 1) parks.
+    expect(planNodeToTaskSpec(node, parkTemplate, "plan-1", undefined, undefined, undefined, undefined, 0).debug).toBeUndefined();
+    expect(planNodeToTaskSpec(node, parkTemplate, "plan-1", undefined, undefined, undefined, undefined, 1).debug).toEqual({
+      parkBeforeStep: 0,
+    });
+  });
+
+  it("WP-243: arms every node when no nodeIndex is given", () => {
+    const parkTemplate: ChainNodeTemplate = { ...template, debugPark: { beforeStep: 2 } };
+    expect(planNodeToTaskSpec(node, parkTemplate, "plan-1", undefined, undefined, undefined, undefined, 0).debug).toEqual({
+      parkBeforeStep: 2,
+    });
+    expect(planNodeToTaskSpec(node, parkTemplate, "plan-1", undefined, undefined, undefined, undefined, 9).debug).toEqual({
+      parkBeforeStep: 2,
+    });
+  });
+
+  it("leaves debug undefined when the template carries no park seam", () => {
+    expect(planNodeToTaskSpec(node, template, "plan-1").debug).toBeUndefined();
+  });
+
   it("carries optional template budgetTokens/maxSteps only when present", () => {
     const bare = planNodeToTaskSpec(node, template, "plan-1");
     expect(bare.budgetTokens).toBeUndefined();

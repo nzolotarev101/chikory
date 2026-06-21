@@ -33,6 +33,13 @@ export interface ChainNodeTemplate {
   routing: RoutingPolicy;
   budgetTokens?: number;
   maxSteps?: number;
+  /**
+   * WP-243 dogfood/test-only: force a deterministic SUSPEND park. `nodeIndex`
+   * (0-based dispatch order) targets a single node — node A = 0, node B = 1 —
+   * so an independent root keeps running while a dependent node parks; absent
+   * `nodeIndex` arms every node.
+   */
+  debugPark?: { beforeStep: number; nodeIndex?: number };
 }
 
 /**
@@ -62,6 +69,7 @@ export function planNodeToTaskSpec(
   handoffNote?: string,
   chainId?: string,
   parentHandoffs?: ChainNodeHandoff[],
+  dispatchIndex?: number,
 ): TaskSpec {
   const chainLink: ChainLink = { planId, nodeId: node.id };
   if (chainId !== undefined) chainLink.chainId = chainId;
@@ -84,6 +92,15 @@ export function planNodeToTaskSpec(
   };
   if (template.budgetTokens !== undefined) spec.budgetTokens = template.budgetTokens;
   if (template.maxSteps !== undefined) spec.maxSteps = template.maxSteps;
+  // WP-243: arm the dogfood park seam on the targeted node (or all nodes when
+  // `nodeIndex` is absent). Deterministic — dispatch order is fixed.
+  if (
+    template.debugPark !== undefined &&
+    (template.debugPark.nodeIndex === undefined ||
+      template.debugPark.nodeIndex === dispatchIndex)
+  ) {
+    spec.debug = { parkBeforeStep: template.debugPark.beforeStep };
+  }
   return spec;
 }
 

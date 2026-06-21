@@ -107,6 +107,26 @@ describe("childParkedState", () => {
     });
   });
 
+  it("WP-243: reports an injected debug halt as SUSPENDED with the seam reason", () => {
+    childJournal(runId, [
+      { kind: "budget_event", payload: { event: "halt", cause: "debug", details: { injected: 1, atStep: 0 } } },
+    ]);
+    expect(childParkedState(dataDir, "node-b", runId)).toEqual({
+      nodeId: "node-b",
+      childRunId: runId,
+      kind: "SUSPENDED",
+      reason: "debug park-injection (WP-243)",
+    });
+  });
+
+  it("WP-243: clears the injected debug park once a top-up lands", () => {
+    childJournal(runId, [
+      { kind: "budget_event", payload: { event: "halt", cause: "debug", details: { injected: 1 } } },
+      { kind: "budget_event", payload: { event: "top_up", details: { budgetUsd: 5 } } },
+    ]);
+    expect(childParkedState(dataDir, "node-b", runId)).toBeUndefined();
+  });
+
   it("clears the park once the escalation is resolved by a later verdict", () => {
     childJournal(runId, [
       { kind: "verdict", payload: { verdict: { kind: "ESCALATE", escalateReason: "stuck" } } },

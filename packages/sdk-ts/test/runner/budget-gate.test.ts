@@ -170,6 +170,61 @@ describe.skipIf(address === null)("budget gate + terminal states (WP-124)", () =
     }
   });
 
+  test("park-injection (WP-243): spec.debug.parkBeforeStep deterministically SUSPENDs before the step; resume continues", async () => {
+    // The node would otherwise one-shot SUCCESS (F-44). parkBeforeStep:0 forces
+    // the real SUSPEND→top-up path BEFORE any step runs, so the park is
+    // deterministic regardless of how many steps the executor takes.
+    const { repoUrl, dataDir, runner } = await setup({ costPerStep: 0.01 });
+    const spec = makeSpec({
+      repoUrl,
+      budgetUsd: 100, // generous — only the injected park trips, not the real gate
+      maxSteps: 4,
+      judge: { family: "gemini", cadence: 50 },
+      debug: { parkBeforeStep: 0 },
+    });
+
+    const handle = await runner.start(spec);
+    const parked = await awaitStatus(handle, (r) => r.status === "SUSPENDED", "debug park");
+    // Parked before the first step ever ran — zero compute, nothing checkpointed.
+    expect(parked.currentStep).toBe(0);
+    expect(parked.spentUsd).toBe(0);
+    expect(parked.checkpoints).toHaveLength(0);
+
+    {
+      const journal = new Journal(journalPath(dataDir, handle.runId));
+      try {
+        const events = journal.entries("budget_event");
+        expect(events).toHaveLength(1);
+        const payload = events[0]!.payload as { event: string; cause?: string };
+        expect(payload.event).toBe("halt");
+        expect(payload.cause).toBe("debug"); // the WP-243 marker, not a real budget breach
+        expect(journal.entries("step")).toHaveLength(0);
+        expect(journal.entries("terminal")).toHaveLength(0);
+      } finally {
+        journal.close();
+      }
+    }
+
+    // Resume exactly as a budget park would: top up and run to terminal.
+    await runner.resume(handle.runId, { addBudgetUsd: 5 });
+    const finished = await awaitStatus(
+      handle,
+      (r) => TERMINAL_STATUSES.includes(r.status),
+      "run end after debug resume",
+    );
+    expect(finished.currentStep).toBe(4); // ran normally after the single injected park
+
+    const journal = new Journal(journalPath(dataDir, handle.runId));
+    try {
+      const kinds = journal.entries("budget_event").map((e) => (e.payload as { event: string }).event);
+      expect(kinds).toEqual(["halt", "top_up"]); // fired once — no re-park after resume
+      expect(journal.entries("step")).toHaveLength(4);
+      expect(journal.entries("terminal")).toHaveLength(1);
+    } finally {
+      journal.close();
+    }
+  });
+
   test("token gate (WP-218): budgetTokens breach → token HALT + resumable FAILED (no USD top-up channel)", async () => {
     // 600 tokens/step; budget 1000 covers step 1 (est 0), blocks step 2
     // (est 600×1.5=900 > remaining 400). USD budget is generous — only the

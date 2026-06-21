@@ -103,6 +103,7 @@ export async function agentLoop(spec: TaskSpec): Promise<RunStatus> {
   let budgetEventIndex = 0;
   let escalationIndex = 0;
   let consecutiveFailures = 0;
+  let parkInjected = false;
   let cancelRequested = false;
   let lastVerdict: { kind: JudgeVerdict["kind"]; atStep: number } | undefined;
   let lastGoodCheckpointId: string | undefined;
@@ -179,6 +180,38 @@ export async function agentLoop(spec: TaskSpec): Promise<RunStatus> {
     if (cancelRequested) return seal("CANCELLED", "cancelled by user");
     if (stepIndex >= maxSteps) {
       return seal("FAILED", `maxSteps (${maxSteps}) reached without meeting acceptance criteria`);
+    }
+
+    // WP-243 deterministic park-injection seam (dogfood/test-only). Force the
+    // real SUSPEND→top-up path at a chosen step so WP-241's chain surfacing +
+    // `chikory chain resume` are provable without a non-deterministic budget/
+    // ESCALATE trigger (F-44). The value rides in spec.debug (frozen workflow
+    // input → replay-safe; never read from env in-workflow). Fires once; the
+    // journaled halt/top_up is indistinguishable from a real budget park to
+    // `childParkedState`, so the whole WP-241 path exercises unchanged.
+    if (!parkInjected && spec.debug?.parkBeforeStep === stepIndex) {
+      parkInjected = true;
+      await activities.recordBudgetEvent({
+        runId,
+        budgetEventIndex: budgetEventIndex++,
+        event: "halt",
+        cause: "debug",
+        remainingUsd: budgetUsd - spentUsd,
+        details: { injected: 1, atStep: stepIndex, spentUsd, budgetUsd },
+      });
+      status = "SUSPENDED";
+      await condition(() => pendingTopUps.length > 0 || cancelRequested);
+      if (cancelRequested) return seal("CANCELLED", "cancelled while halted (debug park)");
+      const added = pendingTopUps.splice(0).reduce((a, b) => a + b, 0);
+      budgetUsd += added;
+      await activities.recordBudgetEvent({
+        runId,
+        budgetEventIndex: budgetEventIndex++,
+        event: "top_up",
+        remainingUsd: budgetUsd - spentUsd,
+        details: { addedUsd: added, budgetUsd },
+      });
+      status = "RUNNING";
     }
 
     // Budget gate (WP-124, CG-2): conservative pre-step estimate; breach →

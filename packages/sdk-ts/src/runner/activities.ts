@@ -744,8 +744,11 @@ export function createRunnerActivities(deps: RunnerActivityDeps) {
       event: "halt" | "top_up";
       remainingUsd: number;
       details: Record<string, number>;
-      /** WP-218: which budget tripped. Absent ⇒ "usd" (back-compatible). */
-      cause?: "usd" | "tokens";
+      /**
+       * WP-218: which budget tripped. Absent ⇒ "usd" (back-compatible).
+       * WP-243: "debug" marks a deterministic dogfood park-injection halt.
+       */
+      cause?: "usd" | "tokens" | "debug";
       /** WP-218: token headroom at a token HALT (rides the token gate). */
       remainingTokens?: number;
     }): Promise<void> {

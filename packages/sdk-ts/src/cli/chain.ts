@@ -141,6 +141,19 @@ function templateFromSpec(spec: TaskSpec): ChainNodeTemplate {
   };
   if (spec.budgetTokens !== undefined) template.budgetTokens = spec.budgetTokens;
   if (spec.maxSteps !== undefined) template.maxSteps = spec.maxSteps;
+  // WP-243 dogfood/test-only park seam: armed host-side from env so the dogfood
+  // spec stays unchanged. `CHIKORY_PARK_BEFORE_STEP=N` parks before step N;
+  // `CHIKORY_PARK_NODE_INDEX=K` (optional) restricts the park to the K-th
+  // dispatched node (0-based). Read here (host process), frozen into the
+  // workflow input → never read inside the deterministic workflow body.
+  const beforeStep = process.env["CHIKORY_PARK_BEFORE_STEP"];
+  if (beforeStep !== undefined) {
+    const idx = process.env["CHIKORY_PARK_NODE_INDEX"];
+    template.debugPark = {
+      beforeStep: Number(beforeStep),
+      ...(idx !== undefined ? { nodeIndex: Number(idx) } : {}),
+    };
+  }
   return template;
 }
 
@@ -224,6 +237,7 @@ export function childParkedState(
       } else if (entry.kind === "budget_event") {
         const p = entry.payload as {
           event: string;
+          cause?: string;
           details?: { spentUsd?: number; budgetUsd?: number };
         };
         if (p.event === "halt") {
@@ -233,10 +247,14 @@ export function childParkedState(
             nodeId,
             childRunId,
             kind: "SUSPENDED",
+            // WP-243: an injected park is honest about being a debug seam, not a
+            // fake budget breach.
             reason:
-              spent !== undefined && budget !== undefined
-                ? `budget cap ($${spent.toFixed(2)} / $${budget.toFixed(2)})`
-                : "budget cap",
+              p.cause === "debug"
+                ? "debug park-injection (WP-243)"
+                : spent !== undefined && budget !== undefined
+                  ? `budget cap ($${spent.toFixed(2)} / $${budget.toFixed(2)})`
+                  : "budget cap",
           };
         } else if (p.event === "top_up") {
           parked = undefined; // funds added → gate cleared

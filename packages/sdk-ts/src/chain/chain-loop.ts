@@ -82,6 +82,9 @@ export async function chainLoop(input: ChainLoopInput): Promise<ChainStatus> {
 
     // Sequential dispatch (v1): run the first ready node, fold, re-derive.
     const node = ready[0]!;
+    // 0-based dispatch order (sequential → deterministic): every already-sealed
+    // node has been dispatched, so the count is this node's index (WP-243).
+    const dispatchIndex = Object.keys(record.nodeOutcomes).length;
     const runId = childRunId(chainId, node.id);
     await activities.recordNodeStarted({ chainId, nodeId: node.id, childRunId: runId });
 
@@ -111,6 +114,7 @@ export async function chainLoop(input: ChainLoopInput): Promise<ChainStatus> {
       handoffNote,
       chainId,
       parentHandoffs,
+      dispatchIndex,
     );
     const runStatus: RunStatus = await executeChild(agentLoop, {
       workflowId: runId,

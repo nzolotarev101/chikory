@@ -89,6 +89,14 @@ export interface TaskSpec {
   notifications?: NotificationPolicy;
   /** P2 (WP-219, ADR-005) — present when this run is a node in a chain. */
   chainLink?: ChainLink;
+  /**
+   * WP-243 dogfood/test-only: force a deterministic SUSPEND park before the
+   * given step index, so WP-241's chain surfacing + `chikory chain resume` are
+   * provable without a non-deterministic budget/ESCALATE trigger (F-44). Off
+   * the happy path; armed host-side from `CHIKORY_PARK_*` env, never read in
+   * the workflow (replay-safe — it rides the frozen workflow input).
+   */
+  debug?: { parkBeforeStep?: number };
 }
 
 export interface RepoSpec {
