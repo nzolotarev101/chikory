@@ -241,4 +241,74 @@ describe.skipIf(address === null)("verdict gating (WP-132)", () => {
       journal.close();
     }
   });
+
+  // ─── WP-244 deterministic judge-catch seam (dogfood-045 F-46) ──────────────
+  // The judge-catch analog of WP-243's park seam: instead of HOPING the
+  // executor introduces a regression (non-deterministic — a strong executor
+  // one-shots the trap, as in dogfood-045), `spec.debug.seedBadDiff` overwrites
+  // a workspace file with known-wrong content right after the chosen step, so
+  // the real-time judge MUST catch it via its acceptance `check` (whose exit
+  // code overrides the LLM form). These two tests share a spec; the ONLY
+  // difference is whether the seam is armed — isolating the seam as the cause
+  // of the catch.
+  const NO_MARKER_CHECK = "! grep -q CORRUPTED-BY-SEAM step-1.txt";
+
+  test("seedBadDiff DISARMED (control): the AC check passes, run seals SUCCESS", async () => {
+    const wire = await startFakeJudgeWire([judgeForm({ criteria: { "AC-1": true } })]);
+    const { dataDir, handle } = await run(wire, {
+      maxSteps: 2,
+      acceptanceCriteria: [
+        { id: "AC-1", description: "no CORRUPTED-BY-SEAM marker in step-1.txt", check: NO_MARKER_CHECK },
+      ],
+    });
+    const report = await awaitTerminal(handle);
+
+    expect(report.status).toBe("SUCCESS");
+    expect(verdictKinds(dataDir, handle.runId)).toEqual(["PROCEED"]);
+    const journal = new Journal(journalPath(dataDir, handle.runId));
+    try {
+      const verdict = (journal.entries("verdict")[0]!.payload as VerdictPayload).verdict;
+      expect(verdict.form.criterionResults[0]).toMatchObject({ id: "AC-1", pass: true });
+    } finally {
+      journal.close();
+    }
+  });
+
+  test("seedBadDiff ARMED: the seam corrupts step-1.txt, the judge CATCHES it (AC-1 fails), run does NOT seal SUCCESS", async () => {
+    // Fake form lies "AC-1 passes" — but the judge-executed check sees the
+    // seeded marker and exits 1, overriding the form to a fail. That override
+    // is the true-positive catch the product exists to demonstrate, forced
+    // deterministically regardless of executor skill.
+    const wire = await startFakeJudgeWire([judgeForm({ criteria: { "AC-1": true } })]);
+    const { dataDir, handle } = await run(wire, {
+      maxSteps: 2,
+      acceptanceCriteria: [
+        { id: "AC-1", description: "no CORRUPTED-BY-SEAM marker in step-1.txt", check: NO_MARKER_CHECK },
+      ],
+      debug: { seedBadDiff: { atStep: 0, path: "step-1.txt", content: "CORRUPTED-BY-SEAM\n" } },
+    });
+    const report = await awaitTerminal(handle);
+
+    // The regression never lands as SUCCESS — it is caught every pass and the
+    // run exhausts maxSteps (the scripted executor cannot self-correct; a real
+    // executor would fix it from the judge feedback, as dogfood-046 shows).
+    expect(report.status).toBe("FAILED");
+    // A single non-destructive criterion fail → PROCEED verdict, but allCriteria
+    // do NOT pass, so the runner refuses to seal SUCCESS (the catch).
+    expect(verdictKinds(dataDir, handle.runId)).toEqual(["PROCEED", "PROCEED"]);
+
+    // The seam activity actually mutated the workspace (proof the diff was injected).
+    const seeded = await readFile(join(workspaceDir(dataDir, handle.runId), "step-1.txt"), "utf8");
+    expect(seeded).toBe("CORRUPTED-BY-SEAM\n");
+
+    const journal = new Journal(journalPath(dataDir, handle.runId));
+    try {
+      const verdict = (journal.entries("verdict")[0]!.payload as VerdictPayload).verdict;
+      const ac1 = verdict.form.criterionResults.find((r) => r.id === "AC-1");
+      expect(ac1?.pass).toBe(false); // overridden from the form's "true" by the real check
+      expect(ac1?.justification).toContain("exited 1"); // judge-executed check caught it
+    } finally {
+      journal.close();
+    }
+  });
 });

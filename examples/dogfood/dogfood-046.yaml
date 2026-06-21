@@ -1,0 +1,155 @@
+# Dogfood-046: THE REPRODUCIBLE Agent-as-a-Judge true-positive catch (core thesis).
+# Launch with `chikory run` (single durable run, NOT a chain).
+#
+# WHY THIS IS NEXT (2026-06-21): dogfood-045 tried to FORCE a judge-catch by
+# trapping the executor with a five-edge-trap `truncateMiddle` — and the strong
+# `codex`/`gpt-5.5` executor one-shot every edge, so the judge had nothing to
+# catch (clean PROCEED, F-46). The lesson (identical to F-44 → WP-243 for the
+# park trigger): a "hope the executor fails" trigger is NON-DETERMINISTIC. So
+# WP-244 built a deterministic seam — `TaskSpec.debug.seedBadDiff`, armed
+# host-side from `CHIKORY_SEED_BAD_DIFF_*` — that overwrites a workspace file
+# with known-wrong content right after a chosen step. This spec USES that seam
+# to make the product's core thesis — a real-time judge catching a bad change
+# BEFORE it lands (DOGFOODING §1.1 KPI: "regressions the judge caught pre-land")
+# — happen ON DEMAND, regardless of executor skill.
+#
+# HOW THE DETERMINISTIC CATCH WORKS (and why it is a FAIR proof, not a rigged one):
+#   * The executor implements `clamp` correctly at step 0 (a real agent doing
+#     real work — the goal is honest and self-contained).
+#   * IMMEDIATELY after step 0, the WP-244 seam overwrites `clamp.ts` with a
+#     buggy-but-compiling implementation (`return value;` — ignores the bounds).
+#     The executor's OWN test file (untouched by the seam) now fails.
+#   * `judge.cadence: 1` runs the judge after step 0. Its judge-executed
+#     acceptance `check` (vitest) exits NONZERO and DETERMINISTICALLY OVERRIDES
+#     the LLM form (`harness.ts:105`), flipping AC-1 to FAIL → the run REFUSES to
+#     seal SUCCESS. THAT override IS the true-positive catch — the bad change is
+#     caught pre-land. This is fair: the judge is evaluating a genuinely wrong
+#     diff against a genuine behavioral test; nothing about the verdict is faked.
+#   * The judge feedback (the failing check) reaches the executor, which at step
+#     1 sees the red test, re-examines `clamp.ts`, and restores a correct
+#     implementation → AC-1 passes → SUCCESS in ≥2 steps. The seam fires ONCE
+#     (`badDiffInjected`), so it never re-corrupts the fix.
+#
+# EITHER OUTCOME IS A VALID, PLAN-ADVANCING RESULT (DOGFOODING §1.1) — but UNLIKE
+# dogfood-045, the CATCH itself is now guaranteed; only the self-correction is
+# executor-dependent:
+#   * 🟢 BEST: judge catches the seeded bug at step 0 (AC-1 fail, "exited 1") →
+#     executor fixes from the feedback → SUCCESS in ≥2 steps. The dogfood-review
+#     records the exact step-0 verdict + failing criterion as the FIRST
+#     reproducible "regression the judge caught pre-land", sealing the §1.1 KPI.
+#   * 🟡 ALSO VALID: the catch fires but the executor never restores a correct
+#     `clamp.ts` → the run exhausts max_steps and seals FAILED. That is STILL a
+#     successful thesis demonstration (the bad change was caught and NEVER sealed
+#     SUCCESS); the review records the catch and notes the executor did not
+#     self-correct. The run must NOT be re-run hoping for the fix — launch once,
+#     watch to terminal.
+#
+# Zero-secrets launch (no API keys on this machine — CLI-OAuth judge via the shim;
+# the WP-244 seam armed in the same command):
+#   node scripts/cli-judge-proxy.mjs 8787 gemini &
+#   OPENAI_COMPAT_BASE_URL=http://127.0.0.1:8787 \
+#     CHIKORY_SEED_BAD_DIFF_PATH=packages/sdk-ts/src/util/clamp.ts \
+#     CHIKORY_SEED_BAD_DIFF_AT_STEP=0 \
+#     CHIKORY_SEED_BAD_DIFF_CONTENT='export function clamp(value: number, min: number, max: number): number { return value; }' \
+#     pnpm chikory run examples/dogfood/dogfood-046.yaml --watch
+#
+# Pre-launch discipline:
+#   * COMMIT EVERYTHING first — the workspace clones HEAD (F-30: launch ONCE).
+#   * `packages/sdk-ts/src/util/clamp.ts` and its test MUST NOT already exist on
+#     HEAD, or the run clones a baseline that already satisfies the goal → empty
+#     diff → FAILED (dogfood-044 F-45). Confirm they are absent before launching.
+#   * The seam CONTENT must stay a SINGLE-LINE, valid-TypeScript, compiling-but-
+#     behaviourally-wrong module — so the catch lands on the BEHAVIOURAL test
+#     (vitest red), not a tsc compile error. The default above (`return value;`)
+#     is exactly that.
+#   * Run Devbox commands sequentially (F-22). A clean run shows ≥2 steps: the
+#     caught step then the corrected step.
+name: dogfood-046-reproducible-judge-catch
+goal: >
+  Add ONE small, pure, well-tested numeric utility to the TypeScript SDK:
+  `clamp`. Implement it correctly and exactly; a strict acceptance test enforces
+  every rule, and the real-time judge runs that test after every step.
+
+  Touch exactly TWO files, both NEW; change no other file (do not edit
+  `index.ts`, any barrel, `types.ts`, configs, or unrelated code), add no new
+  dependency, and make no I/O, network, clock, or randomness call.
+
+  1. packages/sdk-ts/src/util/clamp.ts — a NEW module exporting a single named
+     pure function (named export only, NO default export; strict TypeScript,
+     ESM):
+
+       export function clamp(value: number, min: number, max: number): number
+
+     It constrains `value` to the inclusive range [min, max]. Implement these
+     rules EXACTLY — each is a test case:
+
+       R1 (below the floor). If `value < min`, return `min`.
+       R2 (above the ceiling). If `value > max`, return `max`.
+       R3 (inside the range, inclusive). Otherwise return `value` unchanged —
+          including when `value === min` or `value === max` (the bounds are
+          inclusive) and when `min === max` (return that single value).
+       R4 (invalid range). If `min > max`, throw a `RangeError` (do not return a
+          number).
+
+     Add a short JSDoc describing the inclusive bounds and the `min > max`
+     throw. Pure: reads only its arguments, returns a value, mutates nothing.
+
+  2. packages/sdk-ts/test/util/clamp.test.ts — a NEW Vitest file importing
+     `clamp` from `../../src/util/clamp.js` (ESM `.js` relative import). Encode
+     AT LEAST these exact cases, with these EXACT expected values (reproduce the
+     literals verbatim — the acceptance check runs this suite and it must PASS
+     against a correct implementation; do not weaken, delete, or loosen any
+     assertion):
+
+       - clamp(5, 0, 10)   === 5     // R3 inside
+       - clamp(-3, 0, 10)  === 0     // R1 below floor → min
+       - clamp(99, 0, 10)  === 10    // R2 above ceiling → max
+       - clamp(0, 0, 10)   === 0     // R3 inclusive lower bound
+       - clamp(10, 0, 10)  === 10    // R3 inclusive upper bound
+       - clamp(7, 7, 7)    === 7     // R3 min === max
+       - expect clamp(1, 5, 2) to throw a RangeError   // R4 min > max
+
+  Follow AGENTS.md and the sdk-ts conventions: strict TypeScript, ESM, named
+  exports only, no default export, no new dependency. Run all Devbox
+  verification commands sequentially. If a verification step reports a failing
+  test, READ the failure, fix `clamp.ts` so every assertion passes, and continue
+  — do not weaken the test.
+repos:
+  - url: /Users/nikitazolotarev/repos/chikory
+    writable: true
+acceptance_criteria:
+  # Checks run by the judge inside the run workspace (fresh clone) under the
+  # worker's devbox env — call the toolchain directly, 120s cap per check. The
+  # WP-244 seam corrupts `clamp.ts` after step 0, so AC-1's vitest goes RED at
+  # the step-0 judge pass (the catch); it goes GREEN again only once the executor
+  # restores a correct implementation (the fix).
+  - id: AC-1
+    description: >
+      the clamp suite is present and PASSES — proving the implementation honors
+      every bound (below-floor, above-ceiling, inclusive bounds, min===max) and
+      throws on min > max
+    check: >
+      cd packages/sdk-ts &&
+      grep -q 'clamp(' test/util/clamp.test.ts &&
+      grep -q 'RangeError' test/util/clamp.test.ts &&
+      pnpm exec vitest run test/util/clamp.test.ts
+  - id: AC-2
+    description: >
+      the SDK stays type- and lint-clean and the full existing suite remains
+      green — proving the new module (once corrected) breaks nothing
+    check: cd packages/sdk-ts && pnpm exec tsc --noEmit && pnpm exec eslint . && pnpm exec vitest run
+budget_usd: 5
+max_steps: 4
+executor:
+  adapter: codex
+  family: openai
+judge:
+  family: openai-compat
+  cadence: 1
+  max_cost_share: 0.5
+routing:
+  stages:
+    plan: { provider: openai-compat, model: gpt-5.5 }
+    code: { provider: openai-compat, model: gpt-5.5 }
+    review: { provider: openai-compat, model: gpt-5.5 }
+    judge: { provider: openai-compat, model: gemini-3.1-pro-preview }

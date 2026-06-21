@@ -10,7 +10,7 @@
 import { execFile } from "node:child_process";
 import { existsSync } from "node:fs";
 import { mkdir, readFile, unlink, writeFile } from "node:fs/promises";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { promisify } from "node:util";
 
 import { heartbeat } from "@temporalio/activity";
@@ -731,6 +731,27 @@ export function createRunnerActivities(deps: RunnerActivityDeps) {
       } finally {
         journal.close();
       }
+    },
+
+    /**
+     * WP-244 dogfood/test-only judge-catch seam: overwrite a workspace-relative
+     * file with known-wrong content, deterministically introducing a regression
+     * the real-time judge must catch via its acceptance `check` (JD-3) — the
+     * analog of the WP-243 park seam for the Agent-as-a-Judge true-positive
+     * pillar (dogfood-045 F-46). Idempotent (same path+content writes the same
+     * bytes), so it stays replay-safe. Only reached when `spec.debug.seedBadDiff`
+     * is armed host-side; refuses any path that escapes the workspace.
+     */
+    async seedBadDiff(input: { runId: string; path: string; content: string }): Promise<void> {
+      const rel = input.path;
+      if (rel.length === 0 || rel.startsWith("/") || rel.split("/").includes("..")) {
+        throw new Error(
+          `seedBadDiff: refusing unsafe path "${rel}" (must be a non-empty workspace-relative path with no "..")`,
+        );
+      }
+      const target = join(workspaceDir(deps.dataDir, input.runId), rel);
+      await mkdir(dirname(target), { recursive: true });
+      await writeFile(target, input.content);
     },
 
     /**

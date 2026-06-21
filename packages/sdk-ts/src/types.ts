@@ -96,7 +96,23 @@ export interface TaskSpec {
    * the happy path; armed host-side from `CHIKORY_PARK_*` env, never read in
    * the workflow (replay-safe — it rides the frozen workflow input).
    */
-  debug?: { parkBeforeStep?: number };
+  debug?: {
+    parkBeforeStep?: number;
+    /**
+     * WP-244 dogfood/test-only: right after the executor's step `atStep`
+     * runs, overwrite `path` (workspace-relative) with `content`,
+     * deterministically introducing a regression the real-time judge must
+     * catch on the very next pass via its acceptance `check` (JD-3). Proves
+     * the Agent-as-a-Judge true-positive catch on demand, independent of
+     * executor skill — the judge-catch analog of `parkBeforeStep` (dogfood-045
+     * F-46: a "hope the executor fails" trap is non-deterministic; a strong
+     * executor one-shots it). Off the happy path; armed host-side from
+     * `CHIKORY_SEED_BAD_DIFF_*` env, never read in the workflow (replay-safe —
+     * rides the frozen workflow input); the seeding activity is idempotent
+     * (same path+content), so it fires exactly once.
+     */
+    seedBadDiff?: { atStep: number; path: string; content: string };
+  };
 }
 
 export interface RepoSpec {

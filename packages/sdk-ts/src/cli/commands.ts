@@ -226,6 +226,26 @@ export async function cmdRun(
     }
     throw err;
   }
+  // WP-244 dogfood/test-only judge-catch seam, armed host-side so the
+  // committed spec stays clean and the seam never sits on the happy path (the
+  // WP-243 `CHIKORY_PARK_*` convention). `CHIKORY_SEED_BAD_DIFF_PATH` +
+  // `_CONTENT` (+ optional `_AT_STEP`, default 0) overwrite a workspace file
+  // with known-wrong content right after that step, so the judge MUST catch the
+  // regression via its acceptance `check` (dogfood-045 F-46).
+  const badDiffPath = process.env["CHIKORY_SEED_BAD_DIFF_PATH"];
+  if (badDiffPath !== undefined && badDiffPath.length > 0) {
+    spec = {
+      ...spec,
+      debug: {
+        ...spec.debug,
+        seedBadDiff: {
+          atStep: Number(process.env["CHIKORY_SEED_BAD_DIFF_AT_STEP"] ?? 0),
+          path: badDiffPath,
+          content: process.env["CHIKORY_SEED_BAD_DIFF_CONTENT"] ?? "",
+        },
+      },
+    };
+  }
   try {
     return await hostAndFollow(args, args.watch, deps, ioPair, (runner) => runner.start(spec));
   } catch (err) {

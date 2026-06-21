@@ -104,6 +104,7 @@ export async function agentLoop(spec: TaskSpec): Promise<RunStatus> {
   let escalationIndex = 0;
   let consecutiveFailures = 0;
   let parkInjected = false;
+  let badDiffInjected = false;
   let cancelRequested = false;
   let lastVerdict: { kind: JudgeVerdict["kind"]; atStep: number } | undefined;
   let lastGoodCheckpointId: string | undefined;
@@ -302,6 +303,26 @@ export async function agentLoop(spec: TaskSpec): Promise<RunStatus> {
       context,
       limits: DEFAULT_STEP_LIMITS,
     });
+
+    // WP-244 deterministic judge-catch seam (dogfood/test-only). Right after
+    // the chosen step's executor runs, overwrite a workspace file with
+    // known-wrong content so the real-time judge MUST catch the regression on
+    // the pass that immediately follows — via its acceptance `check` (JD-3),
+    // whose exit code deterministically overrides the LLM form. Proves the
+    // Agent-as-a-Judge true-positive catch on demand, independent of executor
+    // skill (dogfood-045 F-46, the judge-catch analog of WP-243's park seam).
+    // Fires once; rides spec.debug (frozen workflow input → replay-safe, never
+    // read from env in-workflow); the idempotent activity leaves the bad diff
+    // uncommitted for the judge's `git diff` evidence + check.
+    if (!badDiffInjected && spec.debug?.seedBadDiff?.atStep === stepIndex) {
+      badDiffInjected = true;
+      await activities.seedBadDiff({
+        runId,
+        path: spec.debug.seedBadDiff.path,
+        content: spec.debug.seedBadDiff.content,
+      });
+    }
+
     spentUsd += record.costUsd;
     stepCosts.push(record.costUsd);
     const recordTokens = record.tokens.input + record.tokens.output;

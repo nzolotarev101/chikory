@@ -773,3 +773,18 @@ a first-attempt SUCCESS and produced three plan-changing findings
   file-ops-only (can't run tests itself — the judge does), codex has
   workspace-write (can run tests). Both are fine: SUCCESS is judge-verified
   either way.
+- **The Agent-as-a-Judge true-positive catch is still DOGFOOD-UNPROVEN
+  (dogfood-045 F-46).** Only the dogfood-001 missing-JSDoc catch exists; no
+  run has shown the judge ROLLBACK a *genuinely wrong* diff before it landed.
+  You **cannot reliably force one by trapping the executor**: a deterministic
+  acceptance check forces you to over-specify the answer in the goal (every
+  edge rule + the exact algorithm + the verbatim expected outputs), leaving a
+  strong executor zero room to err → it one-shots and the judge has nothing to
+  catch (dogfood-045: `codex`/`gpt-5.5` nailed all five `truncateMiddle` edge
+  traps in step 1). Under-specifying instead breaks the grep-AC (the executor
+  can't reproduce assertions it never saw). This is the same non-determinism
+  lesson as the park trigger (F-44 → WP-243): the catch must be **forced
+  deterministically** via a `debug.seedBadDiff` injection seam (**WP-244**),
+  not chased with ever-cleverer traps. Until WP-244 lands, do **not** queue
+  another "hope-the-executor-fails" judge-catch dogfood — it just burns budget
+  greening the dashboard.
