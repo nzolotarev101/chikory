@@ -132,12 +132,14 @@ none of the thesis (durable multi-run execution, a judge that catches real
 regressions, long-horizon reliability). Two gates, in order, before you write
 any YAML:
 
-1. **Mission-critical gate (mandatory veto).** Run the `/dogfood-assessor`
-   skill on your intended candidate. If it returns **🟡 Busy Work** AND any
+1. **Mission-critical gate (mandatory veto).** Evaluate your intended candidate
+   (do NOT run the `/dogfood-assessor` skill automatically; the user will trigger
+   it manually if needed. If the user has already run it, use that verdict).
+   If the candidate is determined/classified to be **🟡 Busy Work** AND any
    thesis-stressing slice is unblocked (🟢/🟡, no un-landed contract), the busy
    candidate is **VETOED** — queue the thesis slice instead. Busy work is a
    headline dogfood ONLY when nothing thesis-stressing is unblocked. Record the
-   assessor verdict in your output.
+   assessor verdict in your output if it was provided by the user.
 2. **Failure-surface test (DOGFOODING §1.1).** A headline run must be something
    a competent agent could *plausibly fail*: 2–6 steps, cross-file or a thesis
    pillar (durable execution / multi-run chains WP-219 / judge-catching /
