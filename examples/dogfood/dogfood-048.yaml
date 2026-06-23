@@ -1,0 +1,170 @@
+# Dogfood-048: THE chain-level Agent-as-a-Judge true-positive catch — ARMED RE-ATTEMPT of dogfood-047.
+# Launch with `chikory chain` (durable multi-node chain, NOT a single run).
+#
+# WHY THIS EXISTS (2026-06-22): dogfood-047 (`chain-989b31b9-…`,
+# docs/reports/dogfood-047.md) was the first attempt at the chain-level judge-catch
+# but was launched DISARMED — the four `CHIKORY_SEED_BAD_DIFF_*` env vars were
+# omitted, so the WP-246 seam never fired, node B sealed a clean SUCCESS in 1 step,
+# and NO catch happened (F-48, the F-32 "path not exercised" wasted-run mode the
+# dogfood-047 header itself warned about). WP-246's per-node seam wiring IS landed
+# (`3fc27bb`, `chain.ts:158-171`); the only failure was operational. This spec is
+# the re-attempt with two corrections baked in:
+#   * F-48 fix (discipline until WP-247's pre-flight guard lands): the launch
+#     command below INCLUDES the four `CHIKORY_SEED_BAD_DIFF_*` vars +
+#     `CHIKORY_SEED_BAD_DIFF_NODE_INDEX=1`. After launch, CONFIRM the seam armed:
+#     node B's `task_json` must contain a `debug.seedBadDiff` block, and node B must
+#     take ≥2 steps (caught → fixed), not 1.
+#   * F-49 fix (close the circular gate WITHOUT waiting for WP-248): each AC `check`
+#     `grep`s the spec's MANDATED literal assertions verbatim in the test file
+#     BEFORE running vitest — so an executor cannot weaken/omit/rewrite the gate to
+#     match a spec-deviating impl (dogfood-047's executor did exactly that:
+#     dropped every mandated assertion and the judge passed it). The seam corrupts
+#     only the IMPL (post-step-0), never the test file, so the grep stays green
+#     through both the catch and the fix.
+#
+# NEW DELIVERABLES (truncate, not round — distinct from dogfood-047's landed
+# round-to*; the round-to* files now exist on HEAD so reusing them would empty-diff
+# FAIL, dogfood-044 F-45). truncateToCents(9.999)===9.99 is the key discriminator:
+# rounding would yield 10, truncation yields 9.99 — so a wrong (rounding) impl is
+# also caught, not just the seeded `return value;`.
+#
+# HOW THE DETERMINISTIC CHAIN-CATCH WORKS (fair, not rigged — same shape as
+# dogfood-046, escalated to a chain node):
+#   * Node A (predecessor) implements a correct pure `truncateDecimals` and seals
+#     SUCCESS — a real node doing real work, no seam.
+#   * Node B (dependent) imports `truncateDecimals` from node A's handed-off
+#     artifact (WP-239) and implements `truncateToCents`. IMMEDIATELY after node B's
+#     step 0, the WP-246 seam (`CHIKORY_SEED_BAD_DIFF_NODE_INDEX=1`) overwrites
+#     `truncate-to-cents.ts` with a buggy-but-compiling `return value;` (ignores
+#     truncation, drops the import). Node B's OWN test (untouched) now fails.
+#   * Node B's cadence-1 judge runs its acceptance `check` (grep + vitest) → vitest
+#     exits NONZERO → deterministically overrides the LLM form (`harness.ts:105`) →
+#     AC-2 FAILS → node B REFUSES to seal SUCCESS. THAT override IS the chain-level
+#     true-positive catch — the bad change is caught pre-land, inside a dependent node.
+#   * The failing-test feedback reaches node B's executor, which restores a correct
+#     `truncateToCents` → AC-2 passes → node B SUCCESS → chain SUCCESS 2/2. The seam
+#     fires ONCE (`badDiffInjected`), so the fix is never re-corrupted.
+#
+# EITHER OUTCOME IS A VALID, PLAN-ADVANCING RESULT (DOGFOODING §1.1) — the CATCH is
+# guaranteed once the seam is armed; only node B's self-correction is
+# executor-dependent:
+#   * 🟢 BEST: node B's judge catches the seeded bug at step 0 → node B fixes from
+#     the feedback → chain SUCCESS 2/2. Records the FIRST chain-level "regression the
+#     judge caught pre-land".
+#   * 🟡 ALSO VALID: the catch fires but node B never restores a correct
+#     `truncateToCents` → node B exhausts its steps and seals FAILED → chain HALTs
+#     FAILED 1/2. STILL a successful thesis demo (the bad change was caught and NEVER
+#     sealed SUCCESS). Do NOT re-run hoping for the fix — launch once, watch to terminal.
+#
+# Zero-secrets launch (no API keys on this machine — CLI-OAuth judge via the shim;
+# the WP-246 chain seam armed for node B — DO NOT DROP THE ENV). ⚠️ `devbox run
+# dogfood` ALONE DOES NOT ARM THE SEAM (`scripts/dogfood.sh` sets up Temporal + the
+# proxy + OPENAI_COMPAT_BASE_URL but never exports `CHIKORY_SEED_BAD_DIFF_*`) — bare
+# `devbox run dogfood` reproduces dogfood-047 F-48 (disarmed → no catch). Arm it by
+# exporting the four vars FIRST, then let the script handle the rest (it auto-starts
+# the `agy`/Antigravity proxy for the gemini judge — Google retired the standalone
+# `gemini` CLI OAuth):
+#   devbox shell
+#   export CHIKORY_SEED_BAD_DIFF_NODE_INDEX=1
+#   export CHIKORY_SEED_BAD_DIFF_PATH=packages/sdk-ts/src/util/truncate-to-cents.ts
+#   export CHIKORY_SEED_BAD_DIFF_AT_STEP=0
+#   export CHIKORY_SEED_BAD_DIFF_CONTENT='export function truncateToCents(value: number): number { return value; }'
+#   bash scripts/dogfood.sh examples/dogfood/dogfood-048.yaml
+# (Manual path without the script: start the proxy `node scripts/cli-judge-proxy.mjs
+#  8787 agy &`, set `OPENAI_COMPAT_BASE_URL=http://127.0.0.1:8787`, then run the four
+#  exports above + `pnpm chikory chain examples/dogfood/dogfood-048.yaml --watch`.)
+#
+# Pre-launch discipline:
+#   * COMMIT EVERYTHING first — each node workspace clones HEAD (F-30: launch ONCE).
+#   * `truncate-decimals.ts`, `truncate-to-cents.ts`, and their tests MUST NOT
+#     already exist on HEAD (confirmed absent 2026-06-22) — else a node clones a
+#     baseline that already satisfies its goal → empty diff → FAILED (dogfood-044 F-45).
+#   * The seam CONTENT must stay a SINGLE-LINE, valid-TypeScript, compiling-but-
+#     behaviourally-wrong module (no import, so it still compiles) — so the catch
+#     lands on node B's BEHAVIOURAL test (vitest red), not a tsc/eslint error.
+#   * Run Devbox commands sequentially (F-22). A clean run shows node A SUCCESS, then
+#     node B with the caught step followed by the corrected step (≥2 steps).
+#   * AFTER it finishes, VERIFY the seam actually armed (F-48): node B `task_json`
+#     has a `debug.seedBadDiff` block and node B took ≥2 steps. A 1-step node B SUCCESS
+#     means the env was dropped again — the run is void, re-launch armed.
+name: dogfood-048-chain-level-judge-catch-armed
+goal: >
+  Implement exactly two sequential, diff-producing deliverables in
+  packages/sdk-ts. The second deliverable MUST depend on and import code from the
+  first; do not combine them into one node, make them independent, or add a
+  verification-only node. A strict acceptance test gates each node, and the
+  real-time judge runs that test after every step (cadence 1).
+
+  Node A (independent predecessor): add a NEW pure module at
+  packages/sdk-ts/src/util/truncate-decimals.ts exporting a single named pure
+  function (named export only, NO default export; strict TypeScript, ESM):
+
+    export function truncateDecimals(value: number, digits: number): number
+
+  It TRUNCATES `value` toward zero to `digits` decimal places using
+  `Math.trunc(value * 10 ** digits) / 10 ** digits` (truncation, NOT rounding). If
+  `digits` is negative or not an integer, throw a `RangeError`. Add a short JSDoc.
+  Add packages/sdk-ts/test/util/truncate-decimals.test.ts (NEW Vitest file, ESM
+  `.js` relative import) encoding AT LEAST these exact assertions verbatim (these
+  are graded by a grep, do not rephrase the call or the expected literal):
+  truncateDecimals(1.239, 2) === 1.23, truncateDecimals(-1.239, 2) === -1.23
+  (truncation is toward zero), truncateDecimals(2.5, 0) === 2, and
+  `expect(() => truncateDecimals(1, -1)).toThrow(RangeError)`. Touch only those two files.
+
+  Node B (dependent consumer): only after node A seals SUCCESS, add a NEW pure
+  module at packages/sdk-ts/src/util/truncate-to-cents.ts. It MUST import
+  `truncateDecimals` from `./truncate-decimals.js` and export a single named pure
+  function (named export only, NO default export):
+
+    export function truncateToCents(value: number): number
+
+  returning `truncateDecimals(value, 2)` — `value` truncated to 2 decimal places
+  (cents). Add a short JSDoc. Add packages/sdk-ts/test/util/truncate-to-cents.test.ts
+  (NEW Vitest file) encoding AT LEAST these exact assertions verbatim (graded by a
+  grep): truncateToCents(9.999) === 9.99 (truncation, NOT rounding — rounding would
+  give 10), truncateToCents(1.239) === 1.23, truncateToCents(5) === 5. node A's
+  `truncate-decimals.ts` is already present in node B's workspace via the WP-239
+  handoff — build on it, do not recreate it. Touch only those two files.
+
+  Keep both functions pure and minimal. Use strict TypeScript, ESM `.js` relative
+  imports, named exports only, no default exports, no I/O, network, clock, or
+  randomness, and no new dependencies. Do not change contracts, schemas, the chain
+  runner, the CLI, or unrelated files. Run project commands sequentially inside the
+  existing Devbox environment. If a verification step reports a failing test, READ
+  the failure, fix the IMPLEMENTATION so every assertion passes, and continue — do
+  NOT weaken, rephrase, or remove any mandated assertion (a grep enforces them).
+repos:
+  - url: /Users/nikitazolotarev/repos/chikory
+    writable: true
+acceptance_criteria:
+  - id: AC-1
+    description: >
+      independent node A adds only the truncate-decimals module/test, its mandated
+      assertions are present verbatim (grep-pinned, closing dogfood-047 F-49), its
+      focused test passes, and the SDK stays type- and lint-clean.
+    check: cd packages/sdk-ts && grep -Eq 'truncateDecimals\(1\.239, *2\)[^0-9]*1\.23' test/util/truncate-decimals.test.ts && grep -Eq 'truncateDecimals\(-1\.239, *2\)[^0-9-]*-1\.23' test/util/truncate-decimals.test.ts && pnpm exec vitest run test/util/truncate-decimals.test.ts && pnpm exec tsc --noEmit && pnpm exec eslint .
+  - id: AC-2
+    description: >
+      node B imports node A's truncateDecimals, exports truncateToCents truncating
+      to 2 decimal places, its mandated assertions are present verbatim (grep-pinned),
+      its focused test passes, and the SDK stays type- and lint-clean. The WP-246
+      seam corrupts truncate-to-cents.ts after node B's step 0, so this check goes
+      RED at node B's step-0 judge pass (the catch — vitest fails while the
+      grep-pinned test file is intact); it goes GREEN again only once the executor
+      restores a correct implementation (the fix).
+    check: cd packages/sdk-ts && grep -Eq 'truncateToCents\(9\.999\)[^0-9]*9\.99' test/util/truncate-to-cents.test.ts && grep -Eq 'truncateToCents\(1\.239\)[^0-9]*1\.23' test/util/truncate-to-cents.test.ts && pnpm exec vitest run test/util/truncate-to-cents.test.ts && pnpm exec tsc --noEmit && pnpm exec eslint .
+budget_usd: 12
+max_steps: 8
+executor:
+  adapter: codex
+  family: openai
+judge:
+  family: openai-compat
+  cadence: 1
+  max_cost_share: 0.5
+routing:
+  stages:
+    plan: { provider: openai-compat, model: gpt-5.5 }
+    code: { provider: openai-compat, model: gpt-5.5 }
+    review: { provider: openai-compat, model: gpt-5.5 }
+    judge: { provider: openai-compat, model: gemini-3.1-pro-preview }
