@@ -125,30 +125,46 @@ docs in `docs/` listed as living docs must not drift from code.
 
 ## 5. Ready the next run
 
-**Pick by thesis value, not by safety — and prove it before writing the spec.**
-The loop's standing failure mode is defaulting to the safest slice (a pure
-1-file parity port an agent can't fail), which greens the dashboard but tests
-none of the thesis (durable multi-run execution, a judge that catches real
-regressions, long-horizon reliability). Two gates, in order, before you write
-any YAML:
+**Pick by thesis value AND product progress, not by safety — and prove it before
+writing the spec.** The loop's standing failure mode is twofold: defaulting to the
+safest slice (a pure 1-file parity port an agent can't fail), **and** riding a
+thesis mechanism on **throwaway scaffolding that moves no product WP** — seeding a
+bad diff into an invented utility just to force a judge-catch (dogfood-046 `clamp`,
+047 `roundTo`/`roundToCents`, 048 `truncateDecimals`/`truncateToCents`). Both green
+the dashboard while the `plan.md` backlog stands still. **You MUST apply all three
+gates yourself, in order, on every candidate** — do not defer to a human trigger;
+no spec is written without a recorded verdict from these gates. (`/dogfood-assessor`
+remains available for an explicit second opinion; if the user already ran it, honor
+its `⛔ VETO`.)
 
-1. **Mission-critical gate (mandatory veto).** Evaluate your intended candidate
-   (do NOT run the `/dogfood-assessor` skill automatically; the user will trigger
-   it manually if needed. If the user has already run it, use that verdict).
-   If the candidate is determined/classified to be **🟡 Busy Work** AND any
-   thesis-stressing slice is unblocked (🟢/🟡, no un-landed contract), the busy
-   candidate is **VETOED** — queue the thesis slice instead. Busy work is a
-   headline dogfood ONLY when nothing thesis-stressing is unblocked. Record the
-   assessor verdict in your output if it was provided by the user.
-2. **Failure-surface test (DOGFOODING §1.1).** A headline run must be something
+1. **Failure-surface test (DOGFOODING §1.1).** A headline run must be something
    a competent agent could *plausibly fail*: 2–6 steps, cross-file or a thesis
    pillar (durable execution / multi-run chains WP-219 / judge-catching /
    crash→resume WP-206 / context-rot WP-203/204) or a real bug surface. A pure
    single-file deterministic-test port is **track-B** — land it as a normal PR,
    never the dogfood headline.
+2. **Product-progress gate (DOGFOODING §1.2, mandatory).** The candidate's *landed
+   diff* must advance a **real open `plan.md` §6 product WP** (feature code on a
+   thesis pillar — memory store, chains, compaction wiring, control-plane), not
+   invented disposable code. A thesis mechanism (judge-catch seam, chain) is a
+   **vehicle seeded INTO that WP's real code**, never a fresh throwaway utility.
+   **Prefer a real open WP to host the mechanism.** Scaffold-hosted is allowed
+   **only** under the §1.2 fallback carve-out — *no* open WP can host it because
+   every candidate is blocked by a **frozen-contract / ADR wall** (TASK-PROTOCOL §4)
+   or **harness the dogfood mechanism itself depends on**. If the carve-out fires,
+   name the blocking WP/contract and make unblocking it the next priority.
+3. **Mission-critical gate (DOGFOODING §1.3, binding veto).** Apply the
+   `/dogfood-assessor` two-axis logic inline: if the candidate is **🟡 Busy Work**
+   or **🟡 Scaffold-hosted** AND any thesis-stressing slice on a real product WP is
+   unblocked (🟢/🟡, no un-landed contract), the candidate is **VETOED** — queue the
+   real-WP slice instead. A scaffold-hosted or busy headline is permitted ONLY when
+   nothing real is unblocked. Record the verdict (`✅ PROCEED` / `⛔ VETO` /
+   `🟡 ALLOW (fallback)`) in your output.
 
 Then write `examples/dogfood/dogfood-<NNN+1>.yaml` per DOGFOODING §3: goal a
-self-contained brief naming exact files/symbols/tests (for a chain dogfood, a
+self-contained brief naming exact files/symbols/tests **of the real product WP the
+run advances** — if a judge-catch seam or chain is the mechanism, it is seeded
+**into that WP's real code** (not a new disposable utility); for a chain dogfood, a
 goal that genuinely decomposes — launched with `chikory chain`, not `run`);
 judge-executed checks that fit the 120 s cap (time them — bare toolchain
 binaries, not `devbox run`); zero-secrets routing block if no API keys.

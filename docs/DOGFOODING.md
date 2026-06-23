@@ -339,7 +339,7 @@ real-time judge that catches a bad change *before* it lands, and reliability
 over long horizons. A task a competent agent cannot plausibly fail tests none of
 that; greening it is theater. (The tell: dogfood-002…039 were 38/39 one-step
 SUCCESSes — that streak meant the picks were too trivial to fail, **not** that
-the product was reliable.) Selection has three gates, in order.
+the product was reliable.) Selection has four gates, in order.
 
 ### 1.1 Failure-surface test — is this WORTH dogfooding?
 
@@ -356,16 +356,42 @@ A **pure single-file function with a deterministic test** — a 1:1 parity port,
 formatter, a pure helper — is **track-B**: necessary, but not thesis evidence.
 Land it as a normal PR or batch it. It must **not** be the dogfood headline.
 
-### 1.2 Mission-critical gate — is this the RIGHT thing now? (mandatory veto)
+### 1.2 Product-progress gate — does the DELIVERABLE move the backlog? (mandatory)
 
-Before queueing the next run, run `/dogfood-assessor` on the candidate. It
-issues a **binding verdict**: a `⛔ VETO` (the candidate is busy work / track-B
-**and** a thesis-stressing slice is unblocked) means queue the named thesis
-slice instead. Busy work is allowed as a headline **only** when nothing
-thesis-stressing is unblocked (`🟡 ALLOW (fallback)`), in which case the gap to
-unblock a real run is itself the priority.
+A headline run's *landed diff* must advance a **real open `plan.md` §6 product
+WP** — feature code on a thesis pillar (durable execution, memory store, chains,
+compaction wiring, control-plane) — not invented disposable code. A thesis
+**mechanism** (the `debug.seedBadDiff` judge-catch seam, a `chikory chain`
+decomposition) is a **vehicle layered onto real product work, not a substitute
+for it**. Seeding a bad diff into a brand-new throwaway utility passes §1.1
+(there's a failure surface) yet moves **zero** product WP — that is the standing
+failure mode (dogfood-046 `clamp`, 047 `roundTo`/`roundToCents`,
+048 `truncateDecimals`/`truncateToCents`): the thesis machine fired, the backlog
+did not move. Selection MUST **prefer a real open WP to host the mechanism**.
 
-### 1.3 WP-tag readiness — CAN it run as one campaign?
+**Fallback carve-out (the only exclusions).** A throwaway-scaffold deliverable is
+permitted **only** when *no* open product WP can plausibly host the mechanism
+because every candidate is blocked by:
+
+- a **frozen-contract / ADR wall** (un-landed contract; TASK-PROTOCOL §4), **or**
+- **harness the dogfood mechanism itself depends on** (changing it would break the
+  run).
+
+When the carve-out fires, the spec must **name the blocking WP/contract** and the
+report must register *unblocking it* as the next priority.
+
+### 1.3 Mission-critical gate — is this the RIGHT thing now? (mandatory veto)
+
+`dogfood-review` phase 5 applies this gate **automatically/inline on every
+candidate** (no pick is queued without a recorded verdict); `/dogfood-assessor`
+remains available for an explicit second opinion. The gate issues a **binding
+verdict**: a `⛔ VETO` (the candidate is busy work / track-B / scaffold-hosted
+**and** a thesis-stressing slice on a real product WP is unblocked) means queue
+the named thesis slice instead. A scaffold-hosted or busy-work headline is allowed
+**only** when nothing real is unblocked (`🟡 ALLOW (fallback)`, the §1.2
+carve-out), in which case the gap to unblock a real run is itself the priority.
+
+### 1.4 WP-tag readiness — CAN it run as one campaign?
 
 | WP tag | Dogfood? |
 |---|---|
@@ -380,9 +406,11 @@ track-B (one step ≈ one focused agent session, ≤10 min, ≤25 turns).
 
 **Success signal (KPI):** judge "N straight one-step SUCCESS" as a *warning*,
 not a win — it means the picks stopped being hard. Track instead: regressions
-the judge caught **pre-land**, successful crash→resumes, and measured per-step
-reliability over long (10+ step) horizons. Reward catching failure, and
-selection follows.
+the judge caught **pre-land**, successful crash→resumes, measured per-step
+reliability over long (10+ step) horizons, **and product-WP progress per run**
+(did the landed diff advance an open `plan.md` §6 WP, or only host a thesis
+mechanism on throwaway code?). Reward catching failure **on real product work**,
+and selection follows.
 
 ## 2. One-time setup
 
