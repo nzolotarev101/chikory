@@ -5,19 +5,31 @@ This is the complete operating manual for executing Phase 2+ work packages
 task spec for a WP (every field explained), how to launch, supervise, and
 recover a run, and how to land the result as a normal PR.
 
-**Open item (dogfood-047, `docs/reports/dogfood-047.md`): the CHAIN-LEVEL judge-catch
-is STILL UNPROVEN.** WP-246 wired the bad-diff seam per-node (`3fc27bb`), but
-dogfood-047 (`chain-989b31b9-…`) was launched **without** the `CHIKORY_SEED_BAD_DIFF_*`
-env → the seam never armed → clean chain SUCCESS 2/2, **no catch** (F-48, the F-32
-"path not exercised" mode). The durable-chain machinery worked (2-node SUCCESS,
-real WP-239 dependent handoff, family-diverse), but the headline escalation must be
-**re-run with the seam armed** once WP-247 (pre-flight seam-armed guard) and WP-248
-(gate on spec-authored assertions, not the executor's self-written tests — F-49)
-land. Until then, a seam-spec greens silently when launched disarmed (§7).
+**CLOSED (dogfood-048, `docs/reports/dogfood-048.md`): the CHAIN-LEVEL judge-catch
+is PROVEN.** The armed re-attempt of dogfood-047 landed the first chain-level
+true-positive catch: in `chain-b7665e97-…` (delivery `2c516d5`), node A wrote a
+correct `truncateDecimals` → SUCCESS, then node B (dependent, imports it via the
+WP-239 handoff) wrote a correct `truncateToCents` at step 0, the WP-246 seam
+(`CHIKORY_SEED_BAD_DIFF_NODE_INDEX=1`) overwrote it with `return value;`, node B's
+cadence-1 judge re-ran AC-2 → `vitest exited 1` → deterministic override → **AC-2
+FAILED (0/1), node B refused to seal SUCCESS (THE CATCH)** → executor restored a
+correct impl from the failing-test feedback → node B SUCCESS → **chain SUCCESS
+2/2.** Both dogfood-047 gaps were closed at spec-authoring time: **F-48** (the four
+`CHIKORY_SEED_BAD_DIFF_*` vars were baked into the launch header AND the seam was
+verified armed post-run — `debug.seedBadDiff` in node B `task_json`, node B took 2
+steps) and **F-49** (each AC `check` `grep`s the mandated literals verbatim before
+vitest, so the executor could not rewrite the gate). **WP-246 → 🟢 DOGFOOD-PROVEN.**
+Two residuals carried forward: **WP-245** (the seam STILL journals no telemetry —
+node B's trace reads `injections 0`, so the catch is invisible to `chikory trace`;
+§8) and **WP-247** (arming still relies on manual discipline — nothing in the
+launcher refuses a disarmed seam-spec; §7).
 
-**Latest proven path:** dogfood-046 (`docs/reports/dogfood-046.md`) is the first
-**reproducible Agent-as-a-Judge true-positive catch** — the §1.1 KPI sealed on
-demand (single-run only; the chain-level escalation is the open item above). The WP-244 `debug.seedBadDiff` seam (armed via `CHIKORY_SEED_BAD_DIFF_PATH`
+**Latest proven path:** dogfood-048 (`docs/reports/dogfood-048.md`) is the first
+**chain-level Agent-as-a-Judge true-positive catch** — the §1.1 KPI sealed inside a
+dependent node of a durable chain (`chain-b7665e97-…`, delivery `2c516d5`; see the
+CLOSED item above). Its single-run predecessor dogfood-046 (`docs/reports/dogfood-046.md`)
+was the first **reproducible** catch — the §1.1 KPI sealed on demand. The WP-244
+`debug.seedBadDiff` seam (armed via `CHIKORY_SEED_BAD_DIFF_PATH`
 /`_CONTENT`/`_AT_STEP`) overwrote a correct `clamp` with `return value;` after the
 executor finished but before the judge ran; the cadence-1 judge's `vitest` AC went
 red (AC-1 `exited 1`), the deterministic override (`harness.ts:105`) blocked the

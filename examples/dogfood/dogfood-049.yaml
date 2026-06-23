@@ -1,0 +1,142 @@
+# Dogfood-049: WP-247 — the pure seam-arming pre-flight decision (`describeSeamArming`).
+# Launch with `chikory run` (single run, NOT a chain — this goal does not decompose).
+#
+# WHY THIS EXISTS (2026-06-23): dogfood-048 (`chain-b7665e97-…`,
+# docs/reports/dogfood-048.md) PROVED the chain-level Agent-as-a-Judge true-positive
+# catch — but only because the operator manually baked the four
+# `CHIKORY_SEED_BAD_DIFF_*` env vars into the launch and the review verified the seam
+# armed post-run. dogfood-047 (`chain-989b31b9-…`) shows the failure mode when that
+# discipline slips: a seam-requiring spec launched DISARMED greens silently and burns
+# a whole headline on a path it never entered (F-48 → WP-247). Nothing in the launcher
+# tells the operator whether the seam is armed BEFORE the run completes — the seam
+# contract lives only in a spec's prose header.
+#
+# WP-247's cheapest partial (named in the plan.md WP-247 row): a startup banner that
+# echoes the detected seam config. This dogfood delivers its PURE, unit-testable core
+# — the decision function — exactly the way WP-228's launch guard ships its pure
+# `evaluateBaselinePrecheck` in `src/cli/precheck.ts` and the launcher consumes it.
+# The thin launcher wire (`console.error(describeSeamArming(process.env).lines.join(...))`
+# in `cli/chain.ts` + `cli/commands.ts`) is a 2-line frozen-launcher edit hand-landed
+# as a TASK-PROTOCOL §4 follow-up; THIS run delivers the pure brain + its test.
+#
+# WHY IT'S A FAIR FAILURE SURFACE (DOGFOODING §1.1 — NOT a deterministic 1-file port):
+#   * It is NEW feature code (the function does not exist on HEAD), with real branching
+#     an executor can plausibly get wrong: armed iff PATH present and non-empty (mirror
+#     the real readers `chain.ts:158-171` + `commands.ts:235`); optional 0-based
+#     `nodeIndex` parsed only when `_NODE_INDEX` is present; `atStep` defaulting to 0;
+#     and the DANGEROUS partial-config warning (PATH set but CONTENT empty/missing —
+#     the seam would seed an empty file). Mis-handling any branch is a real bug.
+#   * F-49 discipline carried from dogfood-048: the AC `check` `grep`s the spec's
+#     mandated literal assertions verbatim BEFORE running vitest, so the executor
+#     cannot weaken/rewrite the gate to match a deviating impl.
+#
+# This is a real open §6 product WP (WP-247, judge-catch operability pillar), NOT
+# invented disposable scaffolding — it directly removes the F-48 footgun that cost
+# dogfood-047 a headline. Gate verdict recorded in the review: ✅ PROCEED.
+#
+# Zero-secrets launch (no API keys on this machine — CLI-OAuth judge via the shim;
+# NO seam env needed, this is not a judge-catch dogfood):
+#   devbox shell
+#   bash scripts/dogfood.sh examples/dogfood/dogfood-049.yaml
+# (Manual path: start the proxy `node scripts/cli-judge-proxy.mjs 8787 agy &`, set
+#  `OPENAI_COMPAT_BASE_URL=http://127.0.0.1:8787`, then
+#  `pnpm chikory run examples/dogfood/dogfood-049.yaml --watch`.)
+#
+# Pre-launch discipline:
+#   * COMMIT EVERYTHING first — the workspace clones HEAD (F-30: launch ONCE).
+#   * `src/cli/seam-precheck.ts` + `test/cli/seam-precheck.test.ts` MUST NOT already
+#     exist on HEAD (confirmed absent 2026-06-23) — else an empty diff → FAILED (F-45).
+#   * Run Devbox commands sequentially (F-22). The AC toolchain (vitest+tsc+eslint on
+#     the new file) runs in ~6 s, well under the 120 s judge cap (timed 2026-06-23).
+name: dogfood-049-wp247-seam-arming-precheck
+goal: >
+  Add the pure pre-flight decision that reports whether the WP-246 bad-diff
+  judge-catch seam is armed, so an operator/launcher can see the armed-vs-disarmed
+  state BEFORE a run completes (plan.md WP-247, cheapest partial; F-48). Implement
+  exactly one NEW pure module and its test in packages/sdk-ts — touch ONLY these two
+  files, change no launcher/contract/CLI/runner code in this slice.
+
+  Add packages/sdk-ts/src/cli/seam-precheck.ts (strict TypeScript, ESM, named exports
+  only, NO default export), mirroring the existing pure launch-guard
+  packages/sdk-ts/src/cli/precheck.ts in shape. It must export:
+
+    export interface SeamArmingReport {
+      armed: boolean;
+      path?: string;
+      atStep: number;
+      nodeIndex?: number;
+      warnings: string[];
+      lines: string[];
+    }
+
+    export function describeSeamArming(env: Record<string, string | undefined>): SeamArmingReport
+
+  `describeSeamArming` is PURE (no process.env access, no I/O, clock, or randomness —
+  the caller passes the env record in). It reads the same four keys the real host-side
+  readers use (cli/chain.ts and cli/commands.ts):
+  CHIKORY_SEED_BAD_DIFF_PATH, CHIKORY_SEED_BAD_DIFF_CONTENT,
+  CHIKORY_SEED_BAD_DIFF_AT_STEP, CHIKORY_SEED_BAD_DIFF_NODE_INDEX. Semantics, matching
+  the readers exactly:
+    * armed === true iff CHIKORY_SEED_BAD_DIFF_PATH is present AND non-empty;
+      otherwise armed === false.
+    * When armed: `path` is that value; `atStep` is
+      Number(CHIKORY_SEED_BAD_DIFF_AT_STEP ?? 0); `nodeIndex` is set to
+      Number(CHIKORY_SEED_BAD_DIFF_NODE_INDEX) ONLY when that key is present
+      (otherwise the `nodeIndex` field is absent).
+    * When NOT armed: `atStep` is 0, `path`/`nodeIndex` absent, `warnings` empty.
+    * `warnings`: when armed but CHIKORY_SEED_BAD_DIFF_CONTENT is missing or empty,
+      push exactly one warning string explaining the seam will seed an empty file.
+    * `lines`: a human banner. When armed, the first line MUST start with the literal
+      "🧪 seam armed" and include the path (and the node index when present). When NOT
+      armed, `lines` MUST contain exactly the string "no seam armed".
+  Add a short JSDoc on the interface and the function (the precheck.ts convention).
+
+  Re-export both `describeSeamArming` and `type SeamArmingReport` from
+  packages/sdk-ts/src/index.ts next to the existing
+  `evaluateBaselinePrecheck` re-export (index.ts:113), keeping named-export ESM `.js`
+  import style.
+
+  Add packages/sdk-ts/test/cli/seam-precheck.test.ts (NEW Vitest file, ESM `.js`
+  relative import from ../../src/cli/seam-precheck.js, mirroring
+  test/cli/precheck.test.ts) encoding AT LEAST these exact assertions verbatim (these
+  are graded by a grep, do not rephrase the call or the expected literal):
+    expect(describeSeamArming({}).armed).toBe(false)
+    expect(describeSeamArming({}).lines).toContain("no seam armed")
+    expect(describeSeamArming({ CHIKORY_SEED_BAD_DIFF_PATH: "packages/sdk-ts/src/util/x.ts", CHIKORY_SEED_BAD_DIFF_CONTENT: "export const x = 1;" }).armed).toBe(true)
+    expect(describeSeamArming({ CHIKORY_SEED_BAD_DIFF_PATH: "x.ts", CHIKORY_SEED_BAD_DIFF_CONTENT: "y", CHIKORY_SEED_BAD_DIFF_NODE_INDEX: "1" }).nodeIndex).toBe(1)
+  and at least one assertion that the armed-but-no-CONTENT case produces a non-empty
+  `warnings` array.
+
+  Keep the function pure and minimal. Use strict TypeScript, ESM `.js` relative
+  imports, named exports only, no default exports, no I/O/network/clock/randomness,
+  and no new dependencies. Do not change contracts, schemas, the chain runner, the
+  CLI launcher wiring, or unrelated files. Run project commands sequentially inside
+  the existing Devbox environment. If a verification step reports a failing test,
+  READ the failure, fix the IMPLEMENTATION so every assertion passes, and continue —
+  do NOT weaken, rephrase, or remove any mandated assertion (a grep enforces them).
+repos:
+  - url: /Users/nikitazolotarev/repos/chikory
+    writable: true
+acceptance_criteria:
+  - id: AC-1
+    description: >
+      describeSeamArming reports armed/disarmed + optional nodeIndex + the empty-CONTENT
+      warning from a passed env record (mirroring the real cli/chain.ts + cli/commands.ts
+      readers), its mandated assertions are present verbatim (grep-pinned, per dogfood-047
+      F-49), its focused test passes, and the SDK stays type- and lint-clean.
+    check: cd packages/sdk-ts && grep -Eq 'describeSeamArming\(\{\}\)\.armed\)\.toBe\(false\)' test/cli/seam-precheck.test.ts && grep -Eq '\.nodeIndex\)\.toBe\(1\)' test/cli/seam-precheck.test.ts && grep -Eq 'no seam armed' test/cli/seam-precheck.test.ts && pnpm exec vitest run test/cli/seam-precheck.test.ts && pnpm exec tsc --noEmit && pnpm exec eslint .
+budget_usd: 5
+max_steps: 8
+executor:
+  adapter: codex
+  family: openai
+judge:
+  family: openai-compat
+  cadence: 1
+  max_cost_share: 0.5
+routing:
+  stages:
+    plan: { provider: openai-compat, model: gpt-5.5 }
+    code: { provider: openai-compat, model: gpt-5.5 }
+    review: { provider: openai-compat, model: gpt-5.5 }
+    judge: { provider: openai-compat, model: gemini-3.1-pro-preview }
