@@ -40,6 +40,18 @@ function cli(): Cli {
   };
 }
 
+async function rmRecursive(path: string): Promise<void> {
+  for (let i = 0; i < 5; i++) {
+    try {
+      await rm(path, { recursive: true, force: true });
+      return;
+    } catch (e) {
+      if (i === 4) throw e;
+      await new Promise((resolve) => setTimeout(resolve, (i + 1) * 50));
+    }
+  }
+}
+
 describe("chikory land (WP-220)", () => {
   const cleanups: Array<() => Promise<void>> = [];
 
@@ -49,7 +61,7 @@ describe("chikory land (WP-220)", () => {
 
   async function fixture(opts: { changed?: boolean } = {}): Promise<Fixture> {
     const root = await mkdtemp(join(tmpdir(), "chikory-land-"));
-    cleanups.push(() => rm(root, { recursive: true, force: true }));
+    cleanups.push(() => rmRecursive(root));
     const repo = join(root, "host");
     const dataDir = join(root, "data");
     const runId = "run-land-test";
