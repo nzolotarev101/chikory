@@ -40,6 +40,13 @@ export interface ChainNodeTemplate {
    * `nodeIndex` arms every node.
    */
   debugPark?: { beforeStep: number; nodeIndex?: number };
+  /**
+   * WP-246 dogfood/test-only: arm the judge-catch bad-diff seam on the targeted
+   * dispatch node (`nodeIndex`, 0-based) or every node when absent. The chain
+   * analog of `debug.seedBadDiff`; armed host-side from `CHIKORY_SEED_BAD_DIFF_*`
+   * env, frozen into the workflow input (never read in the workflow body).
+   */
+  debugSeedBadDiff?: { atStep: number; path: string; content: string; nodeIndex?: number };
 }
 
 /**
@@ -92,14 +99,24 @@ export function planNodeToTaskSpec(
   };
   if (template.budgetTokens !== undefined) spec.budgetTokens = template.budgetTokens;
   if (template.maxSteps !== undefined) spec.maxSteps = template.maxSteps;
-  // WP-243: arm the dogfood park seam on the targeted node (or all nodes when
-  // `nodeIndex` is absent). Deterministic — dispatch order is fixed.
-  if (
+  // WP-243/WP-246: arm the dogfood debug seams on the targeted node (or all
+  // nodes when `nodeIndex` is absent). Deterministic — dispatch order is fixed.
+  // Both seams can be armed at once, so build `spec.debug` additively.
+  const parkArmed =
     template.debugPark !== undefined &&
     (template.debugPark.nodeIndex === undefined ||
-      template.debugPark.nodeIndex === dispatchIndex)
-  ) {
-    spec.debug = { parkBeforeStep: template.debugPark.beforeStep };
+      template.debugPark.nodeIndex === dispatchIndex);
+  const badDiff = template.debugSeedBadDiff;
+  const badDiffArmed =
+    badDiff !== undefined &&
+    (badDiff.nodeIndex === undefined || badDiff.nodeIndex === dispatchIndex);
+  if (parkArmed || badDiffArmed) {
+    spec.debug = {
+      ...(parkArmed ? { parkBeforeStep: template.debugPark!.beforeStep } : {}),
+      ...(badDiffArmed
+        ? { seedBadDiff: { atStep: badDiff!.atStep, path: badDiff!.path, content: badDiff!.content } }
+        : {}),
+    };
   }
   return spec;
 }

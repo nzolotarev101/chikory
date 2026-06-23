@@ -154,6 +154,21 @@ function templateFromSpec(spec: TaskSpec): ChainNodeTemplate {
       ...(idx !== undefined ? { nodeIndex: Number(idx) } : {}),
     };
   }
+  // WP-246 dogfood/test-only judge-catch seam, the chain analog of the single-run
+  // CHIKORY_SEED_BAD_DIFF_* reader (commands.ts). `_NODE_INDEX` (optional)
+  // restricts the seeding to the K-th dispatched node (0-based) — corrupt a
+  // dependent node so its real-time judge must catch the regression before it
+  // lands. Read here (host process), frozen into the workflow input.
+  const badDiffPath = process.env["CHIKORY_SEED_BAD_DIFF_PATH"];
+  if (badDiffPath !== undefined && badDiffPath.length > 0) {
+    const idx = process.env["CHIKORY_SEED_BAD_DIFF_NODE_INDEX"];
+    template.debugSeedBadDiff = {
+      atStep: Number(process.env["CHIKORY_SEED_BAD_DIFF_AT_STEP"] ?? 0),
+      path: badDiffPath,
+      content: process.env["CHIKORY_SEED_BAD_DIFF_CONTENT"] ?? "",
+      ...(idx !== undefined ? { nodeIndex: Number(idx) } : {}),
+    };
+  }
   return template;
 }
 

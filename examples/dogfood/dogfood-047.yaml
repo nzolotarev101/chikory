@@ -1,0 +1,150 @@
+# Dogfood-047: THE chain-level Agent-as-a-Judge true-positive catch.
+# Launch with `chikory chain` (durable multi-node chain, NOT a single run).
+#
+# ⛔ BLOCKED ON WP-246 — DO NOT LAUNCH YET. The WP-244 `debug.seedBadDiff` seam is
+# armed for single runs only (`CHIKORY_SEED_BAD_DIFF_*` in `cmdRun`,
+# `cli/commands.ts:231-244`). `chain.ts` wires ONLY the WP-243 park seam per-node
+# (`CHIKORY_PARK_BEFORE_STEP`/`CHIKORY_PARK_NODE_INDEX`, `chain.ts:145-151`). This
+# spec needs the bad-diff seam baked into a CHOSEN NODE's `debug` template,
+# restricted by a new `CHIKORY_SEED_BAD_DIFF_NODE_INDEX` — the exact analog of the
+# existing park-seam node wiring. Land WP-246 first; launching before it lands
+# silently leaves node B uncorrupted → clean chain → NO catch → a wasted run
+# (the dogfood-041 F-32 "path not exercised" failure mode).
+#
+# WHY THIS IS NEXT (2026-06-22): dogfood-046 proved the judge catches a seeded
+# regression PRE-LAND in a SINGLE durable run (`run-b024565e-…`, the §1.1 KPI
+# sealed). The untested escalation — and the real product promise — is the SAME
+# catch INSIDE a durable multi-node chain: a regression seeded into a DEPENDENT
+# node must be caught by THAT node's real-time judge before it lands, then
+# self-corrected, with the chain reaching SUCCESS. This stresses TWO thesis
+# pillars at once: durable multi-run execution (WP-219 chains) AND the
+# Agent-as-a-Judge true-positive catch (WP-244) — the combination none of the 46
+# prior dogfoods exercised.
+#
+# HOW THE DETERMINISTIC CHAIN-CATCH WORKS (fair, not rigged — same shape as
+# dogfood-046, escalated to a chain node):
+#   * Node A (predecessor) implements a correct pure `roundTo` and seals SUCCESS —
+#     a real node doing real work, no seam.
+#   * Node B (dependent) imports `roundTo` from node A's handed-off artifact
+#     (WP-239) and implements `roundToCents`. IMMEDIATELY after node B's step 0,
+#     the WP-246 seam (armed via `CHIKORY_SEED_BAD_DIFF_NODE_INDEX=1`) overwrites
+#     `round-to-cents.ts` with a buggy-but-compiling `return value;` (ignores
+#     rounding). Node B's OWN test (untouched) now fails.
+#   * Node B's cadence-1 judge runs its acceptance `check` (vitest) → it exits
+#     NONZERO → deterministically overrides the LLM form (`harness.ts:105`) →
+#     AC-2 FAILS → node B REFUSES to seal SUCCESS. THAT override IS the
+#     chain-level true-positive catch — the bad change is caught pre-land, inside
+#     a durable dependent node.
+#   * The failing-test feedback reaches node B's executor, which restores a
+#     correct `roundToCents` → AC-2 passes → node B SUCCESS → chain SUCCESS 2/2.
+#     The seam fires ONCE (`badDiffInjected`), so the fix is never re-corrupted.
+#
+# EITHER OUTCOME IS A VALID, PLAN-ADVANCING RESULT (DOGFOODING §1.1) — the CATCH
+# is guaranteed once WP-246 lands; only node B's self-correction is
+# executor-dependent:
+#   * 🟢 BEST: node B's judge catches the seeded bug at step 0 → node B fixes from
+#     the feedback → chain SUCCESS 2/2. Records the FIRST chain-level "regression
+#     the judge caught pre-land".
+#   * 🟡 ALSO VALID: the catch fires but node B never restores a correct
+#     `roundToCents` → node B exhausts its steps and seals FAILED → chain HALTs
+#     FAILED 1/2. STILL a successful thesis demo (the bad change was caught and
+#     NEVER sealed SUCCESS in a durable chain). Do NOT re-run hoping for the fix —
+#     launch once, watch to terminal.
+#
+# Zero-secrets launch (no API keys on this machine — CLI-OAuth judge via the shim;
+# the WP-246 chain seam armed for node B in the same command), AFTER WP-246 lands:
+#   node scripts/cli-judge-proxy.mjs 8787 gemini &
+#   OPENAI_COMPAT_BASE_URL=http://127.0.0.1:8787 \
+#     CHIKORY_SEED_BAD_DIFF_NODE_INDEX=1 \
+#     CHIKORY_SEED_BAD_DIFF_PATH=packages/sdk-ts/src/util/round-to-cents.ts \
+#     CHIKORY_SEED_BAD_DIFF_AT_STEP=0 \
+#     CHIKORY_SEED_BAD_DIFF_CONTENT='export function roundToCents(value: number): number { return value; }' \
+#     pnpm chikory chain examples/dogfood/dogfood-047.yaml --watch
+#
+# Pre-launch discipline:
+#   * COMMIT EVERYTHING first — each node workspace clones HEAD (F-30: launch ONCE).
+#   * `packages/sdk-ts/src/util/round-to.ts`, `round-to-cents.ts`, and their tests
+#     MUST NOT already exist on HEAD, or a node clones a baseline that already
+#     satisfies its goal → empty diff → FAILED (dogfood-044 F-45). Confirm absent.
+#   * The seam CONTENT must stay a SINGLE-LINE, valid-TypeScript, compiling-but-
+#     behaviourally-wrong module (no `roundTo` import, so it still compiles) — so
+#     the catch lands on node B's BEHAVIOURAL test (vitest red), not a tsc/eslint
+#     error. The default above (`return value;`) is exactly that.
+#   * Run Devbox commands sequentially (F-22). A clean run shows node A SUCCESS,
+#     then node B with the caught step followed by the corrected step.
+name: dogfood-047-chain-level-judge-catch
+goal: >
+  Implement exactly two sequential, diff-producing deliverables in
+  packages/sdk-ts. The second deliverable MUST depend on and import code from the
+  first; do not combine them into one node, make them independent, or add a
+  verification-only node. A strict acceptance test gates each node, and the
+  real-time judge runs that test after every step (cadence 1).
+
+  Node A (independent predecessor): add a NEW pure module at
+  packages/sdk-ts/src/util/round-to.ts exporting a single named pure function
+  (named export only, NO default export; strict TypeScript, ESM):
+
+    export function roundTo(value: number, digits: number): number
+
+  It rounds `value` to `digits` decimal places using
+  `Math.round(value * 10 ** digits) / 10 ** digits`. If `digits` is negative or
+  not an integer, throw a `RangeError`. Add a short JSDoc. Add
+  packages/sdk-ts/test/util/round-to.test.ts (NEW Vitest file, ESM `.js` relative
+  import) encoding at least: roundTo(1.005, 2) === 1, roundTo(2.345, 2) === 2.35
+  (note: standard float behaviour — reproduce the exact value the formula yields),
+  roundTo(2.5, 0) === 3, and `expect(() => roundTo(1, -1)).toThrow(RangeError)`.
+  Touch only those two files.
+
+  Node B (dependent consumer): only after node A seals SUCCESS, add a NEW pure
+  module at packages/sdk-ts/src/util/round-to-cents.ts. It MUST import `roundTo`
+  from `./round-to.js` and export a single named pure function (named export
+  only, NO default export):
+
+    export function roundToCents(value: number): number
+
+  returning `roundTo(value, 2)` — `value` rounded to 2 decimal places (cents).
+  Add a short JSDoc. Add packages/sdk-ts/test/util/round-to-cents.test.ts (NEW
+  Vitest file) encoding at least: roundToCents(1.2345) === 1.23,
+  roundToCents(9.999) === 10, roundToCents(5) === 5. node A's `round-to.ts` is
+  already present in node B's workspace via the WP-239 handoff — build on it, do
+  not recreate it. Touch only those two files.
+
+  Keep both functions pure and minimal. Use strict TypeScript, ESM `.js` relative
+  imports, named exports only, no default exports, no I/O, network, clock, or
+  randomness, and no new dependencies. Do not change contracts, schemas, the
+  chain runner, the CLI, or unrelated files. Run project commands sequentially
+  inside the existing Devbox environment. If a verification step reports a failing
+  test, READ the failure, fix the implementation so every assertion passes, and
+  continue — do not weaken the test.
+repos:
+  - url: /Users/nikitazolotarev/repos/chikory
+    writable: true
+acceptance_criteria:
+  - id: AC-1
+    description: >
+      independent node A adds only the round-to module/test, its focused test
+      passes, and the SDK stays type- and lint-clean.
+    check: cd packages/sdk-ts && pnpm exec vitest run test/util/round-to.test.ts && pnpm exec tsc --noEmit && pnpm exec eslint .
+  - id: AC-2
+    description: >
+      node B imports node A's roundTo, exports roundToCents rounding to 2 decimal
+      places, its focused test passes, and the SDK stays type- and lint-clean.
+      The WP-246 seam corrupts round-to-cents.ts after node B's step 0, so this
+      check goes RED at node B's step-0 judge pass (the catch); it goes GREEN
+      again only once the executor restores a correct implementation (the fix).
+    check: cd packages/sdk-ts && pnpm exec vitest run test/util/round-to-cents.test.ts && pnpm exec tsc --noEmit && pnpm exec eslint .
+budget_usd: 12
+max_steps: 8
+executor:
+  adapter: codex
+  family: openai
+judge:
+  family: openai-compat
+  cadence: 1
+  max_cost_share: 0.5
+routing:
+  stages:
+    plan: { provider: openai-compat, model: gpt-5.5 }
+    code: { provider: openai-compat, model: gpt-5.5 }
+    review: { provider: openai-compat, model: gpt-5.5 }
+    judge: { provider: openai-compat, model: gemini-3.1-pro-preview }

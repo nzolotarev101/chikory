@@ -141,6 +141,45 @@ describe("planNodeToTaskSpec", () => {
     expect(planNodeToTaskSpec(node, template, "plan-1").debug).toBeUndefined();
   });
 
+  it("WP-246: arms the bad-diff seam only on the targeted dispatch index", () => {
+    const badDiffTemplate: ChainNodeTemplate = {
+      ...template,
+      debugSeedBadDiff: { atStep: 0, path: "src/util/x.ts", content: "broken", nodeIndex: 1 },
+    };
+    // node A (dispatch index 0) runs normally; node B (index 1) gets the bad diff.
+    expect(planNodeToTaskSpec(node, badDiffTemplate, "plan-1", undefined, undefined, undefined, undefined, 0).debug).toBeUndefined();
+    expect(planNodeToTaskSpec(node, badDiffTemplate, "plan-1", undefined, undefined, undefined, undefined, 1).debug).toEqual({
+      seedBadDiff: { atStep: 0, path: "src/util/x.ts", content: "broken" },
+    });
+  });
+
+  it("WP-246: arms every node when no nodeIndex is given", () => {
+    const badDiffTemplate: ChainNodeTemplate = {
+      ...template,
+      debugSeedBadDiff: { atStep: 2, path: "src/util/x.ts", content: "broken" },
+    };
+    expect(planNodeToTaskSpec(node, badDiffTemplate, "plan-1", undefined, undefined, undefined, undefined, 0).debug).toEqual({
+      seedBadDiff: { atStep: 2, path: "src/util/x.ts", content: "broken" },
+    });
+    expect(planNodeToTaskSpec(node, badDiffTemplate, "plan-1", undefined, undefined, undefined, undefined, 9).debug).toEqual({
+      seedBadDiff: { atStep: 2, path: "src/util/x.ts", content: "broken" },
+    });
+  });
+
+  it("WP-246: merges both debug seams when armed together on the targeted node", () => {
+    const bothTemplate: ChainNodeTemplate = {
+      ...template,
+      debugPark: { beforeStep: 0, nodeIndex: 1 },
+      debugSeedBadDiff: { atStep: 0, path: "src/util/x.ts", content: "broken", nodeIndex: 1 },
+    };
+    expect(planNodeToTaskSpec(node, bothTemplate, "plan-1", undefined, undefined, undefined, undefined, 1).debug).toEqual({
+      parkBeforeStep: 0,
+      seedBadDiff: { atStep: 0, path: "src/util/x.ts", content: "broken" },
+    });
+    // a non-targeted node gets neither.
+    expect(planNodeToTaskSpec(node, bothTemplate, "plan-1", undefined, undefined, undefined, undefined, 0).debug).toBeUndefined();
+  });
+
   it("carries optional template budgetTokens/maxSteps only when present", () => {
     const bare = planNodeToTaskSpec(node, template, "plan-1");
     expect(bare.budgetTokens).toBeUndefined();
