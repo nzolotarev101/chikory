@@ -1,0 +1,207 @@
+# Dogfood-051: WP-207 — pacing telemetry. WIRE the pure context-window pacing decision
+# `decideContextWindowPacing` (runner/pacing.ts, landed dogfood-031) INTO the live agent
+# loop and JOURNAL a durable, replay-safe `pacing` entry each step, then surface it in
+# `chikory trace`. Launch with `chikory run` (single run, NOT a chain).
+#
+# WHY THIS EXISTS (2026-06-23): the standing #1 data point in EVERY dogfood report for
+# 50 runs is token economics — each step reads 387k–793k INPUT tokens for a tiny diff
+# (dogfood-050: 770k in / 6.5k out for a 7.4KB diff). Yet `chikory trace` surfaces
+# ZERO context-window pressure: the pure `decideContextWindowPacing(usage, policy)`
+# decision exists and is unit-tested (`runner/pacing.ts`, `test/runner/pacing.test.ts`,
+# dogfood-031) — it returns `continue`/`compact`/`park` over projected window pressure —
+# but it is NEVER wired into the live loop and `kind:"pacing"` (types.ts:328) is emitted
+# by NOTHING, so it falls to the trace renderer's `default` case. This is the EXACT
+# gap-pattern dogfood-050 (WP-245) just closed for the seam: a thesis-pillar decision
+# computed-but-never-journaled. REQUIREMENTS.md FA-3 + SE-2 name the remaining work
+# verbatim: "remaining work is using that decision in planner/runner cadence and
+# journaling." This dogfood does the journaling+wiring half — the first live
+# observability on the context-rot problem the whole product is built to fight.
+#
+# THE FIX HAS A CLEAN PRECEDENT (the seam telemetry just landed): the WP-245
+# `recordSeamEvent` (`runner/activities.ts`, dogfood-050) and the WP-243 park-seam
+# `recordBudgetEvent` both journal a per-run event the same way — idempotent via
+# `journal.appendOnce` keyed on an event index (replay-safe; a Temporal replay never
+# double-journals), payload kept small, `journal.close()` in a `finally`. This dogfood
+# gives pacing the IDENTICAL treatment: a `recordPacingEvent` activity + the agent-loop
+# wire that feeds REAL per-step token usage into `decideContextWindowPacing` + the
+# `chikory trace` surfacing. The `"pacing"` `JournalEntryKind` ALREADY EXISTS
+# (types.ts:328) — so, unlike dogfood-050, this slice needs NO union/contract change.
+#
+# WHY IT'S A FAIR FAILURE SURFACE (DOGFOODING §1.1 — NOT a 1-file port):
+#   * Cross-file vertical (activity + workflow wire + renderer + 2 tests) an executor
+#     can plausibly get wrong: the `appendOnce` idempotency KEY (must dedupe on
+#     `pacingEventIndex` so a replay never double-journals — the `recordSeamEvent`
+#     invariant); the usage must be built from REAL per-step token counts already in
+#     the loop (`record.tokens.input`/`.output`, the cumulative `spentTokens`), not
+#     invented; the call must use the REAL `decideContextWindowPacing` (a grep pins it
+#     in `agent-loop.ts`, so the executor cannot fake the action); the renderer totals
+#     line must stay BYTE-IDENTICAL on the no-pacing path (additive, the WP-218/WP-245
+#     convention).
+#   * F-49 discipline (dogfood-047/048/050): the AC `grep`s the mandated assertions AND
+#     the emit-wire literals verbatim in the SOURCE (`agent-loop.ts`/`activities.ts`),
+#     so the executor cannot land a renderer-only scaffold that renders a `pacing` kind
+#     no real run ever emits — the decision MUST actually be wired and journal.
+#
+# This is a real open §6 product WP (WP-207, the context-rot/pacing pillar — FA-3/SE-2),
+# NOT invented disposable scaffolding — it wires a decision that already exists into the
+# real runtime loop and attacks the #1 recurring data point. Gate verdicts (recorded in
+# the dogfood-050 review):
+#   * §1.1 Failure-surface: ✅ (2–6 steps, cross-file, thesis-pillar context-rot, real
+#     replay-safety + usage-construction bug surface).
+#   * §1.2 Product-progress: ✅ (landed diff advances WP-207 feature code on the real
+#     runtime/trace paths — activity/workflow/renderer — not a throwaway utility; it is
+#     the documented FA-3/SE-2 remaining work).
+#   * §1.3 Mission-critical: ✅ PROCEED (the seam saga is settled — dogfood-046/048/050;
+#     this moves onto the most-cited UNSOLVED pillar, context-rot; nothing more
+#     thesis-critical is unblocked without a frozen-launcher/contract edit — WP-247's
+#     remainder needs a frozen-launcher edit, WP-228/WP-232 need launcher wiring).
+#
+# Zero-secrets launch (no API keys on this machine — CLI-OAuth judge via the shim):
+#   devbox shell
+#   bash scripts/dogfood.sh examples/dogfood/dogfood-051.yaml
+# (Manual path: start the proxy `node scripts/cli-judge-proxy.mjs 8787 agy &`, set
+#  `OPENAI_COMPAT_BASE_URL=http://127.0.0.1:8787`, then
+#  `pnpm chikory run examples/dogfood/dogfood-051.yaml --watch`.)
+#
+# Pre-launch discipline:
+#   * COMMIT EVERYTHING first — the workspace clones HEAD (F-30: launch ONCE). NOTE:
+#     the dogfood-050 delivery (WP-245 seam telemetry) is currently UNCOMMITTED on the
+#     working tree — commit it (ideally its own commit w/ a `Ref: run-id:` trailer per
+#     F-51/WP-249) BEFORE launching this run, or its files clone into the workspace.
+#   * `test/runner/pacing-journal.test.ts` MUST NOT already exist on HEAD (confirmed
+#     absent 2026-06-23) — else an empty diff for that file (F-45).
+#   * `recordPacingEvent` MUST NOT already exist and nothing must yet emit
+#     `kind:"pacing"` (confirmed absent 2026-06-23: grep found only the type/schema
+#     declarations and the trace `default` fallthrough).
+#   * Run Devbox commands sequentially (F-22). The AC toolchain is Temporal-FREE
+#     (two pure/unit test files + tsc + eslint), timed ~25 s, well under the 120 s judge
+#     cap (the heavy Temporal loop path is re-proven by the existing
+#     `verdict-gating.test.ts`/`crash-recovery.test.ts` suites on the operator's run).
+name: dogfood-051-wp207-pacing-telemetry
+goal: >
+  Wire the pure WP-207 context-window pacing decision into the live agent loop so it
+  emits DURABLE, replay-safe telemetry, and surface it in `chikory trace` (plan.md
+  WP-207; REQUIREMENTS.md FA-3 / SE-2). Each step, feed the step's REAL token usage into
+  the existing `decideContextWindowPacing` decision and journal a `pacing` entry; then
+  `chikory trace` shows a `pacing events N` count in its totals. Mirror the WP-245 seam
+  telemetry / WP-243 park-seam journaled-event precedent exactly. Strict TypeScript,
+  ESM `.js` relative imports, named exports only, no default exports, no new
+  dependencies, no contract/schema change (the `"pacing"` `JournalEntryKind` already
+  exists at types.ts:328 — do NOT add or modify any union member or schema).
+
+  Make these changes in packages/sdk-ts:
+
+  1. src/runner/activities.ts — add a `recordPacingEvent` activity on the object
+     returned by `createRunnerActivities`, modeled byte-for-byte on the existing
+     `recordSeamEvent` (the dogfood-050 activity, itself modeled on `recordBudgetEvent`):
+     open the per-run journal via the existing `openJournal(deps, input.runId)`,
+     `journal.appendOnce` keyed on `{ field: "pacingEventIndex", value: input.pacingEventIndex }`
+     with
+     `{ kind: "pacing", payload: { pacingEventIndex, atStep, action, projectedTokens, remainingTokens, utilization }, costDeltaUsd: 0, artifactRefs: [] }`,
+     then `journal.close()` in a `finally`. Signature:
+       recordPacingEvent(input: { runId: string; pacingEventIndex: number; atStep: number; action: "continue" | "compact" | "park"; projectedTokens: number; remainingTokens: number; utilization: number }): Promise<void>
+     `appendOnce` keyed on `pacingEventIndex` makes it idempotent under Temporal replay —
+     the same invariant `recordSeamEvent`/`recordBudgetEvent` have. Add a short JSDoc
+     citing WP-207 / FA-3 / SE-2, mirroring the `recordSeamEvent` doc.
+
+  2. src/workflow/agent-loop.ts — wire the pacing decision into the live loop:
+     (a) add `let pacingEventIndex = 0;` next to the existing `let seamEventIndex = 0;`
+         counter (~line 104);
+     (b) add module-level pacing defaults next to `DEFAULT_MEMORY_POLICY` (~line 58):
+         `const DEFAULT_CONTEXT_WINDOW_TOKENS = 200_000;` and
+         `const DEFAULT_PACING_POLICY: ContextWindowPacingPolicy = { compactAtFraction: 0.8 };`
+         (import `decideContextWindowPacing` and the type `ContextWindowPacingPolicy`
+         from `"../runner/pacing.js"`);
+     (c) right AFTER the existing per-step token-accounting block
+         (`spentTokens += recordTokens; stepTokens.push(recordTokens);`, ~line 337-338),
+         compute the usage from the REAL accumulated counts and the just-finished step,
+         call the pure decision, and journal it:
+           const pacing = decideContextWindowPacing(
+             {
+               currentInputTokens: spentTokens,
+               currentOutputTokens: 0,
+               estimatedNextStepTokens: recordTokens,
+               contextWindowTokens: DEFAULT_CONTEXT_WINDOW_TOKENS,
+             },
+             DEFAULT_PACING_POLICY,
+           );
+           await activities.recordPacingEvent({
+             runId,
+             pacingEventIndex: pacingEventIndex++,
+             atStep: stepIndex - 1,
+             action: pacing.action,
+             projectedTokens: pacing.projectedTokens,
+             remainingTokens: pacing.remainingTokens,
+             utilization: pacing.utilization,
+           });
+     Use the REAL `decideContextWindowPacing` — do NOT inline or re-implement the
+     decision. `spentTokens` already accumulates `record.tokens.input + .output`
+     (combined), so pass it as `currentInputTokens` with `currentOutputTokens: 0`
+     (the decision sums them anyway); `estimatedNextStepTokens` = the just-finished
+     step's `recordTokens` (a replay-safe per-step proxy). Journal EVERY step (not only
+     compact/park) so the trace always reflects window pressure. Do not change the
+     judge/checkpoint/compaction ordering that follows.
+
+  3. src/cli/trace.ts — (a) in `renderTrace`, compute
+     `const pacingEvents = entries.filter((e) => e.kind === "pacing").length;` next to
+     the existing `const seams = …` line; append ` · pacing events ${pacingEvents}` to
+     the same `injections … · checkpoints …${seamSummary}` totals sub-line ONLY when
+     `pacingEvents > 0`, so the no-pacing path stays byte-identical (the WP-245 additive
+     convention). (b) Add a `case "pacing":` to the per-entry `formatEntryLine` switch
+     (it currently falls to `default`) that renders
+     `[${ts}] pacing ${payload.action} — ${Math.round(payload.utilization * 100)}% window (${formatTokens(payload.projectedTokens)} proj)`
+     using the same `payload as { action: string; utilization: number; projectedTokens: number }`
+     cast style as the sibling cases. Do not touch any other totals line.
+
+  4. test/runner/pacing-journal.test.ts — a NEW Temporal-FREE Vitest file (ESM `.js`
+     relative imports from `../../src/index.js`) that proves the journal-write contract
+     directly via the exported `Journal` class (the seam-journal.test.ts / budget-gate
+     pattern): construct a `Journal` (`new Journal(":memory:")`), `createRun(runId, spec)`,
+     then `appendOnce` a `pacing` entry TWICE with the SAME
+     `{ field: "pacingEventIndex", value: 0 }` key, and assert idempotency verbatim:
+       expect(journal.entries("pacing")).toHaveLength(1)
+     Also assert the single entry's payload `action` and `utilization` round-trip. Keep
+     it Temporal-free (no `inject("temporalAddress")`, no worker) so it runs in ms.
+
+  5. test/cli/trace.test.ts — EXTEND the existing renderer test file (do not remove any
+     existing case). Mirroring its existing synthetic-`JournalEntry[]` + `renderTrace`
+     calls (and the dogfood-050 `seam` case), add: (a) a journal that includes a
+     `pacing` entry renders the totals with `pacing events 1` — assert verbatim:
+       expect(renderTrace(run, entries, totals)).toContain("pacing events 1")
+     and (b) a journal with NO `pacing` entry does NOT render the marker — assert:
+       expect(renderTrace(run, entriesNoPacing, totals)).not.toContain("pacing events")
+
+  Run project commands sequentially inside the existing Devbox environment. If a
+  verification step reports a failing test, READ the failure, fix the IMPLEMENTATION so
+  every assertion passes, and continue — do NOT weaken, rephrase, or remove any mandated
+  assertion or emit-wire literal (a grep enforces them).
+repos:
+  - url: /Users/nikitazolotarev/repos/chikory
+    writable: true
+acceptance_criteria:
+  - id: AC-1
+    description: >
+      The live agent loop feeds REAL per-step token usage into the pure
+      `decideContextWindowPacing` decision and journals a durable, replay-safe `pacing`
+      entry each step (idempotent under replay, payload carries action + projected/
+      remaining tokens + utilization), and `chikory trace` surfaces a `pacing events N`
+      count, additive on the no-pacing path. The agent-loop wire calls the REAL decision
+      and the `recordPacingEvent` activity (both grep-pinned in source, dogfood-047
+      F-49), the journal-write idempotency + renderer assertions pass, and the SDK stays
+      type- and lint-clean.
+    check: cd packages/sdk-ts && grep -Eq 'pacing events 1' test/cli/trace.test.ts && grep -Eq 'toHaveLength\(1\)' test/runner/pacing-journal.test.ts && grep -Eq 'recordPacingEvent' src/workflow/agent-loop.ts && grep -Eq 'decideContextWindowPacing' src/workflow/agent-loop.ts && grep -Eq 'recordPacingEvent' src/runner/activities.ts && grep -Eq '"pacing"' src/runner/activities.ts && pnpm exec vitest run test/cli/trace.test.ts test/runner/pacing-journal.test.ts && pnpm exec tsc --noEmit && pnpm exec eslint .
+budget_usd: 5
+max_steps: 8
+executor:
+  adapter: codex
+  family: openai
+judge:
+  family: openai-compat
+  cadence: 1
+  max_cost_share: 0.5
+routing:
+  stages:
+    plan: { provider: openai-compat, model: gpt-5.5 }
+    code: { provider: openai-compat, model: gpt-5.5 }
+    review: { provider: openai-compat, model: gpt-5.5 }
+    judge: { provider: openai-compat, model: gemini-3.1-pro-preview }

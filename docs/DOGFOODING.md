@@ -33,7 +33,14 @@ guard are still owed (WP-247 → 🟡). New **F-51 → WP-249** (harvest-commit 
 that delivery commit bundled an unrelated operator `land.test.ts` edit and cites no
 run-id, so `dogfood-verify §6` couldn't resolve the landed commit.
 
-**Latest proven path:** dogfood-048 (`docs/reports/dogfood-048.md`) is the first
+**Latest proven path:** dogfood-050 (`docs/reports/dogfood-050.md`) made the
+judge-catch seam **self-documenting** — WP-245 seam telemetry: the `debug.seedBadDiff`
+seam now journals a durable replay-safe `seam` entry and `chikory trace` prints
+`seams fired N`, so "was the catch a *seeded* deterministic regression?" is answerable
+from telemetry instead of three-blob byte-archaeology (`run-55eb5422-…`, runtime
+`a4e9665`). The seam saga is now settled (dogfood-046/048/050) and the loop pivots to
+the context-rot pillar (WP-207 pacing telemetry, dogfood-051). dogfood-048
+(`docs/reports/dogfood-048.md`) is the first
 **chain-level Agent-as-a-Judge true-positive catch** — the §1.1 KPI sealed inside a
 dependent node of a durable chain (`chain-b7665e97-…`, delivery `2c516d5`; see the
 CLOSED item above). Its single-run predecessor dogfood-046 (`docs/reports/dogfood-046.md`)
@@ -821,6 +828,14 @@ a first-attempt SUCCESS and produced three plan-changing findings
   goals accordingly (§3.2).
 - **Single repo**, no `inject`, no `branch`, no suspend-for-days HITL UX, no
   pacing — all P2 (WP-214, -212, -205, -206, -207).
+- **A telemetry-*instrumenting* dogfood shows its own new counter at 0** (F-52):
+  a run that adds a journal/trace counter for a mechanism it does **not** itself
+  trigger will read that counter at `0` on its OWN trace — by design, not a bug.
+  dogfood-050 instrumented the seam (`seams fired N`) without arming it →
+  `seams fired 0` on its trace; the telemetry is unit-proven, and live observation
+  belongs to the next run that actually arms/triggers the mechanism. Don't "fix" a
+  zero counter on an instrumenting run, and don't fold a scaffold-hosted armed
+  re-run in just to see it tick — confirm it on the next real triggering run.
 - **Subscription-auth runs can report $0.00 cost** → rely on `max_steps`
   and the HALT guard when the meter is blind. WP-218 slice 1 (dogfood-004)
   prices the documented zero-secrets path (`gpt-5.5`,

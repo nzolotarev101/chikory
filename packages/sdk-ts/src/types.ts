@@ -327,6 +327,7 @@ export type JournalEntryKind =
   | "compaction"
   | "pacing"
   | "terminal"
+  | "seam"
   // P2 (WP-219, ADR-005) — chain-scope kinds (shared JIF; emitted to the
   // chain store, not a per-run journal).
   | "plan"

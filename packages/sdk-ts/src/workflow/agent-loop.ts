@@ -101,6 +101,7 @@ export async function agentLoop(spec: TaskSpec): Promise<RunStatus> {
   let judgeIndex = 0;
   let injectionIndex = 0;
   let budgetEventIndex = 0;
+  let seamEventIndex = 0;
   let escalationIndex = 0;
   let consecutiveFailures = 0;
   let parkInjected = false;
@@ -320,6 +321,13 @@ export async function agentLoop(spec: TaskSpec): Promise<RunStatus> {
         runId,
         path: spec.debug.seedBadDiff.path,
         content: spec.debug.seedBadDiff.content,
+      });
+      await activities.recordSeamEvent({
+        runId,
+        seamEventIndex: seamEventIndex++,
+        atStep: stepIndex,
+        path: spec.debug.seedBadDiff.path,
+        byteCount: spec.debug.seedBadDiff.content.length,
       });
     }
 

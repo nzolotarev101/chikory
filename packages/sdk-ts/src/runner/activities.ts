@@ -755,6 +755,38 @@ export function createRunnerActivities(deps: RunnerActivityDeps) {
     },
 
     /**
+     * Seam ledger events (WP-245, F-47): durable, replay-safe telemetry that
+     * the WP-244 bad-diff judge-catch seam fired.
+     */
+    async recordSeamEvent(input: {
+      runId: string;
+      seamEventIndex: number;
+      atStep: number;
+      path: string;
+      byteCount: number;
+    }): Promise<void> {
+      const journal = openJournal(deps, input.runId);
+      try {
+        journal.appendOnce(
+          { field: "seamEventIndex", value: input.seamEventIndex },
+          {
+            kind: "seam",
+            payload: {
+              seamEventIndex: input.seamEventIndex,
+              atStep: input.atStep,
+              path: input.path,
+              byteCount: input.byteCount,
+            },
+            costDeltaUsd: 0,
+            artifactRefs: [],
+          },
+        );
+      } finally {
+        journal.close();
+      }
+    },
+
+    /**
      * Budget ledger events (WP-124, CG-2): `halt` when the pre-step gate
      * trips, `top_up` when `chikory resume --add-budget` adds funds. The
      * journal makes spend governance auditable (exit-gate #4).

@@ -167,6 +167,7 @@ export function renderTrace(run: RunRow, entries: JournalEntry[], totals: RunTot
 
   const injections = entries.filter((e) => e.kind === "injection").length;
   const checkpoints = entries.filter((e) => e.kind === "checkpoint").length;
+  const seams = entries.filter((e) => e.kind === "seam").length;
   const issuesFound = entries.reduce((count, entry) => {
     if (entry.kind !== "judge") return count;
     const { form } = entry.payload as JudgePayload;
@@ -199,7 +200,8 @@ export function renderTrace(run: RunRow, entries: JournalEntry[], totals: RunTot
     totals.judgePasses > 0
       ? ` · feedback frequency 1/${Math.max(1, Math.round(totals.steps / totals.judgePasses))} steps`
       : "";
-  lines.push(`        injections ${injections} · checkpoints ${checkpoints}${feedback}`);
+  const seamSummary = seams > 0 ? ` · seams fired ${seams}` : "";
+  lines.push(`        injections ${injections} · checkpoints ${checkpoints}${seamSummary}${feedback}`);
   lines.push(
     `        issues found ${issuesFound} · changes made ${changesMade} ` +
       `(issues:changes ${issuesFound}:${changesMade})`,

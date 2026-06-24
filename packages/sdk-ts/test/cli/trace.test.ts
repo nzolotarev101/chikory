@@ -216,6 +216,22 @@ describe("renderTrace (WP-142)", () => {
     expect(text).toContain("failed: judge HALT: gave up (last checkpoint run-x@4)");
   });
 
+  test("reports seam fire count only when seam entries exist", () => {
+    const entriesWithSeam: JournalEntry[] = [
+      ...entries,
+      entry(9, "seam", {
+        seamEventIndex: 0,
+        atStep: 0,
+        path: "step-1.txt",
+        byteCount: 18,
+      }),
+    ];
+    const entriesNoSeam = entries;
+
+    expect(renderTrace(run, entriesWithSeam, totals)).toContain("seams fired 1");
+    expect(renderTrace(run, entriesNoSeam, totals)).not.toContain("seams fired");
+  });
+
   test("reports issues found and changes made", () => {
     const changedStep = step(0, 0, "changed files");
     const probeStep = step(1, 1, "checked state");
