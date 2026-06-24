@@ -1,0 +1,168 @@
+# Dogfood-050: WP-245 — seam telemetry. Make the bad-diff judge-catch seam JOURNAL
+# a durable `seam` entry so `chikory trace` stops reading `injections 0` on the most
+# important catch. Launch with `chikory run` (single run, NOT a chain).
+#
+# WHY THIS EXISTS (2026-06-23): dogfood-046/048 PROVED the Agent-as-a-Judge
+# true-positive catch (per-run + chain-level). But the WP-244 `debug.seedBadDiff` seam
+# (`workflow/agent-loop.ts:317-322`) fires with ZERO journaled telemetry — it flips an
+# in-memory `badDiffInjected` flag and writes the bad file, but appends nothing to the
+# journal. So `chikory trace` shows `injections 0` (that counter, `cli/trace.ts:202`,
+# is for operator-guidance prompt injections, an UNRELATED mechanism) and the seeded
+# catch is invisible: proving dogfood-046/048 were seeded deterministic catches (not a
+# natural in-progress→fix two-step) required hand byte-diffing three artifact blobs
+# (F-47 → WP-245, the top observability debt after dogfood-049 landed WP-247's partial).
+#
+# THE FIX HAS A CLEAN PRECEDENT: the WP-243 park seam's `recordBudgetEvent`
+# (`runner/activities.ts:763`) journals a `cause:"debug"` budget event the same way a
+# real park does — idempotent via `journal.appendOnce` keyed on `budgetEventIndex`,
+# replay-safe (rides the frozen workflow input). This dogfood gives the bad-diff seam
+# the identical treatment: a `recordSeamEvent` activity + an additive `"seam"`
+# `JournalEntryKind` + the agent-loop wire + the `chikory trace` surfacing.
+#
+# WHY IT'S A FAIR FAILURE SURFACE (DOGFOODING §1.1 — NOT a 1-file port):
+#   * Cross-file vertical (types + activity + workflow + renderer + 2 tests) an
+#     executor can plausibly get wrong: the `appendOnce` idempotency KEY (must dedupe
+#     on `seamEventIndex` so a Temporal replay never double-journals — the
+#     `recordBudgetEvent` invariant); the payload must carry the content BYTE COUNT,
+#     never the content (CM-3: payloads >8KB must be artifact-ref'd, and the bad diff
+#     is arbitrary); the renderer line must stay BYTE-IDENTICAL on the no-seam path
+#     (additive, like WP-218 kept the USD budget path identical); the agent-loop call
+#     must sit inside the existing `if (!badDiffInjected && …)` guard so it fires once.
+#   * F-49 discipline (dogfood-047/048): the AC `grep`s the mandated assertions AND the
+#     emit-wire literals verbatim in the SOURCE (`agent-loop.ts`/`activities.ts`), so
+#     the executor cannot land a renderer-only scaffold that renders a `seam` kind no
+#     real run ever emits — the seam MUST actually journal.
+#
+# This is a real open §6 product WP (WP-245, the judge-catch observability pillar), NOT
+# invented disposable scaffolding — the seam it instruments already fires in real runs
+# (dogfood-046/048). Gate verdicts recorded in the review:
+#   * §1.1 Failure-surface: ✅ (2–6 steps, cross-file, thesis-pillar observability,
+#     real replay-safety bug surface).
+#   * §1.2 Product-progress: ✅ (landed diff advances WP-245 feature code on real
+#     runtime/trace paths — types/activity/workflow/renderer — not throwaway utility).
+#   * §1.3 Mission-critical: ✅ PROCEED (the explicitly-named top-next WP after
+#     dogfood-049; nothing more thesis-critical is unblocked — WP-247's structural
+#     guard needs a frozen-launcher edit, WP-228 needs hand-wiring).
+#
+# Zero-secrets launch (no API keys on this machine — CLI-OAuth judge via the shim;
+# NO seam env needed — this dogfood INSTRUMENTS the seam, it does not arm it):
+#   devbox shell
+#   bash scripts/dogfood.sh examples/dogfood/dogfood-050.yaml
+# (Manual path: start the proxy `node scripts/cli-judge-proxy.mjs 8787 agy &`, set
+#  `OPENAI_COMPAT_BASE_URL=http://127.0.0.1:8787`, then
+#  `pnpm chikory run examples/dogfood/dogfood-050.yaml --watch`.)
+#
+# Pre-launch discipline:
+#   * COMMIT EVERYTHING first — the workspace clones HEAD (F-30: launch ONCE).
+#   * `test/runner/seam-journal.test.ts` MUST NOT already exist on HEAD (confirmed
+#     absent 2026-06-23) — else an empty diff for that file (F-45).
+#   * `"seam"` MUST NOT already be in the `JournalEntryKind` union and
+#     `recordSeamEvent` MUST NOT already exist (confirmed absent 2026-06-23).
+#   * Run Devbox commands sequentially (F-22). The AC toolchain is Temporal-FREE
+#     (two pure/unit test files + tsc + eslint), timed ~25 s, well under the 120 s
+#     judge cap (the heavy Temporal seam path is re-proven by the existing
+#     `verdict-gating.test.ts` "seedBadDiff ARMED" test on the operator's full run).
+name: dogfood-050-wp245-seam-telemetry
+goal: >
+  Make the WP-244 bad-diff judge-catch seam emit DURABLE telemetry so `chikory trace`
+  can show it fired (plan.md WP-245; F-47). When the `debug.seedBadDiff` seam fires in
+  the agent loop, journal a replay-safe `seam` entry, and surface a `seams fired N`
+  count in the `chikory trace` totals. Mirror the WP-243 park seam's journaled
+  `recordBudgetEvent` precedent exactly. Strict TypeScript, ESM `.js` relative imports,
+  named exports only, no default exports, no new dependencies, no contract/schema
+  change beyond the one additive union member named below.
+
+  Make these changes in packages/sdk-ts:
+
+  1. types.ts — add a new member `"seam"` to the `JournalEntryKind` union
+     (types.ts:320), in the per-run group next to `"terminal"`. Additive only; change
+     nothing else in the union.
+
+  2. src/runner/activities.ts — add a `recordSeamEvent` activity on the object returned
+     by `createRunnerActivities`, modeled byte-for-byte on the existing
+     `recordBudgetEvent` (activities.ts:763): open the per-run journal via the existing
+     `openJournal(deps, input.runId)`, `journal.appendOnce` keyed on
+     `{ field: "seamEventIndex", value: input.seamEventIndex }` with
+     `{ kind: "seam", payload: { seamEventIndex, atStep, path, byteCount }, costDeltaUsd: 0, artifactRefs: [] }`,
+     then `journal.close()` in a `finally`. Signature:
+       recordSeamEvent(input: { runId: string; seamEventIndex: number; atStep: number; path: string; byteCount: number }): Promise<void>
+     The payload carries the bad-diff content's BYTE COUNT (number), NEVER the content
+     itself (CM-3 keeps payloads small). `appendOnce` keyed on `seamEventIndex` makes
+     it idempotent under Temporal replay — the same invariant `recordBudgetEvent` has.
+     Add a short JSDoc citing WP-245 / F-47, mirroring the `recordBudgetEvent` doc.
+
+  3. src/workflow/agent-loop.ts — add `let seamEventIndex = 0;` next to the existing
+     `let budgetEventIndex = 0;` / `let badDiffInjected = false;` counters (~line 103).
+     INSIDE the existing seam-fire guard
+     `if (!badDiffInjected && spec.debug?.seedBadDiff?.atStep === stepIndex) { … }`
+     (agent-loop.ts:317-322), right AFTER the `await activities.seedBadDiff({ … })`
+     call, add:
+       await activities.recordSeamEvent({
+         runId,
+         seamEventIndex: seamEventIndex++,
+         atStep: stepIndex,
+         path: spec.debug.seedBadDiff.path,
+         byteCount: spec.debug.seedBadDiff.content.length,
+       });
+     Keep it inside the guard so it fires exactly once, alongside the existing seam
+     write. Do NOT change the seam-fire condition or the `seedBadDiff` activity.
+
+  4. src/cli/trace.ts — in `renderTrace` (trace.ts:130), compute
+     `const seams = entries.filter((e) => e.kind === "seam").length;` and append
+     ` · seams fired ${seams}` to the existing `injections … · checkpoints …` totals
+     sub-line (the `lines.push(\`        injections ${injections} · checkpoints ${checkpoints}${feedback}\`)`
+     line, trace.ts:202) ONLY when `seams > 0`, so the no-seam path stays
+     byte-identical (the WP-218 additive-telemetry convention). Do not touch any other
+     totals line.
+
+  5. test/runner/seam-journal.test.ts — a NEW Temporal-FREE Vitest file (ESM `.js`
+     relative imports from `../../src/index.js`) that proves the journal-write contract
+     directly via the exported `Journal` class (the budget-gate.test.ts pattern):
+     construct a `Journal` (a `new Journal(":memory:")` or a tmp `journalPath`), call
+     `createRun(runId, spec)`, then `appendOnce` a `seam` entry TWICE with the SAME
+     `{ field: "seamEventIndex", value: 0 }` key, and assert idempotency verbatim:
+       expect(journal.entries("seam")).toHaveLength(1)
+     Also assert the single entry's payload `byteCount` round-trips. Keep it
+     Temporal-free (no `inject("temporalAddress")`, no worker) so it runs in
+     milliseconds.
+
+  6. test/cli/trace.test.ts — EXTEND the existing renderer test file (do not remove any
+     existing case). Mirroring its existing synthetic-`JournalEntry[]` + `renderTrace`
+     calls, add: (a) a journal that includes a `seam` entry renders the totals with
+     `seams fired 1` — assert verbatim:
+       expect(renderTrace(run, entries, totals)).toContain("seams fired 1")
+     and (b) a journal with NO `seam` entry does NOT render the marker — assert:
+       expect(renderTrace(run, entriesNoSeam, totals)).not.toContain("seams fired")
+
+  Run project commands sequentially inside the existing Devbox environment. If a
+  verification step reports a failing test, READ the failure, fix the IMPLEMENTATION so
+  every assertion passes, and continue — do NOT weaken, rephrase, or remove any
+  mandated assertion or emit-wire literal (a grep enforces them).
+repos:
+  - url: /Users/nikitazolotarev/repos/chikory
+    writable: true
+acceptance_criteria:
+  - id: AC-1
+    description: >
+      The bad-diff seam emits a durable `seam` journal entry (idempotent under replay,
+      payload carries the content byte count not the content) and `chikory trace`
+      surfaces a `seams fired N` count, additive on the no-seam path. The agent-loop +
+      activity emit-wire is present in source (grep-pinned, dogfood-047 F-49), the
+      journal-write idempotency + renderer assertions pass, and the SDK stays type- and
+      lint-clean.
+    check: cd packages/sdk-ts && grep -Eq 'seams fired 1' test/cli/trace.test.ts && grep -Eq 'toHaveLength\(1\)' test/runner/seam-journal.test.ts && grep -Eq 'recordSeamEvent' src/workflow/agent-loop.ts && grep -Eq 'recordSeamEvent' src/runner/activities.ts && grep -Eq '"seam"' src/runner/activities.ts && pnpm exec vitest run test/cli/trace.test.ts test/runner/seam-journal.test.ts && pnpm exec tsc --noEmit && pnpm exec eslint .
+budget_usd: 5
+max_steps: 8
+executor:
+  adapter: codex
+  family: openai
+judge:
+  family: openai-compat
+  cadence: 1
+  max_cost_share: 0.5
+routing:
+  stages:
+    plan: { provider: openai-compat, model: gpt-5.5 }
+    code: { provider: openai-compat, model: gpt-5.5 }
+    review: { provider: openai-compat, model: gpt-5.5 }
+    judge: { provider: openai-compat, model: gemini-3.1-pro-preview }
