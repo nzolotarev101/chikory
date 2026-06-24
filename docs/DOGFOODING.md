@@ -33,13 +33,24 @@ guard are still owed (WP-247 → 🟡). New **F-51 → WP-249** (harvest-commit 
 that delivery commit bundled an unrelated operator `land.test.ts` edit and cites no
 run-id, so `dogfood-verify §6` couldn't resolve the landed commit.
 
-**Latest proven path:** dogfood-050 (`docs/reports/dogfood-050.md`) made the
+**Latest proven path:** dogfood-051 (`docs/reports/dogfood-051.md`) gave `chikory trace`
+its **first live read on context-window pressure** — WP-207 pacing telemetry: the pure
+`decideContextWindowPacing` decision is now wired into the live agent loop, which journals
+a durable replay-safe `pacing` entry every step from REAL per-step token usage
+(`recordPacingEvent`, idempotent `appendOnce` keyed on `pacingEventIndex`) and surfaces
+`pacing events N` + a per-entry `% window` line in the trace — the first observability on
+the token-economics problem every report has flagged for 50 runs (this run itself read
+**2178k input tokens** for a 5-file diff, the series high). One-shot SUCCESS, 454 passed
+re-verified incl. the real-Temporal ARMED/crash-recovery paths (`run-663a1baa-…`, runtime
+`54a2c41`). Residual **F-53** (folds into WP-207): the telemetry is not yet OBSERVED live —
+the run's own trace predates its own wiring; the next dogfood run is automatically the
+first live observation. The seam saga before it is settled (dogfood-046/048/050).
+**Earlier:** dogfood-050 (`docs/reports/dogfood-050.md`) made the
 judge-catch seam **self-documenting** — WP-245 seam telemetry: the `debug.seedBadDiff`
 seam now journals a durable replay-safe `seam` entry and `chikory trace` prints
 `seams fired N`, so "was the catch a *seeded* deterministic regression?" is answerable
 from telemetry instead of three-blob byte-archaeology (`run-55eb5422-…`, runtime
-`a4e9665`). The seam saga is now settled (dogfood-046/048/050) and the loop pivots to
-the context-rot pillar (WP-207 pacing telemetry, dogfood-051). dogfood-048
+`a4e9665`). dogfood-048
 (`docs/reports/dogfood-048.md`) is the first
 **chain-level Agent-as-a-Judge true-positive catch** — the §1.1 KPI sealed inside a
 dependent node of a durable chain (`chain-b7665e97-…`, delivery `2c516d5`; see the

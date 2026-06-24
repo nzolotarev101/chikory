@@ -787,6 +787,42 @@ export function createRunnerActivities(deps: RunnerActivityDeps) {
     },
 
     /**
+     * Context-window pacing ledger events (WP-207, FA-3 / SE-2): durable,
+     * replay-safe telemetry for live context pressure decisions.
+     */
+    async recordPacingEvent(input: {
+      runId: string;
+      pacingEventIndex: number;
+      atStep: number;
+      action: "continue" | "compact" | "park";
+      projectedTokens: number;
+      remainingTokens: number;
+      utilization: number;
+    }): Promise<void> {
+      const journal = openJournal(deps, input.runId);
+      try {
+        journal.appendOnce(
+          { field: "pacingEventIndex", value: input.pacingEventIndex },
+          {
+            kind: "pacing",
+            payload: {
+              pacingEventIndex: input.pacingEventIndex,
+              atStep: input.atStep,
+              action: input.action,
+              projectedTokens: input.projectedTokens,
+              remainingTokens: input.remainingTokens,
+              utilization: input.utilization,
+            },
+            costDeltaUsd: 0,
+            artifactRefs: [],
+          },
+        );
+      } finally {
+        journal.close();
+      }
+    },
+
+    /**
      * Budget ledger events (WP-124, CG-2): `halt` when the pre-step gate
      * trips, `top_up` when `chikory resume --add-budget` adds funds. The
      * journal makes spend governance auditable (exit-gate #4).

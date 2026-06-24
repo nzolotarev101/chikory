@@ -1,0 +1,166 @@
+# Dogfood-052: WP-207 — pacing SUMMARY. dogfood-051 wired the pacing decision into the
+# live loop and journals a `pacing` entry per step, but `chikory trace` only prints a raw
+# `pacing events N` COUNT — and N is just the step count, so it is near-useless: it does
+# NOT say how full the context window actually got, nor whether the run ever crossed the
+# compaction threshold. This dogfood makes the journaled pacing payload ACTIONABLE: a pure
+# `summarizePacing(entries)` reducer over the `pacing` journal entries → peak window
+# utilization + how many steps recommended `compact` / `park`, surfaced in the SAME trace
+# totals sub-line. The first time the trace answers "did this run get close to the window
+# ceiling?" — the actual context-rot signal, not a bare count.
+#
+# WHY THIS EXISTS (2026-06-23): dogfood-051 (WP-207, run-663a1baa, `docs/reports/dogfood-051.md`)
+# landed the journaling+wiring half — every step now journals a `pacing` entry carrying
+# `{ action, projectedTokens, remainingTokens, utilization }`, and `renderTrace` prints
+# ` · pacing events N`. But that count is the WEAK half of the deliverable: the RICH per-step
+# payload (utilization, action) is journaled yet NOT summarized — the trace shows the COUNT,
+# never the PEAK pressure or whether any step recommended compaction. That run itself read
+# **2178k input tokens** (series high) and the operator still cannot see, from the trace, how
+# close to the 200k window it ran. This slice closes that: a pure reducer + an additive
+# renderer segment, the dogfood-026/WP-209 trace-renderer pattern + the dogfood-028/029
+# new-pure-module-with-barrel pattern.
+#
+# WHY THE *ACT* HALF IS NOT THIS RUN (gate honesty): WP-207's remaining ACT half — use the
+# pacing decision to TUNE compaction/checkpoint CADENCE — depends on the live
+# compaction-EXECUTION trigger (WP-203 S2 runtime: fold `toDigest` behind a Memory Pointer,
+# call the digest LLM, journal `CompactionResult`), which "stays BLOCKED on the WP-202 store"
+# and is a non-pure LLM-call hand-design (TASK-PROTOCOL §4) — operator-landed, NOT a dogfood
+# headline. Forcing a checkpoint on high pressure WITHOUT compaction execution adds dead
+# behavior (a checkpoint alone does not reduce a rotted window), so it is NOT done here.
+# This run therefore completes the UNBLOCKED WP-207 observability half rather than half-wiring
+# the blocked ACT half. **Gate verdicts (recorded in the dogfood-051 review):**
+#   * §1.1 Failure-surface: ✅ (cross-file: a NEW pure reducer + barrel re-export + the
+#     renderer wire + 2 tests; thesis-pillar context-rot observability; genuinely failable on
+#     the byte-identical no-pacing path, peak = MAX utilization not the projected-token SUM,
+#     the action counts must EXCLUDE `continue`, and the reducer must ignore non-`pacing`
+#     kinds — not a 1-file deterministic port).
+#   * §1.2 Product-progress: ✅ (landed diff advances WP-207 feature code on the real
+#     `chikory trace` path — makes dogfood-051's journaled payload actionable; NOT scaffold).
+#   * §1.3 Mission-critical: 🟡 ALLOW (fallback) — the meaty WP-207 ACT half + every other
+#     "act" half (WP-203 compaction runtime, WP-205 branch CLI, WP-206 HITL signals, WP-219
+#     `decompose`) are §4-walled (LLM-call / frozen-launcher / git-worktree), so no
+#     thesis-stressing slice on a real WP is cleanly unblocked; this is the best UNBLOCKED
+#     real-WP slice (real trace code, not invented disposable scaffolding). Unblock-priority
+#     for the meaty half: WP-203 S2 runtime compaction trigger (operator §4 hand-design).
+#
+# This is a real open §6 product WP (WP-207, context-rot/pacing — FA-3/SE-2), advancing the
+# real trace renderer, NOT invented disposable scaffolding.
+#
+# Zero-secrets launch (no API keys on this machine — CLI-OAuth judge via the shim):
+#   devbox shell
+#   bash scripts/dogfood.sh examples/dogfood/dogfood-052.yaml
+# (Manual path: start the proxy `node scripts/cli-judge-proxy.mjs 8787 agy &`, set
+#  `OPENAI_COMPAT_BASE_URL=http://127.0.0.1:8787`, then
+#  `pnpm chikory run examples/dogfood/dogfood-052.yaml --watch`.)
+#
+# Pre-launch discipline:
+#   * COMMIT EVERYTHING first — the workspace clones HEAD (F-30: launch ONCE). **CRITICAL:
+#     this slice BUILDS ON dogfood-051, whose delivery is currently UNCOMMITTED on the working
+#     tree.** dogfood-051's `pacing` wiring + the `pacing events N` renderer + the trace tests
+#     MUST be committed to HEAD before launching, or they clone into the workspace as
+#     uncommitted noise and the `summarizePacing` wire has nothing to extend (the
+#     `pacing events` segment it appends to lives in dogfood-051's edit). Commit dogfood-051
+#     in its own commit with a `Ref: run-id:` trailer (F-51/WP-249) FIRST.
+#   * `src/runner/pacing-summary.ts` and `test/runner/pacing-summary.test.ts` MUST NOT already
+#     exist on HEAD (F-45). `summarizePacing`/`PacingSummary` must not already exist.
+#   * Run Devbox commands sequentially (F-22). The AC toolchain is Temporal-FREE (two
+#     pure/unit test files + tsc + eslint), timed ~25 s, well under the 120 s judge cap.
+name: dogfood-052-wp207-pacing-summary
+goal: >
+  Make the journaled WP-207 pacing payload ACTIONABLE in `chikory trace` (plan.md WP-207;
+  REQUIREMENTS.md FA-3 / SE-2). dogfood-051 journals a `pacing` entry per step and the trace
+  prints a bare ` · pacing events N` count; this slice adds a pure `summarizePacing(entries)`
+  reducer that computes the run's PEAK window utilization and how many steps recommended
+  `compact` / `park`, and extends the trace totals sub-line to surface it — additive on the
+  no-pacing path (byte-identical when there are no `pacing` entries, the WP-218/WP-245
+  convention). Mirror the dogfood-028/029 new-pure-module-with-barrel precedent and the
+  dogfood-026/051 additive-renderer precedent exactly. Strict TypeScript, ESM `.js` relative
+  imports, named exports only, no default exports, no new dependencies, no contract/schema
+  change (a LOCAL `PacingSummary` result type + a type-only `JournalEntry` import — do NOT
+  add or modify any `types.ts` union member or schema).
+
+  Make these changes in packages/sdk-ts:
+
+  1. src/runner/pacing-summary.ts — a NEW pure module (the analog of
+     `runner/memory-pointer.ts`'s `formatPointerReference` / `cli/precheck.ts`'s
+     `evaluateBaselinePrecheck`): export a local result interface
+       export interface PacingSummary { peakUtilization: number; compactRecommended: number; parkRecommended: number; }
+     and a pure function
+       export function summarizePacing(entries: readonly JournalEntry[]): PacingSummary
+     that filters `entries` to `e.kind === "pacing"`, casts each payload as
+     `{ action: string; utilization: number }`, and returns:
+       * `peakUtilization` = the MAX `utilization` across the pacing entries (NOT the sum, NOT
+         the projectedTokens), or `0` when there are no pacing entries;
+       * `compactRecommended` = the count of pacing entries whose `action === "compact"`;
+       * `parkRecommended` = the count of pacing entries whose `action === "park"`.
+     Import `JournalEntry` TYPE-ONLY from `"../types.js"` (`import type { JournalEntry } from "../types.js";`).
+     Non-`pacing` kinds are ignored. Add a short JSDoc citing WP-207 / FA-3 / SE-2. Pure: no
+     I/O, no journal/Temporal, no mutation of the input.
+
+  2. src/index.ts — add a single barrel re-export next to the existing
+     `./runner/pacing.js` / `./runner/memory-pointer.js` re-exports (~line 115-121):
+       export { summarizePacing, type PacingSummary } from "./runner/pacing-summary.js";
+
+  3. src/cli/trace.ts — in `renderTrace`, where the existing
+     `const pacingSummary = pacingEvents > 0 ? \` · pacing events ${pacingEvents}\` : "";`
+     line is built (it was added by dogfood-051, ~line 205), call the new reducer
+     `const pacing = summarizePacing(entries);` and EXTEND the non-empty branch so the segment
+     reads (keep `pacing events N`, append the peak + recommendation counts):
+       ` · pacing events ${pacingEvents} · peak window ${Math.round(pacing.peakUtilization * 100)}% (compact ${pacing.compactRecommended} · park ${pacing.parkRecommended})`
+     The EMPTY (no-pacing) branch MUST stay `""` so the totals line is byte-identical on the
+     no-pacing path. Import `summarizePacing` from `"../runner/pacing-summary.js"` at the top
+     of the file. Do NOT touch any other totals line or the `formatEntryLine` switch.
+
+  4. test/runner/pacing-summary.test.ts — a NEW Temporal-FREE Vitest file (ESM `.js` relative
+     imports from `../../src/index.js`) that proves the reducer over synthetic `JournalEntry[]`
+     (the `trace.test.ts` `entry(...)` helper style, or hand-built minimal entries). Assert:
+       (a) over a journal with three `pacing` entries at utilization 0.4 / 0.9 / 0.7 with
+           actions `continue` / `compact` / `park`, the summary is exactly
+           `{ peakUtilization: 0.9, compactRecommended: 1, parkRecommended: 1 }` — assert
+           `expect(summarizePacing(entries).peakUtilization).toBe(0.9)` verbatim plus the two
+           counts;
+       (b) a journal with NO pacing entries returns `peakUtilization: 0` and both counts `0`;
+       (c) non-`pacing` kinds (a `step` or `checkpoint` entry) are ignored — adding one does
+           not change the summary.
+
+  5. test/cli/trace.test.ts — EXTEND the existing renderer test file (do not remove any case;
+     dogfood-051's `pacing events 1` case stays). Mirroring its synthetic-`JournalEntry[]` +
+     `renderTrace` calls, add a test: a journal whose `pacing` entry has `utilization: 0.9` and
+     `action: "compact"` renders the new segment — assert verbatim
+       expect(renderTrace(run, entriesWithPacing, totals)).toContain("peak window 90% (compact 1 · park 0)")
+     and that a journal with NO `pacing` entry does NOT render the marker — assert
+       expect(renderTrace(run, entriesNoPacing, totals)).not.toContain("peak window")
+
+  Run project commands sequentially inside the existing Devbox environment. If a verification
+  step reports a failing test, READ the failure, fix the IMPLEMENTATION so every assertion
+  passes, and continue — do NOT weaken, rephrase, or remove any mandated assertion or wire
+  literal (a grep enforces them).
+repos:
+  - url: /Users/nikitazolotarev/repos/chikory
+    writable: true
+acceptance_criteria:
+  - id: AC-1
+    description: >
+      A pure `summarizePacing(entries)` reducer (new `src/runner/pacing-summary.ts`,
+      re-exported from the barrel) computes the run's peak window utilization + the
+      compact/park recommendation counts over the `pacing` journal entries (max utilization,
+      action counts excluding `continue`, non-`pacing` kinds ignored, empty → 0), and
+      `chikory trace` surfaces `peak window X% (compact C · park P)` additively on the
+      no-pacing path. The reducer is grep-pinned in BOTH its definition and the renderer wire
+      (dogfood-047 F-49), the reducer-unit + renderer assertions pass, and the SDK stays type-
+      and lint-clean.
+    check: cd packages/sdk-ts && grep -Eq 'peak window' test/cli/trace.test.ts && grep -Eq 'peakUtilization' test/runner/pacing-summary.test.ts && grep -Eq 'summarizePacing' src/cli/trace.ts && grep -Eq 'export function summarizePacing' src/runner/pacing-summary.ts && grep -Eq 'summarizePacing' src/index.ts && pnpm exec vitest run test/cli/trace.test.ts test/runner/pacing-summary.test.ts && pnpm exec tsc --noEmit && pnpm exec eslint .
+budget_usd: 5
+max_steps: 8
+executor:
+  adapter: codex
+  family: openai
+judge:
+  family: openai-compat
+  cadence: 1
+  max_cost_share: 0.5
+routing:
+  stages:
+    plan: { provider: openai-compat, model: gpt-5.5 }
+    code: { provider: openai-compat, model: gpt-5.5 }
+    review: { provider: openai-compat, model: gpt-5.5 }
+    judge: { provider: openai-compat, model: gemini-3.1-pro-preview }

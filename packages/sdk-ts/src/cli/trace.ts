@@ -168,6 +168,7 @@ export function renderTrace(run: RunRow, entries: JournalEntry[], totals: RunTot
   const injections = entries.filter((e) => e.kind === "injection").length;
   const checkpoints = entries.filter((e) => e.kind === "checkpoint").length;
   const seams = entries.filter((e) => e.kind === "seam").length;
+  const pacingEvents = entries.filter((e) => e.kind === "pacing").length;
   const issuesFound = entries.reduce((count, entry) => {
     if (entry.kind !== "judge") return count;
     const { form } = entry.payload as JudgePayload;
@@ -201,7 +202,10 @@ export function renderTrace(run: RunRow, entries: JournalEntry[], totals: RunTot
       ? ` · feedback frequency 1/${Math.max(1, Math.round(totals.steps / totals.judgePasses))} steps`
       : "";
   const seamSummary = seams > 0 ? ` · seams fired ${seams}` : "";
-  lines.push(`        injections ${injections} · checkpoints ${checkpoints}${seamSummary}${feedback}`);
+  const pacingSummary = pacingEvents > 0 ? ` · pacing events ${pacingEvents}` : "";
+  lines.push(
+    `        injections ${injections} · checkpoints ${checkpoints}${seamSummary}${pacingSummary}${feedback}`,
+  );
   lines.push(
     `        issues found ${issuesFound} · changes made ${changesMade} ` +
       `(issues:changes ${issuesFound}:${changesMade})`,
@@ -355,6 +359,17 @@ export function formatEntryLine(entry: JournalEntry): string {
       return (
         `[${ts}] compaction ${formatTokens(payload.tokensBefore)}→${formatTokens(payload.tokensAfter)} tokens` +
         (payload.digestRef ? ` (digest ${payload.digestRef.id.slice(0, 12)})` : " (no digest)")
+      );
+    }
+    case "pacing": {
+      const payload = entry.payload as {
+        action: string;
+        utilization: number;
+        projectedTokens: number;
+      };
+      return (
+        `[${ts}] pacing ${payload.action} — ${Math.round(payload.utilization * 100)}% window ` +
+        `(${formatTokens(payload.projectedTokens)} proj)`
       );
     }
     case "terminal": {

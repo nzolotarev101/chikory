@@ -232,6 +232,24 @@ describe("renderTrace (WP-142)", () => {
     expect(renderTrace(run, entriesNoSeam, totals)).not.toContain("seams fired");
   });
 
+  test("reports pacing event count only when pacing entries exist", () => {
+    const entriesWithPacing: JournalEntry[] = [
+      ...entries,
+      entry(9, "pacing", {
+        pacingEventIndex: 0,
+        atStep: 0,
+        action: "compact",
+        projectedTokens: 180_000,
+        remainingTokens: 20_000,
+        utilization: 0.9,
+      }),
+    ];
+    const entriesNoPacing = entries;
+
+    expect(renderTrace(run, entriesWithPacing, totals)).toContain("pacing events 1");
+    expect(renderTrace(run, entriesNoPacing, totals)).not.toContain("pacing events");
+  });
+
   test("reports issues found and changes made", () => {
     const changedStep = step(0, 0, "changed files");
     const probeStep = step(1, 1, "checked state");
@@ -382,5 +400,20 @@ describe("formatEntryLine (--watch)", () => {
 
     expect(line).toContain("(no digest)");
     expect(line).not.toContain("digest abc");
+  });
+
+  test("pacing renders action, utilization, and projected tokens", () => {
+    const line = formatEntryLine(
+      entry(9, "pacing", {
+        pacingEventIndex: 0,
+        atStep: 0,
+        action: "compact",
+        projectedTokens: 180_000,
+        remainingTokens: 20_000,
+        utilization: 0.9,
+      }),
+    );
+
+    expect(line).toContain("pacing compact — 90% window (180k proj)");
   });
 });

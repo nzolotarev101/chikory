@@ -31,6 +31,10 @@ import {
   estimateNextStepTokens,
   tokenBudgetBreached,
 } from "../runner/budget.js";
+import {
+  decideContextWindowPacing,
+  type ContextWindowPacingPolicy,
+} from "../runner/pacing.js";
 import type {
   ArtifactRef,
   ChainNodeHandoff,
@@ -56,6 +60,8 @@ export const RECENT_STEPS_WINDOW = 5;
  * default — the `DEFAULT_STEP_LIMITS` precedent; a TaskSpec knob can come later.
  */
 export const DEFAULT_MEMORY_POLICY: MemoryPointerPolicy = { maxInlineBytes: 16384 };
+const DEFAULT_CONTEXT_WINDOW_TOKENS = 200_000;
+const DEFAULT_PACING_POLICY: ContextWindowPacingPolicy = { compactAtFraction: 0.8 };
 /** How many recent artifact pointers ride along in context (bound growth). */
 export const CARRIED_REFS_WINDOW = 6;
 
@@ -102,6 +108,7 @@ export async function agentLoop(spec: TaskSpec): Promise<RunStatus> {
   let injectionIndex = 0;
   let budgetEventIndex = 0;
   let seamEventIndex = 0;
+  let pacingEventIndex = 0;
   let escalationIndex = 0;
   let consecutiveFailures = 0;
   let parkInjected = false;
@@ -333,11 +340,29 @@ export async function agentLoop(spec: TaskSpec): Promise<RunStatus> {
 
     spentUsd += record.costUsd;
     stepCosts.push(record.costUsd);
+    stepIndex += 1;
     const recordTokens = record.tokens.input + record.tokens.output;
     spentTokens += recordTokens;
     stepTokens.push(recordTokens);
+    const pacing = decideContextWindowPacing(
+      {
+        currentInputTokens: spentTokens,
+        currentOutputTokens: 0,
+        estimatedNextStepTokens: recordTokens,
+        contextWindowTokens: DEFAULT_CONTEXT_WINDOW_TOKENS,
+      },
+      DEFAULT_PACING_POLICY,
+    );
+    await activities.recordPacingEvent({
+      runId,
+      pacingEventIndex: pacingEventIndex++,
+      atStep: stepIndex - 1,
+      action: pacing.action,
+      projectedTokens: pacing.projectedTokens,
+      remainingTokens: pacing.remainingTokens,
+      utilization: pacing.utilization,
+    });
     recentSummaries.push(record.summary);
-    stepIndex += 1;
     consecutiveFailures = record.status === "FAILED" ? consecutiveFailures + 1 : 0;
 
     // Memory Pointer interception (WP-202 / CM-3): the step's transcript and
