@@ -119,6 +119,7 @@ export {
   type ContextWindowPacingPolicy,
   type ContextWindowUsage,
 } from "./runner/pacing.js";
+export { summarizePacing, type PacingSummary } from "./runner/pacing-summary.js";
 export { DIGEST_SYSTEM_PROMPT, buildDigestMessages } from "./runner/compaction-prompt.js";
 export {
   Journal,

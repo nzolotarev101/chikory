@@ -632,6 +632,12 @@ export function createRunnerActivities(deps: RunnerActivityDeps) {
       runId: string;
       stepIndex: number;
       summaries: string[];
+      // WP-207 act half: when the live pacing decision is `compact`/`park`, fold
+      // history beyond the verbatim window NOW instead of waiting for the
+      // count-based trigger. The pressure path lowers the effective trigger to
+      // `keepLastN` — `planCompaction` is unchanged, it just receives a different
+      // policy. Optional so legacy callers default to the count cadence.
+      underPressure?: boolean;
     }): Promise<CompactionResult | undefined> {
       return withHeartbeat(async () => {
         const journal = openJournal(deps, input.runId);
@@ -639,7 +645,13 @@ export function createRunnerActivities(deps: RunnerActivityDeps) {
           const existing = journal.findByKey("compaction", "stepIndex", input.stepIndex);
           if (existing) return existing.payload as CompactionResult;
 
-          const plan = planCompaction(input.summaries, DEFAULT_COMPACTION_POLICY);
+          const policy: CompactionPolicy = input.underPressure
+            ? {
+                triggerAfterSteps: DEFAULT_COMPACTION_POLICY.keepLastN,
+                keepLastN: DEFAULT_COMPACTION_POLICY.keepLastN,
+              }
+            : DEFAULT_COMPACTION_POLICY;
+          const plan = planCompaction(input.summaries, policy);
           if (plan.toDigest.length === 0) return undefined;
 
           // Cost guard: only re-digest when the folded set actually grew since
@@ -692,7 +704,13 @@ export function createRunnerActivities(deps: RunnerActivityDeps) {
             { field: "stepIndex", value: input.stepIndex },
             {
               kind: "compaction",
-              payload: { ...compaction, foldedCount: plan.toDigest.length },
+              payload: {
+                ...compaction,
+                foldedCount: plan.toDigest.length,
+                // WP-207: which cadence fired this fold — `pacing` (token-window
+                // pressure) or `count` (the recall-tier reached triggerAfterSteps).
+                trigger: input.underPressure ? "pacing" : "count",
+              },
               costDeltaUsd: result.costUsd,
               tokens: result.tokens,
               artifactRefs: [digestRef],

@@ -112,6 +112,17 @@ export interface TaskSpec {
      * (same path+content), so it fires exactly once.
      */
     seedBadDiff?: { atStep: number; path: string; content: string };
+    /**
+     * WP-207 dogfood/test-only: override the context-window token budget the
+     * pacing decision (`decideContextWindowPacing`) reasons against, so a short
+     * run deterministically crosses the `compact`/`park` pressure threshold and
+     * the pressure-driven compaction cadence (WP-203 S2) is provable without a
+     * non-deterministic 200k-token accumulation (the `parkBeforeStep`/
+     * `seedBadDiff` analog). Off the happy path; armed host-side from
+     * `CHIKORY_CONTEXT_WINDOW_TOKENS` env, never read from env in the workflow
+     * (replay-safe — rides the frozen workflow input).
+     */
+    contextWindowTokens?: number;
   };
 }
 

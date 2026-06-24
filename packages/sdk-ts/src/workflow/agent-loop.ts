@@ -349,10 +349,19 @@ export async function agentLoop(spec: TaskSpec): Promise<RunStatus> {
         currentInputTokens: spentTokens,
         currentOutputTokens: 0,
         estimatedNextStepTokens: recordTokens,
-        contextWindowTokens: DEFAULT_CONTEXT_WINDOW_TOKENS,
+        // Default 200k window; a dogfood/test may shrink it via the frozen
+        // `debug.contextWindowTokens` seam to force a deterministic pressure
+        // decision (WP-207 act half — replay-safe, never read from env here).
+        contextWindowTokens: spec.debug?.contextWindowTokens ?? DEFAULT_CONTEXT_WINDOW_TOKENS,
       },
       DEFAULT_PACING_POLICY,
     );
+    // WP-207 act half / WP-203 S2: the pacing decision now DRIVES compaction
+    // cadence. Under context-window pressure (`compact` or `park`) the digest
+    // folds history beyond the verbatim window NOW, instead of waiting for the
+    // count-based trigger — the actionable use of the pressure signal dogfood-052
+    // surfaced (602% window, PARK recommended and previously unheeded).
+    const underPressure = pacing.action !== "continue";
     await activities.recordPacingEvent({
       runId,
       pacingEventIndex: pacingEventIndex++,
@@ -417,6 +426,7 @@ export async function agentLoop(spec: TaskSpec): Promise<RunStatus> {
       runId,
       stepIndex: stepIndex - 1,
       summaries: recentSummaries,
+      underPressure,
     });
     if (compaction?.digestRef) {
       // Carry only the latest digest pointer (drop a superseded one); the

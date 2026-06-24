@@ -250,6 +250,24 @@ describe("renderTrace (WP-142)", () => {
     expect(renderTrace(run, entriesNoPacing, totals)).not.toContain("pacing events");
   });
 
+  test("reports actionable pacing summary only when pacing entries exist", () => {
+    const entriesWithPacing: JournalEntry[] = [
+      ...entries,
+      entry(9, "pacing", {
+        pacingEventIndex: 0,
+        atStep: 0,
+        action: "compact",
+        projectedTokens: 180_000,
+        remainingTokens: 20_000,
+        utilization: 0.9,
+      }),
+    ];
+    const entriesNoPacing = entries;
+
+    expect(renderTrace(run, entriesWithPacing, totals)).toContain("peak window 90% (compact 1 · park 0)");
+    expect(renderTrace(run, entriesNoPacing, totals)).not.toContain("peak window");
+  });
+
   test("reports issues found and changes made", () => {
     const changedStep = step(0, 0, "changed files");
     const probeStep = step(1, 1, "checked state");
@@ -400,6 +418,18 @@ describe("formatEntryLine (--watch)", () => {
 
     expect(line).toContain("(no digest)");
     expect(line).not.toContain("digest abc");
+  });
+
+  test("compaction flags a pacing-pressure-triggered fold (WP-207)", () => {
+    const base: CompactionResult = { tokensBefore: 120_000, tokensAfter: 40_000 };
+    const pacingLine = formatEntryLine(entry(9, "compaction", { ...base, trigger: "pacing" }));
+    expect(pacingLine).toContain("(pacing)");
+
+    // Count-triggered and legacy (untagged) folds render without the marker.
+    expect(formatEntryLine(entry(9, "compaction", { ...base, trigger: "count" }))).not.toContain(
+      "(pacing)",
+    );
+    expect(formatEntryLine(entry(9, "compaction", base))).not.toContain("(pacing)");
   });
 
   test("pacing renders action, utilization, and projected tokens", () => {

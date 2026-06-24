@@ -8,6 +8,7 @@
  */
 import type { RunRow, RunTotals } from "../journal/journal.js";
 import type { JudgePayload, StepPayload } from "../runner/activities.js";
+import { summarizePacing } from "../runner/pacing-summary.js";
 import type {
   ArtifactRef,
   Checkpoint,
@@ -169,6 +170,7 @@ export function renderTrace(run: RunRow, entries: JournalEntry[], totals: RunTot
   const checkpoints = entries.filter((e) => e.kind === "checkpoint").length;
   const seams = entries.filter((e) => e.kind === "seam").length;
   const pacingEvents = entries.filter((e) => e.kind === "pacing").length;
+  const pacing = summarizePacing(entries);
   const issuesFound = entries.reduce((count, entry) => {
     if (entry.kind !== "judge") return count;
     const { form } = entry.payload as JudgePayload;
@@ -202,7 +204,10 @@ export function renderTrace(run: RunRow, entries: JournalEntry[], totals: RunTot
       ? ` · feedback frequency 1/${Math.max(1, Math.round(totals.steps / totals.judgePasses))} steps`
       : "";
   const seamSummary = seams > 0 ? ` · seams fired ${seams}` : "";
-  const pacingSummary = pacingEvents > 0 ? ` · pacing events ${pacingEvents}` : "";
+  const pacingSummary =
+    pacingEvents > 0
+      ? ` · pacing events ${pacingEvents} · peak window ${Math.round(pacing.peakUtilization * 100)}% (compact ${pacing.compactRecommended} · park ${pacing.parkRecommended})`
+      : "";
   lines.push(
     `        injections ${injections} · checkpoints ${checkpoints}${seamSummary}${pacingSummary}${feedback}`,
   );
@@ -355,10 +360,13 @@ export function formatEntryLine(entry: JournalEntry): string {
       return `[${ts}] injection: ${payload.text}`;
     }
     case "compaction": {
-      const payload = entry.payload as CompactionResult;
+      const payload = entry.payload as CompactionResult & { trigger?: "pacing" | "count" };
       return (
         `[${ts}] compaction ${formatTokens(payload.tokensBefore)}→${formatTokens(payload.tokensAfter)} tokens` +
-        (payload.digestRef ? ` (digest ${payload.digestRef.id.slice(0, 12)})` : " (no digest)")
+        (payload.digestRef ? ` (digest ${payload.digestRef.id.slice(0, 12)})` : " (no digest)") +
+        // WP-207: flag a fold the live pacing pressure triggered (vs the
+        // count-based cadence). Additive — count/legacy entries render unchanged.
+        (payload.trigger === "pacing" ? " (pacing)" : "")
       );
     }
     case "pacing": {

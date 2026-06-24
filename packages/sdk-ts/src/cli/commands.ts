@@ -246,6 +246,18 @@ export async function cmdRun(
       },
     };
   }
+  // WP-207 dogfood/test-only context-window seam, armed host-side (same
+  // convention). `CHIKORY_CONTEXT_WINDOW_TOKENS=N` shrinks the window the pacing
+  // decision reasons against, so a short run deterministically crosses the
+  // `compact`/`park` threshold and drives pressure-triggered compaction (WP-203
+  // S2) — the actionable proof of the 602%-window signal dogfood-052 surfaced.
+  const contextWindowTokens = process.env["CHIKORY_CONTEXT_WINDOW_TOKENS"];
+  if (contextWindowTokens !== undefined && contextWindowTokens.length > 0) {
+    spec = {
+      ...spec,
+      debug: { ...spec.debug, contextWindowTokens: Number(contextWindowTokens) },
+    };
+  }
   try {
     return await hostAndFollow(args, args.watch, deps, ioPair, (runner) => runner.start(spec));
   } catch (err) {

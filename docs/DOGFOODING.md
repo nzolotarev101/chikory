@@ -33,18 +33,40 @@ guard are still owed (WP-247 → 🟡). New **F-51 → WP-249** (harvest-commit 
 that delivery commit bundled an unrelated operator `land.test.ts` edit and cites no
 run-id, so `dogfood-verify §6` couldn't resolve the landed commit.
 
-**Latest proven path:** dogfood-051 (`docs/reports/dogfood-051.md`) gave `chikory trace`
-its **first live read on context-window pressure** — WP-207 pacing telemetry: the pure
-`decideContextWindowPacing` decision is now wired into the live agent loop, which journals
-a durable replay-safe `pacing` entry every step from REAL per-step token usage
-(`recordPacingEvent`, idempotent `appendOnce` keyed on `pacingEventIndex`) and surfaces
-`pacing events N` + a per-entry `% window` line in the trace — the first observability on
-the token-economics problem every report has flagged for 50 runs (this run itself read
-**2178k input tokens** for a 5-file diff, the series high). One-shot SUCCESS, 454 passed
-re-verified incl. the real-Temporal ARMED/crash-recovery paths (`run-663a1baa-…`, runtime
-`54a2c41`). Residual **F-53** (folds into WP-207): the telemetry is not yet OBSERVED live —
-the run's own trace predates its own wiring; the next dogfood run is automatically the
-first live observation. The seam saga before it is settled (dogfood-046/048/050).
+**Latest (2026-06-24, the WP-207 act-half unlock — operator hand-design, branch
+`feat/wp207-pressure-compaction`):** the context-rot pillar is now ACTED ON, not just
+observed. The live pacing decision DRIVES compaction cadence — `agent-loop.ts` passes
+`underPressure = pacing.action !== "continue"` into the existing `compactContext` activity,
+which under pressure folds history beyond the verbatim window NOW (effective
+`{triggerAfterSteps: keepLastN}` policy) instead of waiting for the count trigger (8). Each
+`compaction` entry is tagged `trigger:"pacing"|"count"` (additive, no contract change);
+`chikory trace` renders ` (pacing)` on a pressure fold; a deterministic `debug.contextWindowTokens`
+seam (`CHIKORY_CONTEXT_WINDOW_TOKENS`, the `seedBadDiff`/`parkBeforeStep` convention) makes it
+provable without a 200k-token accumulation. Real-Temporal proof: `compaction-wiring.test.ts`
+"context-window pressure folds before the count trigger" (a 7-step run under a tiny window
+override folds at step 6 with `trigger:"pacing"`); full SDK suite 460 passed. So dogfood-052's
+602%-window PARK signal is no longer inert. **WP-203 → 🟢, WP-207 act half → 🟢; the `park`→
+durable-suspend remainder is WP-250.** Next dogfood (dogfood-053) surfaces the new `trigger`
+field in the `chikory trace` TOTALS (`summarizeCompaction`).
+
+**Earlier proven path:** dogfood-052 (`docs/reports/dogfood-052.md`) completed WP-207's
+**context-rot observability** and made it self-evidencing. dogfood-051 journaled a `pacing`
+entry per step but `chikory trace` only printed a bare `pacing events N` count; dogfood-052
+added a pure `summarizePacing(entries)` reducer (`src/runner/pacing-summary.ts`) that folds
+those entries into the run's PEAK window utilization + `compact`/`park` recommendation counts,
+surfaced additively as `peak window X% (compact C · park P)` in the same totals sub-line
+(byte-identical no-pacing path). `codex`/`gpt-5.5` one-shot all 5 files, judge ✓ PROCEED 1/1,
+$0.8032/$5 (16.0%), vitest 25 + tsc + eslint exit 0 (`run-7e13ae2a-…`, runtime `0880806`).
+**F-53 CLOSED — first live read:** this run journaled a real `pacing` entry and the new reducer
+rendered `peak window 602% (compact 0 · park 1)` over it (`action park · projectedTokens
+1,203,440 · remainingTokens -1,003,440 · utilization 6.0172`) — the executor ran at 6× the
+200k window with PARK recommended and unheeded (the *act* half is §4-blocked on the WP-203 S2
+runtime compaction trigger). _Earlier (dogfood-051):_ wired `decideContextWindowPacing` into
+the live loop + journaled the durable `pacing` entry per step (`recordPacingEvent`, idempotent
+`appendOnce` keyed on `pacingEventIndex`); the seam saga before that is settled
+(dogfood-046/048/050). **Next headline (dogfood-053):** prove the Agent-as-a-Judge true-positive
+catch on REAL product-WP code — a WP-215 pure `scanDiffForSecrets` security-evidence reducer
+with the WP-244/246 catch seam seeded INTO it (off the throwaway utilities of dogfood-046/047/048).
 **Earlier:** dogfood-050 (`docs/reports/dogfood-050.md`) made the
 judge-catch seam **self-documenting** — WP-245 seam telemetry: the `debug.seedBadDiff`
 seam now journals a durable replay-safe `seam` entry and `chikory trace` prints

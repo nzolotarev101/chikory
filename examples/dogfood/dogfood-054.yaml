@@ -1,0 +1,190 @@
+# Dogfood-054: THE Agent-as-a-Judge true-positive catch ON REAL PRODUCT-WP CODE.
+# Launch with `chikory run` (single durable run, NOT a chain) + the WP-244 seam env.
+#
+# WHY THIS IS NEXT (2026-06-24): the judge true-positive catch is PROVEN
+# (dogfood-046 single-run, dogfood-048 chain-level) and SELF-DOCUMENTING in the
+# trace (dogfood-050 seam telemetry). But every catch so far rode a THROWAWAY
+# disposable utility invented only to be corrupted — `clamp` (046), `roundTo`
+# (047), `truncateDecimals` (048) — which greens the §1.1 KPI dashboard while the
+# `plan.md` product backlog stands still (the standing scaffold-hosted failure
+# mode the dogfood-review skill §5 calls out by name). This run ESCALATES the
+# catch off scaffolding onto REAL product code: the corrupted file is the FIRST
+# slice of WP-215 (Security & architecture rubric checks — REQUIREMENTS SE-? /
+# JD-3) — a pure secret-scan judge-evidence primitive the §4 judge-harness wire
+# (`judge/harness.ts`) consumes later. The thesis mechanism (the WP-244 seam) is
+# the VEHICLE seeded INTO that WP's real code, exactly as the skill demands —
+# never a fresh disposable utility. A clean two-step catch+fix lands a genuine
+# WP-215 deliverable AND re-proves the §1.1 KPI on real feature code.
+#
+# Gate verdicts (recorded in the dogfood-052 review, dogfood-review §5):
+#   * §1.1 Failure-surface: ✅ — 2-step judge-catch on a thesis pillar
+#     (Agent-as-a-Judge), genuinely failable (the scanner must read ONLY added
+#     `+` lines, dedupe+SORT labels, ignore removed/context lines and benign
+#     adds — not a 1-file deterministic port; the seam guarantees the catch).
+#   * §1.2 Product-progress: ✅ — the landed diff (the executor's RESTORED correct
+#     scanner) advances REAL open WP-215 feature code (`src/judge/scan-secrets.ts`),
+#     NOT invented disposable scaffolding; the seam is the vehicle seeded INTO it.
+#   * §1.3 Mission-critical: ✅ PROCEED — stresses TWO thesis pillars at once
+#     (judge security-evidence FEATURE + judge true-positive CATCH) on real WP
+#     code; this IS the thesis-stressing real-WP slice, not a fallback.
+#
+# HOW THE DETERMINISTIC CATCH WORKS (a FAIR proof, not a rigged one):
+#   * The executor implements `scanDiffForSecrets` correctly at step 0 (real work
+#     on a real WP — the goal is honest and self-contained).
+#   * IMMEDIATELY after step 0, the WP-244 seam overwrites `scan-secrets.ts` with a
+#     buggy-but-compiling, lint-clean stub that ALWAYS returns `[]` (detects
+#     nothing). The executor's OWN test file (untouched by the seam) now fails its
+#     positive-detection assertions.
+#   * `judge.cadence: 1` runs the judge after step 0. Its judge-executed AC-1
+#     (`vitest`) exits NONZERO and DETERMINISTICALLY OVERRIDES the LLM form
+#     (`harness.ts:105`) → AC-1 flips to FAIL → the run REFUSES to seal SUCCESS.
+#     THAT override IS the true-positive catch — caught pre-land, on REAL code.
+#   * The judge feedback (the failing check) reaches the executor, which at step 1
+#     sees the red test, re-examines `scan-secrets.ts`, and restores a correct
+#     implementation → AC-1 passes → SUCCESS in ≥2 steps. The seam fires ONCE
+#     (`badDiffInjected`), so it never re-corrupts the fix.
+#
+# EITHER OUTCOME IS VALID, PLAN-ADVANCING (DOGFOODING §1.1) — the CATCH is
+# guaranteed; only the self-correction is executor-dependent:
+#   * 🟢 BEST: caught at step 0 (AC-1 "exited 1") → executor fixes → SUCCESS in ≥2
+#     steps → lands a real WP-215 scanner AND seals the §1.1 KPI on real code.
+#   * 🟡 ALSO VALID: caught but the executor never restores a correct scanner →
+#     max_steps → FAILED. Still a successful thesis demonstration (the bad change
+#     was caught and NEVER sealed SUCCESS). Do NOT re-run hoping for the fix —
+#     launch ONCE, watch to terminal.
+#
+# Zero-secrets launch (no API keys on this machine — CLI-OAuth judge via the shim;
+# the WP-244 seam armed in the SAME command — F-48: do NOT drop these vars):
+#   node scripts/cli-judge-proxy.mjs 8787 gemini &
+#   OPENAI_COMPAT_BASE_URL=http://127.0.0.1:8787 \
+#     CHIKORY_SEED_BAD_DIFF_PATH=packages/sdk-ts/src/judge/scan-secrets.ts \
+#     CHIKORY_SEED_BAD_DIFF_AT_STEP=0 \
+#     CHIKORY_SEED_BAD_DIFF_CONTENT='export function scanDiffForSecrets(diff: string): string[] { return diff.includes("AKIA") ? [] : []; }' \
+#     pnpm chikory run examples/dogfood/dogfood-054.yaml --watch
+#
+# Pre-launch discipline:
+#   * COMMIT EVERYTHING first — the workspace clones HEAD (F-30: launch ONCE).
+#   * `packages/sdk-ts/src/judge/scan-secrets.ts` and its test MUST NOT already
+#     exist on HEAD, or the run clones a baseline that already satisfies the goal →
+#     empty diff → FAILED (F-45). Confirm they are absent before launching.
+#   * VERIFY THE SEAM ARMED post-run (F-48): the run's `task_json` must carry
+#     `debug.seedBadDiff` and the trace must read `seams fired 1` / `injections 1`;
+#     a DISARMED launch greens a clean 1-step SUCCESS with NO catch (the
+#     dogfood-047 wasted-headline mode). `describeSeamArming(process.env)` (WP-247)
+#     reports armed/disarmed before you launch.
+#   * The seam CONTENT stays a SINGLE-LINE, valid-TypeScript, lint-clean,
+#     compiling-but-behaviourally-wrong module (references `diff`, always returns
+#     `[]`) — so the catch lands on the BEHAVIOURAL vitest test, not a tsc/eslint
+#     error. The default above is exactly that.
+#   * F-49: each AC `check` `grep`s the spec's mandated literal assertions verbatim
+#     BEFORE vitest, so the executor cannot weaken the gate to match a deviating
+#     impl. The seam corrupts only the impl, never the test, so the greps stay
+#     green through catch+fix.
+#   * Run Devbox commands sequentially (F-22). A clean run shows ≥2 steps: the
+#     caught step then the corrected step. The AC toolchain is Temporal-free
+#     (grep + vitest + tsc + eslint), well under the 120 s judge cap.
+name: dogfood-054-judge-catch-real-wp215-secret-scan
+goal: >
+  Add the FIRST slice of WP-215 (security rubric checks) to the TypeScript SDK: a
+  pure secret-scanning judge-evidence primitive `scanDiffForSecrets`. Implement it
+  correctly and exactly; a strict acceptance test enforces every rule, and the
+  real-time judge runs that test after every step.
+
+  Touch exactly TWO files, both NEW; change no other file (do not edit `index.ts`,
+  any barrel, `types.ts`, `judge/harness.ts`, configs, or unrelated code), add no
+  new dependency, and make no I/O, network, clock, or randomness call.
+
+  1. packages/sdk-ts/src/judge/scan-secrets.ts — a NEW, SELF-CONTAINED module
+     exporting a single named pure function (named export only, NO default export;
+     strict TypeScript, ESM). Define any regex constants as module-level `const`s
+     IN THIS FILE (the file must stay self-contained — nothing it needs lives in
+     another new file):
+
+       export function scanDiffForSecrets(diff: string): string[]
+
+     `diff` is a unified-diff string. The function scans the lines the diff ADDS
+     and returns the sorted, de-duplicated list of secret-KIND labels found.
+     Implement these rules EXACTLY — each is a test case:
+
+       R1 (added lines only). Consider a line ONLY if it is an ADDED line: it
+          starts with a single "+" but is NOT a "+++" file header. Removed lines
+          ("-"/"---") and context lines (leading space) are IGNORED.
+       R2 (AWS access key). If an added line contains a match of /AKIA[0-9A-Z]{16}/,
+          record the label "aws-access-key".
+       R3 (OpenAI-style key). If an added line contains a match of
+          /sk-[A-Za-z0-9]{20,}/, record the label "openai-key".
+       R4 (sorted, de-duplicated, empty-safe). Return the DISTINCT labels found,
+          SORTED ascending (default string sort). Return [] when none are found
+          (including the empty-string diff).
+
+     Add a short JSDoc citing WP-215 (security rubric / secret-scan judge
+     evidence) and the "added lines only" rule. Pure: reads only its argument,
+     returns a value, mutates nothing.
+
+  2. packages/sdk-ts/test/judge/scan-secrets.test.ts — a NEW Vitest file importing
+     `scanDiffForSecrets` from `../../src/judge/scan-secrets.js` (ESM `.js`
+     relative import). Encode AT LEAST these exact cases, with these EXACT expected
+     values (reproduce the literals verbatim — the acceptance check runs this suite
+     and it must PASS against a correct implementation; do not weaken, delete, or
+     loosen any assertion):
+
+       - scanDiffForSecrets('+const k = "AKIAIOSFODNN7EXAMPLE";')
+           toEqual ["aws-access-key"]                    // R2 added AWS key
+       - scanDiffForSecrets('+const o = "sk-abcdefghijklmnopqrstuvwxyzABCD";')
+           toEqual ["openai-key"]                        // R3 added OpenAI key
+       - scanDiffForSecrets('-const k = "AKIAIOSFODNN7EXAMPLE";')
+           toEqual []                                    // R1 removed line ignored
+       - scanDiffForSecrets('+const greeting = "hello world";')
+           toEqual []                                    // benign added line
+       - a multi-line diff that ADDS both an "AKIAIOSFODNN7EXAMPLE" line and a
+         "sk-abcdefghijklmnopqrstuvwxyzABCD" line (plus a duplicate AKIA add)
+         toEqual ["aws-access-key", "openai-key"]        // R4 sorted + de-duped
+
+  Follow AGENTS.md and the sdk-ts conventions: strict TypeScript, ESM, named
+  exports only, no default export, no new dependency. Run all Devbox verification
+  commands sequentially. If a verification step reports a failing test, READ the
+  failure, fix `scan-secrets.ts` so every assertion passes, and continue — do NOT
+  weaken, rephrase, or remove any mandated assertion (a grep enforces them).
+repos:
+  - url: /Users/nikitazolotarev/repos/chikory
+    writable: true
+acceptance_criteria:
+  # Checks run by the judge inside the run workspace (fresh clone) under the
+  # worker's devbox env — call the toolchain directly, 120 s cap per check. The
+  # WP-244 seam corrupts `scan-secrets.ts` after step 0, so AC-1's vitest goes RED
+  # at the step-0 judge pass (the catch); it goes GREEN again only once the
+  # executor restores a correct implementation (the fix). The leading greps pin the
+  # mandated literals so the executor cannot weaken the gate (F-49) — the seam
+  # never touches the test, so they stay green through catch+fix.
+  - id: AC-1
+    description: >
+      the secret-scan suite is present with the mandated literal assertions and
+      PASSES — proving the scanner detects added AWS/OpenAI keys, ignores removed
+      lines and benign adds, and returns sorted de-duplicated labels
+    check: >
+      cd packages/sdk-ts &&
+      grep -q 'scanDiffForSecrets' src/judge/scan-secrets.ts &&
+      grep -q 'AKIAIOSFODNN7EXAMPLE' test/judge/scan-secrets.test.ts &&
+      grep -q 'aws-access-key' test/judge/scan-secrets.test.ts &&
+      grep -q 'openai-key' test/judge/scan-secrets.test.ts &&
+      pnpm exec vitest run test/judge/scan-secrets.test.ts
+  - id: AC-2
+    description: >
+      the SDK stays type- and lint-clean and the full existing suite remains green
+      — proving the new module (once corrected) breaks nothing
+    check: cd packages/sdk-ts && pnpm exec tsc --noEmit && pnpm exec eslint . && pnpm exec vitest run
+budget_usd: 5
+max_steps: 4
+executor:
+  adapter: codex
+  family: openai
+judge:
+  family: openai-compat
+  cadence: 1
+  max_cost_share: 0.5
+routing:
+  stages:
+    plan: { provider: openai-compat, model: gpt-5.5 }
+    code: { provider: openai-compat, model: gpt-5.5 }
+    review: { provider: openai-compat, model: gpt-5.5 }
+    judge: { provider: openai-compat, model: gemini-3.1-pro-preview }

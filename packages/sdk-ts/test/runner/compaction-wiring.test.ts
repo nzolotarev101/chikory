@@ -138,6 +138,98 @@ describe.skipIf(address === null)("compaction digest wiring (WP-203 S2)", () => 
 
       // Cost guard held: never more digests than steps past the trigger.
       expect(wire.digestHits).toBeLessThanOrEqual(journal.entries("step").length);
+
+      // The count-cadence fold is tagged `count`, not `pacing`.
+      for (const e of compactions) {
+        expect((e.payload as { trigger?: string }).trigger).toBe("count");
+      }
+    } finally {
+      journal.close();
+    }
+  });
+
+  // WP-207 act half / WP-203 S2: the live pacing decision DRIVES compaction.
+  test("context-window pressure folds before the count trigger (pacing-driven cadence)", async () => {
+    const tmp = await mkdtemp(join(tmpdir(), "chikory-pressure-"));
+    cleanups.push(() => rm(tmp, { recursive: true, force: true }));
+    const repoUrl = await initSourceRepo(join(tmp, "src"));
+    const dataDir = join(tmp, "data");
+    const taskQueue = `tq-${randomUUID()}`;
+
+    const wire = await startFakeJudgeWire([judgeForm({ criteria: { "AC-1": false } })], {
+      digestContent: "FOLDED DIGEST: pressure-triggered fold of the older summaries.",
+    });
+    cleanups.push(() => wire.close());
+
+    const worker = await createRunnerWorker({
+      adapters: scriptedRegistry,
+      address: address!,
+      taskQueue,
+      dataDir,
+      workflowBundlePath: bundlePath!,
+      routerOptions: { baseUrls: { "openai-compat": wire.url } },
+    });
+    const workerDone = worker.run();
+    const runner = createTemporalRunner({ address: address!, taskQueue, dataDir });
+    cleanups.push(async () => {
+      worker.shutdown();
+      await workerDone;
+      await runner.close();
+    });
+
+    // maxSteps 7 < DEFAULT_COMPACTION_POLICY.triggerAfterSteps (8): the COUNT
+    // cadence can never fire here. The tiny `debug.contextWindowTokens` window
+    // forces every step's pacing decision to `compact`/`park`, so the pressure
+    // cadence (effective trigger = keepLastN = 5) folds once the recall tier
+    // passes 5 — i.e. by step 6, before the count trigger could ever apply.
+    const spec = makeJudgedSpec({
+      repoUrl,
+      cadence: 100,
+      maxSteps: 7,
+      debug: { contextWindowTokens: 10 },
+      routing: {
+        stages: {
+          plan: { provider: "anthropic", model: "claude-fable-5" },
+          code: { provider: "anthropic", model: "claude-fable-5" },
+          review: { provider: "openai-compat", model: "fake-review" },
+          judge: { provider: "openai-compat", model: "fake-judge" },
+        },
+      },
+    });
+
+    const handle = await runner.start(spec);
+    await waitFor<RunStatusReport>(
+      async () => {
+        const r = await handle.status();
+        return TERMINAL_STATUSES.includes(r.status) ? r : undefined;
+      },
+      { what: "pressure-compaction run to reach a terminal status" },
+    );
+
+    expect(wire.digestHits).toBeGreaterThan(0);
+
+    const journal = new Journal(journalPath(dataDir, handle.runId));
+    try {
+      const steps = journal.entries("step");
+      // The count cadence (>8 summaries) was never reachable in 7 steps.
+      expect(steps.length).toBeLessThanOrEqual(7);
+
+      const compactions = journal.entries("compaction");
+      expect(compactions.length).toBeGreaterThan(0);
+
+      // Every fold here was driven by the pacing pressure signal, not the count.
+      for (const e of compactions) {
+        const payload = e.payload as CompactionResult & { trigger?: string; foldedCount?: number };
+        expect(payload.trigger).toBe("pacing");
+        expect(payload.foldedCount).toBeGreaterThan(0);
+        expect(payload.digestRef).toBeDefined();
+      }
+
+      // Pacing decisions confirm the run was genuinely under window pressure.
+      const underPressure = journal
+        .entries("pacing")
+        .some((e) => (e.payload as { action: string }).action !== "continue");
+      expect(underPressure).toBe(true);
     } finally {
       journal.close();
     }

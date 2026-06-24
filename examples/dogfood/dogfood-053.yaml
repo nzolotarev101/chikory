@@ -1,0 +1,150 @@
+# Dogfood-053: WP-203/WP-207 — COMPACTION SUMMARY in `chikory trace` totals.
+# Launch with `chikory run` (single durable run, NOT a chain). No seam env.
+#
+# WHY THIS IS NEXT (2026-06-24): the WP-207 *act* half just landed — the live
+# pacing decision now DRIVES compaction cadence (WP-203 S2). When the context
+# window crosses the pressure threshold the runner folds history NOW instead of
+# waiting for the count trigger, and each `compaction` journal entry is tagged
+# `trigger: "pacing" | "count"` (rendered per-entry as ` (pacing)` in
+# `chikory trace --step`). But the trace TOTALS line still says nothing about
+# compaction — an operator scanning the one-line summary cannot see whether a
+# run folded under real token pressure at all. This slice closes that, exactly
+# as dogfood-052 did for pacing: a pure `summarizeCompaction(entries)` reducer
+# (the `summarizePacing` analog) → how many folds happened and how many were
+# pacing-pressure-driven, surfaced additively in the SAME trace totals sub-line.
+# The first time the totals answer "did context pressure actually trigger a
+# fold this run?" — the payoff of the act-half unlock.
+#
+# This is a real open §6 product WP increment (WP-203/WP-207, context-rot
+# observability — FA-3/SE-2), advancing the real `chikory trace` renderer over
+# the new `trigger` field, NOT invented disposable scaffolding. Mirrors the
+# dogfood-028/029 new-pure-module-with-barrel + dogfood-026/051/052 additive-
+# renderer precedents exactly.
+#
+# Gate verdict (recorded in the WP-207 act-half unlock, dogfood-review §5):
+#   * §1.1 Failure-surface: ✅ — cross-file (NEW pure reducer + barrel re-export
+#     + renderer wire + 2 tests); genuinely failable on the digestRef filter
+#     (a fold with no digest is a no-op, must NOT count), the `trigger` match,
+#     and the byte-identical no-compaction path. Not a 1-file parity port.
+#   * §1.2 Product-progress: ✅ — the landed diff advances the real WP-203/207
+#     trace renderer (makes the act-half unlock's `trigger` field actionable in
+#     the totals), not throwaway code.
+#   * §1.3 Mission-critical: 🟡 ALLOW (fallback) — the meatier next thesis slice
+#     (park-suspend, WP-250) is a §4 control-flow hand-design (operator-landed);
+#     this is the best UNBLOCKED real-WP slice on the context-rot pillar.
+#
+# Zero-secrets launch (no API keys on this machine — CLI-OAuth judge via the shim):
+#   devbox shell
+#   bash scripts/dogfood.sh examples/dogfood/dogfood-053.yaml
+#
+# Pre-launch discipline:
+#   * COMMIT EVERYTHING first — the workspace clones HEAD (F-30: launch ONCE).
+#     This slice BUILDS ON the WP-207 act-half unlock (the `trigger` field on the
+#     compaction payload + the per-entry ` (pacing)` marker); that MUST be on HEAD
+#     before launching.
+#   * `src/runner/compaction-summary.ts` + `test/runner/compaction-summary.test.ts`
+#     MUST NOT already exist on HEAD (F-45). `summarizeCompaction`/
+#     `CompactionSummary` must not already exist.
+#   * Run Devbox commands sequentially (F-22). The AC toolchain is Temporal-FREE
+#     (two pure/unit test files + tsc + eslint), well under the 120 s judge cap.
+name: dogfood-053-wp203-compaction-summary
+goal: >
+  Make the WP-203/WP-207 compaction `trigger` field ACTIONABLE in the `chikory trace`
+  TOTALS line (plan.md WP-203/WP-207; REQUIREMENTS.md FA-3 / SE-2). The act-half unlock
+  tags each `compaction` journal entry with `trigger: "pacing" | "count"` and the
+  per-entry renderer shows ` (pacing)`; this slice adds a pure `summarizeCompaction(entries)`
+  reducer that counts the run's folds and how many were pacing-pressure-driven, and extends
+  the trace totals sub-line to surface it — additive on the no-compaction path (byte-identical
+  when there are no `compaction` entries, the WP-218/WP-245/WP-052 convention). Mirror the
+  dogfood-028/029 new-pure-module-with-barrel precedent and the dogfood-026/051/052
+  additive-renderer precedent exactly. Strict TypeScript, ESM `.js` relative imports, named
+  exports only, no default exports, no new dependencies, no contract/schema change (a LOCAL
+  `CompactionSummary` result type + a type-only `JournalEntry` import — do NOT add or modify
+  any `types.ts` union member or schema).
+
+  Make these changes in packages/sdk-ts:
+
+  1. src/runner/compaction-summary.ts — a NEW pure module (the analog of
+     `runner/pacing-summary.ts`'s `summarizePacing`): export a local result interface
+       export interface CompactionSummary { folds: number; pacingFolds: number; }
+     and a pure function
+       export function summarizeCompaction(entries: readonly JournalEntry[]): CompactionSummary
+     that filters `entries` to `e.kind === "compaction"`, casts each payload as
+     `{ digestRef?: unknown; trigger?: string }`, and returns:
+       * `folds` = the count of compaction entries that ACTUALLY produced a digest
+         (`payload.digestRef` is present) — a fold with no digest is a no-op and MUST NOT
+         count;
+       * `pacingFolds` = of those folds, the count whose `trigger === "pacing"`.
+     Import `JournalEntry` TYPE-ONLY from `"../types.js"`. Non-`compaction` kinds are ignored,
+     as are compaction entries with no `digestRef`. Add a short JSDoc citing WP-203 / WP-207 /
+     FA-3 / SE-2. Pure: no I/O, no mutation of the input.
+
+  2. src/index.ts — add a single barrel re-export next to the existing
+     `./runner/pacing-summary.js` re-export:
+       export { summarizeCompaction, type CompactionSummary } from "./runner/compaction-summary.js";
+
+  3. src/cli/trace.ts — in `renderTrace`, next to the existing
+     `const pacing = summarizePacing(entries);` line, call the new reducer
+     `const compaction = summarizeCompaction(entries);` and add a totals segment built
+     exactly like `pacingSummary`:
+       const compactionSummary =
+         compaction.folds > 0
+           ? ` · compactions ${compaction.folds} (pacing ${compaction.pacingFolds})`
+           : "";
+     Append `${compactionSummary}` to the SAME totals sub-line the `pacingSummary` segment is
+     pushed on (after `${pacingSummary}`), so the no-compaction path stays byte-identical.
+     Import `summarizeCompaction` from `"../runner/compaction-summary.js"`. Do NOT touch the
+     `formatEntryLine` switch or any other totals line.
+
+  4. test/runner/compaction-summary.test.ts — a NEW Temporal-FREE Vitest file (ESM `.js`
+     relative imports from `../../src/index.js`) proving the reducer over synthetic
+     `JournalEntry[]` (the `trace.test.ts` `entry(...)` helper style or hand-built entries).
+     Assert:
+       (a) over a journal with two `compaction` entries that BOTH carry a `digestRef` — one
+           `trigger: "pacing"`, one `trigger: "count"` — the summary is exactly
+           `{ folds: 2, pacingFolds: 1 }` (assert `pacingFolds` verbatim);
+       (b) a journal with NO compaction entries returns `{ folds: 0, pacingFolds: 0 }`;
+       (c) a `compaction` entry with NO `digestRef` is NOT counted, and non-`compaction`
+           kinds (a `step`/`checkpoint`) are ignored.
+
+  5. test/cli/trace.test.ts — EXTEND the existing renderer test file (do not remove any case).
+     Add a test: a journal with two digest-bearing `compaction` entries (one `trigger:"pacing"`)
+     renders the new totals segment — assert verbatim
+       expect(renderTrace(run, entriesWithCompaction, totals)).toContain("compactions 2 (pacing 1)")
+     and that a journal with NO `compaction` entry does NOT render the marker — assert
+       expect(renderTrace(run, entriesNoCompaction, totals)).not.toContain("compactions")
+
+  Run project commands sequentially inside the existing Devbox environment. If a verification
+  step reports a failing test, READ the failure, fix the IMPLEMENTATION so every assertion
+  passes, and continue — do NOT weaken, rephrase, or remove any mandated assertion or wire
+  literal (a grep enforces them).
+repos:
+  - url: /Users/nikitazolotarev/repos/chikory
+    writable: true
+acceptance_criteria:
+  - id: AC-1
+    description: >
+      A pure `summarizeCompaction(entries)` reducer (new `src/runner/compaction-summary.ts`,
+      re-exported from the barrel) counts the run's digest-bearing folds and the
+      pacing-pressure-driven subset over the `compaction` journal entries (digestRef-gated,
+      `trigger === "pacing"` subset, non-`compaction` and digest-less entries ignored,
+      empty → 0/0), and `chikory trace` surfaces `compactions N (pacing M)` additively on the
+      no-compaction path. The reducer is grep-pinned in BOTH its definition and the renderer
+      wire (dogfood-047 F-49), the reducer-unit + renderer assertions pass, and the SDK stays
+      type- and lint-clean.
+    check: cd packages/sdk-ts && grep -Eq 'compactions ' test/cli/trace.test.ts && grep -Eq 'pacingFolds' test/runner/compaction-summary.test.ts && grep -Eq 'summarizeCompaction' src/cli/trace.ts && grep -Eq 'export function summarizeCompaction' src/runner/compaction-summary.ts && grep -Eq 'summarizeCompaction' src/index.ts && pnpm exec vitest run test/cli/trace.test.ts test/runner/compaction-summary.test.ts && pnpm exec tsc --noEmit && pnpm exec eslint .
+budget_usd: 5
+max_steps: 8
+executor:
+  adapter: codex
+  family: openai
+judge:
+  family: openai-compat
+  cadence: 1
+  max_cost_share: 0.5
+routing:
+  stages:
+    plan: { provider: openai-compat, model: gpt-5.5 }
+    code: { provider: openai-compat, model: gpt-5.5 }
+    review: { provider: openai-compat, model: gpt-5.5 }
+    judge: { provider: openai-compat, model: gemini-3.1-pro-preview }
