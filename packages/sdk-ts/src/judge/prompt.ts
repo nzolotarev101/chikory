@@ -88,6 +88,11 @@ function renderCheckRuns(checkRuns: CheckRun[]): string {
     .join("\n\n");
 }
 
+function renderSecretScanLabels(labels: string[]): string {
+  if (labels.length === 0) return "(none)";
+  return labels.map((label) => `- ${label}`).join("\n");
+}
+
 function renderHistory(history: Record<string, boolean[]>): string {
   const entries = Object.entries(history).filter(([, h]) => h.length > 0);
   if (entries.length === 0) return "(first judge pass of this run)";
@@ -101,6 +106,7 @@ export interface JudgePromptInput {
   evidence: JudgeEvidence;
   rubric: RubricItem[];
   diffText: string;
+  secretScanLabels: string[];
   checkRuns: CheckRun[];
 }
 
@@ -117,6 +123,9 @@ export function buildJudgeMessages(input: JudgePromptInput): Message[] {
     "",
     "## EVIDENCE — workspace diff since last verdict",
     input.diffText.length > 0 ? `\`\`\`diff\n${input.diffText}\n\`\`\`` : "(empty diff — no changes)",
+    "",
+    "## EVIDENCE — deterministic secret scan (added diff lines)",
+    renderSecretScanLabels(input.secretScanLabels),
     "",
     "## EVIDENCE — CHECK RESULTS (judge-executed; exit 0 = pass)",
     renderCheckRuns(input.checkRuns),

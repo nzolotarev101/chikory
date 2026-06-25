@@ -1,0 +1,182 @@
+# Dogfood-056: WP-253 / WP-215 S3 — the example-key allowlist that unblocks the
+# deterministic `no_secrets_introduced` override.
+# Launch with `chikory run` (single durable run). NO seam env this time.
+#
+# WHY THIS IS NEXT (2026-06-25): dogfood-054 landed WP-215 S1 (the pure
+# `scanDiffForSecrets(diff): string[]` primitive, `src/judge/scan-secrets.ts`) and
+# dogfood-055 landed WP-215 S2 (it is now WIRED into the inner-loop judge's evidence
+# collection — `evidence.ts` surfaces `secretScanLabels` to the judge). The judge
+# now MECHANICALLY sees secret-kind findings, but it cannot yet ACT on them
+# deterministically: a live destructive override that flips `no_secrets_introduced`
+# →FAIL on a scanner hit would SELF-TRIP ROLLBACK on AWS's canonical example key
+# `AKIAIOSFODNN7EXAMPLE`, which legitimately appears in test fixtures (the WP-215 S1
+# `scan-secrets.test.ts` asserts exactly this literal). The documented unblocker is an
+# example-key allowlist (plan.md WP-253). This slice lands the PURE allowlist primitive
+# + a real-secrets-only scan that excludes example keys — the deterministic security
+# signal the future override consumes. This is the Agent-as-a-Judge thesis pillar:
+# a DETERMINISTIC, non-LLM security gate over the actual change.
+#
+# Gate verdicts (recorded in the dogfood-055 review, dogfood-review §5):
+#   * §1.1 Failure-surface: ✅ — a cross-file judge-pillar slice (a NEW allowlist module
+#     + a NEW `scanDiffForRealSecrets` in the existing `scan-secrets.ts` + a test).
+#     Genuinely failable: the real-vs-example PARTITION must be correct, AND the
+#     evidence-facing `scanDiffForSecrets` must stay byte-behavior-IDENTICAL (the S1
+#     5-case suite + the dogfood-055 evidence wire are the regression guard). Not a
+#     1-file port.
+#   * §1.2 Product-progress: ✅ — the landed diff is REAL open WP-253 (WP-215 S3) feature
+#     code: the documented allowlist that unblocks the deterministic override. NOT
+#     invented scaffolding.
+#   * §1.3 Mission-critical: ✅ PROCEED — advances the deterministic-security-gate
+#     thesis mechanism on real product code. WP-250 (park→durable suspend, the meatier
+#     act-slice) is §4 control-flow hand-design — TASK-PROTOCOL §4 operator-landed, NOT a
+#     dogfood headline. WP-251 is observability-completeness only. This is the strongest
+#     UNBLOCKED real-WP thesis slice.
+#
+# DELIBERATELY ADDITIVE — NOT the live destructive override itself.
+#   * This slice lands the PURE allowlist + `scanDiffForRealSecrets` (the override-relevant
+#     real-secrets-only labels). The override that consumes it to flip the verdict pre-land
+#     (the `applyCheckOverrides`/`tests_pass` precedent in `harness.ts`) is the SEPARATE
+#     §4 hand-design follow-up once this primitive lands — keep this slice override-free.
+#   * `scanDiffForSecrets` (the dogfood-055 evidence scan) MUST stay UNCHANGED: the judge
+#     still SEES every secret-like match (incl. example keys) as evidence; only the new
+#     real-secrets-only function excludes allowlisted dummies.
+#
+# Self-trip safety for THIS run (critical — the dogfood-055 evidence wire is now LIVE):
+#   * The inner-loop judge now runs `scanDiffForSecrets` over THIS run's own diff and
+#     surfaces the labels. To keep the live judge evidence clean, this run's added diff
+#     lines MUST carry NO contiguous secret literal: build EVERY secret-like value
+#     (incl. the allowlist's `AKIAIOSFODNN7EXAMPLE` and any `sk-...` test input) by
+#     string CONCATENATION (e.g. `"AKIA" + "IOSFODNN7EXAMPLE"`) so no line contains a
+#     contiguous `AKIA[0-9A-Z]{16}` or `sk-` + 20+ chars. The runtime VALUE is identical;
+#     the diff stays secret-free → `scanDiffForSecrets` over this diff returns `[]`.
+#
+# Zero-secrets launch (no API keys; CLI-OAuth judge via the shim; NO seam vars):
+#   node scripts/cli-judge-proxy.mjs 8787 gemini &
+#   OPENAI_COMPAT_BASE_URL=http://127.0.0.1:8787 \
+#     pnpm chikory run examples/dogfood/dogfood-056.yaml --watch
+#
+# Pre-launch discipline:
+#   * COMMIT EVERYTHING first — the workspace clones HEAD (F-30: launch ONCE). The
+#     dogfood-055 delivery (`evidence.ts`/`harness.ts`/`prompt.ts` + its test) is
+#     uncommitted on the working tree; commit it so `scan-secrets.ts` and the wired judge
+#     are on HEAD before this run clones.
+#   * `scan-secrets.ts` MUST already exist on HEAD (landed dogfood-054, `cfb8bcd`) — this
+#     slice MODIFIES it; confirm `git show HEAD:packages/sdk-ts/src/judge/scan-secrets.ts`.
+#   * F-49: each AC `check` `grep`s the mandated wiring verbatim BEFORE vitest, so the
+#     executor cannot weaken the gate or stub the allowlist.
+#   * Run Devbox commands sequentially (F-22). The AC toolchain is Temporal-free
+#     (grep + vitest + tsc + eslint), well under the 120 s judge cap.
+name: dogfood-056-wp253-secret-allowlist
+goal: >
+  Land the WP-253 (WP-215 S3) example-key allowlist that unblocks a deterministic
+  `no_secrets_introduced` override: a pure allowlist primitive plus a real-secrets-only
+  scan that excludes canonical example/dummy credentials, so a future destructive
+  override won't self-trip ROLLBACK on AWS's canonical `AKIAIOSFODNN7EXAMPLE` (which
+  legitimately appears in test fixtures). This is an ADDITIVE primitive — do NOT add or
+  change any rubric item, verdict, override, or destructive-rollback logic, and do NOT
+  change the existing `scanDiffForSecrets` behavior (the judge's evidence scan must keep
+  surfacing every secret-like match, including example keys).
+
+  Change exactly these TWO files plus ONE new test file; change no other file (do not
+  edit `evidence.ts`, `prompt.ts`, `harness.ts`, `rubric.ts`, the verdict/override logic,
+  `types.ts`, configs, or unrelated code), add no new dependency, and make no new I/O,
+  network, clock, or randomness call.
+
+  1. packages/sdk-ts/src/judge/secret-allowlist.ts  (NEW)
+     - Export a frozen module-level set of canonical example/dummy secret VALUES that
+       must never be treated as a real leaked credential:
+         export const EXAMPLE_SECRET_VALUES: ReadonlySet<string> = new Set([ ... ]);
+       It MUST contain AWS's canonical example access key `AKIAIOSFODNN7EXAMPLE`.
+       Build that literal by string CONCATENATION (e.g. `"AKIA" + "IOSFODNN7EXAMPLE"`)
+       so this file's added diff lines carry no contiguous `AKIA[0-9A-Z]{16}` literal
+       (the dogfood-055 evidence scan now runs over this run's own diff — see the header).
+     - Export a pure predicate:
+         export function isExampleSecret(value: string): boolean
+       returning `EXAMPLE_SECRET_VALUES.has(value)`. Add a short doc comment citing
+       WP-253 (the example-key allowlist that keeps the deterministic secret override from
+       self-tripping on dummy keys in test fixtures). Named exports only, no default,
+       strict TS / ESM, pure (reads only its arg + the module constant).
+
+  2. packages/sdk-ts/src/judge/scan-secrets.ts
+     - Import `isExampleSecret` from `./secret-allowlist.js` (ESM `.js` relative import).
+     - Add a NEW exported function:
+         export function scanDiffForRealSecrets(diff: string): string[]
+       that scans the SAME added unified-diff lines as `scanDiffForSecrets` (added lines
+       only, `+++` headers excluded) REUSING the existing module-level
+       `AWS_ACCESS_KEY_PATTERN` and `OPENAI_KEY_PATTERN` regexes, but EXCLUDES any match
+       whose matched value is an example key (`isExampleSecret(matchedValue)` is true) —
+       so allowlisted dummies do not produce a label. Capture the matched value via
+       `line.match(PATTERN)` (the existing `scanDiffForSecrets` uses `.test`, which yields
+       no value); a matched, non-allowlisted AWS key adds `"aws-access-key"`, a matched,
+       non-allowlisted OpenAI key adds `"openai-key"`; result sorted, de-duped (a
+       `Set<string>`), empty-safe (`[]` on no real-secret match). Add a doc comment citing
+       WP-253. You MAY introduce a shared private helper to avoid duplicating the
+       added-line filter, but you MUST NOT change the public behavior of the existing
+       `scanDiffForSecrets` (it stays `.test`-based and still surfaces example keys as
+       evidence) — the existing S1 `scan-secrets.test.ts` (5 cases) is the regression guard.
+
+  3. packages/sdk-ts/test/judge/secret-allowlist.test.ts  (NEW)
+     - A new Vitest file importing `scanDiffForSecrets` and `scanDiffForRealSecrets` from
+       `../../src/judge/scan-secrets.js` and `isExampleSecret`/`EXAMPLE_SECRET_VALUES` from
+       `../../src/judge/secret-allowlist.js`. Build every secret-like input by
+       CONCATENATION (no contiguous secret literal in this file's added diff lines — see
+       the header). It must encode AT LEAST these cases:
+       - `isExampleSecret(("AKIA" + "IOSFODNN7EXAMPLE"))` is `true`; `isExampleSecret` of a
+         non-example AWS-shaped value (a DIFFERENT contiguous-on-concat 16-char body) is
+         `false`.
+       - given a unified diff whose only added secret line carries the example key
+         (`"+const k = \"" + "AKIA" + "IOSFODNN7EXAMPLE" + "\";"`), `scanDiffForSecrets`
+         STILL returns `["aws-access-key"]` (evidence scan unchanged) but
+         `scanDiffForRealSecrets` returns `[]` (allowlisted — excluded).
+       - given a unified diff with an added line carrying a NON-example AWS key AND an added
+         line carrying an OpenAI-shaped key (`"sk-" + "<<<concatenated 24+ alnum chars>>>"`),
+         `scanDiffForRealSecrets` returns `["aws-access-key", "openai-key"]` (sorted) — both
+         real secrets flagged.
+       Do not weaken or loosen any assertion.
+
+  Follow AGENTS.md and the sdk-ts conventions: strict TypeScript, ESM, named exports only,
+  no default export, no new dependency. Run all Devbox verification commands sequentially.
+  If a verification step reports a failing test or type error, READ the failure, fix the
+  code, and continue — do NOT weaken, rephrase, or remove any mandated assertion (a grep
+  enforces them), and do NOT alter the existing `scanDiffForSecrets` behavior or the
+  existing `scan-secrets.test.ts`.
+repos:
+  - url: /Users/nikitazolotarev/repos/chikory
+    writable: true
+acceptance_criteria:
+  - id: AC-1
+    description: >
+      the example-key allowlist primitive lands and a real-secrets-only scan excludes
+      allowlisted dummies while the evidence scan is unchanged — `secret-allowlist.ts`
+      exports `EXAMPLE_SECRET_VALUES` + `isExampleSecret`, `scan-secrets.ts` imports
+      `isExampleSecret` and exports `scanDiffForRealSecrets`, and the new focused test
+      proves the partition (example key surfaced by `scanDiffForSecrets`, excluded by
+      `scanDiffForRealSecrets`)
+    check: >
+      cd packages/sdk-ts &&
+      grep -q "EXAMPLE_SECRET_VALUES" src/judge/secret-allowlist.ts &&
+      grep -q "isExampleSecret" src/judge/secret-allowlist.ts &&
+      grep -q "isExampleSecret" src/judge/scan-secrets.ts &&
+      grep -q "scanDiffForRealSecrets" src/judge/scan-secrets.ts &&
+      pnpm exec vitest run test/judge/secret-allowlist.test.ts test/judge/scan-secrets.test.ts
+  - id: AC-2
+    description: >
+      the SDK stays type- and lint-clean and the full existing suite remains green —
+      proving the new function is additive and the existing `scanDiffForSecrets` evidence
+      scan (S1 suite + dogfood-055 wire) is not regressed
+    check: cd packages/sdk-ts && pnpm exec tsc --noEmit && pnpm exec eslint . && pnpm exec vitest run
+budget_usd: 5
+max_steps: 4
+executor:
+  adapter: codex
+  family: openai
+judge:
+  family: openai-compat
+  cadence: 1
+  max_cost_share: 0.5
+routing:
+  stages:
+    plan: { provider: openai-compat, model: gpt-5.5 }
+    code: { provider: openai-compat, model: gpt-5.5 }
+    review: { provider: openai-compat, model: gpt-5.5 }
+    judge: { provider: openai-compat, model: gemini-3.1-pro-preview }

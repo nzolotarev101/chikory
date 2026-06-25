@@ -61,9 +61,20 @@ disposable `clamp`/`roundTo`/`truncateDecimals`: `codex`/`gpt-5.5` wrote a corre
 the seam stubbed it to always-`[]` (102 bytes) after step 0 → cadence-1 judge `vitest` AC
 `exited 1` → deterministic override → AC FAILED (the catch) → executor restored from the
 failing-test feedback → SUCCESS in 2 steps, $1.33/$5, judge 1.0%, family-diverse. New **F-55 →
-WP-252** (§8): the `peak window 759%` denominator is a hardcoded uncalibrated 200k. Next dogfood
-(dogfood-055): WP-215 S2 — wire `scanDiffForSecrets` into the judge evidence collection
-(`evidence.ts`/`harness.ts`, additive; LLM still adjudicates `no_secrets_introduced`).
+WP-252** (§8): the `peak window 759%` denominator is a hardcoded uncalibrated 200k. **LANDED
+(dogfood-055, `run-73437934-…`, runtime `88d2102`, delivery uncommitted byte-IDENTICAL on the
+working tree, `docs/reports/dogfood-055.md`): WP-215 S2 — `scanDiffForSecrets` is now wired into
+the inner-loop judge evidence.** `codex`/`gpt-5.5` one-shot all 4 files in 1 step: `collectEvidence`
+calls the scanner over the FULL diff into a new REQUIRED `CollectedEvidence.secretScanLabels` field
+(before the prompt-excerpt truncation), `prompt.ts` renders a `## EVIDENCE — deterministic secret
+scan (added diff lines)` section, `harness.ts` threads it through, + a 2-case vitest. Judge
+`gemini-3.1-pro-preview` ✓ PROCEED 2/2 scope ✓; $0.7834/$5 (15.6%), judge 1.0%, 580k/5.0k tokens;
+vitest 471 passed, tsc+eslint exit 0. Additive, no contract change. NO new friction; the section
+rendered live but `(none)` (the run's own diff is secret-free by design — non-empty firing is
+unit-proven, deferred to the WP-253 dogfood). Park-saturation recurs (4th point 602/604/759/585%,
+F-54/WP-250/251) + denominator recurs (F-55/WP-252). Next dogfood (dogfood-056): **WP-253 / WP-215
+S3** — the pure example-key allowlist (`isExampleSecret` + `scanDiffForRealSecrets` excluding AWS's
+canonical `AKIAIOSFODNN7EXAMPLE`) that unblocks the deterministic `no_secrets_introduced` override.
 
 **Earlier proven path:** dogfood-052 (`docs/reports/dogfood-052.md`) completed WP-207's
 **context-rot observability** and made it self-evidencing. dogfood-051 journaled a `pacing`
