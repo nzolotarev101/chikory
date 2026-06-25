@@ -1,0 +1,156 @@
+# Dogfood-055: WP-215 S2 — wire the secret scanner INTO the inner-loop judge.
+# Launch with `chikory run` (single durable run). NO seam env this time.
+#
+# WHY THIS IS NEXT (2026-06-25): dogfood-054 landed WP-215 S1 — the pure
+# `scanDiffForSecrets(diff): string[]` primitive (`src/judge/scan-secrets.ts`) — and
+# re-proved the Agent-as-a-Judge true-positive CATCH on that real code. But the
+# scanner is consumed NOWHERE yet (`grep -r scanDiffForSecrets src` hits only its
+# own file). This slice threads it into the inner-loop judge's evidence collection
+# so the judge MECHANICALLY extracts secret-kind findings from the diff it already
+# collects — the documented `harness.ts`/`evidence.ts` consumer, the real product
+# value of WP-215. This is the core thesis: "Agent-as-a-Judge inspects diffs" with
+# a DETERMINISTIC, non-LLM security signal over the actual change.
+#
+# Gate verdicts (recorded in the dogfood-054 review, dogfood-review §5):
+#   * §1.1 Failure-surface: ✅ — a cross-file judge-pillar slice (evidence.ts +
+#     prompt.ts + harness.ts + test), genuinely failable: a NEW REQUIRED field must
+#     thread through every constructor/consumer without breaking `tsc`/the existing
+#     judge suite, and the prompt renderer must surface it correctly. Not a 1-file port.
+#   * §1.2 Product-progress: ✅ — the landed diff is REAL open WP-215 feature code in
+#     the judge harness (the scanner's documented consumer), NOT invented scaffolding.
+#   * §1.3 Mission-critical: ✅ PROCEED — stresses the Agent-as-a-Judge pillar
+#     (deterministic diff inspection in the inner loop) on real product code. The
+#     judge-CATCH is already settled (dogfood-046/048/050/054) — this run does NOT
+#     re-prove it; it advances the security-evidence FEATURE. Unblocked real-WP slice.
+#
+# DELIBERATELY ADDITIVE — NOT a live deterministic destructive override.
+#   * The new wiring SURFACES the scan as judge EVIDENCE (a prompt section + a typed
+#     field). The LLM still adjudicates the `no_secrets_introduced` rubric item.
+#   * A LIVE deterministic override that flips `no_secrets_introduced` would SELF-TRIP
+#     ROLLBACK: this run's own diff adds nothing secret-bearing, but ANY diff that
+#     adds test fixtures with AWS's canonical `AKIAIOSFODNN7EXAMPLE` (e.g. WP-215's own
+#     tests) would be flagged. The deterministic override + an example-key allowlist is
+#     the SEPARATE follow-up WP-253. Keep this slice evidence-only.
+#   * Self-trip safety for THIS run: the new test files MUST NOT add any literal that
+#     `scanDiffForSecrets` flags (no `AKIA[0-9A-Z]{16}`, no `sk-` + 20+ chars) at
+#     column-contiguous positions. Build secret-like test inputs by string
+#     CONCATENATION (e.g. `"AKIA" + "IOSFODNN7EXAMPLE"`) so the diff lines this run adds
+#     carry no contiguous secret — the live judge over this run's own diff stays clean.
+#
+# Zero-secrets launch (no API keys; CLI-OAuth judge via the shim; NO seam vars):
+#   node scripts/cli-judge-proxy.mjs 8787 gemini &
+#   OPENAI_COMPAT_BASE_URL=http://127.0.0.1:8787 \
+#     pnpm chikory run examples/dogfood/dogfood-055.yaml --watch
+#
+# Pre-launch discipline:
+#   * COMMIT EVERYTHING first — the workspace clones HEAD (F-30: launch ONCE).
+#   * `scan-secrets.ts` MUST already exist on HEAD (it landed dogfood-054, `cfb8bcd`) —
+#     this slice IMPORTS it; confirm `git show HEAD:packages/sdk-ts/src/judge/scan-secrets.ts`.
+#   * F-49: each AC `check` `grep`s the mandated wiring verbatim BEFORE vitest, so the
+#     executor cannot weaken the gate or stub the wiring.
+#   * Run Devbox commands sequentially (F-22). The AC toolchain is Temporal-free
+#     (grep + vitest + tsc + eslint), well under the 120 s judge cap.
+name: dogfood-055-wp215-s2-judge-secret-evidence
+goal: >
+  Wire the existing WP-215 secret scanner `scanDiffForSecrets` (already on HEAD at
+  `packages/sdk-ts/src/judge/scan-secrets.ts`) INTO the real-time judge's evidence
+  collection, so every judge pass mechanically extracts the secret-kind labels from
+  the workspace diff it already collects and surfaces them to the judge. This is an
+  ADDITIVE evidence wire — do NOT add or change any rubric item, verdict, override,
+  or destructive-rollback logic; the LLM still decides `no_secrets_introduced`.
+
+  Change exactly these THREE existing files plus ONE new test file; change no other
+  file (do not edit `rubric.ts`, the verdict/override logic, `index.ts` barrels
+  beyond what a new export trivially needs, `types.ts`, configs, or unrelated code),
+  add no new dependency, and make no new I/O, network, clock, or randomness call.
+
+  1. packages/sdk-ts/src/judge/evidence.ts
+     - Import `scanDiffForSecrets` from `./scan-secrets.js` (ESM `.js` relative import).
+     - Add a NEW REQUIRED field to the `CollectedEvidence` interface:
+         secretScanLabels: string[];
+       with a short doc comment citing WP-215 (deterministic secret-kind labels the
+       judge sees alongside the diff).
+     - In `collectEvidence`, populate it by calling `scanDiffForSecrets` over the FULL
+       collected diff string (the same `diff` already read via `git diff`, BEFORE the
+       `bound(...)` excerpt truncation, so a secret beyond the prompt cap is still
+       detected) and assign the result to `secretScanLabels` in the returned object.
+
+  2. packages/sdk-ts/src/judge/prompt.ts
+     - Add a NEW REQUIRED field `secretScanLabels: string[]` to the `JudgePromptInput`
+       interface.
+     - In `buildJudgeMessages`, render a NEW evidence section in the user message,
+       placed immediately AFTER the "## EVIDENCE — workspace diff since last verdict"
+       block and before the "## EVIDENCE — CHECK RESULTS" block, with this EXACT header
+       line:
+         ## EVIDENCE — deterministic secret scan (added diff lines)
+       followed by, when `secretScanLabels` is non-empty, the labels rendered one per
+       line as `- <label>`; and when it is empty, the literal line `(none)`.
+
+  3. packages/sdk-ts/src/judge/harness.ts
+     - In the existing `buildJudgeMessages({ ... })` call, pass the new field through:
+         secretScanLabels: collected.secretScanLabels
+       (no other change to the harness).
+
+  4. packages/sdk-ts/test/judge/secret-scan-evidence.test.ts — a NEW Vitest file
+     importing `buildJudgeMessages` from `../../src/judge/prompt.js`. It must encode AT
+     LEAST these cases (build any secret-like strings by CONCATENATION so no contiguous
+     secret literal appears in this file's added diff lines — see the header):
+       - given a `JudgePromptInput` with `secretScanLabels: ["aws-access-key", "openai-key"]`,
+         the rendered user message (the `role: "user"` content) CONTAINS the exact header
+         `## EVIDENCE — deterministic secret scan (added diff lines)` AND both
+         `- aws-access-key` and `- openai-key` lines.
+       - given the same input with `secretScanLabels: []`, the rendered user message
+         contains the header followed by the literal `(none)` (and neither label line).
+     Construct the rest of the `JudgePromptInput` minimally (empty `goal`, an `evidence`
+     object with empty `criteria`/`stepSummaries`/`criteriaHistory` as the existing
+     types require, empty `rubric`, empty `diffText`, empty `checkRuns`) — reproduce the
+     shapes the current interfaces demand; do not weaken or loosen any assertion.
+
+  Follow AGENTS.md and the sdk-ts conventions: strict TypeScript, ESM, named exports
+  only, no default export, no new dependency. Because `CollectedEvidence` and
+  `JudgePromptInput` gain a REQUIRED field, `tsc` will flag every construction/call
+  site until it is threaded — update `collectEvidence` (the only `CollectedEvidence`
+  constructor) and the `harness.ts` `buildJudgeMessages` call accordingly. Run all
+  Devbox verification commands sequentially. If a verification step reports a failing
+  test or type error, READ the failure, fix the wiring, and continue — do NOT weaken,
+  rephrase, or remove any mandated assertion (a grep enforces them).
+repos:
+  - url: /Users/nikitazolotarev/repos/chikory
+    writable: true
+acceptance_criteria:
+  - id: AC-1
+    description: >
+      the secret scanner is wired into the judge evidence collection and surfaced in
+      the judge prompt, and the new focused test proves the rendering — `evidence.ts`
+      imports and calls `scanDiffForSecrets`, `CollectedEvidence` carries
+      `secretScanLabels`, and `buildJudgeMessages` renders the deterministic
+      secret-scan section
+    check: >
+      cd packages/sdk-ts &&
+      grep -q "scanDiffForSecrets" src/judge/evidence.ts &&
+      grep -q "secretScanLabels" src/judge/evidence.ts &&
+      grep -q "secretScanLabels" src/judge/prompt.ts &&
+      grep -q "secretScanLabels" src/judge/harness.ts &&
+      grep -q "deterministic secret scan" src/judge/prompt.ts &&
+      pnpm exec vitest run test/judge/secret-scan-evidence.test.ts
+  - id: AC-2
+    description: >
+      the SDK stays type- and lint-clean and the full existing suite remains green —
+      proving the new required field is threaded through every construction/consumer
+      site and the additive evidence wire breaks nothing
+    check: cd packages/sdk-ts && pnpm exec tsc --noEmit && pnpm exec eslint . && pnpm exec vitest run
+budget_usd: 5
+max_steps: 4
+executor:
+  adapter: codex
+  family: openai
+judge:
+  family: openai-compat
+  cadence: 1
+  max_cost_share: 0.5
+routing:
+  stages:
+    plan: { provider: openai-compat, model: gpt-5.5 }
+    code: { provider: openai-compat, model: gpt-5.5 }
+    review: { provider: openai-compat, model: gpt-5.5 }
+    judge: { provider: openai-compat, model: gemini-3.1-pro-preview }

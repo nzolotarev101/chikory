@@ -53,8 +53,17 @@ a pure `summarizeCompaction(entries)` reducer (`src/runner/compaction-summary.ts
 one-shot 5 files, judge ✓ PROCEED 1/1, $0.8086/$5, vitest 27 + tsc + eslint exit 0. **But the
 build run itself PARKED (`peak window 604% (compact 0 · park 1)`, 0 folds) — the new segment
 never rendered live → F-54 → WP-251 (telemetry unit-proven, not yet observed live; closes on a
-seam-forced multi-step fold, the F-53/F-52 close shape; see §8).** Next dogfood (dogfood-054):
-the Agent-as-a-Judge true-positive catch on REAL product-WP code (WP-215 `scanDiffForSecrets`).
+seam-forced multi-step fold, the F-53/F-52 close shape; see §8).** **CLOSED (dogfood-054,
+`run-f7106c03-…`, committed `cfb8bcd`, `docs/reports/dogfood-054.md`): the Agent-as-a-Judge
+true-positive catch now lands on REAL product-WP code, off the throwaway scaffolding.** The
+corrupted file was WP-215 S1's real `scanDiffForSecrets` (`src/judge/scan-secrets.ts`), not a
+disposable `clamp`/`roundTo`/`truncateDecimals`: `codex`/`gpt-5.5` wrote a correct scanner →
+the seam stubbed it to always-`[]` (102 bytes) after step 0 → cadence-1 judge `vitest` AC
+`exited 1` → deterministic override → AC FAILED (the catch) → executor restored from the
+failing-test feedback → SUCCESS in 2 steps, $1.33/$5, judge 1.0%, family-diverse. New **F-55 →
+WP-252** (§8): the `peak window 759%` denominator is a hardcoded uncalibrated 200k. Next dogfood
+(dogfood-055): WP-215 S2 — wire `scanDiffForSecrets` into the judge evidence collection
+(`evidence.ts`/`harness.ts`, additive; LLM still adjudicates `no_secrets_introduced`).
 
 **Earlier proven path:** dogfood-052 (`docs/reports/dogfood-052.md`) completed WP-207's
 **context-rot observability** and made it self-evidencing. dogfood-051 journaled a `pacing`
@@ -884,6 +893,16 @@ a first-attempt SUCCESS and produced three plan-changing findings
   parks (folding can't help one overflowing step → WP-250), so a natural fold never
   happens. Closure = a deterministic multi-step run under the `CHIKORY_CONTEXT_WINDOW_TOKENS`
   seam that folds past `keepLastN` with `trigger:"pacing"`, then reads the live count.
+- **The `peak window N%` figure has an UNCALIBRATED denominator** (F-55, dogfood-054 →
+  WP-252): pacing divides projected tokens by a hardcoded `DEFAULT_CONTEXT_WINDOW_TOKENS
+  = 200_000` (`agent-loop.ts:63`) that does NOT reflect the actual executor model's real
+  window. A single `codex`/`gpt-5.5` step routinely runs 387k–793k input tokens (754k in
+  dogfood-054), so the headline reads e.g. `peak window 759%` and `park` fires
+  unconditionally (`pacing.ts:35`) — the `compact` branch is unreachable for real runs.
+  **Don't read the % as literal context-rot** until WP-252 sources the window from the
+  routing model; for now it only tells you "this step exceeded 200k," which every real
+  codex step does. The `debug.contextWindowTokens` seam still overrides it deterministically
+  for tests.
 - **Subscription-auth runs can report $0.00 cost** → rely on `max_steps`
   and the HALT guard when the meter is blind. WP-218 slice 1 (dogfood-004)
   prices the documented zero-secrets path (`gpt-5.5`,
