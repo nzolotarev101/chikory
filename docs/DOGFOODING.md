@@ -46,8 +46,15 @@ provable without a 200k-token accumulation. Real-Temporal proof: `compaction-wir
 "context-window pressure folds before the count trigger" (a 7-step run under a tiny window
 override folds at step 6 with `trigger:"pacing"`); full SDK suite 460 passed. So dogfood-052's
 602%-window PARK signal is no longer inert. **WP-203 → 🟢, WP-207 act half → 🟢; the `park`→
-durable-suspend remainder is WP-250.** Next dogfood (dogfood-053) surfaces the new `trigger`
-field in the `chikory trace` TOTALS (`summarizeCompaction`).
+durable-suspend remainder is WP-250.** dogfood-053 (`run-41f2744f-…`, runtime `4abb478`,
+`docs/reports/dogfood-053.md`) surfaced the new `trigger` field in the `chikory trace` TOTALS:
+a pure `summarizeCompaction(entries)` reducer (`src/runner/compaction-summary.ts`) renders
+`compactions N (pacing M)` additively (byte-identical no-compaction path); `codex`/`gpt-5.5`
+one-shot 5 files, judge ✓ PROCEED 1/1, $0.8086/$5, vitest 27 + tsc + eslint exit 0. **But the
+build run itself PARKED (`peak window 604% (compact 0 · park 1)`, 0 folds) — the new segment
+never rendered live → F-54 → WP-251 (telemetry unit-proven, not yet observed live; closes on a
+seam-forced multi-step fold, the F-53/F-52 close shape; see §8).** Next dogfood (dogfood-054):
+the Agent-as-a-Judge true-positive catch on REAL product-WP code (WP-215 `scanDiffForSecrets`).
 
 **Earlier proven path:** dogfood-052 (`docs/reports/dogfood-052.md`) completed WP-207's
 **context-rot observability** and made it self-evidencing. dogfood-051 journaled a `pacing`
@@ -869,6 +876,14 @@ a first-attempt SUCCESS and produced three plan-changing findings
   belongs to the next run that actually arms/triggers the mechanism. Don't "fix" a
   zero counter on an instrumenting run, and don't fold a scaffold-hosted armed
   re-run in just to see it tick — confirm it on the next real triggering run.
+  Same shape recurred for pacing (F-53, closed dogfood-052) and now compaction
+  (**F-54, dogfood-053 → WP-251**): the `summarizeCompaction` totals segment
+  `compactions N (pacing M)` read 0 on its own trace because the build run **parked**
+  (`peak window 604% (compact 0 · park 1)`) instead of folding — the standing 1-step
+  `codex` runs blow the 200k window ~6× in one step, which the act-half correctly
+  parks (folding can't help one overflowing step → WP-250), so a natural fold never
+  happens. Closure = a deterministic multi-step run under the `CHIKORY_CONTEXT_WINDOW_TOKENS`
+  seam that folds past `keepLastN` with `trigger:"pacing"`, then reads the live count.
 - **Subscription-auth runs can report $0.00 cost** → rely on `max_steps`
   and the HALT guard when the meter is blind. WP-218 slice 1 (dogfood-004)
   prices the documented zero-secrets path (`gpt-5.5`,

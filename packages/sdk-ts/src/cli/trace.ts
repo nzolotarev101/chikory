@@ -8,6 +8,7 @@
  */
 import type { RunRow, RunTotals } from "../journal/journal.js";
 import type { JudgePayload, StepPayload } from "../runner/activities.js";
+import { summarizeCompaction } from "../runner/compaction-summary.js";
 import { summarizePacing } from "../runner/pacing-summary.js";
 import type {
   ArtifactRef,
@@ -171,6 +172,7 @@ export function renderTrace(run: RunRow, entries: JournalEntry[], totals: RunTot
   const seams = entries.filter((e) => e.kind === "seam").length;
   const pacingEvents = entries.filter((e) => e.kind === "pacing").length;
   const pacing = summarizePacing(entries);
+  const compaction = summarizeCompaction(entries);
   const issuesFound = entries.reduce((count, entry) => {
     if (entry.kind !== "judge") return count;
     const { form } = entry.payload as JudgePayload;
@@ -208,8 +210,12 @@ export function renderTrace(run: RunRow, entries: JournalEntry[], totals: RunTot
     pacingEvents > 0
       ? ` · pacing events ${pacingEvents} · peak window ${Math.round(pacing.peakUtilization * 100)}% (compact ${pacing.compactRecommended} · park ${pacing.parkRecommended})`
       : "";
+  const compactionSummary =
+    compaction.folds > 0
+      ? ` · compactions ${compaction.folds} (pacing ${compaction.pacingFolds})`
+      : "";
   lines.push(
-    `        injections ${injections} · checkpoints ${checkpoints}${seamSummary}${pacingSummary}${feedback}`,
+    `        injections ${injections} · checkpoints ${checkpoints}${seamSummary}${pacingSummary}${compactionSummary}${feedback}`,
   );
   lines.push(
     `        issues found ${issuesFound} · changes made ${changesMade} ` +

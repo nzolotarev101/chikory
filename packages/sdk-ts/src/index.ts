@@ -120,6 +120,7 @@ export {
   type ContextWindowUsage,
 } from "./runner/pacing.js";
 export { summarizePacing, type PacingSummary } from "./runner/pacing-summary.js";
+export { summarizeCompaction, type CompactionSummary } from "./runner/compaction-summary.js";
 export { DIGEST_SYSTEM_PROMPT, buildDigestMessages } from "./runner/compaction-prompt.js";
 export {
   Journal,

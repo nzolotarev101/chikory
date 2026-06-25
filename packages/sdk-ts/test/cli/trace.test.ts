@@ -268,6 +268,28 @@ describe("renderTrace (WP-142)", () => {
     expect(renderTrace(run, entriesNoPacing, totals)).not.toContain("peak window");
   });
 
+  test("reports compaction fold count only when digest-bearing compaction entries exist", () => {
+    const entriesWithCompaction: JournalEntry[] = [
+      ...entries,
+      entry(9, "compaction", {
+        tokensBefore: 120_000,
+        tokensAfter: 40_000,
+        digestRef: ref("context_snapshot", "pacing digest"),
+        trigger: "pacing",
+      }),
+      entry(10, "compaction", {
+        tokensBefore: 90_000,
+        tokensAfter: 35_000,
+        digestRef: ref("context_snapshot", "count digest"),
+        trigger: "count",
+      }),
+    ];
+    const entriesNoCompaction = entries;
+
+    expect(renderTrace(run, entriesWithCompaction, totals)).toContain("compactions 2 (pacing 1)");
+    expect(renderTrace(run, entriesNoCompaction, totals)).not.toContain("compactions");
+  });
+
   test("reports issues found and changes made", () => {
     const changedStep = step(0, 0, "changed files");
     const probeStep = step(1, 1, "checked state");
