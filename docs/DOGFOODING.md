@@ -72,9 +72,26 @@ scan (added diff lines)` section, `harness.ts` threads it through, + a 2-case vi
 vitest 471 passed, tsc+eslint exit 0. Additive, no contract change. NO new friction; the section
 rendered live but `(none)` (the run's own diff is secret-free by design — non-empty firing is
 unit-proven, deferred to the WP-253 dogfood). Park-saturation recurs (4th point 602/604/759/585%,
-F-54/WP-250/251) + denominator recurs (F-55/WP-252). Next dogfood (dogfood-056): **WP-253 / WP-215
-S3** — the pure example-key allowlist (`isExampleSecret` + `scanDiffForRealSecrets` excluding AWS's
-canonical `AKIAIOSFODNN7EXAMPLE`) that unblocks the deterministic `no_secrets_introduced` override.
+F-54/WP-250/251) + denominator recurs (F-55/WP-252). **LANDED (dogfood-056, `run-37862cf7-…`,
+runtime `8e4661c`, delivery uncommitted byte-IDENTICAL on the working tree,
+`docs/reports/dogfood-056.md`): WP-253 / WP-215 S3 — the example-key allowlist that unblocks the
+deterministic `no_secrets_introduced` override.** `codex`/`gpt-5.5` one-shot all 3 files in 1 step:
+a new `src/judge/secret-allowlist.ts` (`EXAMPLE_SECRET_VALUES` + pure `isExampleSecret`, AWS's
+`AKIAIOSFODNN7EXAMPLE` built by concatenation) + a NEW `scanDiffForRealSecrets(diff)` in
+`scan-secrets.ts` (`.match`es the existing patterns, EXCLUDES allowlisted dummies; the
+evidence-facing `scanDiffForSecrets` behavior UNCHANGED — the 5-case S1 suite is the regression
+guard) + a 3-case vitest. Judge `gemini-3.1-pro-preview` ✓ PROCEED 2/2 scope ✓; $0.4744/$5 (9.4%,
+the cheapest WP-215-series headline), judge 2.0%, 328k/5.4k tokens; vitest 474 passed, tsc+eslint
+exit 0. Additive, no contract change. NO new friction; park-saturation recurs (5th point
+602/604/759/585/334%, F-54/WP-250/251) + denominator recurs (F-55/WP-252). The secret-scan
+evidence section again rendered `(none)` live — **self-trip discipline means any dogfood touching
+the live judge cannot carry a contiguous secret in its own diff, so the non-empty path can't be
+observed naturally in a build run; its closure belongs to a dedicated assertion in the override
+slice (§8), not a scaffold run.** The destructive override that consumes `scanDiffForRealSecrets`
+to flip the verdict pre-land = WP-253, the §4 hand-design follow-up (operator-landed). Next dogfood
+(dogfood-057): **WP-252** — calibrate the pacing-window denominator to the executor model (source
+`contextWindowTokens` from the routing model's real window, fallback 200k), retiring the recurring
+F-55 finding every report in this series flags.
 
 **Earlier proven path:** dogfood-052 (`docs/reports/dogfood-052.md`) completed WP-207's
 **context-rot observability** and made it self-evidencing. dogfood-051 journaled a `pacing`

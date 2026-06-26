@@ -1,0 +1,188 @@
+# Dogfood-057: WP-252 — calibrate the pacing-window denominator to the executor model.
+# Launch with `chikory run` (single durable run). NO seam env.
+#
+# WHY THIS IS NEXT (2026-06-25): the pacing decision divides projected tokens by a
+# HARDCODED `DEFAULT_CONTEXT_WINDOW_TOKENS = 200_000` (`agent-loop.ts:63`) that does NOT
+# reflect the real executor model's window. Every `codex`/`gpt-5.5` step runs 328k–793k
+# input tokens — 1.6–4× the 200k assumption — so `decideContextWindowPacing` PARKS
+# unconditionally and the headline `peak window 334%/585%/759%` reads as catastrophic
+# context-rot while its DENOMINATOR is arbitrary. This is anti-thesis for "maximal
+# observability — no magic". F-55 has now recurred across FIVE consecutive reports
+# (dogfood-052→056). WP-252 sources the denominator from the routing model's known window.
+#
+# THE DOGFOODABLE SLICE — a PURE provider→window table + lookup (the `pricing.ts` /
+# `lookupPricing` analog) PLUS the live denominator wire (the workflow already has `spec`
+# in scope, so the calibration actually lands — not just the pure half):
+#   1. NEW `src/runner/context-window.ts` — `CONTEXT_WINDOW_TABLE` (model id → window
+#      tokens) + `lookupContextWindow(model, fallback)` (longest-prefix, the exact
+#      `lookupPricing` shape) + `resolveContextWindowForSpec(spec, fallback)` (pure: reads
+#      the executor's `routing.stages.code.model`).
+#   2. WIRE it into `agent-loop.ts:355` — replace the bare `DEFAULT_CONTEXT_WINDOW_TOKENS`
+#      fallback with `resolveContextWindowForSpec(spec, DEFAULT_CONTEXT_WINDOW_TOKENS)`,
+#      KEEPING the `debug.contextWindowTokens` seam as the override (seam still wins).
+#   3. NEW `test/runner/context-window.test.ts`.
+#
+# Gate verdicts (applied inline in the dogfood-056 review, dogfood-review §5):
+#   * §1.1 Failure-surface: ✅ — cross-file (a new pure module + the live `agent-loop.ts`
+#     denominator wire + a test) AND a real bug surface (the uncalibrated 200k denominator
+#     five reports flag). Genuinely failable: longest-prefix lookup (a dated snapshot id
+#     must resolve to its family row; a `-mini` id must not borrow the base row's window),
+#     unknown→fallback, AND the no-regression constraint that the `debug.contextWindowTokens`
+#     seam STILL wins — `compaction-wiring.test.ts` (the 7-step tiny-window `trigger:"pacing"`
+#     fold) + the pacing tests are the regression guard; get the precedence wrong and they
+#     break. NOT a throwaway 1-file port.
+#   * §1.2 Product-progress: ✅ — the landed diff is REAL open plan.md §6 WP-252 (🟢)
+#     feature code: the live pacing denominator is actually calibrated (the workflow's
+#     window changes), a thesis-pillar (context-rot / "no magic" observability) mechanism
+#     seeded into real runtime code. NOT invented scaffolding.
+#   * §1.3 Mission-critical: ✅ PROCEED — not busy work, not scaffold-hosted. The meatier
+#     act-slices are §4 operator-walled (WP-250 park→durable-suspend control-flow; WP-253
+#     the destructive `no_secrets_introduced` override — both touch verdict/control-flow
+#     logic, TASK-PROTOCOL §4, operator-landed, NOT dogfood headlines). WP-251 is
+#     observability-only and needs a contrived multi-step decomposition. WP-252 is the
+#     strongest UNBLOCKED real-product thesis slice and retires a five-report-recurring
+#     finding.
+#
+# Live-read note (the F-53 shape, NOT new friction): the wire takes effect on the NEXT run
+# after this lands + rebuilds (HEAD at launch predates the wire), so THIS run's own trace
+# still reads the 200k-based peak window. The first calibrated live read is automatically
+# the next dogfood (confirm its `peak window %` drops to the executor-window-relative
+# figure), or the new test asserts the `gpt-5.5`→400k resolution directly.
+#
+# Zero-secrets launch (no API keys; CLI-OAuth judge via the shim; NO seam vars):
+#   node scripts/cli-judge-proxy.mjs 8787 gemini &
+#   OPENAI_COMPAT_BASE_URL=http://127.0.0.1:8787 \
+#     pnpm chikory run examples/dogfood/dogfood-057.yaml --watch
+#
+# Pre-launch discipline:
+#   * COMMIT EVERYTHING first — the workspace clones HEAD (F-30: launch ONCE). The
+#     dogfood-056 delivery (`secret-allowlist.ts`/`scan-secrets.ts` + its test) is
+#     uncommitted on the working tree; commit it so the WP-253 allowlist is on HEAD before
+#     this run clones (this run does not touch it, but the tree must be clean).
+#   * `agent-loop.ts` MUST already carry the `DEFAULT_CONTEXT_WINDOW_TOKENS` fallback +
+#     `spec.debug?.contextWindowTokens` seam on HEAD — this slice MODIFIES line ~355.
+#   * The now-live dogfood-055 secret-scan evidence runs over THIS run's diff, but the diff
+#     carries no secret-like literal (context-window integers only), so no concatenation
+#     discipline is needed.
+#   * F-49: each AC `check` `grep`s the mandated wiring verbatim BEFORE vitest, so the
+#     executor cannot skip the live wire or stub the lookup.
+#   * Run Devbox commands sequentially (F-22). The AC toolchain is Temporal-free
+#     (grep + vitest + tsc + eslint), well under the 120 s judge cap.
+name: dogfood-057-wp252-context-window-calibration
+goal: >
+  Calibrate the WP-207/WP-252 pacing-window denominator to the executor model: add a pure
+  provider→context-window table + lookup (the `pricing.ts` / `lookupPricing` analog) and
+  wire it into the live agent loop so `decideContextWindowPacing` divides projected tokens
+  by the routing model's REAL context window instead of a hardcoded 200k, while keeping the
+  `debug.contextWindowTokens` seam as the deterministic override. This is an ADDITIVE
+  calibration — do NOT change `decideContextWindowPacing`, the `pacing`/`compaction`
+  journal payloads, `types.ts`, the `chikory trace` renderer, or any verdict/override logic.
+
+  Change exactly these THREE files (one new source module, one existing workflow file, one
+  new test file); change no other file, add no new dependency, and make no new I/O,
+  network, clock, or randomness call (the new resolver is PURE and runs inside the Temporal
+  workflow — it must stay deterministic).
+
+  1. packages/sdk-ts/src/runner/context-window.ts  (NEW)
+     - Export a static module-level table keyed by model id, mirroring `pricing.ts`'s
+       `PRICE_TABLE` keys and the "USD per 1M tokens" doc-comment style:
+         export const CONTEXT_WINDOW_TABLE: Record<string, number> = { ... };
+       Values are each model's context window in TOKENS. Use these rows (match the
+       `PRICE_TABLE` family keys exactly):
+         * Anthropic — `claude-fable-5`, `claude-opus-4-8`, `claude-opus-4-7`,
+           `claude-opus-4-6`, `claude-sonnet-4-6`, `claude-haiku-4-5`: 200_000 each.
+         * OpenAI — `gpt-5.5`, `gpt-5.5-mini`, `gpt-5.2`, `gpt-5.2-mini`: 400_000 each.
+         * Gemini — `gemini-3.1-pro-preview`, `gemini-3.1-flash`, `gemini-2.5-pro`,
+           `gemini-2.5-flash`: 1_000_000 each.
+     - Export a pure longest-prefix lookup, the EXACT shape of `lookupPricing`
+       (`pricing.ts:43`) so a dated snapshot id (e.g. `gpt-5.5-2026-06-01`) resolves to its
+       family row:
+         export function lookupContextWindow(model: string, fallback = 200_000): number
+       Return the exact-match entry if present; else the longest table key the model id
+       `startsWith`; else `fallback`. Add a doc comment citing WP-252.
+     - Export a pure spec-aware resolver:
+         export function resolveContextWindowForSpec(spec: TaskSpec, fallback: number): number
+       It reads the EXECUTOR's code-stage model `spec.routing.stages.code.model` and returns
+       `lookupContextWindow(model, fallback)`; if that model string is missing/empty it
+       returns `fallback`. Type-only `import type { TaskSpec } from "../types.js"`. Named
+       exports only, no default, strict TS / ESM, pure (reads only its args + the module
+       constant — no I/O, no Date, no random).
+
+  2. packages/sdk-ts/src/workflow/agent-loop.ts
+     - Import `resolveContextWindowForSpec` from `../runner/context-window.js` (ESM `.js`).
+     - At the `decideContextWindowPacing(...)` call (~line 355), change the
+       `contextWindowTokens` field from
+         `spec.debug?.contextWindowTokens ?? DEFAULT_CONTEXT_WINDOW_TOKENS`
+       to
+         `spec.debug?.contextWindowTokens ?? resolveContextWindowForSpec(spec, DEFAULT_CONTEXT_WINDOW_TOKENS)`
+       so the deterministic `debug.contextWindowTokens` seam STILL wins (a dogfood/test that
+       shrinks the window to force `park` is unaffected), and an un-seamed real run now
+       divides by the executor model's calibrated window. Keep `DEFAULT_CONTEXT_WINDOW_TOKENS`
+       as the fallback constant. Change NOTHING else in the workflow — the resolver is pure,
+       so determinism holds.
+
+  3. packages/sdk-ts/test/runner/context-window.test.ts  (NEW)
+     - A new Vitest file importing `CONTEXT_WINDOW_TABLE`, `lookupContextWindow`, and
+       `resolveContextWindowForSpec` from `../../src/runner/context-window.js`. It must
+       encode AT LEAST these cases:
+       - `lookupContextWindow("gpt-5.5")` is `400_000`; `lookupContextWindow("claude-opus-4-8")`
+         is `200_000`; `lookupContextWindow("gemini-3.1-pro-preview")` is `1_000_000`.
+       - a dated snapshot id resolves via longest prefix: `lookupContextWindow("gpt-5.5-2026-06-01")`
+         is `400_000`.
+       - an unknown model returns the fallback: `lookupContextWindow("mystery-model", 123_456)`
+         is `123_456`, and `lookupContextWindow("mystery-model")` is the `200_000` default.
+       - `resolveContextWindowForSpec` over a minimal spec whose `routing.stages.code.model`
+         is `"gpt-5.5"` returns `400_000`; over a spec whose code model is unknown/empty it
+         returns the passed `fallback`.
+       Build the minimal `TaskSpec` fixtures inline (only the fields the resolver reads need
+       be present; cast as needed). Do not weaken or loosen any assertion.
+
+  Follow AGENTS.md and the sdk-ts conventions: strict TypeScript, ESM, named exports only,
+  no default export, no new dependency. Run all Devbox verification commands sequentially.
+  If a verification step reports a failing test or type error, READ the failure, fix the
+  code, and continue — do NOT weaken, rephrase, or remove any mandated assertion (a grep
+  enforces them), do NOT change `decideContextWindowPacing` or the pacing/compaction journal
+  payloads, and do NOT break the `debug.contextWindowTokens` seam precedence (the
+  `compaction-wiring.test.ts` 7-step tiny-window fold + the pacing tests are the regression
+  guard — they must stay green).
+repos:
+  - url: /Users/nikitazolotarev/repos/chikory
+    writable: true
+acceptance_criteria:
+  - id: AC-1
+    description: >
+      the pure context-window table + lookup + spec-aware resolver land and the live agent
+      loop sources the pacing denominator from it — `context-window.ts` exports
+      `CONTEXT_WINDOW_TABLE`, `lookupContextWindow`, and `resolveContextWindowForSpec`,
+      `agent-loop.ts` calls `resolveContextWindowForSpec` at the pacing decision, and the
+      new focused test proves longest-prefix resolution, the unknown→fallback path, and the
+      executor-model spec resolution
+    check: >
+      cd packages/sdk-ts &&
+      grep -q "CONTEXT_WINDOW_TABLE" src/runner/context-window.ts &&
+      grep -q "lookupContextWindow" src/runner/context-window.ts &&
+      grep -q "resolveContextWindowForSpec" src/runner/context-window.ts &&
+      grep -q "resolveContextWindowForSpec" src/workflow/agent-loop.ts &&
+      pnpm exec vitest run test/runner/context-window.test.ts
+  - id: AC-2
+    description: >
+      the SDK stays type- and lint-clean and the full existing suite remains green —
+      proving the denominator wire is additive, the `decideContextWindowPacing` decision is
+      unchanged, and the `debug.contextWindowTokens` seam precedence still holds (the
+      `compaction-wiring` tiny-window fold + the pacing tests are not regressed)
+    check: cd packages/sdk-ts && pnpm exec tsc --noEmit && pnpm exec eslint . && pnpm exec vitest run
+budget_usd: 5
+max_steps: 4
+executor:
+  adapter: codex
+  family: openai
+judge:
+  family: openai-compat
+  cadence: 1
+  max_cost_share: 0.5
+routing:
+  stages:
+    plan: { provider: openai-compat, model: gpt-5.5 }
+    code: { provider: openai-compat, model: gpt-5.5 }
+    review: { provider: openai-compat, model: gpt-5.5 }
+    judge: { provider: openai-compat, model: gemini-3.1-pro-preview }
