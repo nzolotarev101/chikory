@@ -1,0 +1,165 @@
+# Dogfood-059: WP-215 — pure new-dependency scan primitive for the Agent-as-a-Judge security/architecture rubric.
+# Launch with `chikory run` (single durable run). NO seam env.
+#
+# WHY THIS IS NEXT (2026-06-27): dogfood-058 (WP-210) opened the judge SCORING-modes pillar with a pure
+# G-Eval primitive AND closed F-55 by observation (the calibrated `peak window 179%` live read). WP-210's
+# remaining act half — the `scoringMethod` TaskSpec field + the live judge-harness wire that consumes
+# `aggregateGEval` — is a §4 contract-touching change (TASK-PROTOCOL §4, operator-landed, NOT a dogfood
+# headline). The other meatier slices stay §4-walled: WP-250 (park→durable-suspend control-flow) and
+# WP-253 (destructive `no_secrets_introduced` override) both touch verdict/control-flow logic; WP-251 is
+# observability-only with no new product code. So the loop stays on the Agent-as-a-Judge pillar and takes
+# the next UNBLOCKED real-product slice: WP-215's explicitly-open "dependency-scan / architecture-rubric
+# half" (plan.md §6 WP-215 row: "S1+S2+S3 primitives all landed; WP-215 stays 🟡 on the override + the
+# dependency-scan/architecture-rubric half"). The secret-scan side is fully landed (S1 `scanDiffForSecrets`
+# dogfood-054 → S2 judge-evidence wire dogfood-055 → S3 allowlist dogfood-056); this run lands the DEPENDENCY
+# analog: a pure `scanDiffForNewDependencies(diff)` that flags external packages a diff newly imports — the
+# exact `scanDiffForSecrets` shape (added-lines-only, `+++`-excluded, sorted+de-duped+empty-safe), the same
+# pure-decision-first decomposition (`buildVerdict`, `aggregateGEval` dogfood-058, `scanDiffForSecrets`
+# dogfood-054). It mechanizes the "no new dependencies unless the goal allowed them" review THIS dogfood loop
+# performs by hand every run. The live judge-evidence wire that consumes it is the SEPARATE WP-215 S5
+# follow-up (the `scanDiffForSecrets` → `collectEvidence` S2 analog), NOT part of this run.
+#
+# Gate verdicts (applied inline in the dogfood-058 review, dogfood-review §5):
+#   * §1.1 Failure-surface: ✅ — GENUINE new classification logic (not a port): extracting module specifiers
+#     from added `import`/`from`/`require` lines, then EXCLUDING relative (`./`, `../`), absolute (`/`), and
+#     `node:` builtins, and NORMALIZING a bare specifier to its package name (scoped `@scope/pkg/sub` →
+#     `@scope/pkg`; unscoped `lodash/merge` → `lodash`). Each is a real way to get it subtly wrong (a scoped
+#     package collapsed to `@scope`, a `node:fs` builtin counted as a dep, a removed `-import` line counted,
+#     a subpath not stripped). The `scanDiffForSecrets`/dogfood-054 precedent — a pure judge-evidence scanner
+#     that is a legitimate headline because the logic is genuinely failable, not a 1-file mirror.
+#   * §1.2 Product-progress: ✅ — the landed diff is REAL open plan.md §6 WP-215 (🟡) judge-pillar feature
+#     code: the explicitly-named "dependency-scan half", the dependency analog of the landed secret scan and
+#     the primitive a later judge-evidence wire (WP-215 S5) consumes. The legitimate pure-decision-first
+#     slice with a backing WP, NOT invented disposable scaffolding (unlike dogfood-046/047/048's
+#     clamp/roundTo/truncate throwaways).
+#   * §1.3 Mission-critical: ✅ PROCEED — not busy work, not scaffold-hosted. The meatier act-slices are all
+#     blocked: WP-210 act half (contract change), WP-250 (control-flow), WP-253 (verdict override) are §4
+#     operator-walled; WP-251 is observability-only with no new code. WP-215's dependency-scan pure slice is
+#     the strongest UNBLOCKED real-product thesis slice — it extends a live judge-security pillar.
+#
+# Live-read note (NOT friction): this pure scanner is wired NOWHERE this run (the judge-evidence consumer is
+# the WP-215 S5 follow-up), exactly like `scanDiffForSecrets` (dogfood-054) landed as a pure-first slice
+# before its dogfood-055 evidence wire — the test is the proof of behavior.
+#
+# Zero-secrets launch (no API keys; CLI-OAuth judge via the shim; NO seam vars):
+#   node scripts/cli-judge-proxy.mjs 8787 gemini &
+#   OPENAI_COMPAT_BASE_URL=http://127.0.0.1:8787 \
+#     pnpm chikory run examples/dogfood/dogfood-059.yaml --watch
+#
+# Pre-launch discipline:
+#   * COMMIT EVERYTHING first — the workspace clones HEAD (F-30: launch ONCE). The dogfood-058 delivery
+#     (`src/judge/scoring.ts` + the `index.ts` re-export + its test) is uncommitted on the working tree;
+#     commit it so the tree is clean before this run clones (this run does not touch those files).
+#   * The diff carries no secret-like literal (package names + import statements only), so the now-live
+#     `scanDiffForSecrets` over this run's own diff returns `[]` — no concatenation discipline needed.
+#   * F-49: each AC `check` `grep`s the mandated symbols verbatim BEFORE vitest, so the executor cannot skip
+#     a function or stub the scanner.
+#   * Run Devbox commands sequentially (F-22). The AC toolchain is Temporal-free (grep + vitest + tsc +
+#     eslint), well under the 120 s judge cap.
+name: dogfood-059-wp215-dependency-scan
+goal: >
+  Land the pure new-dependency scan primitive for the Agent-as-a-Judge security/architecture rubric
+  (WP-215): a self-contained function that inspects a unified diff and returns the external package names
+  the diff NEWLY imports — the dependency analog of the already-landed secret scan (`scanDiffForSecrets`),
+  the evidence a judge uses to flag "this change pulls in a new dependency". This is an ADDITIVE pure slice —
+  do NOT change `scanDiffForSecrets`, `scanDiffForRealSecrets`, `collectEvidence`, the judge
+  prompt/harness/rubric, `buildVerdict`, `types.ts`, the journal payloads, or any verdict/evidence logic; the
+  live judge-evidence wire that consumes this scanner is a SEPARATE follow-up (WP-215 S5), NOT part of this
+  run.
+
+  Change exactly these THREE files (one new source module, the judge barrel, one new test file); change no
+  other file, add no new dependency, and make no I/O, network, clock, or randomness call (the scanner is
+  PURE — it reads only its `diff` argument).
+
+  1. packages/sdk-ts/src/judge/scan-dependencies.ts  (NEW)
+     - Export one pure function with a doc comment citing WP-215:
+         export function scanDiffForNewDependencies(diff: string): string[]
+     - Consider ONLY added unified-diff lines: a line that starts with "+" but NOT "+++" (the exact
+       `getAddedDiffLines` discipline `scan-secrets.ts` uses — added lines only, file headers excluded).
+     - From each added line, extract every module specifier introduced by an import or require:
+         * an ES import/re-export with a source: the specifier captured by `/\bfrom\s*["']([^"']+)["']/`
+           (covers `import x from "pkg"`, `import { y } from "pkg"`, `export { z } from "pkg"`);
+         * a side-effect import: the specifier captured by `/\bimport\s*["']([^"']+)["']/`
+           (covers `import "pkg"`);
+         * a CommonJS require: the specifier captured by `/\brequire\(\s*["']([^"']+)["']\s*\)/`
+           (covers `const a = require("pkg")`).
+       (A single line may match more than one pattern; collect every captured specifier.)
+     - Classify + normalize each captured specifier to a bare PACKAGE NAME, IGNORING non-external ones:
+         * IGNORE a specifier that starts with "." (relative: "./x", "../x"), "/" (absolute), or the
+           "node:" prefix (Node builtins) — these are NOT external dependencies;
+         * otherwise normalize to the package name: a SCOPED specifier (starts with "@") keeps its first
+           TWO "/"-separated segments (`@scope/pkg/sub` -> `@scope/pkg`); an UNSCOPED specifier keeps its
+           first segment only (`lodash/merge` -> `lodash`, `express` -> `express`).
+     - Return the package names SORTED, DE-DUPED, empty-safe (no matches / empty diff -> `[]`). Pure — reads
+       only its `diff` arg. Named export only, no default, strict TS / ESM.
+
+  2. packages/sdk-ts/src/judge/index.ts
+     - Add a re-export block for the new module, mirroring the existing blocks
+       (e.g. `export { scanDiffForNewDependencies } from "./scan-dependencies.js";`). ESM `.js` specifier.
+       Change nothing else in the barrel.
+
+  3. packages/sdk-ts/test/judge/scan-dependencies.test.ts  (NEW)
+     - A new Vitest file importing `scanDiffForNewDependencies` from `../../src/judge/scan-dependencies.js`.
+       It must encode AT LEAST these cases (build each `diff` as a string of newline-joined unified-diff
+       lines; use a leading "+" for added lines and "-"/" " for context where a case needs them):
+       - an external default import is reported: an added `+import express from "express";` line yields
+         `["express"]`.
+       - a relative import is IGNORED: an added `+import { x } from "./local";` line yields `[]`.
+       - a `node:` builtin is IGNORED: an added `+import { readFile } from "node:fs";` line yields `[]`.
+       - a SCOPED package subpath is normalized to its first two segments: an added
+         `+import { z } from "@scope/pkg/sub";` line yields `["@scope/pkg"]`.
+       - an UNSCOPED subpath is normalized to its first segment: an added `+import merge from "lodash/merge";`
+         line yields `["lodash"]`.
+       - a CommonJS require is reported: an added `+const a = require("axios");` line yields `["axios"]`.
+       - a side-effect import is reported: an added `+import "zod";` line yields `["zod"]`.
+       - only ADDED lines count: a diff whose `+++ b/file.ts` header names a package-like path AND that
+         contains a REMOVED `-import old from "removed-pkg";` line, plus one added
+         `+import good from "good-pkg";` line, yields `["good-pkg"]` (the `+++` header and the `-` line are
+         both excluded).
+       - the result is SORTED and DE-DUPED: a diff adding `+import a from "zebra";`, `+import b from "alpha";`,
+         and a second `+import c from "alpha/x";` yields `["alpha", "zebra"]`.
+       - an empty diff yields `[]`.
+       Do not weaken or loosen any assertion.
+
+  Follow AGENTS.md and the sdk-ts conventions: strict TypeScript, ESM, named exports only, no default
+  export, no new dependency. Run all Devbox verification commands sequentially. If a verification step
+  reports a failing test or type error, READ the failure, fix the code, and continue — do NOT weaken,
+  rephrase, or remove any mandated assertion (a grep enforces them), do NOT change `scanDiffForSecrets`/
+  `scanDiffForRealSecrets`/`collectEvidence` or any verdict/evidence/journal logic, and do NOT touch
+  `types.ts`.
+repos:
+  - url: /Users/nikitazolotarev/repos/chikory
+    writable: true
+acceptance_criteria:
+  - id: AC-1
+    description: >
+      the pure new-dependency scan primitive lands and is re-exported from the judge barrel —
+      `scan-dependencies.ts` exports `scanDiffForNewDependencies`, `src/judge/index.ts` re-exports the new
+      module, and the new focused test proves external-import detection, the relative / absolute / `node:`
+      exclusions, scoped + unscoped subpath normalization, the require + side-effect import forms, the
+      added-lines-only (`+`/`+++`) discipline, and the sorted/de-duped/empty-safe output
+    check: >
+      cd packages/sdk-ts &&
+      grep -q "scanDiffForNewDependencies" src/judge/scan-dependencies.ts &&
+      grep -q "scan-dependencies.js" src/judge/index.ts &&
+      pnpm exec vitest run test/judge/scan-dependencies.test.ts
+  - id: AC-2
+    description: >
+      the SDK stays type- and lint-clean and the full existing suite remains green — proving the dependency
+      scanner is additive and the secret-scan / evidence / verdict logic is unchanged
+    check: cd packages/sdk-ts && pnpm exec tsc --noEmit && pnpm exec eslint . && pnpm exec vitest run
+budget_usd: 5
+max_steps: 4
+executor:
+  adapter: codex
+  family: openai
+judge:
+  family: openai-compat
+  cadence: 1
+  max_cost_share: 0.5
+routing:
+  stages:
+    plan: { provider: openai-compat, model: gpt-5.5 }
+    code: { provider: openai-compat, model: gpt-5.5 }
+    review: { provider: openai-compat, model: gpt-5.5 }
+    judge: { provider: openai-compat, model: gemini-3.1-pro-preview }
