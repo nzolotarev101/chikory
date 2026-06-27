@@ -100,12 +100,21 @@ so the live pacing decision divides by the routing model's REAL window (`gpt-5.5
 6 + full suite 480 passed, tsc+eslint exit 0. Additive, no contract change. **NO new friction; F-55
 FIXED IN CODE** (recurred dogfood-052→056) — closure is the F-53 live-read shape, the first calibrated
 read being the NEXT run (this run's own trace predates the wire, reads `peak window 904%`).
-Park-saturation recurs (6th point 602/604/759/585/334/904%, F-54/WP-250/251). Next dogfood
-(dogfood-058): **WP-210** — a pure first slice of the Agent-as-a-Judge scoring pillar (pairwise +
-G-Eval scoring modes): `normalizeGEvalScore` + `aggregateGEval` in a new `src/judge/scoring.ts`, the
-continuous-score analog of `buildVerdict` (local types, no contract change), now that the
-pacing/context-rot observability sub-series is complete and the §4-walled act-slices (WP-250/WP-253
-override) and observability-only WP-251 are blocked.
+Park-saturation recurs (6th point 602/604/759/585/334/904%, F-54/WP-250/251). **LANDED (dogfood-058,
+`run-67d39267-c99c-471e-b625-5de20a3bb8ca`, runtime `6292f62`, delivery uncommitted byte-IDENTICAL on
+the working tree, `docs/reports/dogfood-058.md`): WP-210 — the pure G-Eval scoring primitive opens the
+Agent-as-a-Judge SCORING-modes pillar.** `codex`/`gpt-5.5` one-shot all 3 files in 1 step: a NEW pure
+`src/judge/scoring.ts` (`normalizeGEvalScore` clamp→[0,1] divide-by-zero-guarded + `aggregateGEval`
+weighted-mean/missing-weight→1/≤0-weight-ignored/empty-degenerate/threshold-INCLUSIVE + 3 local types,
+the `buildVerdict` continuous-score analog, NO contract change) re-exported from `src/judge/index.ts`
++ a 9-case vitest. Judge `gemini-3.1-pro-preview` ✓ PROCEED 2/2 scope ✓; $0.4905/$5 (9.8%), judge
+1.8%, 355k/3.8k tokens; vitest 9 + full suite 489 passed, tsc+eslint exit 0. Additive, no contract
+change, no new dep. **NO new friction; F-55 CLOSED BY OBSERVATION** — this is the first live un-seamed
+read with the WP-252 calibration committed: the journaled `pacing` entry reads `utilization 1.792485`
+= `716994/400000` and the trace renders the believable `peak window 179%` (vs the pre-wire 904%), with
+the calibrated window flipping the step from `park` to `compact` (`compact 1 · park 0`) — the first
+WP-203/WP-207 act-half payoff. The act half of WP-210 (`scoringMethod` field + the live judge wire that
+consumes `aggregateGEval`) is a §4 contract-touching follow-up, operator-landed, NOT a dogfood headline.
 
 **Earlier proven path:** dogfood-052 (`docs/reports/dogfood-052.md`) completed WP-207's
 **context-rot observability** and made it self-evidencing. dogfood-051 journaled a `pacing`
@@ -944,10 +953,11 @@ a first-attempt SUCCESS and produced three plan-changing findings
   the denominator from `resolveContextWindowForSpec(spec, DEFAULT_CONTEXT_WINDOW_TOKENS)` (a new
   pure `src/runner/context-window.ts` — `CONTEXT_WINDOW_TABLE` + `lookupContextWindow` longest-prefix,
   the `lookupPricing` analog), so `gpt-5.5`→400k, Gemini→1M, Anthropic→200k. The
-  `debug.contextWindowTokens` seam still wins for deterministic tests. **Live-read lag (F-53
-  shape):** dogfood-057's OWN trace predates the wire and still reads `peak window 904%`; the
-  FIRST calibrated read is the NEXT post-rebuild run — confirm its `peak window %` drops to the
-  model-window-relative figure (e.g. ~898k/400k ≈ 225%-class, no longer 200k-relative).
+  `debug.contextWindowTokens` seam still wins for deterministic tests. **CONFIRMED LIVE
+  (dogfood-058, F-55 CLOSED BY OBSERVATION):** the first run launched at the post-wire HEAD
+  (`6292f62`) journaled `pacing utilization 1.792485` = `716994/400000` and the trace rendered
+  the believable `peak window 179%` (vs the pre-wire 904%); the calibrated window also flipped
+  the step from `park` to `compact` (`compact 1 · park 0`) — the first WP-203/WP-207 act-half payoff.
 - **Subscription-auth runs can report $0.00 cost** → rely on `max_steps`
   and the HALT guard when the meter is blind. WP-218 slice 1 (dogfood-004)
   prices the documented zero-secrets path (`gpt-5.5`,

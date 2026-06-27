@@ -35,3 +35,10 @@ export {
   HALT_CONSECUTIVE_FAILS,
   type VerdictDecision,
 } from "./verdict.js";
+export {
+  aggregateGEval,
+  normalizeGEvalScore,
+  type GEvalAggregateOptions,
+  type GEvalCriterionScore,
+  type GEvalScore,
+} from "./scoring.js";
