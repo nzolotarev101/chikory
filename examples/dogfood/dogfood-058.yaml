@@ -1,0 +1,159 @@
+# Dogfood-058: WP-210 — pure G-Eval scoring primitive for the Agent-as-a-Judge harness.
+# Launch with `chikory run` (single durable run). NO seam env.
+#
+# WHY THIS IS NEXT (2026-06-27): the pacing / context-rot observability sub-series is now
+# COMPLETE — dogfood-051 wired `decideContextWindowPacing` into the live loop, 052 added the
+# `summarizePacing` peak-window reducer, 053 the `summarizeCompaction` totals, and 057 (WP-252)
+# calibrated the denominator to the executor model, retiring the five-report-recurring F-55.
+# The remaining context-rot act-slices are §4-walled: WP-250 (park→durable-suspend control-flow)
+# and the WP-253 destructive `no_secrets_introduced` override both touch verdict/control-flow
+# logic (TASK-PROTOCOL §4, operator-landed, NOT dogfood headlines); WP-251 is observability-only
+# with no new product code. So the loop pivots to the next UNBLOCKED real-product thesis pillar:
+# the Agent-as-a-Judge SCORING modes (WP-210, plan.md §6). The judge today emits a BINARY
+# criteria/rubric verdict (`buildVerdict`); WP-210 adds continuous/comparative scoring behind a
+# future `scoringMethod`. This run lands the PURE scoring primitive — the exact pure-decision-first
+# decomposition every prior judge/runner WP used (`buildVerdict`, `decideContextWindowPacing`
+# dogfood-031, `summarizePacing` dogfood-052): a self-contained reducer with LOCAL types and NO
+# contract change. The `scoringMethod` TaskSpec field + the live judge-harness wire that consumes
+# `aggregateGEval` are the SEPARATE §4 follow-up.
+#
+# Gate verdicts (applied inline in the dogfood-057 review, dogfood-review §5):
+#   * §1.1 Failure-surface: ✅ — GENUINE NEW aggregation logic (not a port): weighted mean over
+#     per-criterion scores, raw-scale clamping, [0,1] normalization, a threshold-INCLUSIVE pass
+#     boundary, and the empty / zero-or-negative-weight degenerate paths. Each is a real way to
+#     get it subtly wrong (off-by-one on the clamp, exclusive vs inclusive threshold, dividing by
+#     a zero total weight). The `decideContextWindowPacing`/dogfood-031 precedent — a pure decision
+#     that is a legitimate headline because the logic is genuinely failable, not a 1-file mirror.
+#   * §1.2 Product-progress: ✅ — the landed diff is REAL open plan.md §6 WP-210 (🟡) judge-pillar
+#     feature code: the scoring primitive a `scoringMethod` judge harness consumes later, the
+#     continuous-score analog of the binary verdict. The legitimate pure-decision-first slice, NOT
+#     invented disposable scaffolding (it has a backing WP, unlike dogfood-046/047/048's
+#     clamp/roundTo/truncate throwaways).
+#   * §1.3 Mission-critical: ✅ PROCEED — not busy work, not scaffold-hosted. Every meatier act-slice
+#     is §4 operator-walled (WP-250 control-flow; WP-253 override — both verdict/control-flow logic)
+#     or observability-only (WP-251, no new code). WP-210's pure slice is the strongest UNBLOCKED
+#     real-product thesis slice and opens a new product pillar (judge scoring modes).
+#
+# Live-read note (NOT friction): this pure reducer is wired NOWHERE this run (the `scoringMethod`
+# consumer is the §4 follow-up), exactly like `decideContextWindowPacing` (dogfood-031) and
+# `summarizePacing` (dogfood-052) landed as pure-first slices — the test is the proof of behavior.
+#
+# Zero-secrets launch (no API keys; CLI-OAuth judge via the shim; NO seam vars):
+#   node scripts/cli-judge-proxy.mjs 8787 gemini &
+#   OPENAI_COMPAT_BASE_URL=http://127.0.0.1:8787 \
+#     pnpm chikory run examples/dogfood/dogfood-058.yaml --watch
+#
+# Pre-launch discipline:
+#   * COMMIT EVERYTHING first — the workspace clones HEAD (F-30: launch ONCE). The dogfood-057
+#     delivery (`context-window.ts` + the `agent-loop.ts` wire + its test) is uncommitted on the
+#     working tree; commit it so the tree is clean before this run clones (this run does not touch
+#     those files).
+#   * The diff carries no secret-like literal (numeric scores + a threshold only), so the now-live
+#     `scanDiffForSecrets` over this run's own diff returns `[]` — no concatenation discipline needed.
+#   * F-49: each AC `check` `grep`s the mandated symbols verbatim BEFORE vitest, so the executor
+#     cannot skip a function or stub the reducer.
+#   * Run Devbox commands sequentially (F-22). The AC toolchain is Temporal-free (grep + vitest +
+#     tsc + eslint), well under the 120 s judge cap.
+name: dogfood-058-wp210-geval-scoring
+goal: >
+  Land the pure G-Eval scoring primitive for the Agent-as-a-Judge harness (WP-210): a
+  self-contained module that turns per-criterion numeric scores into a single normalized
+  aggregate plus a pass/fail decision against a threshold — the continuous-score analog of the
+  binary criteria/rubric verdict (`buildVerdict`). This is an ADDITIVE pure slice — do NOT change
+  `buildVerdict`, `computeVerdict`, the judge prompt/harness/rubric, `types.ts`, the journal
+  payloads, or any verdict/override logic; the `scoringMethod` TaskSpec field and the live judge
+  wire that consumes this reducer are a SEPARATE follow-up, NOT part of this run.
+
+  Change exactly these THREE files (one new source module, the judge barrel, one new test file);
+  change no other file, add no new dependency, and make no I/O, network, clock, or randomness call
+  (the reducer is PURE — it reads only its arguments).
+
+  1. packages/sdk-ts/src/judge/scoring.ts  (NEW)
+     - Export three local result/input types (named exports, no default; do NOT touch `types.ts`):
+         export interface GEvalCriterionScore { id: string; score: number; weight?: number; }
+         export interface GEvalAggregateOptions { threshold: number; scaleMin?: number; scaleMax?: number; }
+         export interface GEvalScore { weightedMean: number; normalized: number; passed: boolean; }
+     - Export a pure normalizer with a doc comment citing WP-210:
+         export function normalizeGEvalScore(raw: number, scaleMin = 1, scaleMax = 5): number
+       Clamp `raw` to [scaleMin, scaleMax], then return `(clamped - scaleMin) / (scaleMax - scaleMin)`
+       so the result is in [0, 1]. If `scaleMax <= scaleMin` return 0 (guard the divide-by-zero).
+     - Export a pure aggregator:
+         export function aggregateGEval(scores: GEvalCriterionScore[], opts: GEvalAggregateOptions): GEvalScore
+       Let `scaleMin = opts.scaleMin ?? 1`, `scaleMax = opts.scaleMax ?? 5`. Treat a missing
+       `weight` as 1 and IGNORE any entry whose effective weight is <= 0. For each remaining entry,
+       clamp its `score` to [scaleMin, scaleMax]. If there are NO positive-weight entries, return
+       `{ weightedMean: scaleMin, normalized: 0, passed: 0 >= opts.threshold }`. Otherwise
+       `weightedMean = sum(clampedScore * weight) / sum(weight)` (on the raw scale),
+       `normalized = normalizeGEvalScore(weightedMean, scaleMin, scaleMax)`, and
+       `passed = normalized >= opts.threshold` (threshold INCLUSIVE). Pure — reads only its args.
+       Named exports only, no default, strict TS / ESM.
+
+  2. packages/sdk-ts/src/judge/index.ts
+     - Add a re-export block for the new module, mirroring the existing blocks
+       (e.g. `export { normalizeGEvalScore, aggregateGEval, type GEvalCriterionScore,
+       type GEvalAggregateOptions, type GEvalScore } from "./scoring.js";`). ESM `.js` specifier.
+       Change nothing else in the barrel.
+
+  3. packages/sdk-ts/test/judge/scoring.test.ts  (NEW)
+     - A new Vitest file importing `normalizeGEvalScore`, `aggregateGEval`, and the types from
+       `../../src/judge/scoring.js`. It must encode AT LEAST these cases:
+       - `normalizeGEvalScore(5)` is `1`; `normalizeGEvalScore(1)` is `0`; `normalizeGEvalScore(3)` is `0.5`.
+       - clamping: `normalizeGEvalScore(7)` is `1` and `normalizeGEvalScore(0)` is `0` (out-of-range raw clamps).
+       - a custom scale: `normalizeGEvalScore(7, 0, 10)` is `0.7`.
+       - a single criterion at the top of the scale passes: `aggregateGEval([{ id: "a", score: 5 }],
+         { threshold: 0.7 })` has `normalized` `1` and `passed` `true`.
+       - a single criterion at the bottom fails: `aggregateGEval([{ id: "a", score: 1 }],
+         { threshold: 0.7 })` has `normalized` `0` and `passed` `false`.
+       - weighted mean: `aggregateGEval([{ id: "a", score: 5, weight: 3 }, { id: "b", score: 1, weight: 1 }],
+         { threshold: 0.7 })` has `weightedMean` `4` and `normalized` `0.75` and `passed` `true`.
+       - threshold is INCLUSIVE: `aggregateGEval([{ id: "a", score: 4 }], { threshold: 0.75 })`
+         has `normalized` `0.75` and `passed` `true`.
+       - empty input: `aggregateGEval([], { threshold: 0.7 })` has `weightedMean` `1`, `normalized` `0`,
+         `passed` `false`.
+       - non-positive weights are ignored: `aggregateGEval([{ id: "a", score: 5, weight: 0 },
+         { id: "b", score: 4, weight: 2 }], { threshold: 0.7 })` has `weightedMean` `4` and `passed` `true`.
+       Do not weaken or loosen any assertion.
+
+  Follow AGENTS.md and the sdk-ts conventions: strict TypeScript, ESM, named exports only, no
+  default export, no new dependency. Run all Devbox verification commands sequentially. If a
+  verification step reports a failing test or type error, READ the failure, fix the code, and
+  continue — do NOT weaken, rephrase, or remove any mandated assertion (a grep enforces them), do
+  NOT change `buildVerdict`/`computeVerdict` or any verdict/override/journal logic, and do NOT touch
+  `types.ts`.
+repos:
+  - url: /Users/nikitazolotarev/repos/chikory
+    writable: true
+acceptance_criteria:
+  - id: AC-1
+    description: >
+      the pure G-Eval scoring primitive lands and is re-exported from the judge barrel —
+      `scoring.ts` exports `normalizeGEvalScore` and `aggregateGEval`, `src/judge/index.ts`
+      re-exports the new module, and the new focused test proves normalization + clamping +
+      custom scale, the weighted-mean aggregate, the threshold-inclusive boundary, and the
+      empty / non-positive-weight degenerate paths
+    check: >
+      cd packages/sdk-ts &&
+      grep -q "normalizeGEvalScore" src/judge/scoring.ts &&
+      grep -q "aggregateGEval" src/judge/scoring.ts &&
+      grep -q "scoring.js" src/judge/index.ts &&
+      pnpm exec vitest run test/judge/scoring.test.ts
+  - id: AC-2
+    description: >
+      the SDK stays type- and lint-clean and the full existing suite remains green — proving the
+      scoring primitive is additive and the binary `buildVerdict`/verdict/override logic is unchanged
+    check: cd packages/sdk-ts && pnpm exec tsc --noEmit && pnpm exec eslint . && pnpm exec vitest run
+budget_usd: 5
+max_steps: 4
+executor:
+  adapter: codex
+  family: openai
+judge:
+  family: openai-compat
+  cadence: 1
+  max_cost_share: 0.5
+routing:
+  stages:
+    plan: { provider: openai-compat, model: gpt-5.5 }
+    code: { provider: openai-compat, model: gpt-5.5 }
+    review: { provider: openai-compat, model: gpt-5.5 }
+    judge: { provider: openai-compat, model: gemini-3.1-pro-preview }

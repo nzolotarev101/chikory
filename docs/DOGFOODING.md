@@ -88,10 +88,24 @@ evidence section again rendered `(none)` live — **self-trip discipline means a
 the live judge cannot carry a contiguous secret in its own diff, so the non-empty path can't be
 observed naturally in a build run; its closure belongs to a dedicated assertion in the override
 slice (§8), not a scaffold run.** The destructive override that consumes `scanDiffForRealSecrets`
-to flip the verdict pre-land = WP-253, the §4 hand-design follow-up (operator-landed). Next dogfood
-(dogfood-057): **WP-252** — calibrate the pacing-window denominator to the executor model (source
-`contextWindowTokens` from the routing model's real window, fallback 200k), retiring the recurring
-F-55 finding every report in this series flags.
+to flip the verdict pre-land = WP-253, the §4 hand-design follow-up (operator-landed). **LANDED
+(dogfood-057, `run-6b23da51-c440-432a-bbf8-51d4ee8a24af`, runtime `3a3dc8d`, delivery uncommitted
+byte-IDENTICAL on the working tree, `docs/reports/dogfood-057.md`): WP-252 — the pacing-window
+denominator is now CALIBRATED to the executor model.** `codex`/`gpt-5.5` one-shot all 3 files in 1
+step: a NEW pure `src/runner/context-window.ts` (`CONTEXT_WINDOW_TABLE` 14 rows + `lookupContextWindow`
+longest-prefix, the `lookupPricing` analog + `resolveContextWindowForSpec`) WIRED into `agent-loop.ts:355`
+so the live pacing decision divides by the routing model's REAL window (`gpt-5.5`→400k), the
+`debug.contextWindowTokens` seam still winning + a 6-case vitest. Judge `gemini-3.1-pro-preview`
+✓ PROCEED 2/2 scope ✓; $1.1870/$5 (23.7%), judge 0.8%, 898k/6.5k tokens (series-high input); vitest
+6 + full suite 480 passed, tsc+eslint exit 0. Additive, no contract change. **NO new friction; F-55
+FIXED IN CODE** (recurred dogfood-052→056) — closure is the F-53 live-read shape, the first calibrated
+read being the NEXT run (this run's own trace predates the wire, reads `peak window 904%`).
+Park-saturation recurs (6th point 602/604/759/585/334/904%, F-54/WP-250/251). Next dogfood
+(dogfood-058): **WP-210** — a pure first slice of the Agent-as-a-Judge scoring pillar (pairwise +
+G-Eval scoring modes): `normalizeGEvalScore` + `aggregateGEval` in a new `src/judge/scoring.ts`, the
+continuous-score analog of `buildVerdict` (local types, no contract change), now that the
+pacing/context-rot observability sub-series is complete and the §4-walled act-slices (WP-250/WP-253
+override) and observability-only WP-251 are blocked.
 
 **Earlier proven path:** dogfood-052 (`docs/reports/dogfood-052.md`) completed WP-207's
 **context-rot observability** and made it self-evidencing. dogfood-051 journaled a `pacing`
@@ -921,16 +935,19 @@ a first-attempt SUCCESS and produced three plan-changing findings
   parks (folding can't help one overflowing step → WP-250), so a natural fold never
   happens. Closure = a deterministic multi-step run under the `CHIKORY_CONTEXT_WINDOW_TOKENS`
   seam that folds past `keepLastN` with `trigger:"pacing"`, then reads the live count.
-- **The `peak window N%` figure has an UNCALIBRATED denominator** (F-55, dogfood-054 →
-  WP-252): pacing divides projected tokens by a hardcoded `DEFAULT_CONTEXT_WINDOW_TOKENS
-  = 200_000` (`agent-loop.ts:63`) that does NOT reflect the actual executor model's real
-  window. A single `codex`/`gpt-5.5` step routinely runs 387k–793k input tokens (754k in
-  dogfood-054), so the headline reads e.g. `peak window 759%` and `park` fires
-  unconditionally (`pacing.ts:35`) — the `compact` branch is unreachable for real runs.
-  **Don't read the % as literal context-rot** until WP-252 sources the window from the
-  routing model; for now it only tells you "this step exceeded 200k," which every real
-  codex step does. The `debug.contextWindowTokens` seam still overrides it deterministically
-  for tests.
+- **The `peak window N%` denominator is now CALIBRATED to the executor model** (F-55 →
+  WP-252, LANDED dogfood-057): pacing used to divide projected tokens by a hardcoded
+  `DEFAULT_CONTEXT_WINDOW_TOKENS = 200_000` (`agent-loop.ts:63`) that ignored the executor's
+  real window — a single `codex`/`gpt-5.5` step routinely runs 387k–898k input tokens, so the
+  headline read e.g. `peak window 759%`/`904%` and `park` fired unconditionally
+  (`pacing.ts:35`), the `compact` branch unreachable. **Fixed:** `agent-loop.ts:355` now sources
+  the denominator from `resolveContextWindowForSpec(spec, DEFAULT_CONTEXT_WINDOW_TOKENS)` (a new
+  pure `src/runner/context-window.ts` — `CONTEXT_WINDOW_TABLE` + `lookupContextWindow` longest-prefix,
+  the `lookupPricing` analog), so `gpt-5.5`→400k, Gemini→1M, Anthropic→200k. The
+  `debug.contextWindowTokens` seam still wins for deterministic tests. **Live-read lag (F-53
+  shape):** dogfood-057's OWN trace predates the wire and still reads `peak window 904%`; the
+  FIRST calibrated read is the NEXT post-rebuild run — confirm its `peak window %` drops to the
+  model-window-relative figure (e.g. ~898k/400k ≈ 225%-class, no longer 200k-relative).
 - **Subscription-auth runs can report $0.00 cost** → rely on `max_steps`
   and the HALT guard when the meter is blind. WP-218 slice 1 (dogfood-004)
   prices the documented zero-secrets path (`gpt-5.5`,

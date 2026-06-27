@@ -35,6 +35,7 @@ import {
   decideContextWindowPacing,
   type ContextWindowPacingPolicy,
 } from "../runner/pacing.js";
+import { resolveContextWindowForSpec } from "../runner/context-window.js";
 import type {
   ArtifactRef,
   ChainNodeHandoff,
@@ -352,7 +353,9 @@ export async function agentLoop(spec: TaskSpec): Promise<RunStatus> {
         // Default 200k window; a dogfood/test may shrink it via the frozen
         // `debug.contextWindowTokens` seam to force a deterministic pressure
         // decision (WP-207 act half — replay-safe, never read from env here).
-        contextWindowTokens: spec.debug?.contextWindowTokens ?? DEFAULT_CONTEXT_WINDOW_TOKENS,
+        contextWindowTokens:
+          spec.debug?.contextWindowTokens ??
+          resolveContextWindowForSpec(spec, DEFAULT_CONTEXT_WINDOW_TOKENS),
       },
       DEFAULT_PACING_POLICY,
     );
