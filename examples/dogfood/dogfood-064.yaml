@@ -1,0 +1,173 @@
+# Dogfood-064: WP-254 pacing-numerator fix — the pure LIVE-occupancy estimator half.
+# Launch with `chikory run` (single durable run). NO seam env.
+#
+# WHY THIS IS NEXT (2026-06-29): dogfood-063 landed the WP-210 PAIRWISE pure primitive
+# (`aggregatePairwise`), the documented sibling of the G-Eval half (dogfood-058) — so BOTH pure
+# primitives of "Pairwise + G-Eval scoring modes" now exist and the pure scoring-modes surface is
+# EXHAUSTED (the remaining WP-210 work is the §4 `scoringMethod` field + live harness selection wire,
+# operator-landed). With the judge scoring/scanning pillars and the Memory-Pointer pure surface all
+# complete, the strongest UNBLOCKED real-product thesis slice left is **WP-254** — the single
+# most-reinforced friction in the whole dogfood corpus (F-56, now ~10 data points: dogfood-059 370%,
+# 060 392%, 061 486%, 062 a spurious compact, 063 a 236% PARK on a trivial task). It is a REAL bug on
+# the context-rot / pacing thesis pillar that the dogfood loop's OWN runs keep tripping.
+#
+# ROOT CAUSE (pinned in dogfood-063): the pacing DECISION (`decideContextWindowPacing`, pure,
+# `pacing.ts:29`) is correct given its inputs, and the DENOMINATOR clause is already done
+# (`resolveContextWindowForSpec` → `lookupContextWindow` keys `gpt-5.5`→400k, `context-window.ts`).
+# The OPEN defect is the NUMERATOR: `agent-loop.ts:350-352` feeds `currentInputTokens: spentTokens`
+# (the run's CUMULATIVE token total across all steps) AND `estimatedNextStepTokens: recordTokens`
+# (the same just-finished step) → `projectedTokens = spentTokens + estimatedNextStepTokens ≈ 2× the
+# step`, and `spentTokens` itself is a codex SUBPROCESS's cumulative cross-internal-turn throughput,
+# not what is RESIDENT in our orchestration window going into the next step. The fix must measure the
+# step's LIVE resident orchestration-context occupancy (the fixed system/instruction preamble + only
+# the recent-step summaries STILL retained in the verbatim window after folding), not cumulative
+# throughput.
+#
+# This run lands the PURE half (the pure-first shape every recent slice landed in): a
+# `ResidentContextParts` input type and a pure `estimateResidentContextTokens(parts)` that sums the
+# system preamble + the retained tail of `recentSummaries`, excluding folded-out summaries — the value
+# the agent-loop SHOULD feed as `currentInputTokens`. The non-pure agent-loop wire that swaps
+# `agent-loop.ts:350` from `spentTokens` to `estimateResidentContextTokens(...)` is the SEPARATE §4
+# follow-up (a frozen-runtime edit, operator-landed) — exactly as `aggregateGEval`/`aggregatePairwise`
+# preceded their harness wires and `recallPointerExcerpt` preceded its agent-loop wire.
+#
+# This is a CROSS-FILE pure slice on real WP-254 product code, NOT a deterministic 1-file port — a
+# legitimate failable headline: the "last-N retained, not first-N" tail slice (folding drops the
+# OLDEST summaries), the `retainedSummaryCount` clamp to `[0, length]`, the exclusion of folded-out
+# entries from the sum, the empty path, the negative-input clamp, and not mutating the input are all
+# real ways to get the live-occupancy math subtly wrong.
+#
+# Gate verdicts (applied inline, dogfood-review §5, on this candidate):
+#   * §1.1 Failure-surface: ✅ — cross-file (`src/runner/pacing.ts` extend + `src/index.ts` barrel +
+#     `test/runner/pacing.test.ts`), 1–3 steps plausible; real numeric failure surface (retained-tail
+#     slice direction, clamp, folded-out exclusion, empty, negative clamp, no mutation). Not a 1-file
+#     port — extends the existing pacing module + barrel + the existing suite.
+#   * §1.2 Product-progress: ✅ — the landed diff is REAL open plan.md §6 WP-254 (🟡) product code on
+#     the context-rot / pacing named thesis pillar. It directly attacks F-56, the most-reinforced
+#     friction in the corpus (~10 data points). NOT invented disposable scaffolding (it extends the
+#     `pacing.ts` that `decideContextWindowPacing` lives in; the value it computes is the exact
+#     `currentInputTokens` the agent-loop over-reads today). A real thesis mechanism — fixing the
+#     loop's own broken pressure signal — seeded INTO that WP's real module.
+#   * §1.3 Mission-critical: ✅ PROCEED — a real product-WP thesis slice (the pacing numerator that
+#     the dogfood loop's own runs falsify every time), UNBLOCKED and not §4-walled (pure estimator;
+#     the agent-loop feed swap is the §4 follow-up, exactly as the prior pure halves' wires were). The
+#     alternatives are blocked or non-headline: WP-210's act half / WP-202 recall wire / WP-228
+#     baseline-precheck wire / WP-247 launcher banner are §4 non-pure runtime wiring (operator-landed);
+#     the WP-249 remainder is track-B harvest tooling; WP-251 observe-fold-live needs delicate
+#     multi-step seam tuning (F-32 wasted-run risk, parked 9×). WP-254's pure estimator is the
+#     strongest UNBLOCKED real-product thesis slice, and the only one that retires recurring friction.
+#
+# Zero-secrets launch (no API keys; CLI-OAuth judge via the shim; NO seam vars):
+#   node scripts/cli-judge-proxy.mjs 8787 gemini &
+#   OPENAI_COMPAT_BASE_URL=http://127.0.0.1:8787 \
+#     pnpm chikory run examples/dogfood/dogfood-064.yaml --watch
+#
+# Pre-launch discipline:
+#   * COMMIT EVERYTHING first — the workspace clones HEAD (F-30: launch ONCE). The dogfood-063
+#     delivery (`scoring.ts`/`index.ts`/`scoring.test.ts`) + this review's report/living-doc edits are
+#     STAGED/uncommitted on the working tree; commit them so the tree is clean before this run clones
+#     (and so HEAD is lint-GREEN — the clone must pass this run's own AC-2 `eslint .`).
+#   * F-49: each AC `check` `grep`s the mandated symbols verbatim BEFORE vitest, so the executor
+#     cannot skip the export or stub the primitive.
+#   * Run Devbox commands sequentially (F-22). The AC toolchain is Temporal-free (grep + vitest + tsc
+#     + eslint), timed well under the 120 s judge cap (scoped vitest ~1 s; full suite ~20 s).
+name: dogfood-064-wp254-resident-occupancy
+goal: >
+  Land the pure LIVE-RESIDENT-OCCUPANCY estimator half of WP-254 (the context-rot / pacing pillar).
+  The pacing decision is already pure and correct (`decideContextWindowPacing` in
+  `src/runner/pacing.ts`) and the denominator is already model-keyed (`resolveContextWindowForSpec`);
+  the OPEN defect is the NUMERATOR — the agent-loop feeds the pacing decision the run's CUMULATIVE
+  token total as `currentInputTokens`, over-reading window occupancy ~2× and falsely PARKING/compacting
+  on trivial tasks (F-56). This adds the pure value the agent-loop SHOULD feed instead: the live
+  resident orchestration-context size (the fixed preamble + only the recent-step summaries still
+  retained in the verbatim window after folding). Change exactly these THREE files; change no other
+  file, add no new dependency, and do NOT touch `types.ts` or any contract. Do NOT modify
+  `decideContextWindowPacing` or the existing `ContextWindowUsage`/`ContextWindowPacingDecision`/
+  `ContextWindowPacingPolicy` exports.
+
+  1. packages/sdk-ts/src/runner/pacing.ts  (extend — do not alter the existing pacing exports)
+     - Add an exported input type (LOCAL to this module — do NOT add it to `types.ts`):
+         /** WP-254: the parts of the LIVE resident orchestration-context window going into the next
+          * step. `systemTokens` is the fixed system/instruction preamble carried into every step;
+          * `recentSummaryTokens` is the per-summary token count of the retained recent-step summaries,
+          * MOST-RECENT LAST (the agent-loop's `recentSummaries`); `retainedSummaryCount` is how many of
+          * the most-recent summaries actually stay in the verbatim window after folding. */
+         export interface ResidentContextParts {
+           systemTokens: number;
+           recentSummaryTokens: number[];
+           retainedSummaryCount: number;
+         }
+     - Add the pure estimator with the same short JSDoc shape the existing pacing helper carries:
+         export function estimateResidentContextTokens(parts: ResidentContextParts): number
+       Semantics (exact):
+         * Resident occupancy = `systemTokens` + the sum of the LAST `retainedSummaryCount` entries of
+           `recentSummaryTokens` (the TAIL — folding drops the OLDEST summaries first, so only the
+           most-recent `retainedSummaryCount` remain verbatim; the older ones are folded out and do NOT
+           count). It measures LIVE occupancy, NOT cumulative cross-step/cross-turn throughput.
+         * Clamp `retainedSummaryCount` into `[0, recentSummaryTokens.length]` before slicing: a
+           negative count retains 0 summaries; a count larger than the array length retains all of them.
+         * Clamp the final result to be at least 0 (never return a negative occupancy even if a caller
+           passes a negative `systemTokens`).
+         * Empty / degenerate: `recentSummaryTokens` empty (or `retainedSummaryCount` ≤ 0) →
+           `Math.max(0, systemTokens)`.
+         * Pure: do NOT mutate `parts` or `recentSummaryTokens`; read only.
+
+  2. packages/sdk-ts/src/index.ts  (extend the existing pacing re-export only)
+     - The barrel already re-exports `decideContextWindowPacing, type ContextWindowPacingDecision,
+       type ContextWindowPacingPolicy, type ContextWindowUsage` from `./runner/pacing.js`. Add
+       `estimateResidentContextTokens` and `type ResidentContextParts` to that SAME export statement.
+       Change nothing else in the barrel.
+
+  3. packages/sdk-ts/test/runner/pacing.test.ts  (extend — do not weaken existing cases)
+     - Add focused cases proving: (a) the retained TAIL is summed with the preamble — e.g.
+       `systemTokens: 100`, `recentSummaryTokens: [10, 20, 30, 40]`, `retainedSummaryCount: 2` →
+       `100 + 30 + 40 = 170` (the last two, NOT the first two); (b) `retainedSummaryCount` larger than
+       the array retains ALL summaries (sum of every entry + preamble); (c) `retainedSummaryCount: 0`
+       (and a negative count) returns just `systemTokens`; (d) empty `recentSummaryTokens` returns
+       `systemTokens`; (e) a negative `systemTokens` clamps the result to 0; (f) the input array (and
+       the `parts` object) is NOT mutated (snapshot `recentSummaryTokens`, call the estimator, assert
+       `toEqual` the snapshot). Follow the existing `pacing.test.ts` structure; do not remove or weaken
+       any existing `decideContextWindowPacing` assertion.
+
+  Follow AGENTS.md and the sdk-ts conventions: strict TypeScript, ESM, named exports only, no default
+  export, no new dependency, no `types.ts`/contract change. Run all Devbox verification commands
+  sequentially. If a verification step reports a failing test or type error, READ the failure, fix the
+  code, and continue — do NOT weaken, rephrase, or remove any mandated assertion (a grep enforces the
+  symbols), and do NOT change the existing `decideContextWindowPacing` export or its types.
+repos:
+  - url: /Users/nikitazolotarev/repos/chikory
+    writable: true
+acceptance_criteria:
+  - id: AC-1
+    description: >
+      the live-resident-occupancy estimator lands in `pacing.ts` and is re-exported from the SDK
+      barrel — `estimateResidentContextTokens` + the `ResidentContextParts` type, with the new focused
+      tests proving the retained-tail sum, the count clamp (over-length retains all, ≤0 retains none),
+      the empty path, the negative-`systemTokens` clamp, and the no-mutation path
+    check: >
+      cd packages/sdk-ts &&
+      grep -q "estimateResidentContextTokens" src/runner/pacing.ts &&
+      grep -q "ResidentContextParts" src/runner/pacing.ts &&
+      grep -q "estimateResidentContextTokens" src/index.ts &&
+      grep -q "estimateResidentContextTokens" test/runner/pacing.test.ts &&
+      pnpm exec vitest run test/runner/pacing.test.ts
+  - id: AC-2
+    description: >
+      the SDK stays type- and lint-clean and the full existing suite remains green — proving the
+      estimator is additive and the existing `decideContextWindowPacing` pacing exports are unchanged
+    check: cd packages/sdk-ts && pnpm exec tsc --noEmit && pnpm exec eslint . && pnpm exec vitest run
+budget_usd: 5
+max_steps: 4
+executor:
+  adapter: codex
+  family: openai
+judge:
+  family: openai-compat
+  cadence: 1
+  max_cost_share: 0.5
+routing:
+  stages:
+    plan: { provider: openai-compat, model: gpt-5.5 }
+    code: { provider: openai-compat, model: gpt-5.5 }
+    review: { provider: openai-compat, model: gpt-5.5 }
+    judge: { provider: openai-compat, model: gemini-3.1-pro-preview }

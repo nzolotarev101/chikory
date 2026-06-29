@@ -37,9 +37,13 @@ export {
 } from "./verdict.js";
 export {
   aggregateGEval,
+  aggregatePairwise,
   normalizeGEvalScore,
   type GEvalAggregateOptions,
   type GEvalCriterionScore,
   type GEvalScore,
+  type PairwiseOutcome,
+  type PairwiseResult,
+  type PairwiseTally,
 } from "./scoring.js";
 export { scanDiffForNewDependencies } from "./scan-dependencies.js";

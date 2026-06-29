@@ -974,6 +974,14 @@ a first-attempt SUCCESS and produced three plan-changing findings
   step parks again. Until WP-254 lands, treat `park`/`peak window %` on a 1-step `codex` run as a
   measurement artifact, not context-rot. WP-254 (live-occupancy numerator + executor-keyed window)
   is distinct from WP-250 (the *action* on park) and WP-251 (observe a fold live).
+  **Reinforced 10× and now the next headline (dogfood-063 → dogfood-064):** dogfood-063 (a trivial
+  3-file additive task) PARKED at `peak window 236%` = `944k/400k` while its true step input was
+  466k = 116% of the 400k window. The denominator clause is DONE (`resolveContextWindowForSpec`→
+  `lookupContextWindow`, `context-window.ts:13`); the OPEN defect is purely the NUMERATOR. dogfood-064
+  lands the pure half — `estimateResidentContextTokens(parts: ResidentContextParts)` in
+  `src/runner/pacing.ts` (system preamble + the RETAINED TAIL of `recentSummaries`, not cumulative
+  throughput) — the value the agent-loop should feed instead of cumulative `spentTokens` at
+  `agent-loop.ts:350`; that feed swap is the §4 follow-up.
 - **Subscription-auth runs can report $0.00 cost** → rely on `max_steps`
   and the HALT guard when the meter is blind. WP-218 slice 1 (dogfood-004)
   prices the documented zero-secrets path (`gpt-5.5`,
