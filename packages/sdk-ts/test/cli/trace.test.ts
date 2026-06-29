@@ -405,12 +405,19 @@ describe("traceJson (--json)", () => {
   });
 });
 
+function stripAnsi(str: string): string {
+  return str.replace(/\x1b\[[0-9;]*m/g, "");
+}
+
 describe("formatEntryLine (--watch)", () => {
   test("one line per entry kind", () => {
-    expect(formatEntryLine(entries[0]!)).toContain("step 1 SUCCESS $0.2100 — scaffold blob store interface");
-    expect(formatEntryLine(entries[3]!)).toContain("verdict ✓ PROCEED (1/1 criteria) @ step 2");
-    expect(formatEntryLine(entries[4]!)).toContain("checkpoint run-x@4 (lastGood)");
-    expect(formatEntryLine(entries[8]!)).toContain("terminal FAILED — judge HALT: gave up");
+    const line0 = stripAnsi(formatEntryLine(entries[0]!));
+    expect(line0).toContain("step 1 SUCCESS ($0.2100)");
+    expect(line0).toContain("scaffold blob store interface");
+
+    expect(stripAnsi(formatEntryLine(entries[3]!))).toContain("verdict ✓ PROCEED (1/1 criteria) @ step 2");
+    expect(stripAnsi(formatEntryLine(entries[4]!))).toContain("checkpoint run-x@4 (lastGood)");
+    expect(stripAnsi(formatEntryLine(entries[8]!))).toContain("terminal FAILED — judge HALT: gave up");
   });
 
   test("compaction renders token delta and digest pointer", () => {
@@ -466,6 +473,6 @@ describe("formatEntryLine (--watch)", () => {
       }),
     );
 
-    expect(line).toContain("pacing compact — 90% window (180k proj)");
+    expect(stripAnsi(line)).toContain("pacing compact — 90% window (180k proj)");
   });
 });

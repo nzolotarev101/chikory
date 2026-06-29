@@ -17,6 +17,7 @@ import type {
   JudgeEvidence,
   TestResultArtifact,
 } from "../types.js";
+import { scanDiffForNewDependencies } from "./scan-dependencies.js";
 import { scanDiffForSecrets } from "./scan-secrets.js";
 
 const execFileAsync = promisify(execFile);
@@ -43,6 +44,8 @@ export interface CollectedEvidence {
   diffText: string;
   /** WP-215 deterministic secret-kind labels the judge sees alongside the diff. */
   secretScanLabels: string[];
+  /** WP-215 deterministic new-dependency package names the judge sees alongside the diff. */
+  newDependencyLabels: string[];
   checkRuns: CheckRun[];
   /** Raw evidence size (diff + check output bytes) — span attribute (WP-134). */
   evidenceBytes: number;
@@ -109,6 +112,7 @@ export async function collectEvidence(input: CollectEvidenceInput): Promise<Coll
   await git(input.workspaceDir, ["add", "-N", "."]);
   const diff = await git(input.workspaceDir, ["diff", input.sinceCommit]);
   const secretScanLabels = scanDiffForSecrets(diff);
+  const newDependencyLabels = scanDiffForNewDependencies(diff);
   const diffRef = await input.store.put(diff, {
     kind: "diff",
     summary: `workspace diff since ${input.sinceCommit.slice(0, 12)} (${diff.length} bytes)`,
@@ -155,6 +159,7 @@ export async function collectEvidence(input: CollectEvidenceInput): Promise<Coll
     evidence,
     diffText: bound(diff, MAX_DIFF_PROMPT_CHARS),
     secretScanLabels,
+    newDependencyLabels,
     checkRuns,
     evidenceBytes: diff.length + checkRuns.reduce((a, r) => a + r.output.length, 0),
   };

@@ -19,6 +19,7 @@ function input(secretScanLabels: string[]): JudgePromptInput {
     rubric: [],
     diffText: "",
     secretScanLabels,
+    newDependencyLabels: [],
     checkRuns: [],
   };
 }

@@ -93,6 +93,11 @@ function renderSecretScanLabels(labels: string[]): string {
   return labels.map((label) => `- ${label}`).join("\n");
 }
 
+function renderNewDependencyLabels(labels: string[]): string {
+  if (labels.length === 0) return "(none)";
+  return labels.map((label) => `- ${label}`).join("\n");
+}
+
 function renderHistory(history: Record<string, boolean[]>): string {
   const entries = Object.entries(history).filter(([, h]) => h.length > 0);
   if (entries.length === 0) return "(first judge pass of this run)";
@@ -107,6 +112,7 @@ export interface JudgePromptInput {
   rubric: RubricItem[];
   diffText: string;
   secretScanLabels: string[];
+  newDependencyLabels: string[];
   checkRuns: CheckRun[];
 }
 
@@ -126,6 +132,9 @@ export function buildJudgeMessages(input: JudgePromptInput): Message[] {
     "",
     "## EVIDENCE — deterministic secret scan (added diff lines)",
     renderSecretScanLabels(input.secretScanLabels),
+    "",
+    "## EVIDENCE — deterministic new-dependency scan (added diff lines)",
+    renderNewDependencyLabels(input.newDependencyLabels),
     "",
     "## EVIDENCE — CHECK RESULTS (judge-executed; exit 0 = pass)",
     renderCheckRuns(input.checkRuns),

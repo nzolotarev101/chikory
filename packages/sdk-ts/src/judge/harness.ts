@@ -191,6 +191,7 @@ export async function runJudgePass(input: RunJudgePassInput): Promise<JudgePassR
       rubric,
       diffText: collected.diffText,
       secretScanLabels: collected.secretScanLabels,
+      newDependencyLabels: collected.newDependencyLabels,
       checkRuns: collected.checkRuns,
     }),
     temperature: 0,

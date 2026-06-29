@@ -127,6 +127,10 @@ describe.skipIf(address === null)("chikory CLI (WP-141/142)", () => {
     return JSON.parse(s.out[0]!) as RunStatusReport;
   }
 
+  function stripAnsi(str: string): string {
+    return str.replace(/\x1b\[[0-9;]*m/g, "");
+  }
+
   test("run → SUCCESS (exit 0), then status/trace forensics", async () => {
     const wire = await startFakeJudgeWire([judgeForm({ criteria: { "AC-1": true } })]);
     cleanups.push(() => wire.close());
@@ -138,8 +142,8 @@ describe.skipIf(address === null)("chikory CLI (WP-141/142)", () => {
     const runId = runIdFrom(run.out);
     expect(run.out.join("\n")).toContain("SUCCESS");
     // --watch streamed journal entries live
-    expect(run.out.some((l) => l.includes("] step 1 SUCCESS"))).toBe(true);
-    expect(run.out.some((l) => l.includes("] verdict ✓ PROCEED"))).toBe(true);
+    expect(run.out.some((l) => stripAnsi(l).includes("step 1 SUCCESS"))).toBe(true);
+    expect(run.out.some((l) => stripAnsi(l).includes("] verdict ✓ PROCEED"))).toBe(true);
 
     // status <run-id> (worker down — journal fallback path)
     const report = await statusReport(runId, dataDir);
