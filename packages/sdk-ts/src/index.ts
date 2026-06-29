@@ -132,6 +132,11 @@ export {
   type ResidentContextParts,
   type ResidentContextInput,
 } from "./runner/pacing.js";
+export {
+  describeStepDeadline,
+  type StepDeadlineInput,
+  type StepDeadlineStatus,
+} from "./runner/step-deadline.js";
 export { summarizePacing, type PacingSummary } from "./runner/pacing-summary.js";
 export { summarizeCompaction, type CompactionSummary } from "./runner/compaction-summary.js";
 export { DIGEST_SYSTEM_PROMPT, buildDigestMessages } from "./runner/compaction-prompt.js";

@@ -1,0 +1,199 @@
+# Dogfood-066: FIRST durable CHAIN on REAL product code — WP-256 launch-time spec-staleness gate.
+# Launch with `chikory chain` (durable multi-node chain, NOT a single `run`).
+#
+# WHY THIS IS NEXT (2026-06-29): dogfood-065 review found the pure-first headline cadence is EXHAUSTED
+# and now actively HARMFUL — WP-254 and WP-255 both landed 🟢 (operator §4 follow-ups), and dogfood-065's
+# flawless pure `describeStepDeadline` landed ORPHANED (zero runtime consumers; the same arithmetic was
+# already inline in `step.ts:150-163` 15 min before launch) → F-60, the textbook dogfood-review §5
+# standing failure mode (green dashboard, backlog unmoved). The §1.3 binding veto applies: a busy/pure
+# headline is forbidden while a thesis-stressing slice on a real product WP is unblocked. The single
+# never-truly-exercised thesis pillar is the DURABLE MULTI-RUN CHAIN (decompose → meta-judge gate →
+# WP-239 dependent handoff → per-node durable journal). Every prior "chain" was either launched as a
+# single `run` (dogfood-041 F-32) or rode THROWAWAY `truncate*` scaffolding (dogfood-047/048) — never
+# real product code. This run fixes BOTH: it is the first chain whose nodes land a REAL open plan.md §6
+# WP (WP-256, born from THIS loop's own F-60), and the chain itself is the thesis vehicle — NO seam.
+#
+# Gate verdicts (applied inline, dogfood-review §5, on CURRENT HEAD `cfd4cba`):
+#   * §1.1 Failure-surface: ✅ — a genuine 2-node chain (node B imports node A's symbol via the WP-239
+#     handoff), launched with `chikory chain`, on the durable-execution thesis pillar; plausibly fails
+#     (dogfood-041 burned 5 attempts on the chain path; planner-decompose + meta-judge gate are real
+#     failure surfaces). Real numeric/parsing failure surface in the code too: table-ROW anchoring (a
+#     prose mention of the WP must NOT match), EXACT wpId-cell match (`WP-25` must not match `WP-255`),
+#     3rd-column status extraction, emoji→enum mapping, not-found→null, no input mutation.
+#   * §1.2 Product-progress: ✅ — the landed diff advances REAL open plan.md §6 WP-256 (🔴, the F-60 fix
+#     queued by THIS review): the launch-time staleness decision that would have refused dogfood-065. The
+#     chain (durable multi-run) is the thesis mechanism seeded INTO WP-256's OWN real code, NOT a fresh
+#     throwaway utility — closing the dogfood-047/048 scaffold-hosted gap for the chain pillar.
+#   * §1.3 Mission-critical: ✅ PROCEED — a thesis-stressing slice (durable chain) on a real product WP,
+#     unblocked: the chain machinery matured since dogfood-041 (WP-239 dependent handoff 🟢, resume proven
+#     live dogfood-044, proxy auto-restart WP-234, planner/gate schema fixes WP-235/236/238/240, the plan
+#     now journaled in a durable activity). User confirmed this direction over the lower-risk WP-256
+#     single-run. Recorded verdict: ✅ PROCEED.
+#
+# DELIVERABLES (two NEW files per node; absent on HEAD 2026-06-29 — confirmed, so no empty-diff FAIL,
+# dogfood-044 F-45). NO barrel (`index.ts`) change — two nodes both editing the barrel would collide on
+# scope; the re-export is a trivial §4 follow-up. NO `types.ts`/contract change.
+#
+# HOW THE DURABLE CHAIN EXERCISES THE THESIS (no seam — the chain IS the mechanism):
+#   * The planner decomposes the goal into node A (independent) + node B (depends on A); the plan
+#     meta-judge gates the decomposition BEFORE any node runs (the durable-planning layer, WP-233).
+#   * Node A seals SUCCESS and publishes its Git bundle through the shared ArtifactStore (WP-239).
+#   * Node B's workspace is node A's handed-off tree — node B IMPORTS `parseWpStatus` from node A's
+#     `wp-status.js` (the AC-2 check greps `src/cli/spec-staleness.ts` for `parseWpStatus`, so node B
+#     CANNOT reimplement it — it must consume the predecessor artifact). This dependent handoff is the
+#     durable-multi-run pillar exercised on real code for the first time.
+#   * Cadence-1 judge runs each node's grep-pinned acceptance check after every step.
+#
+# VALID OUTCOMES (DOGFOODING §1.1 — launch ONCE, watch to terminal, do NOT re-run for a better roll):
+#   * 🟢 BEST: node A SUCCESS → node B imports it and SUCCESS → chain SUCCESS 2/2. First durable chain
+#     landing real product WP code; WP-256 pure decision delivered.
+#   * 🟡 ALSO VALID THESIS DATA: a node HALTs (planner mis-decomposes, gate rejects, handoff/import gap,
+#     or budget) — that is a real durable-chain friction on real code → a new F-n + WP, exactly the
+#     evidence the chain pillar has been avoided to dodge. Report it; do not paper over it.
+#
+# Zero-secrets launch (no API keys on this machine — CLI-OAuth judge via the shim; NO seam env). Google
+# retired the standalone `gemini` CLI OAuth, so the script auto-starts the `agy`/Antigravity proxy for
+# the gemini judge:
+#   devbox shell
+#   bash scripts/dogfood.sh examples/dogfood/dogfood-066.yaml
+# (Manual path: start the proxy `node scripts/cli-judge-proxy.mjs 8787 agy &`, set
+#  `OPENAI_COMPAT_BASE_URL=http://127.0.0.1:8787`, then `pnpm chikory chain
+#  examples/dogfood/dogfood-066.yaml --watch`. `chikory chain` validates the spec before launching.)
+#
+# Pre-launch discipline:
+#   * COMMIT EVERYTHING first — each node workspace clones HEAD (F-30: launch ONCE). The dogfood-065
+#     delivery (`step-deadline.ts`/`index.ts`/test) + this review's report/living-doc edits are STAGED/
+#     uncommitted; commit them so the tree is clean and HEAD is lint-GREEN before the nodes clone (each
+#     node's AC runs `eslint .` over the clone).
+#   * The four target files MUST NOT already exist on HEAD (confirmed absent 2026-06-29) — else a node
+#     clones a baseline that already satisfies its goal → empty diff → FAILED (dogfood-044 F-45).
+#   * F-49 discipline: each AC `check` greps the mandated symbols/literals verbatim BEFORE vitest, so the
+#     executor cannot skip the export, stub the primitive, or (node B) reimplement node A's symbol
+#     instead of importing it.
+#   * Run Devbox commands sequentially (F-22). The AC toolchain is Temporal-free (grep + vitest + tsc +
+#     eslint), timed well under the 120 s judge cap (scoped vitest ~1 s; tsc+eslint ~18 s).
+#   * AFTER it finishes, CONFIRM the chain path was actually exercised (F-32): `.chikory/chains/<chain-id>`
+#     exists with a `ChainJournal`, there are TWO `…-node-…` child runs, and node B's diff imports
+#     `parseWpStatus` (not a reimplementation). A single-run journal with no chain dir means it was
+#     launched as `run` — void, re-launch with `chikory chain`.
+name: dogfood-066-chain-wp256-spec-staleness
+goal: >
+  Implement exactly two sequential, diff-producing deliverables in packages/sdk-ts that together build
+  the WP-256 launch-time spec-staleness gate (the fix for dogfood-065 F-60: a dogfood whose target WP is
+  already done must be detectable before it runs). The second deliverable MUST depend on and import code
+  from the first; do not combine them into one node, do not make them independent, and do not add a
+  verification-only node. A strict acceptance test gates each node, and the real-time judge runs that
+  test after every step (cadence 1). Use strict TypeScript, ESM `.js` relative imports, named exports
+  only, NO default exports, no I/O / network / clock / randomness, no new dependencies. Do NOT change
+  contracts, schemas, `types.ts`, the chain runner, the CLI command wiring, the barrel `src/index.ts`,
+  or any unrelated file. Run project commands sequentially inside the existing Devbox environment. If a
+  verification step reports a failing test or type error, READ the failure and fix the IMPLEMENTATION so
+  every mandated assertion passes — do NOT weaken, rephrase, or remove any mandated assertion (a grep
+  enforces them).
+
+  Node A (independent predecessor): add a NEW pure module at
+  packages/sdk-ts/src/cli/wp-status.ts that extracts a work-package's status icon from the plan.md
+  markdown text. Export a status type and a pure parser (named exports only):
+
+    export type WpStatus = "red" | "yellow" | "green";
+    export function parseWpStatus(planText: string, wpId: string): WpStatus | null;
+
+  Semantics (exact):
+    * Split `planText` into lines. A WP STATUS lives only in a markdown TABLE ROW whose FIRST cell is
+      the work-package id — a line that, after trimming, starts with `|`, and whose first pipe-delimited
+      cell trims to EXACTLY `wpId`. A prose mention of the id (e.g. in a status paragraph) is NOT a
+      match. The id match is EXACT: querying `WP-255` must NOT match a `WP-25` row and vice-versa.
+    * For the FIRST matching row, read the THIRD pipe-delimited cell (the status column: row cells are
+      `| <id> | <name> | <status> | <notes> |`) and return `"red"` if it contains 🔴, `"yellow"` if it
+      contains 🟡, `"green"` if it contains 🟢. (Notes cells also contain those emojis — read the status
+      cell only, never the notes.)
+    * Return `null` when no table row matches `wpId`, or the matched row's status cell holds none of the
+      three icons.
+    * Pure: do not mutate inputs; read only. Add a short JSDoc.
+  Add packages/sdk-ts/test/cli/wp-status.test.ts (NEW Vitest file, ESM `.js` relative import from
+  `../../src/cli/wp-status.js`) encoding AT LEAST these cases verbatim (graded by a grep — do not
+  rephrase the call or the expected literal): a 🟢 row for `WP-255` → `"green"`; a 🟡 row → `"yellow"`;
+  a 🔴 row → `"red"`; the EXACT-MATCH discriminator — a fixture containing BOTH a `| WP-25 | … | 🔴 | …`
+  row and a `| WP-255 | … | 🟢 | …` row, where `parseWpStatus(fixture, "WP-255")` returns `"green"`
+  (NOT red); a prose-only mention of `WP-255` (no table row) → `null`; an absent id → `null`. Touch only
+  those two files.
+
+  Node B (dependent consumer): only after node A seals SUCCESS, add a NEW pure module at
+  packages/sdk-ts/src/cli/spec-staleness.ts. It MUST `import { parseWpStatus, type WpStatus } from
+  "./wp-status.js";` (node A's `wp-status.ts` is already present in node B's workspace via the WP-239
+  handoff — build on it, do NOT recreate or reimplement it). Export (named exports only):
+
+    export interface SpecStalenessInput { targetWpId: string; planText: string; }
+    export interface SpecStalenessReport {
+      targetWpId: string;
+      status: WpStatus | null;
+      stale: boolean;
+      reason: string;
+    }
+    export function assessSpecStaleness(input: SpecStalenessInput): SpecStalenessReport;
+
+  Semantics (exact): `status = parseWpStatus(input.planText, input.targetWpId)`; `stale = status ===
+  "green"` (a dogfood targeting an already-🟢 work package is STALE — the F-60 condition); `reason` is a
+  short human string — when status is null: `target <id> not found in plan`; when green:
+  `target <id> already done (🟢) — spec is stale`; otherwise: `target <id> is <status> — spec is fresh`.
+  Return `{ targetWpId, status, stale, reason }`. Pure; do not mutate inputs. Add a short JSDoc.
+  Add packages/sdk-ts/test/cli/spec-staleness.test.ts (NEW Vitest file) encoding AT LEAST these cases
+  verbatim (graded by a grep): a 🟢 row for the target → `stale === true`; a 🟡 row for the target →
+  `stale === false`; an absent target → `status === null` and `stale === false`. Touch only those two
+  files.
+
+  Keep both functions pure and minimal. Build node B ON node A's handed-off module — the acceptance
+  check greps `spec-staleness.ts` for `parseWpStatus`, so node B must IMPORT and CALL node A's parser,
+  not duplicate it.
+repos:
+  - url: /Users/nikitazolotarev/repos/chikory
+    writable: true
+acceptance_criteria:
+  - id: AC-1
+    description: >
+      independent node A adds only the wp-status module/test, exports `parseWpStatus` returning the
+      red/yellow/green status of a WP's table row (exact-id, status-column, prose/absent → null), its
+      mandated cases are present verbatim (grep-pinned, F-49), its focused test passes, and the SDK stays
+      type- and lint-clean.
+    check: >
+      cd packages/sdk-ts &&
+      grep -q "parseWpStatus" src/cli/wp-status.ts &&
+      grep -q "parseWpStatus" test/cli/wp-status.test.ts &&
+      grep -q '"green"' test/cli/wp-status.test.ts &&
+      grep -q '"yellow"' test/cli/wp-status.test.ts &&
+      grep -q '"red"' test/cli/wp-status.test.ts &&
+      grep -q "WP-25" test/cli/wp-status.test.ts &&
+      pnpm exec vitest run test/cli/wp-status.test.ts &&
+      pnpm exec tsc --noEmit && pnpm exec eslint .
+  - id: AC-2
+    description: >
+      dependent node B adds only the spec-staleness module/test, IMPORTS node A's `parseWpStatus` (the
+      WP-239 handoff — grep-pinned in the source so it cannot be reimplemented), exports
+      `assessSpecStaleness` returning `stale === true` exactly when the target WP is already 🟢, its
+      mandated cases are present verbatim, its focused test passes, and the SDK stays type- and
+      lint-clean.
+    check: >
+      cd packages/sdk-ts &&
+      grep -q "parseWpStatus" src/cli/spec-staleness.ts &&
+      grep -q "assessSpecStaleness" src/cli/spec-staleness.ts &&
+      grep -q "assessSpecStaleness" test/cli/spec-staleness.test.ts &&
+      grep -q "stale" test/cli/spec-staleness.test.ts &&
+      grep -q "true" test/cli/spec-staleness.test.ts &&
+      grep -q "false" test/cli/spec-staleness.test.ts &&
+      pnpm exec vitest run test/cli/spec-staleness.test.ts &&
+      pnpm exec tsc --noEmit && pnpm exec eslint .
+budget_usd: 12
+max_steps: 8
+executor:
+  adapter: codex
+  family: openai
+judge:
+  family: openai-compat
+  cadence: 1
+  max_cost_share: 0.5
+routing:
+  stages:
+    plan: { provider: openai-compat, model: gpt-5.5 }
+    code: { provider: openai-compat, model: gpt-5.5 }
+    review: { provider: openai-compat, model: gpt-5.5 }
+    judge: { provider: openai-compat, model: gemini-3.1-pro-preview }
