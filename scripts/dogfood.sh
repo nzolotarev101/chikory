@@ -11,6 +11,7 @@ set -euo pipefail
 
 # Make sure we run from the repo root
 cd "$(dirname "$0")/.."
+mkdir -p .chikory
 
 # 1. Identify the spec file
 SPEC_FILE="${1:-}"
@@ -43,7 +44,7 @@ if temporal operator cluster health --address "$ADDRESS" >/dev/null 2>&1; then
   echo "Setup: Temporal server is already running at $ADDRESS"
 else
   echo "Setup: Starting ephemeral Temporal dev server on port $PORT..."
-  temporal server start-dev --headless --port "$PORT" --log-level error >/dev/null &
+  temporal server start-dev --headless --port "$PORT" --log-level error >.chikory/temporal.log 2>&1 &
   TEMPORAL_PID=$!
   TEMPORAL_STARTED=true
 
@@ -96,7 +97,7 @@ fi
 
 if [ "$PROXY_HEALTHY" = "false" ]; then
   echo "Setup: Starting cli-judge-proxy on port $PROXY_PORT with backend '$BACKEND'..."
-  node scripts/cli-judge-proxy.mjs "$PROXY_PORT" "$BACKEND" &
+  node scripts/cli-judge-proxy.mjs "$PROXY_PORT" "$BACKEND" >.chikory/cli-judge-proxy.log 2>&1 &
   PROXY_PID=$!
   PROXY_STARTED=true
 
@@ -115,10 +116,12 @@ cleanup() {
   if [ "$PROXY_STARTED" = "true" ] && [ -n "$PROXY_PID" ]; then
     echo "Stopping cli-judge-proxy (PID: $PROXY_PID)..."
     kill "$PROXY_PID" 2>/dev/null || true
+    wait "$PROXY_PID" 2>/dev/null || true
   fi
   if [ "$TEMPORAL_STARTED" = "true" ] && [ -n "$TEMPORAL_PID" ]; then
     echo "Stopping Temporal dev server (PID: $TEMPORAL_PID)..."
     kill "$TEMPORAL_PID" 2>/dev/null || true
+    wait "$TEMPORAL_PID" 2>/dev/null || true
   fi
 }
 trap cleanup EXIT SIGINT SIGTERM
