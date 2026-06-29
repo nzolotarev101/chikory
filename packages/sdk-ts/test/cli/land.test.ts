@@ -173,6 +173,25 @@ describe("chikory land (WP-220)", () => {
     expect(c.out).toContain("verified: 4/4 checks green");
   });
 
+  test("--verify re-runs acceptance checks against the landed commit", async () => {
+    const f = await fixture();
+    const c = cli();
+    const commands: string[] = [];
+    c.deps.loadAcceptanceChecks = () => ["grep -q SOMETHING file"];
+    c.deps.runCheck = (command) => commands.push(command);
+
+    expect(
+      await main(
+        ["land", f.runId, "--verify", "--repo", f.repo, "--data-dir", f.dataDir],
+        c.deps,
+      ),
+    ).toBe(0);
+    expect(commands).toEqual([...VERIFY_COMMANDS, "grep -q SOMETHING file"]);
+    expect(c.out).toContain("acceptance: 1/1 checks green");
+    expect(git(f.repo, ["rev-list", "--count", `${f.baseSha}..HEAD`])).toBe("1");
+    expect(git(f.repo, ["rev-parse", `land-${f.runId}`])).toBe(git(f.repo, ["rev-parse", "HEAD"]));
+  });
+
   test("--verify stops at the first red check, keeps the commit, exits 1", async () => {
     const f = await fixture();
     const c = cli();
@@ -194,6 +213,31 @@ describe("chikory land (WP-220)", () => {
       expect.stringContaining("verification failed: devbox run lint"),
       expect.stringContaining("commit kept"),
     ]);
+  });
+
+  test("--verify fails closed when acceptance checks are red and keeps the commit", async () => {
+    const f = await fixture();
+    const c = cli();
+    const commands: string[] = [];
+    c.deps.loadAcceptanceChecks = () => ["__ac_fails__"];
+    c.deps.runCheck = (command) => {
+      commands.push(command);
+      if (command === "__ac_fails__") throw new Error("red");
+    };
+
+    expect(
+      await main(
+        ["land", f.runId, "--verify", "--repo", f.repo, "--data-dir", f.dataDir],
+        c.deps,
+      ),
+    ).toBe(1);
+    expect(commands).toEqual([...VERIFY_COMMANDS, "__ac_fails__"]);
+    expect(c.err).toEqual([
+      expect.stringContaining("acceptance check failed against landed commit"),
+      expect.stringContaining("commit kept"),
+    ]);
+    expect(git(f.repo, ["rev-list", "--count", `${f.baseSha}..HEAD`])).toBe("1");
+    expect(git(f.repo, ["rev-parse", `land-${f.runId}`])).toBe(git(f.repo, ["rev-parse", "HEAD"]));
   });
 
   test("git failures surface git's stderr in the error message", async () => {

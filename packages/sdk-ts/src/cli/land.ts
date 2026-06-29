@@ -2,7 +2,8 @@ import { execFileSync, execSync } from "node:child_process";
 import { existsSync } from "node:fs";
 import { resolve } from "node:path";
 
-import { workspaceDir } from "../runner/paths.js";
+import { Journal } from "../journal/journal.js";
+import { journalPath, workspaceDir } from "../runner/paths.js";
 import type { CliDeps, CommonFlags } from "./commands.js";
 
 interface LandArgs extends CommonFlags {
@@ -14,6 +15,9 @@ interface LandArgs extends CommonFlags {
 
 export interface LandDeps extends CliDeps {
   runCheck?: (command: string, cwd: string) => void;
+  /** WP-249: the landed run's own acceptance `check` commands, re-run against the landed
+   * commit under `--verify`. Defaults to reading them from the run journal. */
+  loadAcceptanceChecks?: (runId: string, dataDir: string | undefined) => string[];
 }
 
 export const VERIFY_COMMANDS: readonly string[] = [
@@ -56,6 +60,14 @@ function errorMessage(error: unknown): string {
   return collapsedMessage;
 }
 
+function defaultLoadAcceptanceChecks(runId: string, dataDir: string | undefined): string[] {
+  const journal = new Journal(journalPath(dataDir ?? ".chikory", runId));
+  const criteria = journal.getRun()?.task.acceptanceCriteria ?? [];
+  return criteria
+    .filter((c) => typeof c.check === "string" && c.check.trim() !== "")
+    .map((c) => c.check as string);
+}
+
 /**
  * Land a finished run's net workspace diff as one auditable commit.
  */
@@ -67,9 +79,11 @@ export async function cmdLand(args: LandArgs, deps: LandDeps = {}): Promise<numb
     ((command: string, cwd: string): void => {
       execSync(command, { cwd, stdio: ["ignore", "inherit", "inherit"] });
     });
+  const loadAcceptanceChecks = deps.loadAcceptanceChecks ?? defaultLoadAcceptanceChecks;
   const workspace = workspaceDir(args.dataDir, args.runId);
   const repo = resolve(args.repo ?? process.cwd());
   const branch = args.branch ?? `land-${args.runId}`;
+  let acceptanceChecks: string[] = [];
 
   if (!existsSync(workspace)) {
     err(`chikory: workspace for run '${args.runId}' not found at ${workspace}`);
@@ -123,6 +137,17 @@ export async function cmdLand(args: LandArgs, deps: LandDeps = {}): Promise<numb
           return 1;
         }
       }
+      acceptanceChecks = loadAcceptanceChecks(args.runId, args.dataDir);
+      for (const check of acceptanceChecks) {
+        if (!args.json) out(`acceptance: ${check}`);
+        try {
+          runCheck(check, repo);
+        } catch {
+          err(`chikory: acceptance check failed against landed commit: ${check}`);
+          err(`chikory: commit kept: ${sha} — inspect with: git -C ${repo} show ${sha}`);
+          return 1;
+        }
+      }
     }
 
     if (args.json) {
@@ -132,12 +157,13 @@ export async function cmdLand(args: LandArgs, deps: LandDeps = {}): Promise<numb
           branch,
           commit: sha,
           workspace,
-          ...(args.verify === true ? { verified: true } : {}),
+          ...(args.verify === true ? { verified: true, acceptanceChecks: acceptanceChecks.length } : {}),
         }),
       );
     } else {
       if (args.verify === true) {
         out(`verified: ${VERIFY_COMMANDS.length}/${VERIFY_COMMANDS.length} checks green`);
+        out(`acceptance: ${acceptanceChecks.length}/${acceptanceChecks.length} checks green`);
       }
       out(`branch: ${branch}`);
       out(`commit: ${sha}`);

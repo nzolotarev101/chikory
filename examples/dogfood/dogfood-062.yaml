@@ -1,0 +1,162 @@
+# Dogfood-062: WP-202 Memory Pointer RECALL primitive — the pure READ half of the Memory Pointer
+# Pattern. Launch with `chikory run` (single durable run). NO seam env.
+#
+# WHY THIS IS NEXT (2026-06-28): dogfood-061 landed WP-249 fix-clause (c) and de-escalated WP-249
+# 🔴→🟡 (the breaking-build capability now lives in `chikory land --verify`; the remaining gap is
+# track-B harvest-tooling adoption, F-58 — not a failable product-dogfood headline). With the
+# judge-security evidence chain complete and the §4-walled OVERRIDE / WP-210-act / WP-250 off the
+# table, the strongest UNBLOCKED real-product thesis slice is the **Memory Pointer Pattern**
+# (CLAUDE.md core concept: "store large tool outputs externally, pass short refs into context") —
+# the direct context-rot mitigation this very run's pacing data screams for: dogfood-061 PARKED at
+# `peak window 486%` (journaled `projectedTokens 1,943,084 · utilization 4.85771` against the
+# calibrated 400k `gpt-5.5` window), the 9th park data point in the series. The WRITE/render half is
+# landed (`shouldPointerize` + `formatPointerReference`, dogfood-028); the documented remaining WP-202
+# work is the `store.excerpt` RECALL path — the READ half. This run lands its PURE primitive (the
+# pure-first shape the write half landed in): a `parsePointerReference` that turns a context-facing
+# pointer line back into its fields, and a `recallPointerExcerpt` that dereferences it through an
+# INJECTED store-excerpt function (the established `deps.runCheck` DI pattern → hermetic test, no real
+# store, no contract change). The non-pure agent-loop wiring that calls the real `store.excerpt` is the
+# SEPARATE §4 follow-up — exactly as `formatPointerReference` (dogfood-028) preceded its interception
+# wiring (TASK-PROTOCOL §4, hand-landed).
+#
+# This is a CROSS-FILE pure slice on real WP-202 product code, NOT a deterministic 1-file port — a
+# legitimate failable headline: the parser is the exact INVERSE of the landed
+# `formatPointerReference` (`[memory <kind> <idPrefix>] <bytes>B — <summary>`, the literal U+2014
+# em-dash separator, the 12-char `id.slice(0,12)` prefix, the `<bytes>B` suffix), and several real
+# ways to get it subtly wrong (hyphen vs em-dash, greedy summary capture, NaN bytes, returning a
+# truthy object on a malformed line instead of null, breaking the round-trip with the formatter).
+#
+# Gate verdicts (applied inline, dogfood-review §5, on this candidate):
+#   * §1.1 Failure-surface: ✅ — cross-file (`src/runner/memory-pointer.ts` + `src/index.ts` barrel +
+#     `test/runner/memory-pointer.test.ts`), 1–3 steps plausible; real parsing failure surface
+#     (em-dash split, bytes suffix, idPrefix, null-on-malformed, round-trip). Not a 1-file port.
+#   * §1.2 Product-progress: ✅ — the landed diff is REAL open plan.md §6 WP-202 (🟡) product code, the
+#     Memory Pointer Pattern named thesis pillar, the documented "store.excerpt recall path" remainder.
+#     NOT invented disposable scaffolding — it dereferences the real `ArtifactRef`/`ArtifactStore.excerpt`
+#     surface (`types.ts:307-314`) the write half already emits.
+#   * §1.3 Mission-critical: ✅ PROCEED — the core context-rot mitigation this run's 486% park
+#     motivates; UNBLOCKED and not §4-walled (pure primitive + injected excerptFn). The alternatives
+#     are blocked or non-headline: WP-249 remainder = track-B harvest tooling; the dependency/secret
+#     deterministic OVERRIDE + WP-210 act half + WP-250 park→durable-suspend are §4-walled
+#     (verdict/contract/control-flow, operator-landed); WP-251 observe-fold-live needs delicate
+#     multi-step seam tuning (F-32 wasted-run risk). WP-202's recall slice is the strongest UNBLOCKED
+#     real-product thesis slice.
+#
+# Zero-secrets launch (no API keys; CLI-OAuth judge via the shim; NO seam vars):
+#   node scripts/cli-judge-proxy.mjs 8787 gemini &
+#   OPENAI_COMPAT_BASE_URL=http://127.0.0.1:8787 \
+#     pnpm chikory run examples/dogfood/dogfood-062.yaml --watch
+#
+# Pre-launch discipline:
+#   * COMMIT EVERYTHING first — the workspace clones HEAD (F-30: launch ONCE). The dogfood-061
+#     delivery (`land.ts`/`land.test.ts`) + this review's report/living-doc edits are uncommitted on
+#     the working tree; commit them so the tree is clean before this run clones (and so HEAD is
+#     lint-GREEN — the clone must pass this run's own AC-2 `eslint .`).
+#   * F-49: each AC `check` `grep`s the mandated symbols verbatim BEFORE vitest, so the executor
+#     cannot skip the wire or stub the primitive.
+#   * Run Devbox commands sequentially (F-22). The AC toolchain is Temporal-free (grep + vitest + tsc
+#     + eslint), timed well under the 120 s judge cap (scoped vitest ~2 s; full suite ~25 s).
+name: dogfood-062-wp202-memory-pointer-recall
+goal: >
+  Land the pure READ half of the Memory Pointer Pattern (WP-202): turn a context-facing memory
+  pointer line back into its fields and dereference it through an injected store-excerpt function.
+  The WRITE/render half is already landed in the SAME module — `shouldPointerize(bytes, policy)` and
+  `formatPointerReference(ref): string` (which renders `[memory ${ref.kind} ${ref.id.slice(0, 12)}]
+  ${ref.bytes}B — ${ref.summary}`, with a literal U+2014 em-dash " — " before the summary). This adds
+  the exact INVERSE plus a recall helper. Change exactly these THREE files; change no other file, add
+  no new dependency, and do NOT touch `types.ts` or any contract.
+
+  1. packages/sdk-ts/src/runner/memory-pointer.ts  (extend — do not alter the existing exports)
+     - Add an exported result interface (a LOCAL type — do NOT add it to `types.ts`):
+         /** WP-202: the parsed fields of a context-facing memory pointer reference, the inverse of
+          * `formatPointerReference`. `idPrefix` is the 12-char `ArtifactRef.id.slice(0, 12)` the
+          * renderer emits, not the full content hash. */
+         export interface ParsedPointerReference {
+           kind: string;
+           idPrefix: string;
+           bytes: number;
+           summary: string;
+         }
+     - Add the pure inverse parser:
+         export function parsePointerReference(line: string): ParsedPointerReference | null
+       It MUST be the exact inverse of `formatPointerReference`. Match the single-line format
+       `[memory <kind> <idPrefix>] <bytes>B — <summary>` where `<kind>` and `<idPrefix>` are non-empty
+       runs of non-space characters, `<bytes>` is one or more ASCII digits immediately followed by the
+       literal `B`, the separator is the literal `" — "` (space, U+2014 EM DASH, space) the renderer
+       uses, and `<summary>` is the remaining text (which MAY be empty and MAY itself contain spaces or
+       a `—`). Return a `ParsedPointerReference` with `bytes` parsed via `Number.parseInt(..., 10)` on
+       a match; return `null` for any line that does not match the format. A value produced by
+       `formatPointerReference(ref)` must round-trip: `parsePointerReference(formatPointerReference(ref))`
+       yields `{ kind: ref.kind, idPrefix: ref.id.slice(0, 12), bytes: ref.bytes, summary: ref.summary }`.
+     - Add the pure recall helper that dereferences a pointer line through an injected excerpt source
+       (the established `deps.runCheck`/`deps.loadAcceptanceChecks` dependency-injection pattern, so
+       the test is hermetic and no real `ArtifactStore` is needed):
+         export async function recallPointerExcerpt(
+           line: string,
+           excerptFn: (idPrefix: string, bytes: number) => Promise<string>,
+         ): Promise<string | null>
+       Parse `line` with `parsePointerReference`; if it is `null`, return `null` WITHOUT calling
+       `excerptFn`; otherwise return `await excerptFn(parsed.idPrefix, parsed.bytes)`.
+     - Add the same kind of short JSDoc the existing helpers carry above each new export.
+
+  2. packages/sdk-ts/src/index.ts  (extend the existing memory-pointer re-export only)
+     - The barrel already re-exports `shouldPointerize, formatPointerReference, type MemoryPointerPolicy`
+       from `./runner/memory-pointer.js` (index.ts:115). Add `parsePointerReference`,
+       `recallPointerExcerpt`, and `type ParsedPointerReference` to that SAME export statement. Change
+       nothing else in the barrel.
+
+  3. packages/sdk-ts/test/runner/memory-pointer.test.ts  (extend — do not weaken existing cases)
+     - Add focused cases proving: (a) `parsePointerReference` round-trips a value produced by
+       `formatPointerReference` (build an `ArtifactRef`, format it, parse it back, assert the four
+       fields — `idPrefix` equals the 12-char `id.slice(0, 12)`); (b) it parses a hand-written valid
+       line with a multi-word summary; (c) it returns `null` for at least two malformed lines (e.g. a
+       missing `B` suffix, a missing `[memory ...]` prefix, or a hyphen `-` separator instead of the
+       em-dash); (d) `recallPointerExcerpt` parses a valid line and returns the value of an injected
+       `excerptFn` spy, asserting the spy was called with the parsed `idPrefix` and `bytes`; (e)
+       `recallPointerExcerpt` returns `null` and does NOT call the spy for a malformed line. Follow the
+       existing `memory-pointer.test.ts` structure; do not remove or weaken any existing assertion.
+
+  Follow AGENTS.md and the sdk-ts conventions: strict TypeScript, ESM, named exports only, no default
+  export, no new dependency, no `types.ts`/contract change. Run all Devbox verification commands
+  sequentially. If a verification step reports a failing test or type error, READ the failure, fix the
+  code, and continue — do NOT weaken, rephrase, or remove any mandated assertion (a grep enforces the
+  symbols), and do NOT change the existing `shouldPointerize`/`formatPointerReference`/`MemoryPointerPolicy`
+  exports.
+repos:
+  - url: /Users/nikitazolotarev/repos/chikory
+    writable: true
+acceptance_criteria:
+  - id: AC-1
+    description: >
+      the Memory Pointer recall primitive lands in `memory-pointer.ts` and is re-exported from the
+      barrel — `parsePointerReference` (the inverse of `formatPointerReference`) + `recallPointerExcerpt`
+      (parse → injected excerptFn) + the `ParsedPointerReference` type, with the new focused tests
+      proving round-trip, null-on-malformed, and the injected-excerpt recall paths
+    check: >
+      cd packages/sdk-ts &&
+      grep -q "parsePointerReference" src/runner/memory-pointer.ts &&
+      grep -q "recallPointerExcerpt" src/runner/memory-pointer.ts &&
+      grep -q "ParsedPointerReference" src/runner/memory-pointer.ts &&
+      grep -q "parsePointerReference" src/index.ts &&
+      grep -q "parsePointerReference" test/runner/memory-pointer.test.ts &&
+      pnpm exec vitest run test/runner/memory-pointer.test.ts
+  - id: AC-2
+    description: >
+      the SDK stays type- and lint-clean and the full existing suite remains green — proving the recall
+      primitive is additive and the existing memory-pointer exports / interception wiring are unchanged
+    check: cd packages/sdk-ts && pnpm exec tsc --noEmit && pnpm exec eslint . && pnpm exec vitest run
+budget_usd: 5
+max_steps: 4
+executor:
+  adapter: codex
+  family: openai
+judge:
+  family: openai-compat
+  cadence: 1
+  max_cost_share: 0.5
+routing:
+  stages:
+    plan: { provider: openai-compat, model: gpt-5.5 }
+    code: { provider: openai-compat, model: gpt-5.5 }
+    review: { provider: openai-compat, model: gpt-5.5 }
+    judge: { provider: openai-compat, model: gemini-3.1-pro-preview }
