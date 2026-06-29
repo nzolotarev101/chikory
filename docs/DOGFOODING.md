@@ -958,6 +958,20 @@ a first-attempt SUCCESS and produced three plan-changing findings
   (`6292f62`) journaled `pacing utilization 1.792485` = `716994/400000` and the trace rendered
   the believable `peak window 179%` (vs the pre-wire 904%); the calibrated window also flipped
   the step from `park` to `compact` (`compact 1 · park 0`) — the first WP-203/WP-207 act-half payoff.
+- **BUT `peak window N%` STILL over-reads on `codex` steps — don't read it as real context
+  pressure** (F-56 → WP-254, dogfood-059): the WP-252 calibration fixed the DENOMINATOR, not the
+  NUMERATOR. dogfood-059 was a TRIVIAL 3-file additive task, yet it read `peak window 370%` and
+  **parked** (`projectedTokens 1,480,248 · utilization 3.70062`, denominator still exactly 400k —
+  calibration HELD). The numerator is `spentTokens + estimatedNextStepTokens = (734,193+5,931)×2`
+  (`agent-loop.ts:348–359`), i.e. a fresh `codex` subprocess's `tokens_in` SUMMED across its 27
+  internal tool-call turns, fed as if it were live single-prompt window occupancy — even raw
+  734k/400k = 1.835× "overflows" though the provider accepted all 734k input (the executor's real
+  window is well above 400k; there was zero genuine pressure). The window also keys off
+  `routing.stages.code.model`, not the actual codex executor. **So dogfood-058's "park-saturation
+  broke" was happenstance** (that step was just light, 716,994 → 1.79× → compact); a heavier codex
+  step parks again. Until WP-254 lands, treat `park`/`peak window %` on a 1-step `codex` run as a
+  measurement artifact, not context-rot. WP-254 (live-occupancy numerator + executor-keyed window)
+  is distinct from WP-250 (the *action* on park) and WP-251 (observe a fold live).
 - **Subscription-auth runs can report $0.00 cost** → rely on `max_steps`
   and the HALT guard when the meter is blind. WP-218 slice 1 (dogfood-004)
   prices the documented zero-secrets path (`gpt-5.5`,

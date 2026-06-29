@@ -42,3 +42,4 @@ export {
   type GEvalCriterionScore,
   type GEvalScore,
 } from "./scoring.js";
+export { scanDiffForNewDependencies } from "./scan-dependencies.js";

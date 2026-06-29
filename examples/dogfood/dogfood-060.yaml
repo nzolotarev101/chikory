@@ -1,0 +1,166 @@
+# Dogfood-060: WP-215 S5 — wire `scanDiffForNewDependencies` into the inner-loop judge evidence.
+# Launch with `chikory run` (single durable run). NO seam env.
+#
+# WHY THIS IS NEXT (2026-06-28): dogfood-059 (WP-215 S4) landed the PURE dependency-scan primitive
+# `scanDiffForNewDependencies(diff): string[]` (`src/judge/scan-dependencies.ts`) but it is consumed
+# NOWHERE — exactly the pure-first→wire shape the secret-scan side already walked (S1 pure
+# `scanDiffForSecrets` dogfood-054 → S2 judge-evidence wire dogfood-055 → S3 allowlist dogfood-056).
+# This run is the DEPENDENCY analog of the S2 wire: thread the landed scanner into `collectEvidence`
+# so the Agent-as-a-Judge mechanically flags the external packages a diff NEWLY imports, in the same
+# inner-loop evidence pass it already runs the secret scan in. It mechanizes the "no new dependencies
+# unless the goal allowed them" review THIS dogfood loop performs by hand every run — now the judge
+# sees it deterministically, alongside the diff, before it grades.
+#
+# This is a CROSS-FILE wire (4 source files + 1 test), the EXACT structure dogfood-055 used for the
+# secret-scan evidence wire — a legitimate failable headline, not a 1-file port: the FULL-diff-before-
+# truncation ordering (the scan must run on the complete diff, NOT the `bound(...)` prompt excerpt — a
+# real way to get it subtly wrong), the additive `CollectedEvidence` field plumbing, the judge-prompt
+# section rendering, and the `harness.ts` thread must all line up. Additive only — the LLM still
+# adjudicates the verdict; this run does NOT add a deterministic override (that is the WP-253-style §4
+# follow-up), does NOT change `scanDiffForNewDependencies`/`scanDiffForSecrets`/`buildVerdict`/the
+# rubric/`types.ts`/the journal payloads.
+#
+# Gate verdicts (applied inline in the dogfood-059 review, dogfood-review §5):
+#   * §1.1 Failure-surface: ✅ — cross-file judge-evidence wire (4 files + test), 2–4 steps plausible;
+#     real failure surface (scan the FULL diff before the `bound` excerpt — the S2 discipline; the new
+#     `CollectedEvidence`/`JudgePromptInput` field threaded through `collectEvidence`→`harness`→
+#     `buildJudgeMessages`; the prompt section rendered like the secret-scan section). The dogfood-055
+#     S2-wire precedent is itself a landed legitimate headline of this exact shape.
+#   * §1.2 Product-progress: ✅ — the landed diff is REAL open plan.md §6 WP-215 (🟡) judge-pillar
+#     feature code: the documented S5 consumer of the S4 primitive, the dependency analog of the landed
+#     secret-scan evidence wire. NOT invented disposable scaffolding.
+#   * §1.3 Mission-critical: ✅ PROCEED — not busy work, not scaffold-hosted. The §4-walled alternatives
+#     stay blocked (WP-210 act half = `scoringMethod` contract change; WP-250 = park→durable-suspend
+#     control-flow; WP-253 = destructive override — all operator-landed) and WP-251/WP-254 are
+#     observability-accuracy, not a thesis headline. WP-215 S5 is the strongest UNBLOCKED real-product
+#     thesis slice — it extends a live judge-security evidence pillar.
+#
+# Live-read note (NOT friction): the new evidence section will likely render `(none)` on this run's own
+# diff — the delivery adds imports of ALREADY-present internal modules (the scanner, `.js` barrel
+# specifiers are relative → excluded) plus no NEW external package, so `scanDiffForNewDependencies` over
+# this run's own diff returns `[]`. Non-empty firing is unit-proven by the new test, exactly as the S2
+# secret-scan section rendered `(none)` live in dogfood-055/056. Do not seed a fake external import to
+# force a non-empty render — that is scaffold-hosted busy work; the unit test is the proof of behavior.
+#
+# Zero-secrets launch (no API keys; CLI-OAuth judge via the shim; NO seam vars):
+#   node scripts/cli-judge-proxy.mjs 8787 gemini &
+#   OPENAI_COMPAT_BASE_URL=http://127.0.0.1:8787 \
+#     pnpm chikory run examples/dogfood/dogfood-060.yaml --watch
+#
+# Pre-launch discipline:
+#   * COMMIT EVERYTHING first — the workspace clones HEAD (F-30: launch ONCE). The dogfood-059 delivery
+#     (`src/judge/scan-dependencies.ts` + the `index.ts` re-export + its test) is uncommitted on the
+#     working tree; commit it so the tree is clean before this run clones (this run CONSUMES that module,
+#     so it MUST be on HEAD).
+#   * The diff carries no secret-like literal (import statements + a render helper only), so the live
+#     `scanDiffForSecrets` over this run's own diff returns `[]` — no concatenation discipline needed.
+#   * F-49: each AC `check` `grep`s the mandated symbols verbatim BEFORE vitest, so the executor cannot
+#     skip the wire or stub the field.
+#   * Run Devbox commands sequentially (F-22). The AC toolchain is Temporal-free (grep + vitest + tsc +
+#     eslint), well under the 120 s judge cap.
+name: dogfood-060-wp215-dependency-evidence-wire
+goal: >
+  Wire the already-landed pure dependency scanner `scanDiffForNewDependencies` (from
+  `packages/sdk-ts/src/judge/scan-dependencies.ts`, dogfood-059) into the inner-loop Agent-as-a-Judge
+  evidence collection — the DEPENDENCY analog of the landed secret-scan evidence wire
+  (`scanDiffForSecrets` → `collectEvidence`, dogfood-055). The judge must mechanically see the external
+  package names a diff NEWLY imports, alongside the diff it already collects, before it grades. This is
+  an ADDITIVE wire — do NOT change `scanDiffForNewDependencies`, `scanDiffForSecrets`,
+  `scanDiffForRealSecrets`, `buildVerdict`, the judge rubric/verdict logic, `types.ts`, or the journal
+  payloads; the LLM still adjudicates the verdict (a deterministic dependency override is a SEPARATE §4
+  follow-up, NOT part of this run).
+
+  Change exactly these FOUR source files plus ADD one new test file; change no other file, add no new
+  dependency, and keep the scan PURE (the existing `collectEvidence` git/exec I/O is unchanged — only
+  an in-memory scan of the diff string already in hand is added).
+
+  1. packages/sdk-ts/src/judge/evidence.ts
+     - Import `scanDiffForNewDependencies` from `./scan-dependencies.js` (ESM `.js` specifier),
+       mirroring the existing `import { scanDiffForSecrets } from "./scan-secrets.js";`.
+     - Add a REQUIRED field to the `CollectedEvidence` interface, mirroring `secretScanLabels`:
+         /** WP-215 deterministic new-dependency package names the judge sees alongside the diff. */
+         newDependencyLabels: string[];
+     - In `collectEvidence`, populate it from the FULL diff (the `diff` variable, BEFORE the
+       `bound(...)` prompt-excerpt truncation — the exact discipline the `secretScanLabels` line uses):
+         const newDependencyLabels = scanDiffForNewDependencies(diff);
+       and return `newDependencyLabels` in the `CollectedEvidence` object literal (next to
+       `secretScanLabels`). Change nothing else in the evidence flow.
+
+  2. packages/sdk-ts/src/judge/prompt.ts
+     - Add a REQUIRED `newDependencyLabels: string[];` field to the `JudgePromptInput` interface
+       (next to `secretScanLabels`).
+     - Add a new section to the judge user-prompt in `buildJudgeMessages`, IMMEDIATELY AFTER the
+       existing `## EVIDENCE — deterministic secret scan (added diff lines)` section and BEFORE the
+       `## EVIDENCE — CHECK RESULTS` section, of the EXACT shape of the secret-scan section:
+         "## EVIDENCE — deterministic new-dependency scan (added diff lines)",
+         renderNewDependencyLabels(input.newDependencyLabels),
+         "",
+     - Add a module-private `renderNewDependencyLabels(labels: string[]): string` helper mirroring the
+       existing `renderSecretScanLabels`: when `labels` is non-empty, render each as a `- <label>`
+       line (newline-joined); when empty, render the single line `(none)`.
+
+  3. packages/sdk-ts/src/judge/harness.ts
+     - At the `buildJudgeMessages({ ... })` call site that already passes
+       `secretScanLabels: collected.secretScanLabels`, ALSO pass
+       `newDependencyLabels: collected.newDependencyLabels`. Change nothing else.
+
+  4. packages/sdk-ts/test/judge/new-dependency-scan-evidence.test.ts  (NEW)
+     - A new Vitest file proving the wire end-to-end on synthetic input. It must encode AT LEAST:
+       - `collectEvidence` populates `newDependencyLabels` from a diff that NEWLY imports an external
+         package: build a tiny git workspace (or reuse the existing harness/evidence test fixture
+         pattern in this directory) whose diff adds `+import express from "express";`, run
+         `collectEvidence`, and assert `newDependencyLabels` deep-equals `["express"]` (and that a
+         relative/`node:` import does NOT appear).
+       - `buildJudgeMessages` renders the new section: call it with
+         `newDependencyLabels: ["axios", "zod"]` and assert the user message contains
+         `## EVIDENCE — deterministic new-dependency scan (added diff lines)` followed by `- axios`
+         and `- zod`; call it again with `newDependencyLabels: []` and assert the section renders
+         `(none)`.
+       Follow the existing `test/judge/secret-scan-evidence.test.ts` structure (it is the direct
+       precedent for the secret-scan wire). Do not weaken or loosen any assertion.
+
+  Follow AGENTS.md and the sdk-ts conventions: strict TypeScript, ESM, named exports only, no default
+  export, no new dependency. Run all Devbox verification commands sequentially. If a verification step
+  reports a failing test or type error, READ the failure, fix the code, and continue — do NOT weaken,
+  rephrase, or remove any mandated assertion (a grep enforces them), do NOT change
+  `scanDiffForNewDependencies`/`scanDiffForSecrets` or any verdict/rubric/journal logic, and do NOT
+  touch `types.ts`.
+repos:
+  - url: /Users/nikitazolotarev/repos/chikory
+    writable: true
+acceptance_criteria:
+  - id: AC-1
+    description: >
+      the dependency scanner is wired into the judge evidence — `evidence.ts` imports
+      `scanDiffForNewDependencies` and populates a `newDependencyLabels` field on `CollectedEvidence`
+      over the full diff, `prompt.ts` renders the new `## EVIDENCE — deterministic new-dependency scan`
+      section, `harness.ts` threads `collected.newDependencyLabels` into `buildJudgeMessages`, and the
+      new focused test proves both the `collectEvidence` population and the prompt-section rendering
+      (non-empty `- <label>` lines and the empty `(none)` case)
+    check: >
+      cd packages/sdk-ts &&
+      grep -q "scanDiffForNewDependencies" src/judge/evidence.ts &&
+      grep -q "newDependencyLabels" src/judge/prompt.ts &&
+      grep -q "newDependencyLabels: collected.newDependencyLabels" src/judge/harness.ts &&
+      grep -q "deterministic new-dependency scan" src/judge/prompt.ts &&
+      pnpm exec vitest run test/judge/new-dependency-scan-evidence.test.ts
+  - id: AC-2
+    description: >
+      the SDK stays type- and lint-clean and the full existing suite remains green — proving the wire is
+      additive and the secret-scan / evidence / verdict / journal logic is unchanged
+    check: cd packages/sdk-ts && pnpm exec tsc --noEmit && pnpm exec eslint . && pnpm exec vitest run
+budget_usd: 5
+max_steps: 4
+executor:
+  adapter: codex
+  family: openai
+judge:
+  family: openai-compat
+  cadence: 1
+  max_cost_share: 0.5
+routing:
+  stages:
+    plan: { provider: openai-compat, model: gpt-5.5 }
+    code: { provider: openai-compat, model: gpt-5.5 }
+    review: { provider: openai-compat, model: gpt-5.5 }
+    judge: { provider: openai-compat, model: gemini-3.1-pro-preview }
