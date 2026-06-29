@@ -128,6 +128,7 @@ describe.skipIf(address === null)("chikory CLI (WP-141/142)", () => {
   }
 
   function stripAnsi(str: string): string {
+    // eslint-disable-next-line no-control-regex -- matching the ESC (\x1b) byte in ANSI color codes is intentional
     return str.replace(/\x1b\[[0-9;]*m/g, "");
   }
 
