@@ -4,6 +4,7 @@
  * the shared runCliStep machinery (WP-111) owns bounds, artifacts, status
  * normalization, and the step span.
  */
+import { computeCostUsd } from "../pricing.js";
 import type { ExecutorAdapter, StepInput, StepRecord, TokenUsage } from "../types.js";
 import type { ArtifactStore } from "../types.js";
 import { scrubExecutorEnv } from "./env.js";
@@ -47,7 +48,10 @@ interface ClaudeStreamEvent {
   result?: string;
   total_cost_usd?: number;
   usage?: ClaudeUsage;
-  message?: { content?: Array<{ type?: string }> };
+  // Per-assistant-turn usage rides on the message; the final `result` event
+  // carries the authoritative total (WP-255: the per-turn usage is the partial
+  // telemetry recoverable when a step is killed before `result`).
+  message?: { content?: Array<{ type?: string }>; usage?: ClaudeUsage };
 }
 
 function usageTokens(usage: ClaudeUsage | undefined): TokenUsage {
@@ -63,63 +67,86 @@ function usageTokens(usage: ClaudeUsage | undefined): TokenUsage {
 }
 
 /** Parse the stream-json transcript; the final `result` event is the verdict. */
-export function parseClaudeCodeOutput(stdout: string): ParsedCliResult {
-  let resultEvent: ClaudeStreamEvent | undefined;
-  let toolCalls = 0;
+export function parseClaudeCodeOutput(
+  model: string | undefined,
+): (stdout: string) => ParsedCliResult {
+  return (stdout) => {
+    let resultEvent: ClaudeStreamEvent | undefined;
+    let toolCalls = 0;
+    // WP-255: keep the most-recent assistant-turn usage so a step killed before
+    // the `result` event still reports the partial token spend (the pacing
+    // numerator + token budget gate would otherwise read a misleading 0/0).
+    let lastAssistantUsage: ClaudeUsage | undefined;
+    let assistantTurns = 0;
 
-  for (const line of stdout.split("\n")) {
-    const trimmed = line.trim();
-    if (!trimmed.startsWith("{")) continue;
-    let event: ClaudeStreamEvent;
-    try {
-      event = JSON.parse(trimmed) as ClaudeStreamEvent;
-    } catch {
-      continue; // interleaved non-JSON noise is not fatal
+    for (const line of stdout.split("\n")) {
+      const trimmed = line.trim();
+      if (!trimmed.startsWith("{")) continue;
+      let event: ClaudeStreamEvent;
+      try {
+        event = JSON.parse(trimmed) as ClaudeStreamEvent;
+      } catch {
+        continue; // interleaved non-JSON noise is not fatal
+      }
+      if (event.type === "assistant") {
+        toolCalls += (event.message?.content ?? []).filter((b) => b.type === "tool_use").length;
+        if (event.message?.usage) {
+          lastAssistantUsage = event.message.usage;
+          assistantTurns += 1;
+        }
+      } else if (event.type === "result") {
+        resultEvent = event;
+      }
     }
-    if (event.type === "assistant") {
-      toolCalls += (event.message?.content ?? []).filter((b) => b.type === "tool_use").length;
-    } else if (event.type === "result") {
-      resultEvent = event;
-    }
-  }
 
-  if (!resultEvent) {
-    return {
-      ok: false,
-      summary: "",
-      toolCalls,
-      tokens: { input: 0, output: 0 },
-      costUsd: 0,
-      costEstimated: true,
-      failure: { reason: "no result event in claude stream-json output", retriable: true },
-    };
-  }
-
-  const tokens = usageTokens(resultEvent.usage);
-  const costUsd = resultEvent.total_cost_usd ?? 0;
-  const costEstimated = resultEvent.total_cost_usd === undefined;
-  // `error_max_turns` is a SUCCESSFUL bounded invocation: the turn cap is the
-  // contract working as designed; the diff is real and the judge gates it.
-  // Only execution errors fail the step.
-  const ok =
-    resultEvent.is_error !== true &&
-    (resultEvent.subtype === "success" || resultEvent.subtype === "error_max_turns");
-
-  return {
-    ok,
-    summary: resultEvent.result ?? "",
-    toolCalls,
-    tokens,
-    costUsd,
-    costEstimated,
-    failure: ok
-      ? undefined
-      : {
-          reason: `claude result: ${resultEvent.subtype ?? "unknown"}${
-            resultEvent.result ? ` — ${resultEvent.result.slice(0, 500)}` : ""
-          }`,
+    if (!resultEvent) {
+      // No authoritative total — recover best-effort partial usage from the last
+      // assistant turn (WP-255), pricing it from the table since the killed run
+      // never emitted `total_cost_usd`.
+      const tokens = usageTokens(lastAssistantUsage);
+      const recovered = lastAssistantUsage !== undefined;
+      return {
+        ok: false,
+        summary: "",
+        toolCalls,
+        tokens,
+        costUsd: recovered && model ? computeCostUsd(model, tokens) : 0,
+        costEstimated: true,
+        failure: {
+          reason: recovered
+            ? `no result event in claude stream-json output (partial usage recovered from ${assistantTurns} assistant turn${assistantTurns === 1 ? "" : "s"})`
+            : "no result event in claude stream-json output",
           retriable: true,
         },
+      };
+    }
+
+    const tokens = usageTokens(resultEvent.usage);
+    const costUsd = resultEvent.total_cost_usd ?? 0;
+    const costEstimated = resultEvent.total_cost_usd === undefined;
+    // `error_max_turns` is a SUCCESSFUL bounded invocation: the turn cap is the
+    // contract working as designed; the diff is real and the judge gates it.
+    // Only execution errors fail the step.
+    const ok =
+      resultEvent.is_error !== true &&
+      (resultEvent.subtype === "success" || resultEvent.subtype === "error_max_turns");
+
+    return {
+      ok,
+      summary: resultEvent.result ?? "",
+      toolCalls,
+      tokens,
+      costUsd,
+      costEstimated,
+      failure: ok
+        ? undefined
+        : {
+            reason: `claude result: ${resultEvent.subtype ?? "unknown"}${
+              resultEvent.result ? ` — ${resultEvent.result.slice(0, 500)}` : ""
+            }`,
+            retriable: true,
+          },
+    };
   };
 }
 
@@ -159,7 +186,7 @@ export function createClaudeCodeAdapter(opts: ClaudeCodeAdapterOptions): Executo
         args,
         env: scrubExecutorEnv(opts.env ?? process.env, ["ANTHROPIC_API_KEY"]),
         killGraceMs: opts.killGraceMs,
-        parse: parseClaudeCodeOutput,
+        parse: parseClaudeCodeOutput(opts.model),
       });
     },
   };

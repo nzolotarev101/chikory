@@ -1,0 +1,177 @@
+# Dogfood-065: WP-255 killed-step telemetry — the pure STEP-DEADLINE descriptor half.
+# Launch with `chikory run` (single durable run). NO seam env.
+#
+# WHY THIS IS NEXT (2026-06-29): dogfood-064 landed the WP-254 PURE NUMERATOR half
+# (`estimateResidentContextTokens`) — so the last pure half of the context-rot/pacing pillar is done,
+# and BOTH judge scoring-mode primitives (G-Eval dogfood-058 + Pairwise dogfood-063) and BOTH Memory
+# Pointer halves (write dogfood-028 + recall dogfood-062) and the secret/dependency judge-evidence
+# chains are complete too. The pure-first headline well is DRY: every remaining thesis-stressing slice
+# is §4-walled (operator-landed frozen-runtime / contract / control-flow) — the WP-254 feed swap, the
+# WP-210 act-half harness wire, the WP-202 recall wire, WP-250 park→durable-suspend, WP-206 HITL,
+# and the WP-255 tree-reap itself; WP-251 observe-fold needs delicate multi-step seam tuning (parked
+# 9×, F-32 wasted-run risk); WP-201 parity is a single-file deterministic port (track-B, never the
+# headline per dogfood-review §5.1). So NO thesis-stressing slice on a real product WP is unblocked.
+#
+# This run hosts its mechanism in the REAL code of WP-255 — the open product WP born from dogfood-064's
+# OWN F-59 friction — NOT throwaway scaffolding. F-59: dogfood-064's step was journaled
+# `step exceeded maxSeconds=600; killed (retriable: true)` yet ran 24m32s = 2.45× the cap before it
+# died (root cause: `runBounded`, `src/executors/process.ts:48-55`, SIGTERMs/SIGKILLs the DIRECT child
+# only, not the process GROUP, so codex's grandchildren keep the pipes open and the `close` handler
+# never fires until they exit naturally), and the kill zeroed the step's telemetry (`0/0` tokens,
+# `$0.00`) so the trace makes the 2.45× overrun INVISIBLE. WP-255 has two halves: (a) reap the process
+# tree (a §4 frozen-runtime edit to `process.ts`, operator-landed) and (b) PRESERVE+SURFACE telemetry
+# on a killed step. This run lands the PURE-FIRST piece of (b): a `describeStepDeadline(input)`
+# descriptor — the `summarizePacing`/`describeSeamArming`/`evaluateBaselinePrecheck` pure-decision
+# analog — that computes the elapsed / overran / overrunRatio (the 2.45× figure) / remaining the
+# killed-step journal entry + `chikory trace` will render, so an overrun is observable instead of
+# masked. The non-pure wires that journal a killed step and reap the tree are the SEPARATE §4
+# follow-ups (operator-landed), exactly as the prior pure halves preceded their wires.
+#
+# Gate verdicts (applied inline, dogfood-review §5, on this candidate):
+#   * §1.1 Failure-surface: ✅ — cross-file (NEW `src/runner/step-deadline.ts` + `src/index.ts` barrel +
+#     NEW `test/runner/step-deadline.test.ts`), 1–3 steps plausible; real numeric failure surface (the
+#     `>` strict overran boundary at exactly-at-cap, the negative-elapsed clock-skew clamp, the
+#     `remainingSeconds` ≥0 clamp, the maxSeconds=0 divide-by-zero guard on `overrunRatio`, ms→s
+#     conversion, no input mutation). Not a 1-file port.
+#   * §1.2 Product-progress: 🟡 (fallback) — the landed diff is REAL open plan.md §6 WP-255 (🟡) product
+#     code on the loop-integrity / cost-control reliability surface, hosting the telemetry-visibility
+#     mechanism in WP-255's OWN real module (the descriptor the killed-step journal/trace consume), NOT
+#     invented disposable code. It directly attacks F-59 (this very loop's friction). It is the §1.2
+#     FALLBACK carve-out: no thesis-stressing slice on a real WP is unblocked — every candidate is
+#     §4-walled (frozen-runtime/contract/control-flow, operator-landed) or track-B. The blocking wall to
+#     unblock NEXT: the WP-255 tree-reap (`process.ts` spawn-detached + `process.kill(-pid)`) and the
+#     WP-254 agent-loop feed swap (`agent-loop.ts:350`) — both operator-landed §4 frozen-runtime edits.
+#   * §1.3 Mission-critical: 🟡 ALLOW (fallback) — the two-axis logic: this is a real-WP pure slice (not
+#     scaffold-hosted), but low on the thesis-stress axis, so it would be VETOED IF any thesis-stressing
+#     slice on a real product WP were unblocked. None is (all §4-walled / track-B), so a busy/fallback
+#     headline is permitted. Recorded verdict: 🟡 ALLOW (fallback). Make the §4 tree-reap + WP-254 feed
+#     swap the operator's next priority.
+#
+# Zero-secrets launch (no API keys; CLI-OAuth judge via the shim; NO seam vars):
+#   node scripts/cli-judge-proxy.mjs 8787 gemini &
+#   OPENAI_COMPAT_BASE_URL=http://127.0.0.1:8787 \
+#     pnpm chikory run examples/dogfood/dogfood-065.yaml --watch
+#
+# Pre-launch discipline:
+#   * COMMIT EVERYTHING first — the workspace clones HEAD (F-30: launch ONCE). The dogfood-064
+#     delivery (`pacing.ts`/`index.ts`/`pacing.test.ts`) + this review's report/living-doc edits are
+#     STAGED/uncommitted on the working tree; commit them so the tree is clean before this run clones
+#     (and so HEAD is lint-GREEN — the clone must pass this run's own AC-2 `eslint .`).
+#   * F-49: each AC `check` `grep`s the mandated symbols verbatim BEFORE vitest, so the executor
+#     cannot skip the export or stub the primitive.
+#   * Run Devbox commands sequentially (F-22). The AC toolchain is Temporal-free (grep + vitest + tsc
+#     + eslint), timed well under the 120 s judge cap (scoped vitest ~1 s; full suite ~20 s).
+name: dogfood-065-wp255-step-deadline
+goal: >
+  Land the pure STEP-DEADLINE telemetry descriptor half of WP-255 (the loop-integrity / cost-control
+  reliability surface). dogfood-064's step was killed for exceeding its `maxSeconds=600` wall-clock cap
+  but ran 24m32s = 2.45× the cap before it died, and the kill zeroed its token/cost telemetry so the
+  trace shows only `0/0` tokens and `$0.00` — the overrun is INVISIBLE (F-59). This adds the pure value
+  the killed-step journal entry and `chikory trace` SHOULD render to make an overrun observable: the
+  elapsed wall-clock, whether it overran the cap, by what ratio (the 2.45× figure), and the remaining
+  budget. Change exactly these THREE files; change no other file, add no new dependency, and do NOT
+  touch `types.ts` or any contract. Do NOT modify `runBounded`/`process.ts`, the executor adapters, or
+  the agent loop — the tree-reap and the killed-step journal wire are the SEPARATE §4 follow-ups.
+
+  1. packages/sdk-ts/src/runner/step-deadline.ts  (NEW FILE — a pure module, the `pacing.ts` /
+     `seam-precheck.ts` pure-decision analog)
+     - Add an exported input type (LOCAL to this module — do NOT add it to `types.ts`):
+         /** WP-255: the wall-clock facts of a step that hit (or may hit) its per-step `maxSeconds`
+          * cap. `startedAtMs` and `endedAtMs` are epoch-millisecond timestamps (the runner's step
+          * start and the moment it stopped/was killed); `maxSeconds` is the per-step wall-clock cap
+          * (`StepLimits.maxSeconds`). */
+         export interface StepDeadlineInput {
+           startedAtMs: number;
+           endedAtMs: number;
+           maxSeconds: number;
+         }
+     - Add an exported result type (LOCAL to this module):
+         /** WP-255: the derived deadline telemetry the killed-step journal entry + `chikory trace`
+          * render so a cap overrun is VISIBLE instead of masked by zeroed token/cost counters. */
+         export interface StepDeadlineStatus {
+           elapsedSeconds: number;
+           maxSeconds: number;
+           overran: boolean;
+           remainingSeconds: number;
+           overrunRatio: number;
+         }
+     - Add the pure descriptor with the same short JSDoc shape the existing pacing helper carries:
+         export function describeStepDeadline(input: StepDeadlineInput): StepDeadlineStatus
+       Semantics (exact):
+         * `elapsedSeconds` = `(endedAtMs - startedAtMs) / 1000`, CLAMPED to be at least 0 (a negative
+           span from clock skew or a bad timestamp reads 0, never negative). Do NOT round — return the
+           exact fractional seconds.
+         * `maxSeconds` = the input `maxSeconds`, passed through unchanged.
+         * `overran` = `elapsedSeconds > maxSeconds` (STRICTLY greater — a step that ends exactly at the
+           cap did NOT overrun).
+         * `remainingSeconds` = `maxSeconds - elapsedSeconds`, CLAMPED to be at least 0 (an overrun
+           reads 0 remaining, never negative).
+         * `overrunRatio` = `elapsedSeconds / maxSeconds`, GUARDED: when `maxSeconds` is 0 (or negative)
+           return `0` instead of dividing (no `Infinity`/`NaN`). A step that ran 2.45× its cap reads
+           `2.45...` here.
+         * Pure: do NOT mutate `input`; read only.
+
+  2. packages/sdk-ts/src/index.ts  (extend the barrel — add a NEW re-export only)
+     - Add a re-export of `describeStepDeadline` and `type StepDeadlineInput`, `type StepDeadlineStatus`
+       from `./runner/step-deadline.js`, following the existing pacing / `summarizePacing` re-export
+       style (a named `export { … } from "./runner/step-deadline.js";` statement). Change nothing else
+       in the barrel; do NOT alter any existing export.
+
+  3. packages/sdk-ts/test/runner/step-deadline.test.ts  (NEW FILE — follow the existing
+     `pacing.test.ts` structure)
+     - Add focused cases proving: (a) the F-59 overrun — `startedAtMs: 0`, `endedAtMs: 1_472_000`,
+       `maxSeconds: 600` → `elapsedSeconds 1472`, `overran true`, `remainingSeconds 0`, and
+       `overrunRatio` ≈ `2.4533…` (assert with `toBeCloseTo`); (b) an UNDER-cap step —
+       `endedAtMs: 300_000`, `maxSeconds: 600` → `elapsedSeconds 300`, `overran false`,
+       `remainingSeconds 300`, `overrunRatio 0.5`; (c) the EXACTLY-AT-cap boundary —
+       `endedAtMs: 600_000`, `maxSeconds: 600` → `overran false`, `remainingSeconds 0`,
+       `overrunRatio 1`; (d) a NEGATIVE span (clock skew, `endedAtMs` < `startedAtMs`) clamps
+       `elapsedSeconds` to 0, `remainingSeconds` to `maxSeconds`, `overran false`, `overrunRatio 0`;
+       (e) the `maxSeconds: 0` guard returns `overrunRatio 0` (NOT `Infinity`/`NaN`); (f) the input
+       object is NOT mutated (snapshot the input, call the descriptor, assert `toEqual` the snapshot).
+       Follow the existing `pacing.test.ts` structure; this is a new file, so import
+       `describeStepDeadline` (and the types as needed) from `../../src/runner/step-deadline.js`.
+
+  Follow AGENTS.md and the sdk-ts conventions: strict TypeScript, ESM, named exports only, no default
+  export, no new dependency, no `types.ts`/contract change. Run all Devbox verification commands
+  sequentially. If a verification step reports a failing test or type error, READ the failure, fix the
+  code, and continue — do NOT weaken, rephrase, or remove any mandated assertion (a grep enforces the
+  symbols), and do NOT modify `runBounded`/`process.ts`, the executor adapters, or the agent loop.
+repos:
+  - url: /Users/nikitazolotarev/repos/chikory
+    writable: true
+acceptance_criteria:
+  - id: AC-1
+    description: >
+      the pure step-deadline descriptor lands in a new `step-deadline.ts` and is re-exported from the
+      SDK barrel — `describeStepDeadline` + the `StepDeadlineInput`/`StepDeadlineStatus` types, with the
+      new focused tests proving the F-59 overrun (elapsed/overran/ratio), the under-cap path, the
+      exactly-at-cap boundary, the negative-span clamp, the `maxSeconds: 0` divide-by-zero guard, and
+      the no-mutation path
+    check: >
+      cd packages/sdk-ts &&
+      grep -q "describeStepDeadline" src/runner/step-deadline.ts &&
+      grep -q "StepDeadlineStatus" src/runner/step-deadline.ts &&
+      grep -q "describeStepDeadline" src/index.ts &&
+      grep -q "describeStepDeadline" test/runner/step-deadline.test.ts &&
+      pnpm exec vitest run test/runner/step-deadline.test.ts
+  - id: AC-2
+    description: >
+      the SDK stays type- and lint-clean and the full existing suite remains green — proving the
+      descriptor is additive and no existing export, `runBounded`/`process.ts`, or contract changed
+    check: cd packages/sdk-ts && pnpm exec tsc --noEmit && pnpm exec eslint . && pnpm exec vitest run
+budget_usd: 5
+max_steps: 4
+executor:
+  adapter: codex
+  family: openai
+judge:
+  family: openai-compat
+  cadence: 1
+  max_cost_share: 0.5
+routing:
+  stages:
+    plan: { provider: openai-compat, model: gpt-5.5 }
+    code: { provider: openai-compat, model: gpt-5.5 }
+    review: { provider: openai-compat, model: gpt-5.5 }
+    judge: { provider: openai-compat, model: gemini-3.1-pro-preview }

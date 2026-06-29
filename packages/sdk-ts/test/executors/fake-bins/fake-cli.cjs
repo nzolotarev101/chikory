@@ -59,6 +59,17 @@ if (mode === "hang") {
   if (process.env.FAKE_TRAP_TERM === "1") {
     process.on("SIGTERM", () => {});
   }
+  if (process.env.FAKE_SPAWN_GRANDCHILD === "1") {
+    // Spawn a grandchild that INHERITS our stdout pipe and is a separate process
+    // (WP-255 / F-59 reproduction). A bare `child.kill()` on the direct child does
+    // NOT reach this grandchild, so it keeps the runner's stdout pipe open and
+    // `close` never fires — only a process-group kill (`process.kill(-pid)`) reaps it.
+    const { spawn } = require("node:child_process");
+    const grandchild = spawn(process.execPath, ["-e", "setInterval(() => {}, 60000)"], {
+      stdio: ["ignore", "inherit", "inherit"],
+    });
+    grandchild.unref();
+  }
   emit({ type: "system", subtype: "init" });
   setInterval(() => {}, 60_000); // stay alive, produce nothing
 } else if (mode === "fail") {

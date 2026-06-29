@@ -34,10 +34,16 @@ export function runBounded(
   const start = Date.now();
   return new Promise((resolve, reject) => {
     // CLI agents read prompts from argv; stdin is closed so none can block on it.
+    // `detached: true` makes the child its own process-group leader so the deadline
+    // can signal the WHOLE group — a bare `child.kill()` reaches only the direct
+    // child, and grandchildren (e.g. a `codex` sandbox subprocess) keep the stdout
+    // pipe open, so `close` never fires and the step outlives `maxSeconds` ~2.45×
+    // (WP-255 / F-59: dogfood-064 ran 24m32s on a 600s cap).
     const child = spawn(command, args, {
       cwd: opts.cwd,
       env: opts.env as NodeJS.ProcessEnv | undefined,
       stdio: ["ignore", "pipe", "pipe"],
+      detached: true,
     });
 
     let stdout = "";
@@ -45,11 +51,25 @@ export function runBounded(
     let timedOut = false;
     let killTimer: NodeJS.Timeout | undefined;
 
+    // Signal the child's whole process group (negative pid), falling back to the
+    // direct child if the pid is unavailable. ESRCH (group already gone) is benign.
+    const killGroup = (signal: NodeJS.Signals): void => {
+      try {
+        if (child.pid !== undefined) {
+          process.kill(-child.pid, signal);
+        } else {
+          child.kill(signal);
+        }
+      } catch {
+        // group/process already exited — nothing to reap.
+      }
+    };
+
     const deadline = setTimeout(() => {
       timedOut = true;
-      child.kill("SIGTERM");
+      killGroup("SIGTERM");
       killTimer = setTimeout(
-        () => child.kill("SIGKILL"),
+        () => killGroup("SIGKILL"),
         opts.killGraceMs ?? DEFAULT_KILL_GRACE_MS,
       );
     }, opts.maxSeconds * 1000);

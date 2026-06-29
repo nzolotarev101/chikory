@@ -31,7 +31,7 @@ import type { ArtifactStore, ExecutorAdapter, StepInput } from "../../src/types.
 
 const execFileAsync = promisify(execFile);
 
-export type Scenario = "ok" | "hang" | "hang-trap-term" | "fail";
+export type Scenario = "ok" | "hang" | "hang-trap-term" | "hang-grandchild" | "fail";
 
 export interface ExecutorHarness {
   label: string;
@@ -177,6 +177,20 @@ export function executorConformanceSuite(h: ExecutorHarness): void {
       const record = await adapter.runStep(makeStepInput(ws, "irrelevant", 1));
       expect(record.status).toBe("FAILED");
       expect(record.failure?.retriable).toBe(true);
+    }, 30_000);
+
+    it("(2c) hang spawning a pipe-holding grandchild is reaped near maxSeconds (WP-255)", async () => {
+      // The grandchild inherits the runner's stdout pipe and outlives a kill to the
+      // DIRECT child, so without a process-group reap `close` never fires and the
+      // step runs ~2.45× its cap (F-59). The group kill (process.kill(-pid)) bounds it.
+      const ws = await makeWorkspace();
+      const adapter = h.make({ store: ws.store, scenario: "hang-grandchild", killGraceMs: 100 });
+      const record = await adapter.runStep(makeStepInput(ws, "irrelevant", 1));
+      expect(record.status).toBe("FAILED");
+      expect(record.failure?.retriable).toBe(true);
+      expect(record.failure?.reason).toMatch(/maxSeconds/);
+      // 1s cap + grace + slack; pre-fix this hangs until the 60s grandchild interval.
+      expect(record.durationMs).toBeLessThan(10_000);
     }, 30_000);
 
     it("(5) FAILED on nonzero exit with stderr captured", async () => {

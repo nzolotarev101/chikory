@@ -981,7 +981,45 @@ a first-attempt SUCCESS and produced three plan-changing findings
   lands the pure half — `estimateResidentContextTokens(parts: ResidentContextParts)` in
   `src/runner/pacing.ts` (system preamble + the RETAINED TAIL of `recentSummaries`, not cumulative
   throughput) — the value the agent-loop should feed instead of cumulative `spentTokens` at
-  `agent-loop.ts:350`; that feed swap is the §4 follow-up.
+  `agent-loop.ts:350`; that feed swap is the §4 follow-up. **PURE HALF LANDED (dogfood-064):**
+  `estimateResidentContextTokens` + `ResidentContextParts` are in `pacing.ts` + the barrel + 6 vitest
+  cases (`Math.max(0, systemTokens + sum(recentSummaryTokens.slice(-clamp(retainedSummaryCount,[0,length]))))`).
+  **The §4 feed swap that RETIRES F-56 is now LANDED (operator, 2026-06-29, uncommitted pending
+  review):** `agent-loop.ts:~348` feeds `estimateResidentContextTokens(buildResidentContextParts(...))`
+  as `currentInputTokens` AND `estimateTokensFromText(record.summary)` as `estimatedNextStepTokens` —
+  both numerator terms swapped off the codex throughput (new pure `CHARS_PER_TOKEN`/`estimateTokensFromText`/
+  `buildResidentContextParts` in `pacing.ts`). Intended semantic shift: for `codex` (separate process)
+  OUR window barely grows per step, so `park`/`compact` now fire only under REAL resident pressure —
+  expect believable `peak window` (well under 100%) and NO spurious park on trivial codex tasks, vs the
+  historical 236%–486% parks. NB: dogfood-064's own run predates this wire (and its step was killed,
+  F-59), so its trace still reads `peak window 0%` — the first calibrated live read is the NEXT run.
+- **A KILLED step loses ALL its telemetry, and the `maxSeconds` cap is not a hard deadline** (F-59 →
+  WP-255, dogfood-064): a step that exceeds its per-step wall-clock cap is journaled `step exceeded
+  maxSeconds=N; killed (retriable: true)` — but in dogfood-064 the `maxSeconds=600` step actually ran
+  **24m32s (2.45× the cap)** before it died. Root cause: `runBounded` (`src/executors/process.ts:48-55`)
+  arms a correct `setTimeout(maxSeconds*1000)` that fires `child.kill("SIGTERM"/"SIGKILL")` on time, but
+  signals only the DIRECT child (`codex exec`), not its process GROUP — codex's grandchild subprocesses
+  keep the stdout/stderr pipes open, so the `close` handler (and thus the step) doesn't resolve until
+  they exit naturally. The deadline fires; the tree just isn't reaped. **FIXED (operator, 2026-06-29,
+  uncommitted pending review): `runBounded` now `spawn(detached:true)` + signals the process GROUP via
+  `process.kill(-pid, signal)` (ESRCH-guarded), so the grandchildren are reaped and the step ends near
+  `maxSeconds` — proven by a new `hang-grandchild` conformance case (`durationMs < 10_000` on a 1 s
+  cap) on both adapters.** The kill previously **zeroed the step's token/cost telemetry**
+  (`0/0` tokens, `$0.00`) because the adapters emit usage only at clean turn completion. Two
+  consequences on a killed run: (1) the budget gate reads `$0` executor spend (total cost is
+  judge-only) — BLIND, not free; (2) the pacing numerator has no tokens, so `peak window 0%` even on a
+  real over-read. **WP-255(b) FIX (operator, 2026-06-29, uncommitted pending review):**
+  `parseClaudeCodeOutput` (now curried `(model)=>(stdout)`) recovers the last `assistant`-turn usage
+  (priced via `computeCostUsd`) when killed before the `result` event, and `step.ts` enriches the kill
+  reason with the actual `{elapsed}s ({ratio}× cap)` so the overrun is VISIBLE — a killed step is no
+  longer blindly `0/0`/`$0.00` where any usage is recoverable. (A `codex` step killed mid-turn with no
+  `turn.completed` is still genuinely unrecoverable — no usage event exists.) The kill's TRIGGER was
+  the executor doing a REDUNDANT post-completion self-verification after the ACs were already met (the
+  WP-217 completion-signal gap — no "ACs met → stop" signal). 🟢 The flip side is a genuine thesis WIN:
+  the durable + judge-grades-on-disk-artifacts layers RECOVERED the killed executor into a correct
+  lint-green SUCCESS (judge ran both ACs on the clone, checkpoint `lastGood true`, no
+  rollback/re-execution). Still, on a killed step prefer the JUDGE's re-run + working-tree
+  re-verification over the trace counters, and watch the enriched kill reason for the overrun ratio.
 - **Subscription-auth runs can report $0.00 cost** → rely on `max_steps`
   and the HALT guard when the meter is blind. WP-218 slice 1 (dogfood-004)
   prices the documented zero-secrets path (`gpt-5.5`,

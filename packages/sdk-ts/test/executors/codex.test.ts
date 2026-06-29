@@ -28,6 +28,7 @@ function fakeEnv(scenario: Scenario): Record<string, string | undefined> {
     FAKE_DIALECT: "codex",
     FAKE_MODE: scenario.startsWith("hang") ? "hang" : scenario,
     FAKE_TRAP_TERM: scenario === "hang-trap-term" ? "1" : undefined,
+    FAKE_SPAWN_GRANDCHILD: scenario === "hang-grandchild" ? "1" : undefined,
   };
 }
 

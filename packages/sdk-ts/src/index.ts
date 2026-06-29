@@ -122,9 +122,15 @@ export {
 } from "./runner/memory-pointer.js";
 export {
   decideContextWindowPacing,
+  estimateResidentContextTokens,
+  estimateTokensFromText,
+  buildResidentContextParts,
+  CHARS_PER_TOKEN,
   type ContextWindowPacingDecision,
   type ContextWindowPacingPolicy,
   type ContextWindowUsage,
+  type ResidentContextParts,
+  type ResidentContextInput,
 } from "./runner/pacing.js";
 export { summarizePacing, type PacingSummary } from "./runner/pacing-summary.js";
 export { summarizeCompaction, type CompactionSummary } from "./runner/compaction-summary.js";

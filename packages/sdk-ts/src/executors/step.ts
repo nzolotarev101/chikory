@@ -147,12 +147,20 @@ export async function runCliStep(opts: CliStepOptions): Promise<StepRecord> {
 
   let record: StepRecord;
   if (proc.timedOut) {
+    // WP-255 / F-59: surface the ACTUAL elapsed wall-clock so a cap overrun is
+    // visible in the trace, not masked. With the process-group reap this lands
+    // near the cap; the number is the telemetry that made F-59 invisible before.
+    const cap = opts.input.limits.maxSeconds;
+    const elapsedSeconds = proc.durationMs / 1000;
+    const overrunRatio = cap > 0 ? elapsedSeconds / cap : 0;
     record = {
       ...base,
       status: "FAILED",
       summary: parsed.summary || "step killed: exceeded maxSeconds",
       failure: {
-        reason: `step exceeded maxSeconds=${opts.input.limits.maxSeconds}; killed`,
+        reason:
+          `step exceeded maxSeconds=${cap}; killed after ${elapsedSeconds.toFixed(1)}s ` +
+          `(${overrunRatio.toFixed(2)}× cap)`,
         retriable: true,
       },
     };

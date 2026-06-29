@@ -33,6 +33,9 @@ import {
 } from "../runner/budget.js";
 import {
   decideContextWindowPacing,
+  estimateResidentContextTokens,
+  estimateTokensFromText,
+  buildResidentContextParts,
   type ContextWindowPacingPolicy,
 } from "../runner/pacing.js";
 import { resolveContextWindowForSpec } from "../runner/context-window.js";
@@ -345,11 +348,33 @@ export async function agentLoop(spec: TaskSpec): Promise<RunStatus> {
     const recordTokens = record.tokens.input + record.tokens.output;
     spentTokens += recordTokens;
     stepTokens.push(recordTokens);
+    // WP-254: the pacing numerator must measure the LIVE resident occupancy of the
+    // orchestration window WE assemble for the next step — the fixed preamble (goal,
+    // acceptance criteria, judge feedback, injections) plus the last
+    // `RECENT_STEPS_WINDOW` summaries the next ContextBundle carries verbatim — NOT
+    // the cumulative `spentTokens`/`recordTokens` of the executor subprocess (a fresh
+    // `codex` process's summed cross-turn throughput, which over-read window pressure
+    // ~2× and falsely parked trivial tasks: F-56). `record.summary` is pushed into
+    // `recentSummaries` below, so include it here to reflect what the next step sees.
+    const residentInputTokens = estimateResidentContextTokens(
+      buildResidentContextParts({
+        systemTexts: [
+          spec.goal,
+          ...spec.acceptanceCriteria.map((c) => `${c.id} ${c.description} ${c.check ?? ""}`),
+          judgeFeedback ?? "",
+          ...injections,
+        ],
+        recentSummaries: [...recentSummaries, record.summary],
+        retainedSummaryCount: RECENT_STEPS_WINDOW,
+      }),
+    );
     const pacing = decideContextWindowPacing(
       {
-        currentInputTokens: spentTokens,
+        currentInputTokens: residentInputTokens,
         currentOutputTokens: 0,
-        estimatedNextStepTokens: recordTokens,
+        // The next step's marginal addition to OUR window is ~one more summary, not
+        // the executor subprocess's internal throughput (WP-254).
+        estimatedNextStepTokens: estimateTokensFromText(record.summary),
         // Default 200k window; a dogfood/test may shrink it via the frozen
         // `debug.contextWindowTokens` seam to force a deterministic pressure
         // decision (WP-207 act half — replay-safe, never read from env here).
