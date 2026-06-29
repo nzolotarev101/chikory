@@ -335,44 +335,193 @@ export function traceJson(
 }
 
 /** One journal entry → one live line (`chikory run --watch`). */
+/** Helper to format step summary to a multi-line colorized string */
+function formatStepSummary(summary: string, indent: string): string {
+  if (!summary) return "";
+
+  const reset = "\x1b[0m";
+  const bold = "\x1b[1m";
+  const dim = "\x1b[2m";
+  const green = "\x1b[32m";
+  const red = "\x1b[31m";
+  const yellow = "\x1b[33m";
+  const blue = "\x1b[34m";
+  const cyan = "\x1b[36m";
+
+  const cleanSummary = summary.replace(/\bCHIKORY_TASK_COMPLETE\b/g, "").trim();
+
+  let description = cleanSummary;
+  let changesSection = "";
+  let verificationSection = "";
+
+  const changedIndex = cleanSummary.search(/\b(Changed|Changes):/i);
+  const verificationIndex = cleanSummary.search(/\bVerification:/i);
+
+  if (changedIndex !== -1) {
+    description = cleanSummary.slice(0, changedIndex).trim();
+    if (verificationIndex !== -1 && verificationIndex > changedIndex) {
+      changesSection = cleanSummary.slice(changedIndex, verificationIndex).trim();
+      verificationSection = cleanSummary.slice(verificationIndex).trim();
+    } else {
+      changesSection = cleanSummary.slice(changedIndex).trim();
+    }
+  } else if (verificationIndex !== -1) {
+    description = cleanSummary.slice(0, verificationIndex).trim();
+    verificationSection = cleanSummary.slice(verificationIndex).trim();
+  }
+
+  const lines: string[] = [];
+
+  let descText = description;
+  if (descText.startsWith("Done:")) {
+    descText = descText.slice(5).trim();
+  }
+
+  descText = descText.replace(/`([^`]+)`/g, `${cyan}$1${reset}`);
+
+  const wrapWidth = 80 - indent.length;
+  const words = descText.split(/\s+/);
+  let currentLine = "";
+  for (const word of words) {
+    if (currentLine.length + word.length + 1 > wrapWidth) {
+      lines.push(indent + currentLine);
+      currentLine = word;
+    } else {
+      currentLine = currentLine ? `${currentLine} ${word}` : word;
+    }
+  }
+  if (currentLine) {
+    lines.push(indent + currentLine);
+  }
+
+  if (changesSection) {
+    lines.push("");
+    lines.push(`${indent}${bold}${yellow}Changes:${reset}`);
+    const items = changesSection.split(/(?:^|\n|\r)\s*-\s+/);
+    for (const item of items) {
+      const cleanItem = item.trim();
+      const lower = cleanItem.toLowerCase();
+      if (!cleanItem || lower.startsWith("changed:") || lower.startsWith("changes:")) continue;
+
+      const linkMatch = cleanItem.match(/^\[([^\]]+)\]\(([^)]+)\):?\s*(.*)/s);
+      if (linkMatch) {
+        const [, label, , desc] = linkMatch;
+        const shortLabel = label.split("/").slice(-3).join("/");
+        const cleanDesc = desc.replace(/`([^`]+)`/g, `${cyan}$1${reset}`);
+        lines.push(`${indent}  • ${bold}${blue}${shortLabel}${reset}: ${cleanDesc}`);
+      } else {
+        const parts = cleanItem.split(/:\s*(.*)/s);
+        const name = parts[0]?.trim() || "";
+        const desc = parts[1]?.trim() || "";
+        const cleanDesc = desc.replace(/`([^`]+)`/g, `${cyan}$1${reset}`);
+        if (name) {
+          lines.push(`${indent}  • ${bold}${blue}${name}${reset}${desc ? `: ${cleanDesc}` : ""}`);
+        }
+      }
+    }
+  }
+
+  if (verificationSection) {
+    lines.push("");
+    lines.push(`${indent}${bold}${yellow}Verification:${reset}`);
+
+    if (verificationSection.includes("|")) {
+      const tableLines = verificationSection.split(/\r?\n/);
+      for (const tLine of tableLines) {
+        if (
+          !tLine.trim() ||
+          tLine.includes("---|---") ||
+          tLine.toLowerCase().includes("command | result") ||
+          tLine.toLowerCase().includes("verification:")
+        ) {
+          continue;
+        }
+        const cells = tLine
+          .split("|")
+          .map((c) => c.trim())
+          .filter(Boolean);
+        if (cells.length >= 2) {
+          const command = cells[0] ?? "";
+          const result = cells[1] ?? "";
+          let statusIndicator = `${dim}•${reset}`;
+          if (
+            result.toLowerCase().includes("pass") ||
+            result.toLowerCase().includes("success") ||
+            result.toLowerCase().includes("✓")
+          ) {
+            statusIndicator = `${green}✔${reset}`;
+          } else if (result.toLowerCase().includes("fail") || result.toLowerCase().includes("✗")) {
+            statusIndicator = `${red}✘${reset}`;
+          }
+          lines.push(`${indent}  ${statusIndicator} ${bold}${cyan}${command}${reset}: ${result}`);
+        }
+      }
+    } else {
+      const items = verificationSection.split(/(?:^|\n|\r)\s*-\s+/);
+      for (const item of items) {
+        const cleanItem = item.trim();
+        if (!cleanItem || cleanItem.toLowerCase().startsWith("verification:")) continue;
+        const cleanText = cleanItem.replace(/`([^`]+)`/g, `${cyan}$1${reset}`);
+        lines.push(`${indent}  ✔ ${cleanText}`);
+      }
+    }
+  }
+
+  return lines.join("\n");
+}
+
+/** One journal entry → one live line (`chikory run --watch`). */
 export function formatEntryLine(entry: JournalEntry): string {
   const ts = entry.ts.slice(11, 19); // HH:MM:SS
+  const reset = "\x1b[0m";
+  const bold = "\x1b[1m";
+  const dim = "\x1b[2m";
+  const green = "\x1b[32m";
+  const red = "\x1b[31m";
+  const yellow = "\x1b[33m";
+  const cyan = "\x1b[36m";
+
   switch (entry.kind) {
     case "step": {
       const payload = entry.payload as StepPayload;
-      return (
-        `[${ts}] step ${payload.stepIndex + 1} ${payload.record.status} ` +
-        `$${payload.record.costUsd.toFixed(4)} — ${oneLine(payload.record.summary)}`
-      );
+      const isSuccess = payload.record.status === "SUCCESS";
+      const statusColor = isSuccess ? green : red;
+      const statusIcon = isSuccess ? "🟢" : "🔴";
+      const header =
+        `[${ts}] ${statusIcon} step ${payload.stepIndex + 1} ${statusColor}${bold}${payload.record.status}${reset} ` +
+        `${dim}($${payload.record.costUsd.toFixed(4)})${reset}`;
+      const formatted = formatStepSummary(payload.record.summary, "  ");
+      return formatted ? `${header}\n${formatted}\n` : `${header}\n`;
     }
     case "verdict": {
       const payload = entry.payload as VerdictRowPayload;
-      return `[${ts}] verdict ${verdictCell(payload)} @ step ${payload.atStep + 1}`;
+      const isProceed = payload.verdict.kind === "PROCEED";
+      const verdictColor = isProceed ? green : (payload.verdict.kind === "ESCALATE" ? yellow : red);
+      return `[${ts}] verdict ${verdictColor}${bold}${verdictCell(payload)}${reset} @ step ${payload.atStep + 1}`;
     }
     case "judge": {
       const payload = entry.payload as JudgePayload;
-      return `[${ts}] judge pass #${payload.judgeIndex + 1} $${payload.costUsd.toFixed(4)}`;
+      return `[${ts}] ⚖️ judge pass #${payload.judgeIndex + 1} ${dim}($${payload.costUsd.toFixed(4)})${reset}`;
     }
     case "checkpoint": {
       const payload = entry.payload as Checkpoint;
-      return `[${ts}] checkpoint ${payload.id}${payload.lastGood ? " (lastGood)" : ""}`;
+      return `[${ts}] 💾 checkpoint ${cyan}${payload.id}${reset}${payload.lastGood ? ` ${green}(lastGood)${reset}` : ""}`;
     }
     case "budget_event": {
       const payload = entry.payload as { event: string; remainingUsd: number };
-      return `[${ts}] budget ${payload.event} — remaining $${payload.remainingUsd.toFixed(2)}`;
+      const eventColor = payload.event === "halt" ? red : yellow;
+      return `[${ts}] 💰 budget ${eventColor}${bold}${payload.event}${reset} — remaining ${bold}$${payload.remainingUsd.toFixed(2)}${reset}`;
     }
     case "injection": {
       const payload = entry.payload as { text: string };
-      return `[${ts}] injection: ${payload.text}`;
+      return `[${ts}] 💉 injection: ${payload.text}`;
     }
     case "compaction": {
       const payload = entry.payload as CompactionResult & { trigger?: "pacing" | "count" };
       return (
-        `[${ts}] compaction ${formatTokens(payload.tokensBefore)}→${formatTokens(payload.tokensAfter)} tokens` +
-        (payload.digestRef ? ` (digest ${payload.digestRef.id.slice(0, 12)})` : " (no digest)") +
-        // WP-207: flag a fold the live pacing pressure triggered (vs the
-        // count-based cadence). Additive — count/legacy entries render unchanged.
-        (payload.trigger === "pacing" ? " (pacing)" : "")
+        `[${ts}] 🗜️ compaction ${formatTokens(payload.tokensBefore)}→${formatTokens(payload.tokensAfter)} tokens` +
+        (payload.digestRef ? ` ${dim}(digest ${payload.digestRef.id.slice(0, 12)})${reset}` : " (no digest)") +
+        (payload.trigger === "pacing" ? ` ${yellow}(pacing)${reset}` : "")
       );
     }
     case "pacing": {
@@ -381,14 +530,17 @@ export function formatEntryLine(entry: JournalEntry): string {
         utilization: number;
         projectedTokens: number;
       };
+      const actionColor = payload.action === "compact" ? yellow : (payload.action === "park" ? red : green);
       return (
-        `[${ts}] pacing ${payload.action} — ${Math.round(payload.utilization * 100)}% window ` +
-        `(${formatTokens(payload.projectedTokens)} proj)`
+        `[${ts}] ⏱️ pacing ${actionColor}${bold}${payload.action}${reset} — ${bold}${Math.round(payload.utilization * 100)}%${reset} window ` +
+        `${dim}(${formatTokens(payload.projectedTokens)} proj)${reset}`
       );
     }
     case "terminal": {
       const payload = entry.payload as TerminalPayload;
-      return `[${ts}] terminal ${payload.status}${payload.reason ? ` — ${payload.reason}` : ""}`;
+      const statusColor = payload.status === "SUCCESS" ? green : red;
+      const statusIcon = payload.status === "SUCCESS" ? "🏁" : "⚠️";
+      return `[${ts}] ${statusIcon} terminal ${statusColor}${bold}${payload.status}${reset}${payload.reason ? ` — ${payload.reason}` : ""}`;
     }
     default:
       return `[${ts}] ${entry.kind}`;
