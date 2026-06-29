@@ -1,0 +1,167 @@
+# Dogfood-063: WP-210 PAIRWISE scoring mode — the pure aggregation half. Launch with `chikory run`
+# (single durable run). NO seam env.
+#
+# WHY THIS IS NEXT (2026-06-29): dogfood-062 landed the WP-202 Memory Pointer RECALL primitive
+# (`parsePointerReference` + `recallPointerExcerpt`), completing the pure READ half of the Memory
+# Pointer Pattern — the context-rot WRITE+READ pure surface is now exhausted (the remaining WP-202
+# work is the §4 non-pure agent-loop wire calling the REAL `store.excerpt`). With the context-rot/
+# pacing observability sub-series and the Memory-Pointer pure surface both complete, and the
+# §4-walled alternatives off the dogfood table, the strongest UNBLOCKED real-product thesis slice is
+# the second half of WP-210's named title — **"Pairwise + G-Eval scoring modes"**. dogfood-058 landed
+# the G-EVAL half (`normalizeGEvalScore` + `aggregateGEval` in `src/judge/scoring.ts`, the continuous
+# analog of the binary criteria/rubric verdict); the PAIRWISE half — aggregate a set of pairwise
+# candidate comparisons into a ranked tally + winner — is the documented unbuilt sibling on the
+# Agent-as-a-Judge SCORING-modes pillar. This run lands its PURE aggregation primitive (the pure-first
+# shape the G-Eval half landed in): a `PairwiseOutcome` input type, a `PairwiseTally`/`PairwiseResult`
+# result, and a pure `aggregatePairwise(outcomes)` that tallies wins/losses/ties → win-rate → a sorted
+# ranking + a clear-winner-or-null. The live judge-harness wire that consumes it (the `scoringMethod`
+# TaskSpec field + the harness selection of pairwise vs G-Eval vs binary) is the SEPARATE §4 follow-up
+# — exactly as `aggregateGEval` (dogfood-058) precedes its harness wire, and `formatPointerReference`
+# (dogfood-028) preceded its interception wiring (TASK-PROTOCOL §4, operator-landed).
+#
+# This is a CROSS-FILE pure slice on real WP-210 product code, NOT a deterministic 1-file port — a
+# legitimate failable headline: the win-rate math (ties count 0.5, the comparisons denominator), the
+# stable sort (win-rate desc, then id asc), the clear-winner-vs-null-on-top-tie rule, the empty-input
+# degenerate path, and not mutating the input are all real ways to get it subtly wrong.
+#
+# Gate verdicts (applied inline, dogfood-review §5, on this candidate):
+#   * §1.1 Failure-surface: ✅ — cross-file (`src/judge/scoring.ts` extend + `src/judge/index.ts`
+#     barrel + `test/judge/scoring.test.ts`), 1–3 steps plausible; real aggregation failure surface
+#     (tie=0.5 win-rate, denominator, stable sort tiebreak, top-tie→null, empty path, no input
+#     mutation). Not a 1-file port — extends an existing module + barrel + the existing suite.
+#   * §1.2 Product-progress: ✅ — the landed diff is REAL open plan.md §6 WP-210 (🟡) product code on
+#     the Agent-as-a-Judge SCORING-modes named thesis pillar — the documented PAIRWISE half of
+#     "Pairwise + G-Eval scoring modes", the comparative analog of the binary verdict / continuous
+#     G-Eval. NOT invented disposable scaffolding (it extends the `scoring.ts` the G-Eval half landed).
+#   * §1.3 Mission-critical: ✅ PROCEED — a real product-WP thesis slice (judge scoring modes),
+#     UNBLOCKED and not §4-walled (pure primitive; the `scoringMethod` field + live harness wire that
+#     selects pairwise is the §4 follow-up, exactly as G-Eval's was). The alternatives are blocked or
+#     non-headline: WP-202's recall wire / WP-228 baseline-precheck wire / WP-247 launcher banner /
+#     WP-254 numerator are all §4 non-pure runtime wiring or semantics changes (operator-landed); the
+#     WP-249 remainder is track-B harvest tooling; WP-251 observe-fold-live needs delicate multi-step
+#     seam tuning (F-32 wasted-run risk, parked 9× already). WP-210's pairwise slice is the strongest
+#     UNBLOCKED real-product thesis slice.
+#
+# Zero-secrets launch (no API keys; CLI-OAuth judge via the shim; NO seam vars):
+#   node scripts/cli-judge-proxy.mjs 8787 gemini &
+#   OPENAI_COMPAT_BASE_URL=http://127.0.0.1:8787 \
+#     pnpm chikory run examples/dogfood/dogfood-063.yaml --watch
+#
+# Pre-launch discipline:
+#   * COMMIT EVERYTHING first — the workspace clones HEAD (F-30: launch ONCE). The dogfood-062
+#     delivery (`memory-pointer.ts`/`index.ts`/`memory-pointer.test.ts`) + this review's report/
+#     living-doc edits are STAGED/uncommitted on the working tree; commit them so the tree is clean
+#     before this run clones (and so HEAD is lint-GREEN — the clone must pass this run's own AC-2
+#     `eslint .`).
+#   * F-49: each AC `check` `grep`s the mandated symbols verbatim BEFORE vitest, so the executor
+#     cannot skip the wire or stub the primitive.
+#   * Run Devbox commands sequentially (F-22). The AC toolchain is Temporal-free (grep + vitest + tsc
+#     + eslint), timed well under the 120 s judge cap (scoped vitest ~2 s; full suite ~25 s).
+name: dogfood-063-wp210-pairwise-scoring
+goal: >
+  Land the pure PAIRWISE scoring-mode aggregation half of WP-210 (the Agent-as-a-Judge scoring-modes
+  pillar). The G-Eval half is already landed in the SAME module — `normalizeGEvalScore(raw, scaleMin,
+  scaleMax)` and `aggregateGEval(scores, opts)` in `src/judge/scoring.ts`. This adds the comparative
+  sibling: aggregate a set of pairwise candidate comparisons into a per-candidate win/loss/tie tally,
+  a win-rate, a stable ranking, and a single clear winner (or null when ambiguous). Change exactly
+  these THREE files; change no other file, add no new dependency, and do NOT touch `types.ts` or any
+  contract.
+
+  1. packages/sdk-ts/src/judge/scoring.ts  (extend — do not alter the existing G-Eval exports)
+     - Add an exported input type (LOCAL to this module — do NOT add it to `types.ts`):
+         /** WP-210: one pairwise comparison between two judged candidates. `a` and `b` are the two
+          * candidate ids; `winner` names which side won, or "tie". */
+         export interface PairwiseOutcome {
+           a: string;
+           b: string;
+           winner: "a" | "b" | "tie";
+         }
+     - Add the exported result types (LOCAL — not in `types.ts`):
+         /** WP-210: a single candidate's pairwise record. `winRate` counts a tie as half a win:
+          * `(wins + 0.5 * ties) / (wins + losses + ties)`. */
+         export interface PairwiseTally {
+           id: string;
+           wins: number;
+           losses: number;
+           ties: number;
+           winRate: number;
+         }
+         export interface PairwiseResult {
+           tallies: PairwiseTally[];
+           winnerId: string | null;
+         }
+     - Add the pure aggregator with the same short JSDoc shape the G-Eval helpers carry:
+         export function aggregatePairwise(outcomes: PairwiseOutcome[]): PairwiseResult
+       Semantics (exact):
+         * Tally every candidate id that appears as `a` or `b` in any outcome. For each outcome:
+           on `winner: "a"` the `a` id gets +1 win and the `b` id +1 loss; on `winner: "b"` the `b`
+           id gets +1 win and the `a` id +1 loss; on `winner: "tie"` BOTH ids get +1 tie.
+         * `winRate = (wins + 0.5 * ties) / (wins + losses + ties)` for each tally; a candidate that
+           appears always has at least one comparison, so the denominator is never 0.
+         * `tallies` is sorted by `winRate` DESCENDING, ties broken by `id` ASCENDING (lexicographic
+           `<`), so the order is deterministic.
+         * `winnerId` is the single top candidate's `id` — but `null` when there is no clear winner:
+           either `outcomes` is empty (→ `{ tallies: [], winnerId: null }`) OR the top two tallies
+           share the same `winRate` (an ambiguous top → `null`).
+         * Pure: do NOT mutate `outcomes` or any element; build fresh arrays/objects.
+
+  2. packages/sdk-ts/src/judge/index.ts  (extend the existing scoring re-export only)
+     - The barrel already re-exports `aggregateGEval, normalizeGEvalScore, type GEvalAggregateOptions,
+       type GEvalCriterionScore, type GEvalScore` from `./scoring.js`. Add `aggregatePairwise` and
+       `type PairwiseOutcome`, `type PairwiseResult`, `type PairwiseTally` to that SAME export
+       statement. Change nothing else in the barrel.
+
+  3. packages/sdk-ts/test/judge/scoring.test.ts  (extend — do not weaken existing cases)
+     - Add focused cases proving: (a) a clear winner — a candidate that wins all its comparisons sorts
+       first with `winRate` 1 and is the `winnerId`; (b) the tie arithmetic — a single `"tie"` outcome
+       gives both ids `winRate` 0.5 and `winnerId` `null` (top-tie); (c) a mixed three-candidate set
+       ranks by `winRate` descending with the `id`-ascending tiebreak, and `tallies` length equals the
+       number of distinct ids; (d) empty input returns `{ tallies: [], winnerId: null }`; (e) the input
+       array (and its elements) is NOT mutated (snapshot it, call `aggregatePairwise`, assert
+       `toEqual` the snapshot). Follow the existing `scoring.test.ts` structure; do not remove or
+       weaken any existing G-Eval assertion.
+
+  Follow AGENTS.md and the sdk-ts conventions: strict TypeScript, ESM, named exports only, no default
+  export, no new dependency, no `types.ts`/contract change. Run all Devbox verification commands
+  sequentially. If a verification step reports a failing test or type error, READ the failure, fix the
+  code, and continue — do NOT weaken, rephrase, or remove any mandated assertion (a grep enforces the
+  symbols), and do NOT change the existing `normalizeGEvalScore`/`aggregateGEval` exports.
+repos:
+  - url: /Users/nikitazolotarev/repos/chikory
+    writable: true
+acceptance_criteria:
+  - id: AC-1
+    description: >
+      the pairwise scoring primitive lands in `scoring.ts` and is re-exported from the judge barrel —
+      `aggregatePairwise` + the `PairwiseOutcome`/`PairwiseTally`/`PairwiseResult` types, with the new
+      focused tests proving the clear-winner, tie (0.5 → null winner), ranking/tiebreak, empty, and
+      no-mutation paths
+    check: >
+      cd packages/sdk-ts &&
+      grep -q "aggregatePairwise" src/judge/scoring.ts &&
+      grep -q "PairwiseOutcome" src/judge/scoring.ts &&
+      grep -q "PairwiseResult" src/judge/scoring.ts &&
+      grep -q "PairwiseTally" src/judge/scoring.ts &&
+      grep -q "aggregatePairwise" src/judge/index.ts &&
+      grep -q "aggregatePairwise" test/judge/scoring.test.ts &&
+      pnpm exec vitest run test/judge/scoring.test.ts
+  - id: AC-2
+    description: >
+      the SDK stays type- and lint-clean and the full existing suite remains green — proving the
+      pairwise primitive is additive and the existing G-Eval scoring exports are unchanged
+    check: cd packages/sdk-ts && pnpm exec tsc --noEmit && pnpm exec eslint . && pnpm exec vitest run
+budget_usd: 5
+max_steps: 4
+executor:
+  adapter: codex
+  family: openai
+judge:
+  family: openai-compat
+  cadence: 1
+  max_cost_share: 0.5
+routing:
+  stages:
+    plan: { provider: openai-compat, model: gpt-5.5 }
+    code: { provider: openai-compat, model: gpt-5.5 }
+    review: { provider: openai-compat, model: gpt-5.5 }
+    judge: { provider: openai-compat, model: gemini-3.1-pro-preview }

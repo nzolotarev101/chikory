@@ -112,7 +112,14 @@ export {
 } from "./planner/meta-judge-harness.js";
 export { evaluateBaselinePrecheck, type PrecheckCheckResult, type BaselinePrecheckResult } from "./cli/precheck.js";
 export { describeSeamArming, type SeamArmingReport } from "./cli/seam-precheck.js";
-export { shouldPointerize, formatPointerReference, type MemoryPointerPolicy } from "./runner/memory-pointer.js";
+export {
+  shouldPointerize,
+  formatPointerReference,
+  parsePointerReference,
+  recallPointerExcerpt,
+  type MemoryPointerPolicy,
+  type ParsedPointerReference,
+} from "./runner/memory-pointer.js";
 export {
   decideContextWindowPacing,
   type ContextWindowPacingDecision,
