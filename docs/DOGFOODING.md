@@ -926,9 +926,24 @@ a first-attempt SUCCESS and produced three plan-changing findings
 
 ## 8. Known P1 limitations (so you don't fight them)
 
-- **No planner**: every step gets the full `goal` as its instruction, plus
-  the last 5 step summaries, judge feedback, and acceptance criteria. Scope
-  goals accordingly (§3.2).
+- **No planner for `chikory run`**: every step gets the full `goal` as its
+  instruction, plus the last 5 step summaries, judge feedback, and acceptance
+  criteria. Scope goals accordingly (§3.2).
+- **`chikory chain` DOES have a planner — and it PARAPHRASES each node's goal,
+  dropping grep-pinned literals** (F-62 → WP-257, dogfood-066): the chain planner
+  decomposes the spec `goal` into nodes, and each `node.goal` is the planner's
+  one-line *summary*, NOT a verbatim slice. `planNodeToTaskSpec` (`src/chain/node-spec.ts:91`)
+  hands that summary to the executor as its `goal`. So any **verbatim/grep-pinned
+  literal** your AC enforces (the F-49 discipline — e.g. `grep -q "WP-25"` for a
+  mandated test fixture) will be **stripped from what the executor actually sees**,
+  while the strict AC survives → the node is structurally **unwinnable** (the executor
+  passes its OWN self-authored tests, the hidden grep fails every step, the judge
+  budget-waste guard HALTs after 3 consecutive fails). dogfood-066's node A burned
+  $3.76/$6 this way. **Until WP-257 lands (planner preserves verbatim/grep-pinned
+  tokens into node goals), do NOT put grep-pinned mandated literals in a `chikory chain`
+  goal** — either deliver that work as a single `chikory run` (which carries the full
+  goal+literals straight to the executor), or write chain-node goals whose ACs grep
+  only symbols/identifiers the one-line node summary will naturally still contain.
 - **Single repo**, no `inject`, no `branch`, no suspend-for-days HITL UX, no
   pacing — all P2 (WP-214, -212, -205, -206, -207).
 - **A telemetry-*instrumenting* dogfood shows its own new counter at 0** (F-52):

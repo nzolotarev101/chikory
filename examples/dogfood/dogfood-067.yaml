@@ -1,0 +1,169 @@
+# Dogfood-067: WP-256 launch-time spec-staleness gate — the F-60 fix, delivered as a SINGLE run.
+# Launch with `chikory run` (single durable run, NOT `chikory chain`). NO seam env.
+#
+# WHY THIS IS NEXT (2026-06-29): dogfood-066 attempted to deliver WP-256 as the first durable 2-node
+# CHAIN and node A HALTed — NOT because the work was hard, but because of a real chain bug: the chain
+# planner compressed node A's brief into a one-line `node.goal` and DROPPED the grep-pinned mandated
+# literals (`WP-255`/`WP-25`) the spec required, while preserving the strict AC-1 grep — so the executor
+# built a sane parser graded against an AC it was never told the secrets of (F-62 → WP-257). WP-256 (the
+# launch-time staleness gate, the dogfood-065 F-60 fix) is STILL 🔴 and unblocked. This run delivers it
+# as a SINGLE `chikory run`: a single run hands the FULL `goal` (with every mandated literal) straight to
+# the executor — there is no planner paraphrase — so F-62 cannot bite. Both modules live in one workspace,
+# so the consumer imports the parser directly (no WP-239 handoff needed). The chain pillar's own fix is
+# WP-257 (queued); re-attempting WP-256 as a chain waits behind it.
+#
+# Gate verdicts (applied inline, dogfood-review §5, on this candidate, current HEAD `e423b64`):
+#   * §1.1 Failure-surface: ✅ — cross-file (two NEW pure modules + two NEW tests, 4 files; the consumer
+#     imports the parser), 1–3 steps plausible; real parsing/decision failure surface — markdown TABLE-ROW
+#     anchoring (a PROSE mention of the id must NOT match), EXACT wpId-cell match (`WP-25` must NOT match
+#     `WP-255`), THIRD-column status extraction (notes cells also hold emojis — read the status cell only),
+#     emoji→enum mapping, not-found→null, the `stale === status === "green"` F-60 condition, no input
+#     mutation. Not a 1-file deterministic port.
+#   * §1.2 Product-progress: ✅ — the landed diff advances REAL open plan.md §6 WP-256 (🔴), the F-60 fix
+#     queued by the dogfood-065 review: the launch-time staleness DECISION that would have refused the
+#     orphaned dogfood-065. The four target files are absent on HEAD (confirmed 2026-06-29) — net-new real
+#     product code, NOT throwaway scaffolding, and NOT a duplicate of any inline logic (the very orphaning
+#     this WP exists to prevent). The pure decision is the dogfoodable half; the launcher wire that CALLS
+#     `assessSpecStaleness` before a run/chain clones is the SEPARATE §4 follow-up.
+#   * §1.3 Mission-critical: ✅ PROCEED — a real product WP (the loop's own F-60 fix), unblocked, delivered
+#     on the path that sidesteps the freshly-found F-62. NOT busy work and NOT scaffold-hosted, so the §1.3
+#     veto does not fire. (The chain pillar's WP-257 is the meatier thesis slice but it is planner-prompt
+#     work — harder to dogfood deterministically — and re-chaining WP-256 is blocked on it; delivering
+#     WP-256 now via single-run is the cleaner product win.) Recorded verdict: ✅ PROCEED.
+#
+# Zero-secrets launch (no API keys; CLI-OAuth judge via the shim; NO seam vars). The script auto-starts
+# the `agy`/Antigravity proxy for the gemini judge:
+#   devbox shell
+#   bash scripts/dogfood.sh examples/dogfood/dogfood-067.yaml
+# (Manual path: `node scripts/cli-judge-proxy.mjs 8787 agy &`, set
+#  `OPENAI_COMPAT_BASE_URL=http://127.0.0.1:8787`, then
+#  `pnpm chikory run examples/dogfood/dogfood-067.yaml --watch`. `chikory run` validates the spec first.)
+#
+# Pre-launch discipline:
+#   * COMMIT EVERYTHING first — the workspace clones HEAD (F-30: launch ONCE). This review's report +
+#     living-doc edits are uncommitted; commit them so the tree is clean and HEAD is lint-GREEN before the
+#     run clones (the clone must pass this run's own AC `eslint .`).
+#   * The four target files MUST NOT already exist on HEAD (confirmed absent 2026-06-29) — else the clone
+#     already satisfies the goal → empty diff → FAILED (dogfood-044 F-45).
+#   * F-49: each AC `check` greps the mandated symbols/literals verbatim BEFORE vitest, so the executor
+#     cannot skip the export, stub the primitive, or reimplement the parser instead of importing it. In a
+#     SINGLE run the full goal (with the literals) reaches the executor directly — the F-62 trap is absent.
+#   * Run Devbox commands sequentially (F-22). The AC toolchain is Temporal-free (grep + vitest + tsc +
+#     eslint), timed well under the 120 s judge cap (scoped vitest ~1 s; full suite ~20 s).
+name: dogfood-067-wp256-spec-staleness
+goal: >
+  Land the WP-256 launch-time spec-staleness gate — the fix for dogfood-065 F-60 (a dogfood whose target
+  work-package is already done must be detectable before it runs). Add exactly FOUR new files in
+  packages/sdk-ts: a pure parser module + its test, and a pure consumer module (that imports the parser)
+  + its test. Change no other file, add no new dependency, and do NOT touch `types.ts`, any contract, the
+  barrel `src/index.ts`, the chain runner, or the CLI command wiring. Use strict TypeScript, ESM `.js`
+  relative imports, named exports only, NO default exports, no I/O / network / clock / randomness. Run
+  Devbox verification commands sequentially. If a verification step reports a failing test or type error,
+  READ the failure and fix the IMPLEMENTATION so every mandated assertion passes — do NOT weaken,
+  rephrase, or remove any mandated assertion (a grep enforces the symbols and literals).
+
+  FILE 1 — packages/sdk-ts/src/cli/wp-status.ts (NEW pure module): extract a work-package's status icon
+  from the plan.md markdown text. Export a status type and a pure parser (named exports only):
+
+    export type WpStatus = "red" | "yellow" | "green";
+    export function parseWpStatus(planText: string, wpId: string): WpStatus | null;
+
+  Semantics (exact):
+    * Split `planText` into lines. A WP STATUS lives only in a markdown TABLE ROW whose FIRST cell is the
+      work-package id — a line that, after trimming, starts with `|`, and whose first pipe-delimited cell
+      trims to EXACTLY `wpId`. A prose mention of the id (e.g. in a status paragraph) is NOT a match. The
+      id match is EXACT: querying `WP-255` must NOT match a `WP-25` row and vice-versa.
+    * For the FIRST matching row, read the THIRD pipe-delimited cell (the status column: row cells are
+      `| <id> | <name> | <status> | <notes> |`) and return `"red"` if it contains 🔴, `"yellow"` if it
+      contains 🟡, `"green"` if it contains 🟢. (Notes cells also contain those emojis — read the status
+      cell only, never the notes.)
+    * Return `null` when no table row matches `wpId`, or the matched row's status cell holds none of the
+      three icons.
+    * Pure: do not mutate inputs; read only. Add a short JSDoc.
+
+  FILE 2 — packages/sdk-ts/test/cli/wp-status.test.ts (NEW Vitest file, ESM `.js` relative import from
+  `../../src/cli/wp-status.js`) encoding AT LEAST these cases verbatim (graded by a grep — do not rephrase
+  the call or the expected literal): a 🟢 row for `WP-255` → `"green"`; a 🟡 row → `"yellow"`; a 🔴 row →
+  `"red"`; the EXACT-MATCH discriminator — a fixture containing BOTH a `| WP-25 | … | 🔴 | …` row and a
+  `| WP-255 | … | 🟢 | …` row, where `parseWpStatus(fixture, "WP-255")` returns `"green"` (NOT red); a
+  prose-only mention of `WP-255` (no table row) → `null`; an absent id → `null`.
+
+  FILE 3 — packages/sdk-ts/src/cli/spec-staleness.ts (NEW pure module). It MUST
+  `import { parseWpStatus, type WpStatus } from "./wp-status.js";` (build on FILE 1's parser — do NOT
+  recreate or reimplement it). Export (named exports only):
+
+    export interface SpecStalenessInput { targetWpId: string; planText: string; }
+    export interface SpecStalenessReport {
+      targetWpId: string;
+      status: WpStatus | null;
+      stale: boolean;
+      reason: string;
+    }
+    export function assessSpecStaleness(input: SpecStalenessInput): SpecStalenessReport;
+
+  Semantics (exact): `status = parseWpStatus(input.planText, input.targetWpId)`; `stale = status ===
+  "green"` (a dogfood targeting an already-🟢 work package is STALE — the F-60 condition); `reason` is a
+  short human string — when status is null: `target <id> not found in plan`; when green:
+  `target <id> already done (🟢) — spec is stale`; otherwise: `target <id> is <status> — spec is fresh`.
+  Return `{ targetWpId, status, stale, reason }`. Pure; do not mutate inputs. Add a short JSDoc.
+
+  FILE 4 — packages/sdk-ts/test/cli/spec-staleness.test.ts (NEW Vitest file) encoding AT LEAST these cases
+  verbatim (graded by a grep): a 🟢 row for the target → `stale === true`; a 🟡 row for the target →
+  `stale === false`; an absent target → `status === null` and `stale === false`.
+
+  Keep both functions pure and minimal. The consumer (FILE 3) must IMPORT and CALL FILE 1's parser, not
+  duplicate it — the acceptance check greps `spec-staleness.ts` for `parseWpStatus`.
+repos:
+  - url: /Users/nikitazolotarev/repos/chikory
+    writable: true
+acceptance_criteria:
+  - id: AC-1
+    description: >
+      the pure `parseWpStatus` parser lands in a new `wp-status.ts` returning the red/yellow/green status
+      of a WP's table row (exact-id, status-column, prose/absent → null), its mandated cases present
+      verbatim (grep-pinned, F-49 — the `WP-25` exact-match discriminator included), and its focused test
+      passes
+    check: >
+      cd packages/sdk-ts &&
+      grep -q "parseWpStatus" src/cli/wp-status.ts &&
+      grep -q "parseWpStatus" test/cli/wp-status.test.ts &&
+      grep -q '"green"' test/cli/wp-status.test.ts &&
+      grep -q '"yellow"' test/cli/wp-status.test.ts &&
+      grep -q '"red"' test/cli/wp-status.test.ts &&
+      grep -q "WP-25" test/cli/wp-status.test.ts &&
+      pnpm exec vitest run test/cli/wp-status.test.ts
+  - id: AC-2
+    description: >
+      the pure `assessSpecStaleness` consumer lands in a new `spec-staleness.ts`, IMPORTS the parser (the
+      grep pins `parseWpStatus` in the source so it cannot be reimplemented), returns `stale === true`
+      exactly when the target WP is already 🟢, its mandated cases are present verbatim, and its focused
+      test passes
+    check: >
+      cd packages/sdk-ts &&
+      grep -q "parseWpStatus" src/cli/spec-staleness.ts &&
+      grep -q "assessSpecStaleness" src/cli/spec-staleness.ts &&
+      grep -q "assessSpecStaleness" test/cli/spec-staleness.test.ts &&
+      grep -q "stale" test/cli/spec-staleness.test.ts &&
+      grep -q "true" test/cli/spec-staleness.test.ts &&
+      grep -q "false" test/cli/spec-staleness.test.ts &&
+      pnpm exec vitest run test/cli/spec-staleness.test.ts
+  - id: AC-3
+    description: >
+      the SDK stays type- and lint-clean and the full existing suite remains green — proving the two
+      modules are additive and no existing export, contract, or unrelated file changed
+    check: cd packages/sdk-ts && pnpm exec tsc --noEmit && pnpm exec eslint . && pnpm exec vitest run
+budget_usd: 5
+max_steps: 5
+executor:
+  adapter: codex
+  family: openai
+judge:
+  family: openai-compat
+  cadence: 1
+  max_cost_share: 0.5
+routing:
+  stages:
+    plan: { provider: openai-compat, model: gpt-5.5 }
+    code: { provider: openai-compat, model: gpt-5.5 }
+    review: { provider: openai-compat, model: gpt-5.5 }
+    judge: { provider: openai-compat, model: gemini-3.1-pro-preview }
