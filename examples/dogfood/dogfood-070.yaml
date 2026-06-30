@@ -1,0 +1,169 @@
+# Dogfood-070: WP-261 — the pure LAUNCH-MODE-MISMATCH precheck (the dogfood-069 F-70 fix half).
+# LAUNCH WITH `chikory run` (single durable run, NOT `chikory chain`). NO seam env.
+# ⚠️ HONOR THE LAUNCH MODE THIS TIME: dogfood-067/068/069 were all authored single-`run` and all launched
+#    as `chikory chain`; dogfood-069 (F-70) PROVED that divergence re-triggers the F-64 planner paraphrase
+#    and cost 63% of the run. This spec is the guard for exactly that mistake — launch it correctly:
+#      bash scripts/dogfood.sh examples/dogfood/dogfood-070.yaml
+#
+# WHY THIS IS NEXT (2026-06-30): dogfood-069 surfaced F-70 — a spec authored single-`run` (its header says
+# "NOT a chain" three times, *because a chain re-risks F-64*) was launched as a `chikory chain` for the THIRD
+# run in a row (067/068/069); the chain planner paraphrased the full goal into a 2-sentence node goal that
+# DROPPED 32 of 35 grep-pinned literals, steps 1-2 burned ~$1.72 (63% of the $2.73 run) failing AC-1, and the
+# run survived only because the F-49 grep pins persisted into the acceptance criteria. WP-261 is the launcher
+# guard that refuses/warns when a single-`run`-authored spec is invoked via `chikory chain`. The pure half is
+# a deterministic decision in the EXACT shape of the landed `evaluateSpecStalenessPrecheck` / `extractTargetWpId`
+# (`src/cli/spec-staleness-precheck.ts`, the WP-258 sibling): detect the single-run intent from the spec text,
+# and flag the mismatch when the launch mode disagrees. This run lands that decision. The §4 follow-up
+# (operator-landed, like every prior pure half's wire) calls it inside `cmdChain` and warns (or refuses pending
+# `--force`) when the mismatch is non-null — turning F-70 from a silent costly divergence into a caught one.
+#
+# Single `chikory run` (NOT a chain): one cohesive pure module + its test in one workspace; a chain would
+# re-risk the very F-64 paraphrase F-70 is about (and the goal does not genuinely decompose). A single run
+# hands the FULL goal — every mandated symbol/literal/interface field — straight to the executor, no planner
+# paraphrase, so the F-64 trap is absent.
+#
+# F-67 HARDENING: dogfood-068 shipped a precheck whose result type DROPPED a mandated field and used POSITIONAL
+# args past a name-only grep AC. So this goal pins the EXACT interface shape AND the object-param call, and
+# AC-1 greps the test for the object-literal call `assessLaunchModeMismatch({` + a result-FIELD access
+# (`.warning`) + the `LaunchModeMismatch` type name — not just the function name.
+#
+# Gate verdicts (applied inline, dogfood-review §5, on CURRENT HEAD `361c4b4`):
+#   * §1.1 Failure-surface: ✅ — cross-file (NEW pure module + its test, 2 files); real failure surface —
+#     single-run-intent detection across the conventional marker phrasings, the mismatch TRUTH TABLE (only
+#     intended-single-run AND launched-as-chain is a mismatch; a genuine chain spec launched as a chain is
+#     NOT), null-when-aligned, no input mutation. Real BUG surface — F-70 cost 63% of dogfood-069. 1–3 steps
+#     plausible. Not a 1-file deterministic port — it is the guard for a recurring costly defect.
+#   * §1.2 Product-progress: ✅ — advances REAL open plan.md §6 WP-261 (🔴), queued by the dogfood-069 review.
+#     The decision is WP-261's OWN real code (the launcher-guard's pure half, the `evaluateSpecStalenessPrecheck`
+#     analog); the `cmdChain` wire is the SEPARATE §4 follow-up. Net-new real product code (both files absent on
+#     HEAD, confirmed 2026-06-30) — NOT throwaway scaffolding.
+#   * §1.3 Mission-critical: ✅ PROCEED — F-70 is a fresh, triply-evidenced (067/068/069), costly bug surface;
+#     the slice hosts the fix in WP-261's own real code (not busy, not scaffold-hosted). The §1.3 veto does not
+#     fire: every remaining CORE-PILLAR slice is a §4 operator-landed wire (WP-257 REVISE wire, WP-202/210 act
+#     wires) — no thesis-stressing real-WP PURE slice is unblocked to displace this. Recorded verdict: ✅ PROCEED.
+#
+# Zero-secrets launch (no API keys; CLI-OAuth judge via the shim; NO seam vars). The script auto-starts the
+# `agy`/Antigravity proxy for the gemini judge:
+#   devbox shell
+#   bash scripts/dogfood.sh examples/dogfood/dogfood-070.yaml
+# (Manual path: `node scripts/cli-judge-proxy.mjs 8787 agy &`, set
+#  `OPENAI_COMPAT_BASE_URL=http://127.0.0.1:8787`, then
+#  `pnpm chikory run examples/dogfood/dogfood-070.yaml --watch`. `chikory run` validates the spec first.)
+#
+# Pre-launch discipline:
+#   * COMMIT EVERYTHING first — the workspace clones HEAD (F-30: launch ONCE). This review's report +
+#     living-doc edits + the dogfood-069 delivery (`literal-preservation.ts` + test) are STAGED/uncommitted;
+#     commit them so the tree is clean and HEAD is lint-GREEN before the run clones (the clone must pass this
+#     run's own AC `eslint .`).
+#   * The two target files MUST NOT already exist on HEAD (confirmed absent 2026-06-30) — else the clone
+#     already satisfies the goal → empty diff → FAILED (dogfood-044 F-45).
+#   * F-49: each AC `check` greps the mandated symbols/literals/shape verbatim BEFORE vitest, so the executor
+#     cannot skip the export, drop a field, or stub the primitive.
+#   * Run Devbox commands sequentially (F-22). Bare `pnpm exec`, NOT `devbox run` (F-24). The AC toolchain is
+#     Temporal-free (grep + vitest + tsc + eslint), timed well under the 120 s judge cap (scoped vitest ~1 s;
+#     full suite ~20 s).
+name: dogfood-070-wp261-launch-mode-mismatch-precheck
+goal: >
+  Land the WP-261 launch-mode-mismatch precheck — a pure decision that catches the dogfood-069 F-70 failure
+  mode (a spec authored as a single `chikory run` is launched via `chikory chain`, re-triggering the F-64
+  planner paraphrase). Add exactly TWO new files in packages/sdk-ts: a pure module + its test. Mirror the
+  existing `src/cli/spec-staleness-precheck.ts` shape exactly (pure, named exports only, an `export interface`
+  result type, an object-param decision function, no contract change). Change no other file, add no new
+  dependency, and do NOT touch `types.ts`, any contract, the barrel `src/index.ts`, the chain runner,
+  `src/cli/commands.ts`, or `spec-staleness-precheck.ts`. Use strict TypeScript, ESM `.js` relative imports,
+  named exports only, NO default exports, no I/O / network / clock / randomness. Run Devbox verification
+  commands sequentially with bare `pnpm exec`. If a verification step reports a failing test or type error,
+  READ the failure and fix the IMPLEMENTATION so every mandated assertion passes — do NOT weaken, rephrase,
+  or remove any mandated assertion (a grep enforces the symbols, literals, and interface shape).
+
+  FILE 1 — packages/sdk-ts/src/cli/launch-mode-precheck.ts (NEW pure module). Export (named exports only):
+
+    export interface LaunchModeMismatch {
+      intendedSingleRun: boolean;
+      launchedAsChain: boolean;
+      warning: string;
+    }
+    export function detectIntendedSingleRun(specText: string): boolean;
+    export function assessLaunchModeMismatch(input: {
+      intendedSingleRun: boolean;
+      launchedAsChain: boolean;
+    }): LaunchModeMismatch | null;
+
+  Semantics (exact):
+    * `detectIntendedSingleRun` returns `true` when `specText` carries the conventional single-run marker the
+      dogfood specs use — i.e. it matches, CASE-INSENSITIVELY, ANY of: the phrase `NOT a chain`, OR
+      `single \`chikory run\``, OR `Launch with \`chikory run\``. Returns `false` otherwise (a spec with no
+      such marker, e.g. a genuine `chikory chain` spec). Pure; read only.
+    * `assessLaunchModeMismatch` returns a non-null `LaunchModeMismatch` EXACTLY when
+      `input.intendedSingleRun === true && input.launchedAsChain === true` (the F-70 condition) — the returned
+      object echoes both input booleans and carries a `warning` string that contains the substring
+      `chikory chain` and the substring `single \`chikory run\``. In EVERY other case (intended single-run but
+      launched as a run; a genuine chain spec launched as a chain; neither) it returns `null`. Pure; do NOT
+      mutate `input`.
+    * Add a short JSDoc on each export explaining it is the WP-261 launch-mode guard and the
+      `evaluateSpecStalenessPrecheck` analog.
+
+  FILE 2 — packages/sdk-ts/test/cli/launch-mode-precheck.test.ts (NEW Vitest file, ESM `.js` relative import
+  from `../../src/cli/launch-mode-precheck.js`, plus `import type { LaunchModeMismatch } from
+  "../../src/cli/launch-mode-precheck.js";`) encoding AT LEAST these cases verbatim (graded by a grep — do not
+  rephrase the call, the object-literal argument, or the expected literal):
+    * `detectIntendedSingleRun` true on a marker: `detectIntendedSingleRun("# Launch with \`chikory run\`, NOT
+      a chain.")` → `true`.
+    * `detectIntendedSingleRun` false with no marker: `detectIntendedSingleRun("Decompose this goal into two
+      dependent nodes.")` → `false`.
+    * the F-70 MISMATCH case returns a non-null result with a populated `warning` FIELD (call with an OBJECT
+      literal, assert the field): `const result = assessLaunchModeMismatch({ intendedSingleRun: true,
+      launchedAsChain: true });` then assert `result` is not null and `result?.warning` contains both
+      `chikory chain` and `single \`chikory run\``, and `result?.intendedSingleRun === true`.
+    * launched-correctly → null: `assessLaunchModeMismatch({ intendedSingleRun: true, launchedAsChain: false
+      })` → `null`.
+    * the DISCRIMINATOR — a genuine chain spec launched as a chain is NOT a mismatch:
+      `assessLaunchModeMismatch({ intendedSingleRun: false, launchedAsChain: true })` → `null`.
+    * no mutation: snapshot the `input` object before calling `assessLaunchModeMismatch`, assert it is
+      unchanged after.
+
+  Keep both functions pure and minimal. The `assessLaunchModeMismatch` decision is the WP-261 guard; the wire
+  that calls it inside `cmdChain` and warns/refuses on a non-null result is the SEPARATE §4 follow-up — do NOT
+  wire it here.
+repos:
+  - url: /Users/nikitazolotarev/repos/chikory
+    writable: true
+acceptance_criteria:
+  - id: AC-1
+    description: >
+      the pure `detectIntendedSingleRun` + `assessLaunchModeMismatch` decision lands in a new
+      `src/cli/launch-mode-precheck.ts` with the EXACT `LaunchModeMismatch` interface shape (the `warning`
+      result field — grep-pinned, anti-F-67) and the object-param call, its mandated cases present verbatim
+      (incl. the F-70 mismatch case and the genuine-chain discriminator), and its focused test passes
+    check: >
+      cd packages/sdk-ts &&
+      grep -q "detectIntendedSingleRun" src/cli/launch-mode-precheck.ts &&
+      grep -q "assessLaunchModeMismatch" src/cli/launch-mode-precheck.ts &&
+      grep -q "interface LaunchModeMismatch" src/cli/launch-mode-precheck.ts &&
+      grep -q "LaunchModeMismatch" test/cli/launch-mode-precheck.test.ts &&
+      grep -q "assessLaunchModeMismatch({" test/cli/launch-mode-precheck.test.ts &&
+      grep -q "intendedSingleRun: true" test/cli/launch-mode-precheck.test.ts &&
+      grep -q ".warning" test/cli/launch-mode-precheck.test.ts &&
+      grep -q "NOT a chain" test/cli/launch-mode-precheck.test.ts &&
+      pnpm exec vitest run test/cli/launch-mode-precheck.test.ts
+  - id: AC-2
+    description: >
+      the SDK stays type- and lint-clean and the full existing suite remains green — proving the precheck is
+      additive (a new pure module + test) and no existing export, contract, the barrel, `commands.ts`, or
+      `spec-staleness-precheck.ts` changed
+    check: cd packages/sdk-ts && pnpm exec tsc --noEmit && pnpm exec eslint . && pnpm exec vitest run
+budget_usd: 5
+max_steps: 5
+executor:
+  adapter: codex
+  family: openai
+judge:
+  family: openai-compat
+  cadence: 1
+  max_cost_share: 0.5
+routing:
+  stages:
+    plan: { provider: openai-compat, model: gpt-5.5 }
+    code: { provider: openai-compat, model: gpt-5.5 }
+    review: { provider: openai-compat, model: gpt-5.5 }
+    judge: { provider: openai-compat, model: gemini-3.1-pro-preview }
