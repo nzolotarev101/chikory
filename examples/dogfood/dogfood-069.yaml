@@ -1,0 +1,156 @@
+# Dogfood-069: WP-257 — the pure LITERAL-PRESERVATION VERIFIER for the chain planner (the root-cause fix half).
+# Launch with `chikory run` (single durable run, NOT `chikory chain`). NO seam env.
+#
+# WHY THIS IS NEXT (2026-06-29): WP-257 (the chain planner must preserve grep-pinned/verbatim literals from
+# the parent goal into each node's `goal`) is the durable-chain pillar's own ROOT BUG and is now
+# TRIPLY-evidenced: dogfood-066 HALTed node A when the planner dropped `WP-255`/`WP-25` (F-62); dogfood-067
+# passed but built a divergent parser because the planner dropped the parent goal's positional semantics
+# (F-64); dogfood-068 passed but shipped CONTRACT DRIFT — the planner dropped node-1's mandated `stale`
+# field + object param, and the name-only grep AC could not catch it (F-67). The planner-prompt half of the
+# fix is non-deterministic to dogfood, but the GUARDRAIL half is a pure, deterministic decision function in
+# the exact shape of the landed `planCoverageGaps` (`src/planner/coverage.ts`): given a `Plan`, return the
+# mandated literals from `plan.goal` that NO `node.goal` preserves. This run lands that verifier. The §4
+# follow-up (operator-landed, like every prior pure half's wire) calls `planLiteralGaps` inside
+# `runPlannerPass`/`buildPlan` and REVISEs/warns when it is non-empty — turning F-64 from a silent
+# paraphrase into a caught planner-output defect.
+#
+# Single `chikory run` (NOT a chain): one cohesive pure module + its test in one workspace; a chain would
+# re-risk the very F-64 paraphrase this WP exists to fix (and the goal does not genuinely decompose). A
+# single run hands the FULL goal — every mandated symbol/rule/literal — straight to the executor, no planner
+# paraphrase, so the F-64 trap is absent.
+#
+# Gate verdicts (applied inline, dogfood-review §5, on CURRENT HEAD `e0da13f`):
+#   * §1.1 Failure-surface: ✅ — cross-file (NEW pure module + its test, 2 files); real failure surface —
+#     backtick-literal extraction (first-seen order + dedup), EXACT-TOKEN preservation (a `WP-25` literal
+#     must NOT be counted preserved by a node goal that only contains `WP-255` — the discriminator that
+#     literally HALTed dogfood-066), literals-with-punctuation (`{ goal, planText }`), no-literals → empty,
+#     no input mutation. 1–3 steps plausible. Not a 1-file deterministic port — it is the guardrail for a
+#     thesis pillar (durable chains).
+#   * §1.2 Product-progress: ✅ — advances REAL open plan.md §6 WP-257 (🔴), the durable-chain pillar's own
+#     root bug. The `planLiteralGaps` verifier is the deterministic half of WP-257's documented fix
+#     ("a planner-output check that every AC-referenced literal still appears in some node goal"); the
+#     `runPlannerPass` wire is the SEPARATE §4 follow-up. Net-new real product code (both files absent on
+#     HEAD, confirmed 2026-06-29), the `planCoverageGaps` analog — NOT throwaway scaffolding.
+#   * §1.3 Mission-critical: ✅ PROCEED — WP-257 is the root that just leaked contract drift through a green
+#     chain (F-67). Highest-value unblocked real-product slice; protects every future grep-pinned chain
+#     dogfood. NOT busy work, NOT scaffold-hosted — the §1.3 veto does not fire. Recorded verdict: ✅ PROCEED.
+#
+# Zero-secrets launch (no API keys; CLI-OAuth judge via the shim; NO seam vars). The script auto-starts the
+# `agy`/Antigravity proxy for the gemini judge:
+#   devbox shell
+#   bash scripts/dogfood.sh examples/dogfood/dogfood-069.yaml
+# (Manual path: `node scripts/cli-judge-proxy.mjs 8787 agy &`, set
+#  `OPENAI_COMPAT_BASE_URL=http://127.0.0.1:8787`, then
+#  `pnpm chikory run examples/dogfood/dogfood-069.yaml --watch`. `chikory run` validates the spec first.)
+#
+# Pre-launch discipline:
+#   * COMMIT EVERYTHING first — the workspace clones HEAD (F-30: launch ONCE). This review's report +
+#     living-doc edits + the dogfood-068 delivery (`spec-staleness-precheck.ts` + test + `commands.ts`) are
+#     STAGED/uncommitted; commit them so the tree is clean and HEAD is lint-GREEN before the run clones (the
+#     clone must pass this run's own AC `eslint .`).
+#   * The two target files MUST NOT already exist on HEAD (confirmed absent 2026-06-29) — else the clone
+#     already satisfies the goal → empty diff → FAILED (dogfood-044 F-45).
+#   * F-49: each AC `check` greps the mandated symbols/literals verbatim BEFORE vitest, so the executor
+#     cannot skip the export or stub the primitive. In a SINGLE run the full goal (with the literals) reaches
+#     the executor directly — the F-62/F-64 trap is absent.
+#   * F-67 lesson: the AC greps pin the discriminator literals (`WP-25` AND `WP-255`) in the test so the
+#     EXACT-TOKEN rule is enforced, not just the function name.
+#   * Run Devbox commands sequentially (F-22). Bare `pnpm exec`, NOT `devbox run` (F-24). The AC toolchain is
+#     Temporal-free (grep + vitest + tsc + eslint), timed well under the 120 s judge cap (scoped vitest ~1 s;
+#     full suite ~20 s).
+name: dogfood-069-wp257-literal-preservation-verifier
+goal: >
+  Land the WP-257 chain-planner literal-preservation verifier — a pure decision that catches the F-64/F-67
+  failure mode (the chain planner paraphrases each node's goal and DROPS verbatim/grep-pinned literals the
+  parent goal mandated). Add exactly TWO new files in packages/sdk-ts: a pure module + its test. Mirror the
+  existing `src/planner/coverage.ts` `planCoverageGaps` shape exactly (pure, type-only `Plan` import, no
+  contract change). Change no other file, add no new dependency, and do NOT touch `types.ts`, any contract,
+  the barrel `src/index.ts`, the chain runner, the planner harness, or `coverage.ts`. Use strict TypeScript,
+  ESM `.js` relative imports, named exports only, NO default exports, no I/O / network / clock / randomness.
+  Run Devbox verification commands sequentially with bare `pnpm exec`. If a verification step reports a
+  failing test or type error, READ the failure and fix the IMPLEMENTATION so every mandated assertion
+  passes — do NOT weaken, rephrase, or remove any mandated assertion (a grep enforces the symbols and
+  literals).
+
+  FILE 1 — packages/sdk-ts/src/planner/literal-preservation.ts (NEW pure module). Import the `Plan` type
+  ONLY (`import type { Plan } from "../types.js";`). Export (named exports only):
+
+    export function extractGoalLiterals(goalText: string): string[];
+    export function planLiteralGaps(plan: Plan): string[];
+
+  Semantics (exact):
+    * `extractGoalLiterals` returns the inner text of every SINGLE-BACKTICK-delimited span (`` `...` ``) in
+      `goalText`, in FIRST-SEEN order, DE-DUPLICATED (a literal repeated in the goal appears once). Empty
+      array when the goal pins no backtick literals. These are the "mandated literals" the planner must
+      preserve. Pure; read only.
+    * `planLiteralGaps` returns the mandated literals from `extractGoalLiterals(plan.goal)` that NO node in
+      `plan.nodes` PRESERVES, in `plan.goal` first-seen order. A literal `L` is PRESERVED by a node iff `L`
+      occurs in that `node.goal` as an EXACT TOKEN — i.e. not immediately flanked by a word character or a
+      hyphen (so a literal `WP-25` is NOT preserved by a node goal that contains only `WP-255`, and
+      vice-versa — this exact-token rule is the discriminator that HALTed dogfood-066). A literal is a GAP
+      iff it is preserved by ZERO nodes. Empty array ⇒ every mandated literal survived into some node goal
+      (the planner-output PROCEED precondition). Pure; do not mutate `plan` or its arrays.
+    * Add a short JSDoc on each export explaining it is the WP-257 planner-output guardrail and the
+      `planCoverageGaps` analog.
+
+  FILE 2 — packages/sdk-ts/test/planner/literal-preservation.test.ts (NEW Vitest file, ESM `.js` relative
+  import from `../../src/planner/literal-preservation.js`) encoding AT LEAST these cases verbatim (graded by
+  a grep — do not rephrase the call or the expected literal):
+    * `extractGoalLiterals` dedup + order: a goal text pinning `` `parseWpStatus` ``, then `` `Plan` ``, then
+      `` `parseWpStatus` `` again → `["parseWpStatus", "Plan"]`.
+    * a goal with NO backtick literal → `extractGoalLiterals(...)` returns `[]`.
+    * full preservation → `planLiteralGaps(plan)` returns `[]`: build a `Plan` whose `goal` pins
+      `` `parseWpStatus` `` and `` `assessSpecStaleness` `` and whose two nodes' `goal`s each contain one of
+      those tokens.
+    * a DROPPED literal is returned: a `Plan` whose `goal` pins `` `assessSpecStaleness` `` but where no
+      `node.goal` contains it → `planLiteralGaps(plan)` includes `"assessSpecStaleness"`.
+    * the EXACT-TOKEN discriminator: a `Plan` whose `goal` pins `` `WP-25` `` and whose only node's `goal`
+      contains `WP-255` (but not `WP-25` as a standalone token) → `planLiteralGaps(plan)` returns `["WP-25"]`
+      (the `WP-255` substring must NOT count as preserving `WP-25`).
+    * no mutation: snapshot the `plan` (and its `nodes`) before calling `planLiteralGaps`, assert it is
+      unchanged after.
+
+  Keep both functions pure and minimal. The `planLiteralGaps` verifier is the WP-257 guardrail; the wire
+  that calls it inside `runPlannerPass`/`buildPlan` and REVISEs on a non-empty result is the SEPARATE §4
+  follow-up — do NOT wire it here.
+repos:
+  - url: /Users/nikitazolotarev/repos/chikory
+    writable: true
+acceptance_criteria:
+  - id: AC-1
+    description: >
+      the pure `extractGoalLiterals` + `planLiteralGaps` verifier lands in a new
+      `src/planner/literal-preservation.ts` importing only the `Plan` type, with the EXACT-TOKEN
+      preservation rule (a `WP-25` literal is NOT preserved by a `WP-255`-only node goal — grep-pinned, F-49,
+      the dogfood-066 discriminator), its mandated cases present verbatim, and its focused test passes
+    check: >
+      cd packages/sdk-ts &&
+      grep -q "extractGoalLiterals" src/planner/literal-preservation.ts &&
+      grep -q "planLiteralGaps" src/planner/literal-preservation.ts &&
+      grep -q "extractGoalLiterals" test/planner/literal-preservation.test.ts &&
+      grep -q "planLiteralGaps" test/planner/literal-preservation.test.ts &&
+      grep -q "WP-25" test/planner/literal-preservation.test.ts &&
+      grep -q "WP-255" test/planner/literal-preservation.test.ts &&
+      grep -q "assessSpecStaleness" test/planner/literal-preservation.test.ts &&
+      pnpm exec vitest run test/planner/literal-preservation.test.ts
+  - id: AC-2
+    description: >
+      the SDK stays type- and lint-clean and the full existing suite remains green — proving the verifier is
+      additive (a new pure module + test) and no existing export, contract, the barrel, or `coverage.ts`
+      changed
+    check: cd packages/sdk-ts && pnpm exec tsc --noEmit && pnpm exec eslint . && pnpm exec vitest run
+budget_usd: 5
+max_steps: 5
+executor:
+  adapter: codex
+  family: openai
+judge:
+  family: openai-compat
+  cadence: 1
+  max_cost_share: 0.5
+routing:
+  stages:
+    plan: { provider: openai-compat, model: gpt-5.5 }
+    code: { provider: openai-compat, model: gpt-5.5 }
+    review: { provider: openai-compat, model: gpt-5.5 }
+    judge: { provider: openai-compat, model: gemini-3.1-pro-preview }

@@ -18,6 +18,7 @@ import { journalPath } from "../runner/paths.js";
 import { createRunnerWorker } from "../runner/worker.js";
 import { parseTaskSpec, TaskSpecValidationError } from "../taskspec.js";
 import type { RunHandle, RunStatus, RunStatusReport, TaskSpec } from "../types.js";
+import { evaluateSpecStalenessPrecheck } from "./spec-staleness-precheck.js";
 import { formatEntryLine, renderStepDetail, renderTrace, traceJson } from "./trace.js";
 
 /** The wrapped-CLI executors that ship in P1 (ADR-003; WP-112/113). */
@@ -37,6 +38,8 @@ export interface CliDeps {
   workflowBundlePath?: string;
   /** Task queue override (tests isolate runs on per-test queues). */
   taskQueue?: string;
+  /** Optional plan.md reader for launch prechecks (tests can inject fixture text). */
+  readPlanText?: () => Promise<string>;
   out?: (line: string) => void;
   err?: (line: string) => void;
   /** Status/journal poll cadence for run/resume/--watch. */
@@ -70,6 +73,14 @@ function actionable(err: unknown): string {
 }
 
 const sleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
+
+async function readPlanText(deps: CliDeps): Promise<string | null> {
+  try {
+    return deps.readPlanText !== undefined ? await deps.readPlanText() : await readFile("plan.md", "utf8");
+  } catch {
+    return null;
+  }
+}
 
 function journalReport(dataDir: string, runId: string): RunStatusReport | undefined {
   const path = journalPath(dataDir, runId);
@@ -225,6 +236,13 @@ export async function cmdRun(
       return 1;
     }
     throw err;
+  }
+  const planText = await readPlanText(deps);
+  if (planText !== null) {
+    const precheck = evaluateSpecStalenessPrecheck(yamlText, planText);
+    if (precheck.warning !== null) {
+      ioPair.err(precheck.warning);
+    }
   }
   // WP-244 dogfood/test-only judge-catch seam, armed host-side so the
   // committed spec stays clean and the seam never sits on the happy path (the

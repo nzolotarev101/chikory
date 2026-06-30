@@ -5,24 +5,37 @@ This is the complete operating manual for executing Phase 2+ work packages
 task spec for a WP (every field explained), how to launch, supervise, and
 recover a run, and how to land the result as a normal PR.
 
-**PROVEN PATH (dogfood-067, `docs/reports/dogfood-067.md`): the durable CHAIN landed
-real open-WP product code end-to-end for the first time.** A spec written for a
-single `chikory run` was launched as `chikory chain` (`chain-d18a8c1b-…`, runtime
-`a4b8e7a`) and SUCCEEDED 2/2: decompose → meta-judge PROCEED → node-1 `parseWpStatus`
-parser sealed SUCCESS → **node-2 cloned node-1's handed-off git tree (`baseCommit ==
-node-1 head`) and IMPORTED its symbol (the WP-239 dependent handoff, finally exercised
-LIVE)** → node-2 `assessSpecStaleness` sealed SUCCESS → chain SUCCESS ($2.5073, judge
-0.46%, 6m44s; AC re-run green tsc+eslint+9 vitest). This closes the dogfood-066 gap
-(node A HALTed there, handoff never ran). **Two gotchas this surfaced (see §7/§8):**
-(1) the chain planner STILL paraphrases each node's `goal` and can DROP detail the
-parent goal carried — here it dropped the "id in the FIRST cell / status in the THIRD
-cell" positional rule, so the executor built a *different* (header-driven) parser that
-still passed the loose AC. A chain can go green while building the wrong function;
-harden every load-bearing literal/rule into the **AC `check` / AC description** (which
-survive to the node verbatim), not just the goal prose (**F-64 → WP-257**). (2) A
-4-files-only spec can land a pure decision with **no live consumer** — WP-256's
-`assessSpecStaleness` landed orphaned, nothing refuses a stale spec at launch yet
-(**F-65 → WP-258**).
+**PROVEN PATH (dogfood-068, `docs/reports/dogfood-068.md`): the durable CHAIN landed
+real open-WP product code end-to-end a SECOND consecutive time — the pillar is
+repeatable.** A single-`run`-authored spec was again launched as `chikory chain`
+(`chain-aa25aa5c-…`, runtime `e0da13f`) and SUCCEEDED 2/2: node-1 `precheck-module`
+(pure `evaluateSpecStalenessPrecheck` + test) sealed SUCCESS → **node-2 cloned node-1's
+handed-off tree (`baseCommit 4631f4d == node-1 head`) and consumed its module (WP-239
+dependent handoff)** → node-2 `wire-precheck-cli` (the `commands.ts` wire) sealed
+SUCCESS → chain SUCCESS ($1.6988, judge 0.62%, ~5m42s; AC re-run green tsc+eslint+547
+vitest). This WIRED WP-256's spec-staleness gate LIVE — `cmdRun` now warns on a stale
+spec at launch (F-65 orphan killed; WP-256 + WP-258 → 🟢). **A SHARPENED gotcha this
+surfaced (see §7/§8): the chain planner paraphrase (F-64) can now leak past a GREEN
+chain not just as wrong SEMANTICS (dogfood-067) but as wrong CONTRACT SHAPE.** The
+planner dropped node-1's mandated interface fields + param shape, so the executor
+shipped `evaluateSpecStalenessPrecheck` with NO `stale` field and POSITIONAL
+`(specText, planText)` args (vs the mandated `{ targetWpId, stale, warning }` /
+`{ goal, planText }`) — and it stayed GREEN because the AC grep pins symbol NAMES, not
+interface SHAPES (`grep -q "stale"` matched the test's `.toContain("stale")` string),
+and tsc/eslint only enforce internal consistency (**F-67 → WP-259**: assert the
+type-shape, not just the name). The wire also reads the target WP from the whole yaml,
+not `spec.goal` (**F-68 → WP-260**). **WP-257 is now triply-evidenced (066 HALT → 067
+wrong semantics → 068 wrong contract)** — the durable-chain pillar's own root bug.
+
+**Earlier (dogfood-067, `docs/reports/dogfood-067.md`): the FIRST durable chain to land
+real open-WP product code** (`chain-d18a8c1b-…`, runtime `a4b8e7a`, SUCCESS 2/2,
+$2.5073): node-1 `parseWpStatus` parser → node-2 `assessSpecStaleness` consumer via the
+WP-239 handoff, closing the dogfood-066 gap (node A HALTed there, handoff never ran).
+That run first surfaced F-64 (the planner dropped the "id in the FIRST cell / status in
+the THIRD cell" positional rule → a divergent header-driven parser that still passed the
+loose AC) and F-65 (the 4-files-only spec landed `assessSpecStaleness` ORPHANED).
+**Harden every load-bearing literal/rule into the AC `check` / AC description (which
+survive to the node verbatim), not just the goal prose (F-64 → WP-257).**
 
 **CLOSED (dogfood-048, `docs/reports/dogfood-048.md`): the CHAIN-LEVEL judge-catch
 is PROVEN.** The armed re-attempt of dogfood-047 landed the first chain-level
@@ -975,6 +988,25 @@ a first-attempt SUCCESS and produced three plan-changing findings
   prose. **Practical rule until WP-257: put every load-bearing rule the delivery must
   honor into the AC `check` (grep/test) or the AC `description`, never only in goal
   prose — the planner can paraphrase goal prose away without failing anything.**
+  **Further refinement (F-67, dogfood-068): the paraphrase can drop the mandated API
+  CONTRACT SHAPE, and a NAME-only grep AC will NOT catch it.** dogfood-068's parent goal
+  mandated `SpecStalenessPrecheckResult = { targetWpId, stale, warning }` and a
+  `evaluateSpecStalenessPrecheck(input: { goal, planText })` object param; the planner
+  compressed node-1's goal to "export `extractTargetWpId`, `evaluateSpecStalenessPrecheck`,
+  and the `SpecStalenessPrecheckResult` interface" (no field list, no param shape), and
+  the executor shipped `{ targetWpId, warning }` (NO `stale` field) with POSITIONAL
+  `(specText, planText)` args. **It stayed green** because AC-1's `grep -q "stale"`
+  matched the test's `expect(result.warning).toContain("stale")` STRING (not a result
+  field), and `tsc`/`eslint`/`vitest` only enforce *internal* consistency (node-2's wire
+  called the divergent signature, so both nodes agreed). **A `grep -q "<name>"` AC pins
+  that a symbol NAME appears somewhere — it cannot enforce an interface's FIELDS or a
+  function's PARAM SHAPE.** When a goal mandates an exact `export interface` / signature,
+  add a tiny tsc-compiled `satisfies` / `expectTypeOf` fixture as an AC so a missing
+  field or wrong param shape fails to compile (**F-67 → WP-259**). Related: a wire built
+  off such a paraphrase can also read from the wrong source — dogfood-068's `cmdRun`
+  passed the whole `yamlText` (incl. comment preamble) to the precheck instead of the
+  mandated `spec.goal`, correct only by the dogfood-header-leads-with-target convention
+  (**F-68 → WP-260**).
 - **Single repo**, no `inject`, no `branch`, no suspend-for-days HITL UX, no
   pacing — all P2 (WP-214, -212, -205, -206, -207).
 - **A telemetry-*instrumenting* dogfood shows its own new counter at 0** (F-52):
