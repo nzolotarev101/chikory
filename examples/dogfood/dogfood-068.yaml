@@ -1,0 +1,153 @@
+# Dogfood-068: WP-258 — WIRE WP-256's spec-staleness gate into the live `chikory run` launch path.
+# Launch with `chikory run` (single durable run, NOT `chikory chain`). NO seam env.
+#
+# WHY THIS IS NEXT (2026-06-29): dogfood-067 DELIVERED WP-256's pure `assessSpecStaleness` decision but it
+# landed ORPHANED — zero live consumers, nothing actually REFUSES/WARNS on a stale dogfood at launch (F-65,
+# the very F-60 orphan pattern WP-256 was meant to fix). This run makes the gate LIVE: a new pure precheck
+# module that CONSUMES `assessSpecStaleness`, wired into `cmdRun` (`src/cli/commands.ts`) right after
+# `parseTaskSpec`, so launching a spec whose goal targets an already-🟢 work package prints a loud warning.
+# The landed diff CONSUMES WP-256's real module at a real call-site — this is the de-orphaning wire, NOT a
+# fresh throwaway utility. Closes WP-258 and flips WP-256 → 🟢.
+#
+# Single `chikory run` (NOT a chain): the change is one cohesive edit in one workspace, and a chain would
+# re-risk dogfood-067's F-64 (the planner paraphrases node goals and can drop a load-bearing rule). A single
+# run hands the FULL goal — every mandated symbol/rule — straight to the executor, no planner paraphrase.
+#
+# Gate verdicts (applied inline, dogfood-review §5, on CURRENT HEAD `a4b8e7a`):
+#   * §1.1 Failure-surface: ✅ — cross-file (NEW pure precheck module + its test + a LIVE `cmdRun`
+#     call-site wire in `commands.ts` + an additive optional `CliDeps.readPlanText`), 2–4 steps; real
+#     failure surface — the target-WP regex (first `WP-\d+` in the goal, null when absent), warn-ONLY
+#     (non-blocking) behavior, integrating into `cmdRun` without breaking the existing `commands.test.ts`
+#     / `cli.test.ts` suite. Not a 1-file deterministic port.
+#   * §1.2 Product-progress: ✅ — advances REAL open plan.md §6 WP-258 (🔴) AND flips WP-256 → 🟢; the
+#     landed diff IMPORTS and CALLS WP-256's `assessSpecStaleness` at a live launch call-site, killing the
+#     F-65 orphan. Feature code on the launcher-guard pillar (sibling WP-228/231/232), not scaffolding.
+#   * §1.3 Mission-critical: ✅ PROCEED — a real product WP that makes the §5 standing-failure-mode guard
+#     LIVE (stops the loop greening the dashboard on already-closed work). Not busy/scaffold-hosted; veto
+#     does not fire (nothing this run depends on is a busier real slice that's unblocked).
+#
+# DELIVERABLES: ONE new module + ONE new test + the `commands.ts` wire (+ the additive `CliDeps` field).
+# All three target paths' NEW content is absent on HEAD (the module + test files do not exist; the wire
+# lines are not in `commands.ts`) — confirmed 2026-06-29, so no empty-diff FAIL (dogfood-044 F-45).
+#
+# F-64 DISCIPLINE (dogfood-067): every load-bearing rule is pinned in the AC `check` (grep) or the AC
+# `description`, not only goal prose — a single run carries the full goal, but the greps are the contract.
+# F-65 DISCIPLINE: AC-2 greps `commands.ts` for the precheck call, so the executor CANNOT land the module
+# orphaned again — the wire must exist.
+#
+# Pre-launch discipline:
+#   * COMMIT EVERYTHING first — the workspace clones HEAD (F-30: launch ONCE). The dogfood-067 delivery
+#     (`src/cli/wp-status.ts` + `src/cli/spec-staleness.ts` + their tests) is STAGED/uncommitted; commit it
+#     so `spec-staleness.ts` (which this run IMPORTS) is on HEAD and the tree is lint-GREEN before cloning.
+#   * The AC toolchain is Temporal-free (grep + vitest + tsc + eslint), under the 120 s judge cap.
+#   * Run Devbox commands sequentially (F-22). Bare `pnpm exec`, NOT `devbox run` (F-24).
+name: dogfood-068-wp258-staleness-precheck-wire
+goal: >
+  Land WP-258 — wire WP-256's spec-staleness gate into the live `chikory run` launch path so a dogfood
+  whose goal targets an already-🟢 work package is WARNED about before it runs (the F-65 fix: dogfood-067
+  landed the pure `assessSpecStaleness` decision with zero live consumers). Make exactly the changes below
+  in packages/sdk-ts. Use strict TypeScript, ESM `.js` relative imports, named exports only, NO default
+  exports, no new dependency. Do NOT change `types.ts`, any contract, schemas, the barrel `src/index.ts`,
+  the chain runner, the Temporal workflow/agent-loop, or `src/cli/spec-staleness.ts` / `src/cli/wp-status.ts`
+  (consume them, do not edit them). Run project commands sequentially inside the existing Devbox
+  environment with bare `pnpm exec`. If a verification step reports a failing test or type error, READ the
+  failure and fix the IMPLEMENTATION so every mandated assertion passes — do NOT weaken, rephrase, or
+  remove any mandated assertion (a grep enforces the symbols).
+
+  FILE 1 — packages/sdk-ts/src/cli/spec-staleness-precheck.ts (NEW pure module). It MUST
+  `import { assessSpecStaleness } from "./spec-staleness.js";` (consume WP-256's decision — do NOT
+  reimplement it). Export (named exports only):
+
+    export function extractTargetWpId(goal: string): string | null;
+    export interface SpecStalenessPrecheckResult {
+      targetWpId: string | null;
+      stale: boolean;
+      warning: string | null;
+    }
+    export function evaluateSpecStalenessPrecheck(input: { goal: string; planText: string }): SpecStalenessPrecheckResult;
+
+  Semantics (exact):
+    * `extractTargetWpId` returns the FIRST `WP-<digits>` token in `goal` (regex `/WP-\d+/`), or `null`
+      when the goal names no work-package id. Pure; read only.
+    * `evaluateSpecStalenessPrecheck`: `targetWpId = extractTargetWpId(input.goal)`. When `targetWpId` is
+      null, return `{ targetWpId: null, stale: false, warning: null }` (nothing to check). Otherwise call
+      `assessSpecStaleness({ targetWpId, planText: input.planText })`; set `stale = report.stale`; when
+      `stale` is true, `warning` is a non-empty human string that INCLUDES the substring `stale` and the
+      `targetWpId` (e.g. `` `spec targets WP-XXX which is already done (🟢) — this dogfood may be stale: <reason>` ``);
+      when `stale` is false, `warning` is null. Return `{ targetWpId, stale, warning }`. Pure; do not
+      mutate inputs. Add a short JSDoc. This is WARN-ONLY — it returns a message, it never throws or exits.
+
+  FILE 2 — packages/sdk-ts/test/cli/spec-staleness-precheck.test.ts (NEW Vitest file, ESM `.js` relative
+  import from `../../src/cli/spec-staleness-precheck.js`) encoding AT LEAST these cases verbatim (graded by
+  a grep — do not rephrase): a goal naming a target whose plan-text row is 🟢 → `stale === true` and
+  `warning` is a non-null string containing `"stale"`; a goal naming a target whose row is 🟡 →
+  `stale === false` and `warning === null`; a goal with NO `WP-` id → `targetWpId === null`,
+  `stale === false`, `warning === null`; `extractTargetWpId("... WP-258 ...")` returns `"WP-258"`.
+
+  FILE 3 — packages/sdk-ts/src/cli/commands.ts (WIRE the live call-site — this is the de-orphaning step):
+    * Add an additive optional field to the existing `CliDeps` interface:
+      `readPlanText?: () => Promise<string | null>;` (a best-effort plan.md reader, injectable for tests).
+    * In `cmdRun`, AFTER `spec = parseTaskSpec(yamlText)` succeeds and BEFORE the existing
+      `CHIKORY_SEED_BAD_DIFF_PATH` seam block, run the staleness precheck: read the plan text via
+      `deps.readPlanText` if provided, else best-effort `await readFile("plan.md", "utf8")` wrapped in a
+      try/catch returning null on failure (a missing plan.md must NOT break launch). When the plan text is
+      non-null, call `evaluateSpecStalenessPrecheck({ goal: spec.goal, planText })` (imported from
+      `./spec-staleness-precheck.js`) and, when its `warning` is non-null, emit it via the existing
+      `ioPair.err(...)` channel. The launch then proceeds unchanged (WARN-ONLY — never abort the run).
+    * Do not change any other behavior of `cmdRun`, the seam blocks, or `hostAndFollow`.
+
+  Keep the new module pure and minimal; keep the wire small and additive. The acceptance check greps
+  `commands.ts` for `evaluateSpecStalenessPrecheck` and `readPlanText`, so the wire MUST exist — the module
+  cannot land orphaned (the F-65 lesson). The full existing SDK suite must stay green (the wire is additive
+  and the default plan-read path is best-effort, so runs without a plan.md are unaffected).
+repos:
+  - url: /Users/nikitazolotarev/repos/chikory
+    writable: true
+acceptance_criteria:
+  - id: AC-1
+    description: >
+      the NEW pure `src/cli/spec-staleness-precheck.ts` exports `extractTargetWpId` + an
+      `evaluateSpecStalenessPrecheck` that IMPORTS and CALLS WP-256's `assessSpecStaleness` (grep-pinned in
+      the source so it cannot be reimplemented), returns a non-null `warning` containing `stale` only when
+      the target WP is already 🟢, and its mandated cases (🟢→stale/warning, 🟡→fresh/null, no-id→null) are
+      present verbatim and its focused test passes
+    check: >
+      cd packages/sdk-ts &&
+      grep -q "assessSpecStaleness" src/cli/spec-staleness-precheck.ts &&
+      grep -q "extractTargetWpId" src/cli/spec-staleness-precheck.ts &&
+      grep -q "evaluateSpecStalenessPrecheck" src/cli/spec-staleness-precheck.ts &&
+      grep -q "evaluateSpecStalenessPrecheck" test/cli/spec-staleness-precheck.test.ts &&
+      grep -q "extractTargetWpId" test/cli/spec-staleness-precheck.test.ts &&
+      grep -q "stale" test/cli/spec-staleness-precheck.test.ts &&
+      grep -q "WP-258" test/cli/spec-staleness-precheck.test.ts &&
+      pnpm exec vitest run test/cli/spec-staleness-precheck.test.ts
+  - id: AC-2
+    description: >
+      the precheck is WIRED LIVE into `cmdRun` (`src/cli/commands.ts`) — `commands.ts` imports and calls
+      `evaluateSpecStalenessPrecheck` and reads plan text via the additive `readPlanText` dep — so WP-256's
+      gate has a real launch-path consumer and cannot land orphaned (the F-65 fix)
+    check: >
+      cd packages/sdk-ts &&
+      grep -q "evaluateSpecStalenessPrecheck" src/cli/commands.ts &&
+      grep -q "readPlanText" src/cli/commands.ts &&
+      grep -q "spec-staleness-precheck" src/cli/commands.ts
+  - id: AC-3
+    description: >
+      the SDK stays type- and lint-clean and the full existing suite remains green — proving the wire is
+      additive (warn-only, best-effort plan read) and no existing export, contract, or unrelated file broke
+    check: cd packages/sdk-ts && pnpm exec tsc --noEmit && pnpm exec eslint . && pnpm exec vitest run
+budget_usd: 5
+max_steps: 5
+executor:
+  adapter: codex
+  family: openai
+judge:
+  family: openai-compat
+  cadence: 1
+  max_cost_share: 0.5
+routing:
+  stages:
+    plan: { provider: openai-compat, model: gpt-5.5 }
+    code: { provider: openai-compat, model: gpt-5.5 }
+    review: { provider: openai-compat, model: gpt-5.5 }
+    judge: { provider: openai-compat, model: gemini-3.1-pro-preview }
