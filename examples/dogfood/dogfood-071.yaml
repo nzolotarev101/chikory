@@ -1,0 +1,158 @@
+# Dogfood-071: WP-261 §4 — WIRE the landed launch-mode guard into `cmdChain` (the dogfood-070 F-72 fix).
+# LAUNCH WITH `chikory run` (single durable run, NOT `chikory chain`). NO seam env.
+# ⚠️ HONOR THE LAUNCH MODE: dogfood-067/068/069/070 were all authored single-`run` and all launched as
+#    `chikory chain` — the F-72 defect this run FIXES. Launch it correctly:
+#      bash scripts/dogfood.sh examples/dogfood/dogfood-071.yaml
+#    (Once this run LANDS and is committed, `cmdChain` will itself refuse the exact mistake that has degraded
+#     the last four runs — the guard closes over its own launcher.)
+#
+# WHY THIS IS NEXT (2026-07-01): dogfood-070 landed WP-261's PURE half (`detectIntendedSingleRun` +
+# `assessLaunchModeMismatch`, `src/cli/launch-mode-precheck.ts`) and PROVED it against its own launch — but the
+# guard is consumed NOWHERE, so nothing actually refuses a mis-launch (the F-65 orphan pattern). This run wires
+# it into `cmdChain` (`src/cli/chain.ts`) — the direct analog of dogfood-068's already-dogfooded `cmdRun`
+# spec-staleness wire (`commands.ts:240-246`). The wire fires BEFORE the planner/meta-judge LLM calls, so a
+# single-`run`-authored spec launched via `chikory chain` is REFUSED at zero LLM cost (vs the ~$1.7–1.98 F-64
+# paraphrase tax it costs today). This closes WP-261 → 🟢 and ends the 4-run F-72 bleed.
+#
+# Single `chikory run` (NOT a chain): one cohesive CLI edit (chain.ts wire) + one behavioral test in one
+# workspace; the goal does not decompose, and a chain would re-risk the very F-64 paraphrase this WP guards.
+#
+# F-67 HARDENING: dogfood-068's cmdRun wire had NO behavioral test (only a name-grep AC), so F-67/F-68 contract
+# drift shipped green. This run REQUIRES a real behavioral test that INVOKES `cmdChain` and asserts the refusal
+# + the exact warning substrings — the wire must actually refuse, not merely mention the symbol. AC-1 greps the
+# call-site AND runs the behavioral test.
+#
+# Gate verdicts (applied inline, dogfood-review §5, on CURRENT HEAD once the dogfood-070 delivery is committed):
+#   * §1.1 Failure-surface: ✅ — cross-file (EDIT `chain.ts` + NEW behavioral test). Real failure surface: the
+#     wire must fire BEFORE `createRouter`/`planAndGateChain` (so no LLM cost is wasted), pass the RAW `yamlText`
+#     (the single-run marker lives in the header comment, not `spec.goal` — sidesteps F-68), wire the booleans
+#     correctly (`launchedAsChain: true`, `intendedSingleRun: detectIntendedSingleRun(yamlText)`), honor the
+#     `CHIKORY_ALLOW_LAUNCH_MODE_MISMATCH` override, emit the loud warning + `return 1`, and NOT break the
+#     genuine-chain happy path (the discriminator: no marker → proceed). 1–3 steps; an agent could plausibly
+#     fail (wire after the gate = no savings; forget the override; break the happy path). Not a 1-file port.
+#   * §1.2 Product-progress: ✅ — advances REAL open plan.md §6 WP-261 (🟡→🟢). CONSUMES the just-landed pure
+#     guard at a REAL call-site (kills the F-65 orphan; anti-F-65). Net-new real product code in `chain.ts` —
+#     NOT throwaway scaffolding; the direct analog of dogfood-068's cmdRun wire.
+#   * §1.3 Mission-critical: ✅ PROCEED — closes the loop's OWN most-recurring, costly (4 consecutive runs)
+#     operator defect at the launcher. Neither busy nor scaffold-hosted. The §1.3 veto does NOT fire: the
+#     judge/context-rot pure surfaces are exhausted (their remainders are agent-loop/judge-harness/LLM-call
+#     wires — genuine operator territory), and the chain-pillar pure halves (WP-257/WP-261) are landed — no
+#     thesis-stressing real-WP PURE slice is unblocked to displace this. Recorded verdict: ✅ PROCEED.
+#
+# Zero-secrets launch (no API keys; CLI-OAuth judge via the shim; NO seam vars). The script auto-starts the
+# `agy`/Antigravity proxy for the gemini judge:
+#   devbox shell
+#   bash scripts/dogfood.sh examples/dogfood/dogfood-071.yaml
+# (Manual path: `node scripts/cli-judge-proxy.mjs 8787 agy &`, set
+#  `OPENAI_COMPAT_BASE_URL=http://127.0.0.1:8787`, then
+#  `pnpm chikory run examples/dogfood/dogfood-071.yaml --watch`. `chikory run` validates the spec first.)
+#
+# Pre-launch discipline:
+#   * COMMIT EVERYTHING first — the workspace clones HEAD (F-30: launch ONCE). This review's report +
+#     living-doc edits AND the dogfood-070 delivery (`src/cli/launch-mode-precheck.ts` + its test) are
+#     STAGED/uncommitted; commit them so `chain.ts` can IMPORT `./launch-mode-precheck.js` from the clone and
+#     HEAD is lint-GREEN before the run clones (the clone must pass this run's own AC `eslint .`).
+#   * `src/cli/launch-mode-precheck.ts` MUST already exist on HEAD (it is the module this wire consumes) — the
+#     inverse of the usual F-45 "target must be absent" rule: here the CONSUMED module must be PRESENT.
+#   * F-49: each AC `check` greps the mandated call-site symbols/env-var/`return 1` BEFORE vitest, so the
+#     executor cannot wire it inertly or drop the refusal.
+#   * Run Devbox commands sequentially (F-22). Bare `pnpm exec`, NOT `devbox run` (F-24). The AC toolchain is
+#     Temporal-free (grep + vitest + tsc + eslint) — the behavioral test refuses BEFORE any router/Temporal, so
+#     it stays well under the 120 s judge cap (scoped vitest ~1 s; full suite ~20 s).
+name: dogfood-071-wp261-cmdchain-launch-mode-wire
+goal: >
+  Wire WP-261's landed launch-mode guard into the `chikory chain` launch path so a single-`run`-authored spec
+  invoked via `chikory chain` is REFUSED (loud warning + non-zero exit) BEFORE any planner/meta-judge LLM cost
+  is spent — the dogfood-070 F-72 fix. This is the SEPARATE §4 wire the dogfood-070 spec deferred; it is the
+  direct analog of the already-landed `cmdRun` spec-staleness wire (`src/cli/commands.ts:240-246`). Change
+  exactly ONE existing file plus ONE new test file. Add no new dependency, and do NOT touch `types.ts`, any
+  contract, the barrel `src/index.ts`, `commands.ts`, `spec-staleness-precheck.ts`, or
+  `launch-mode-precheck.ts` (this run CONSUMES the last, it does not edit it). Use strict TypeScript, ESM `.js`
+  relative imports, named exports only, NO default exports. Run Devbox verification commands sequentially with
+  bare `pnpm exec`. If a verification step reports a failing test or type error, READ the failure and fix the
+  IMPLEMENTATION so every mandated assertion passes — do NOT weaken, rephrase, or remove any mandated assertion
+  (a grep enforces the call-site symbols, the env var, and the behavioral assertion).
+
+  FILE 1 — packages/sdk-ts/src/cli/chain.ts (EDIT the existing `cmdChain` function). Add, at the TOP of the
+  file with the other `./`-relative imports:
+
+    import { assessLaunchModeMismatch, detectIntendedSingleRun } from "./launch-mode-precheck.js";
+
+  Then INSIDE `cmdChain`, AFTER the `spec = parseTaskSpec(yamlText)` block succeeds and BEFORE the
+  "1+2: decompose the goal and gate the plan" step (i.e. before `createRouter` / `planAndGateChain` — so the
+  refusal costs ZERO LLM spend), insert the guard:
+
+    * Compute `const launchModeMismatch = assessLaunchModeMismatch({ intendedSingleRun:
+      detectIntendedSingleRun(yamlText), launchedAsChain: true });` — pass the RAW `yamlText` (the single-run
+      marker convention lives in the spec's header comment, NOT `spec.goal`), and `launchedAsChain: true`
+      because this is the `chikory chain` command.
+    * When `launchModeMismatch !== null` AND the escape hatch env var
+      `process.env["CHIKORY_ALLOW_LAUNCH_MODE_MISMATCH"]` is unset or empty, emit `launchModeMismatch.warning`
+      via `ioPair.err(...)`, then emit a second `ioPair.err(...)` line telling the operator to relaunch with
+      `chikory run` or set `CHIKORY_ALLOW_LAUNCH_MODE_MISMATCH=1` to override, and `return 1` — refusing the
+      launch before the planner runs.
+    * When `launchModeMismatch === null` (a genuine chain spec with no single-run marker) OR the override env
+      var is set to a non-empty value, DO NOT return early — fall through to the existing decompose/gate/host
+      path unchanged. Do not alter any other behavior of `cmdChain`.
+
+  FILE 2 — packages/sdk-ts/test/cli/chain-launch-mode.test.ts (NEW Vitest file, ESM `.js` relative import of
+  `{ cmdChain } from "../../src/cli/chain.js"`). It MUST invoke `cmdChain` against a real temp spec file and
+  assert the refusal behaviorally (graded by a grep — do not rephrase the call or the expected substrings):
+    * Write a temp yaml spec file whose TEXT contains the single-run marker `NOT a chain` (a minimal but
+      parse-valid `TaskSpec`: `name`, a `goal`, `repos`, `acceptance_criteria`, `executor`, `judge`, `routing`
+      — reuse the shape of an existing dogfood spec so `parseTaskSpec` succeeds).
+    * Delete the `CHIKORY_ALLOW_LAUNCH_MODE_MISMATCH` env var for the refuse case (save/restore it around the
+      test). Invoke `const code = await cmdChain({ file: <temp spec path>, watch: false, json: false, dataDir:
+      <temp dir> }, { err: (line) => errLines.push(line) });` capturing `err` output into a `errLines: string[]`.
+    * Assert `expect(code).toBe(1);` and that the captured `errLines.join("\n")` contains BOTH the substring
+      `chikory chain` AND the substring `single \`chikory run\`` (the mandated `warning` substrings) — proving
+      the wire actually REFUSED and emitted the guard warning, WITHOUT reaching the router (no Temporal / no
+      network — the guard returns before `createRouter`).
+    * Clean up the temp file/dir after the test.
+
+  Keep the wire minimal and additive. Do NOT add a new CLI flag or edit the argument parser (`main.ts`); the
+  `CHIKORY_ALLOW_LAUNCH_MODE_MISMATCH` env var is the override, mirroring the existing `CHIKORY_*` seam
+  convention. The genuine-chain and override paths stay covered by the landed
+  `assessLaunchModeMismatch`/`detectIntendedSingleRun` unit tests.
+repos:
+  - url: /Users/nikitazolotarev/repos/chikory
+    writable: true
+acceptance_criteria:
+  - id: AC-1
+    description: >
+      `cmdChain` (`src/cli/chain.ts`) imports and CALLS the landed guard at a real call-site — grep-pinned to
+      both `detectIntendedSingleRun` and `assessLaunchModeMismatch`, the `CHIKORY_ALLOW_LAUNCH_MODE_MISMATCH`
+      override, and a `return 1` refusal — and a behavioral test that INVOKES `cmdChain` and asserts the
+      refusal (exit 1 + both mandated `warning` substrings) passes
+    check: >
+      cd packages/sdk-ts &&
+      grep -q "launch-mode-precheck" src/cli/chain.ts &&
+      grep -q "detectIntendedSingleRun" src/cli/chain.ts &&
+      grep -q "assessLaunchModeMismatch" src/cli/chain.ts &&
+      grep -q "CHIKORY_ALLOW_LAUNCH_MODE_MISMATCH" src/cli/chain.ts &&
+      grep -q "return 1" src/cli/chain.ts &&
+      grep -q "cmdChain(" test/cli/chain-launch-mode.test.ts &&
+      grep -q "toBe(1)" test/cli/chain-launch-mode.test.ts &&
+      grep -q "single \`chikory run\`" test/cli/chain-launch-mode.test.ts &&
+      pnpm exec vitest run test/cli/chain-launch-mode.test.ts
+  - id: AC-2
+    description: >
+      the SDK stays type- and lint-clean and the full existing suite remains green — proving the wire is
+      additive (one edited command + one new test) and no existing export, contract, the barrel, `commands.ts`,
+      `spec-staleness-precheck.ts`, or `launch-mode-precheck.ts` changed
+    check: cd packages/sdk-ts && pnpm exec tsc --noEmit && pnpm exec eslint . && pnpm exec vitest run
+budget_usd: 5
+max_steps: 5
+executor:
+  adapter: codex
+  family: openai
+judge:
+  family: openai-compat
+  cadence: 1
+  max_cost_share: 0.5
+routing:
+  stages:
+    plan: { provider: openai-compat, model: gpt-5.5 }
+    code: { provider: openai-compat, model: gpt-5.5 }
+    review: { provider: openai-compat, model: gpt-5.5 }
+    judge: { provider: openai-compat, model: gemini-3.1-pro-preview }
