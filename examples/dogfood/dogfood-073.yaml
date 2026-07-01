@@ -1,0 +1,196 @@
+# Dogfood-073: WP-233(b) part 1 — the plan-gate FAILURE NOTICE RENDERER + the `planAndGateChain` CONSUMER WIRE.
+# LAUNCH WITH `chikory run` (single durable run, NOT `chikory chain`). NO seam env.
+# ⚠️ HONOR THE LAUNCH MODE. dogfood-072 was the FIRST correct single-`run` launch in 6 (067–071 were all
+#    single-`run`-authored and all mis-launched as `chikory chain` — the F-72/F-74 streak). Keep the streak
+#    alive. Launch THIS single-run spec correctly:
+#      devbox run run-dogfood        # ← single `chikory run`; picks the latest spec (this one)
+#    (NEVER `devbox run chain-dogfood` for this spec.) Direct form: `bash scripts/dogfood.sh --run`.
+#    DOUBLE-ENFORCED: the committed `cmdChain` launch-mode guard (WP-261) refuses this single-`run`-marked spec
+#    launched as a chain at zero LLM cost (header carries "NOT `chikory chain`" / "single `chikory run`"). To
+#    override (do NOT): `CHIKORY_ALLOW_LAUNCH_MODE_MISMATCH=1`.
+#
+# WHY THIS IS NEXT (2026-07-01): dogfood-072 LANDED WP-233(a) — the PURE `classifyPlanGateFailure` classifier
+# (infra/transport fault "safe to re-run" vs substantive plan rejection) → WP-233 🟡. That classifier has ZERO
+# runtime consumers today (only the barrel + its test), exactly the F-65 orphan shape the loop keeps hitting.
+# WP-233(b) is TWO halves: (1) the `planAndGateChain` CONSUMER WIRE that surfaces the infra-vs-substantive
+# distinction to the operator (the direct F-33 operator-facing fix — today `planAndGateChain`
+# (`src/cli/chain.ts:130-132`) folds EVERY non-PROCEED gate verdict into `message: gated.verdict.rationale`, so
+# an operator sees the same "gate stopped the chain" whether the meta-judge was UNREACHABLE (safe to re-run) or
+# the plan was genuinely REJECTED); (2) the Plan-persistence/resume half (the durable record so a transient
+# gate failure is resumable). This run lands HALF (1): a PURE notice renderer + the one-site wire that CONSUMES
+# the WP-233(a) classifier at its real call-site — killing the orphan and making the F-33 distinction visible in
+# real product code. Half (2) (durable Plan persistence) is the SEPARATE §4 follow-up (WP-233(b) part 2).
+#
+# Single `chikory run` (NOT a chain): one NEW pure module + one EDIT to the barrel + one EDIT to `chain.ts`
+# (the consumer wire) + one NEW test. The goal does not decompose; this run BUILDS the renderer + wires it, it
+# does not exercise a live gate (so no chain needed). A chain re-risks the F-64 paraphrase that shipped real
+# contract drift green on dogfood-071 (F-75).
+#
+# ANTI-F-64/F-75 hardening: single `run`, so the FULL goal (every mandated symbol + the two EXACT operator
+# message substrings) reaches the executor verbatim — no planner paraphrase can drop a mandate. AC-1 greps the
+# renderer AND the test for each mandated symbol AND the two verbatim operator substrings BEFORE vitest, and
+# greps `chain.ts` for the classifier call, so the renderer cannot be built inertly, the wire cannot be
+# skipped, and the graded test must compose classifier→renderer on REAL `PlanVerdict` literals (not stubs).
+#
+# Gate verdicts (dogfood-review §5, applied inline on CURRENT HEAD once the dogfood-072 delivery is committed):
+#   * §1.1 Failure-surface: ✅ — cross-file (NEW `src/chain/plan-gate-notice.ts` + EDIT `src/cli/chain.ts` +
+#     NEW test). Real failure surface on the durable-execution pillar: the renderer must key on the classified
+#     `kind` (NOT re-sniff the rationale), carry the EXACT operator polarity ("SAFE to re-run" for infra vs
+#     "NOT safe" for substantive — inverting these is the plausible failure), include the underlying `reason`,
+#     and not mutate its input; the wire must call `classifyPlanGateFailure(gated.verdict)` at the gate-failure
+#     return and fall back to the raw rationale only when the classifier returns null. 1–3 steps; an agent could
+#     plausibly fail (polarity inversion; forgetting the wire; leaking the raw reason without the guidance).
+#     Not a 1-file deterministic port.
+#   * §1.2 Product-progress: ✅ — advances REAL open plan.md §6 WP-233 (🟡 → the durable/resumable chain-
+#     planning thesis pillar). Net-new real product code that CONSUMES the dogfood-072 classifier at a real
+#     call-site (anti-F-65 orphan) — NOT throwaway scaffolding; the operator-facing half of the F-33 fix.
+#   * §1.3 Mission-critical: ✅ PROCEED — a thesis-stressing DURABLE-EXECUTION slice on a real product WP,
+#     unblocked (the classifier + the `planAndGateChain` seam both exist). Neither busy nor scaffold-hosted; the
+#     WP-261/WP-262/WP-263 remainders are operator-landed/track-B wires, not headlines. Recorded verdict:
+#     ✅ PROCEED.
+#
+# Zero-secrets launch (no API keys; CLI-OAuth judge via the shim; NO seam vars). The script auto-starts the
+# `agy`/Antigravity proxy for the gemini judge:
+#   devbox shell
+#   devbox run run-dogfood        # single `chikory run`, latest spec (this one)
+# (Manual path: `node scripts/cli-judge-proxy.mjs 8787 agy &`, set
+#  `OPENAI_COMPAT_BASE_URL=http://127.0.0.1:8787`, then
+#  `pnpm chikory run examples/dogfood/dogfood-073.yaml --watch`. `chikory run` validates the spec first.)
+#
+# Pre-launch discipline:
+#   * COMMIT EVERYTHING first — the workspace clones HEAD (F-30: launch ONCE). This review's report +
+#     living-doc edits AND the dogfood-072 delivery (`src/chain/plan-gate-failure.ts` + barrel +
+#     `test/chain/plan-gate-failure.test.ts`) are STAGED/uncommitted; commit them so HEAD is lint-GREEN before
+#     the run clones (the clone must pass this run's own AC `eslint .`) AND so `classifyPlanGateFailure` is a
+#     real import target on HEAD.
+#   * F-45: the NEW file `src/chain/plan-gate-notice.ts` MUST be ABSENT on HEAD (this run creates it).
+#   * F-49: each AC `check` greps the mandated symbols + the two exact operator substrings BEFORE vitest.
+#   * F-76 (dogfood-072): codex blew the 600s wall-clock cap on a 3-file additive task and paid a full-price
+#     retry step. This run is comparably small; if it also nears the cap, that is fresh WP-263 evidence — do
+#     NOT raise `budget_usd`/`max_steps` to paper over it.
+#   * Run Devbox commands sequentially (F-22). Bare `pnpm exec`, NOT `devbox run` (F-24). The AC toolchain is
+#     Temporal-free (grep + vitest + tsc + eslint) — well under the 120 s judge cap (scoped vitest ~1 s;
+#     full suite ~20 s).
+name: dogfood-073-wp233b-plan-gate-notice-wire
+goal: >
+  Land the plan-gate FAILURE NOTICE RENDERER for the durable chain planning layer AND WIRE it (with the
+  dogfood-072 `classifyPlanGateFailure` classifier) into `planAndGateChain` — WP-233(b) part 1, the F-33
+  operator-facing fix. Today `planAndGateChain` (`src/cli/chain.ts`) folds EVERY non-PROCEED plan-gate verdict
+  into `message: gated.verdict.rationale`, so an operator cannot tell an UNREACHABLE meta-judge (an infra fault
+  — SAFE to re-run) from a genuinely REJECTED plan. This run builds a PURE renderer that turns a
+  `PlanGateFailureClass` (from the landed `classifyPlanGateFailure`) into an operator-facing notice carrying the
+  correct re-run guidance, then wires it at the gate-failure return so the distinction is visible. This run does
+  NOT build the Plan-persistence/resume half (WP-233(b) part 2, a SEPARATE §4 follow-up). Change exactly ONE new
+  module, ONE new test, and TWO existing files (the barrel `src/index.ts`, one added re-export line; and
+  `src/cli/chain.ts`, the consumer wire). Add no new dependency, and do NOT touch `types.ts`, any contract,
+  `meta-judge-harness.ts`, `plan-gate-failure.ts`, or any other existing file. Use strict TypeScript, ESM `.js`
+  relative imports, named exports only, NO default exports, and keep the renderer PURE (no I/O, clock,
+  randomness, or input mutation). Run Devbox verification commands sequentially with bare `pnpm exec`. If a
+  verification step reports a failing test or type error, READ the failure and fix the IMPLEMENTATION so every
+  mandated assertion passes — do NOT weaken, rephrase, or remove any mandated assertion.
+
+  FILE 1 — packages/sdk-ts/src/chain/plan-gate-notice.ts (NEW). Import the classifier's result type only:
+
+    import type { PlanGateFailureClass } from "./plan-gate-failure.js";
+
+  Export the pure renderer:
+
+    * `export function renderPlanGateFailureNotice(cls: PlanGateFailureClass): string` — behavior:
+        - When `cls.kind === "infra"`, return a single-line notice that STARTS WITH the EXACT string
+          `"plan gate could not reach the meta-judge — INFRA fault, SAFE to re-run: "` followed by `cls.reason`.
+        - When `cls.kind === "substantive"`, return a single-line notice that STARTS WITH the EXACT string
+          `"plan gate REJECTED the plan — NOT safe to re-run as-is: "` followed by `cls.reason`.
+        - Do NOT mutate the input `cls`. Do NOT re-inspect the rationale — branch ONLY on `cls.kind` (the
+          classification is authoritative; `renderPlanGateFailureNotice` trusts `classifyPlanGateFailure`).
+      Add a JSDoc block citing WP-233(b) and the F-33 operator-facing conflation it resolves, and note it
+      consumes the WP-233(a) `classifyPlanGateFailure` classifier.
+
+  FILE 2 — packages/sdk-ts/src/index.ts (EDIT — add ONE re-export line next to the existing
+  `export { classifyPlanGateFailure, PLAN_GATE_INFRA_REASON_PREFIXES } from "./chain/plan-gate-failure.js";`):
+
+    export { renderPlanGateFailureNotice } from "./chain/plan-gate-notice.js";
+
+  Do NOT change any other export or reorder the barrel.
+
+  FILE 3 — packages/sdk-ts/src/cli/chain.ts (EDIT — the CONSUMER WIRE). Add the imports (top of file, next to the
+  other `../` / `./` imports):
+
+    import { classifyPlanGateFailure } from "../chain/plan-gate-failure.js";
+    import { renderPlanGateFailureNotice } from "../chain/plan-gate-notice.js";
+
+  In `planAndGateChain`, at the gate-failure return (the existing
+  `if (gated.verdict.kind !== "PROCEED") { return { ok: false, phase: "gate", message: gated.verdict.rationale, verdict: gated.verdict, costUsd }; }`),
+  compute the classified notice and use it as the `message`, falling back to the raw rationale only when the
+  classifier returns null:
+
+    const failureClass = classifyPlanGateFailure(gated.verdict);
+    const message = failureClass ? renderPlanGateFailureNotice(failureClass) : gated.verdict.rationale;
+
+  and return `{ ok: false, phase: "gate", message, verdict: gated.verdict, costUsd }`. Do NOT change any other
+  return, the `phase: "plan"` branches, the `FamilyDiversityError` branch, or the PROCEED path.
+
+  FILE 4 — packages/sdk-ts/test/chain/plan-gate-notice.test.ts (NEW Vitest file, ESM `.js` relative imports of
+  `{ renderPlanGateFailureNotice } from "../../src/chain/plan-gate-notice.js"`,
+  `{ classifyPlanGateFailure } from "../../src/chain/plan-gate-failure.js"`, and
+  `type { PlanVerdict } from "../../src/types.js"`). Grade with REAL `PlanVerdict` literals composed through the
+  classifier — do NOT hand-build `PlanGateFailureClass` stubs. It MUST cover:
+    * the F-33 transport ESCALATE — rationale
+      `"plan meta-judge LLM call failed after 5 attempts: transport error: fetch failed"` → pass through
+      `classifyPlanGateFailure` → `renderPlanGateFailureNotice` → assert the result `.toContain("SAFE to re-run")`
+      AND `.toContain("transport error: fetch failed")` (the reason is preserved).
+    * a SUBSTANTIVE coverage-floor REVISE — rationale `"plan leaves goal criteria uncovered: AC-1, AC-2"` → pass
+      through both functions → assert the result `.toContain("NOT safe to re-run")` AND
+      `.toContain("plan leaves goal criteria uncovered")`.
+    * polarity: assert the infra notice does NOT contain `"REJECTED"` and the substantive notice does NOT
+      contain `"could not reach the meta-judge"` (the two branches never cross).
+    * no-mutation: build a `PlanGateFailureClass` via `classifyPlanGateFailure`, snapshot it (field copy or
+      `structuredClone`), call `renderPlanGateFailureNotice`, and assert the class object is unchanged.
+
+  Keep everything additive except the single `chain.ts` message computation. The Plan-persistence/resume half is
+  the separate WP-233(b) part 2 §4 follow-up; do not add it here.
+repos:
+  - url: /Users/nikitazolotarev/repos/chikory
+    writable: true
+acceptance_criteria:
+  - id: AC-1
+    description: >
+      the NEW pure renderer exists and branches on `cls.kind` with the two verbatim operator prefixes, the
+      barrel re-exports it, `chain.ts` calls `classifyPlanGateFailure` at the gate-failure return, and the
+      behavioral test composes `classifyPlanGateFailure`→`renderPlanGateFailureNotice` on real `PlanVerdict`
+      literals asserting the SAFE/NOT-safe polarity and reason preservation
+    check: >
+      cd packages/sdk-ts &&
+      grep -q "renderPlanGateFailureNotice" src/chain/plan-gate-notice.ts &&
+      grep -q "INFRA fault, SAFE to re-run: " src/chain/plan-gate-notice.ts &&
+      grep -q "NOT safe to re-run as-is: " src/chain/plan-gate-notice.ts &&
+      grep -q 'cls.kind === "infra"' src/chain/plan-gate-notice.ts &&
+      grep -q "renderPlanGateFailureNotice" src/index.ts &&
+      grep -q "classifyPlanGateFailure" src/cli/chain.ts &&
+      grep -q "renderPlanGateFailureNotice" src/cli/chain.ts &&
+      grep -q "classifyPlanGateFailure(" test/chain/plan-gate-notice.test.ts &&
+      grep -q "renderPlanGateFailureNotice(" test/chain/plan-gate-notice.test.ts &&
+      grep -q "SAFE to re-run" test/chain/plan-gate-notice.test.ts &&
+      grep -q "NOT safe to re-run" test/chain/plan-gate-notice.test.ts &&
+      grep -q "transport error: fetch failed" test/chain/plan-gate-notice.test.ts &&
+      pnpm exec vitest run test/chain/plan-gate-notice.test.ts
+  - id: AC-2
+    description: >
+      the SDK stays type- and lint-clean and the full existing suite remains green — proving the change is
+      additive (one new module + one barrel line + one gate-failure message wire + one new test) and no
+      existing export, contract, `meta-judge-harness.ts`, or `plan-gate-failure.ts` changed
+    check: cd packages/sdk-ts && pnpm exec tsc --noEmit && pnpm exec eslint . && pnpm exec vitest run
+budget_usd: 5
+max_steps: 5
+executor:
+  adapter: codex
+  family: openai
+judge:
+  family: openai-compat
+  cadence: 1
+  max_cost_share: 0.5
+routing:
+  stages:
+    plan: { provider: openai-compat, model: gpt-5.5 }
+    code: { provider: openai-compat, model: gpt-5.5 }
+    review: { provider: openai-compat, model: gpt-5.5 }
+    judge: { provider: openai-compat, model: gemini-3.1-pro-preview }

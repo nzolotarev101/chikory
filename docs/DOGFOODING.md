@@ -1126,6 +1126,16 @@ a first-attempt SUCCESS and produced three plan-changing findings
   lint-green SUCCESS (judge ran both ACs on the clone, checkpoint `lastGood true`, no
   rollback/re-execution). Still, on a killed step prefer the JUDGE's re-run + working-tree
   re-verification over the trace counters, and watch the enriched kill reason for the overrun ratio.
+  **LIVE-CONFIRMED dogfood-072 (F-76/F-77, `run-1ac16aa8-…`):** clause (a) reaping WORKS —
+  a codex step killed at `maxSeconds=600` landed at **653.1s = 1.09× cap** (vs dogfood-064's 2.45×).
+  The codex telemetry residual RECURRED as documented (killed codex step sealed `$0.00 / 0 tokens`;
+  `codex.ts:62` reads usage only at `turn.completed`). NEW gotcha this run exposed: **a retriable
+  wall-clock kill re-executes a FULL executor turn even when the killed step already wrote the complete,
+  AC-passing delivery.** dogfood-072 step 1 wrote the whole 3-file delivery (5765-byte diff, AC-1 ✓)
+  then got killed → step 2 re-ingested **298k tokens for a 0-byte diff** and paid **96% of the run cost**
+  to re-run the ACs and seal SUCCESS. Until F-76 → WP-263 lands (re-run the killed step's ACs → seal via
+  a judge-only pass when they pass, no executor re-ingest), budget for a **full extra metered step** on
+  any run whose executor risks the wall-clock cap — the retry, not the killed step, is where the money goes.
 - **Subscription-auth runs can report $0.00 cost** → rely on `max_steps`
   and the HALT guard when the meter is blind. WP-218 slice 1 (dogfood-004)
   prices the documented zero-secrets path (`gpt-5.5`,
