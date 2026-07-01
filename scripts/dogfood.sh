@@ -4,14 +4,35 @@
 # and starting the local OpenAI-compat judge proxy) and then executes the spec.
 #
 # Usage:
-#   devbox run dogfood [<spec-path>]
-#   (defaults to the latest created spec in examples/dogfood/)
+#   devbox run run-dogfood     — launch the latest spec as a single `chikory run`
+#   devbox run chain-dogfood   — launch the latest spec as a durable `chikory chain`
+#   bash scripts/dogfood.sh --run|--chain [<spec-path>]
+#   (spec defaults to the latest created spec in examples/dogfood/)
+#
+# The LAUNCH MODE is now EXPLICIT (--run / --chain), chosen by the operator.
+# The old auto-detection (grep the spec for "chikory chain") was BROKEN: every
+# single-run spec's header warns "NOT `chikory chain`", so the grep matched the
+# warning and chained the run — the F-72/F-74 5-run mis-launch bleed
+# (dogfood-067/068/069/070/071). Picking the mode by hand removes the heuristic.
 
 set -euo pipefail
 
 # Make sure we run from the repo root
 cd "$(dirname "$0")/.."
 mkdir -p .chikory
+
+# 0. Parse the explicit launch mode (authoritative — no heuristic).
+MODE=""
+case "${1:-}" in
+  --run) MODE="run"; shift ;;
+  --chain) MODE="chain"; shift ;;
+esac
+if [ -z "$MODE" ]; then
+  echo "Error: launch mode required. Use 'devbox run run-dogfood' (single \`chikory run\`)" >&2
+  echo "       or 'devbox run chain-dogfood' (durable \`chikory chain\`)." >&2
+  echo "       (direct: bash scripts/dogfood.sh --run|--chain [<spec-path>])" >&2
+  exit 1
+fi
 
 # 1. Identify the spec file
 SPEC_FILE="${1:-}"
@@ -129,10 +150,5 @@ trap cleanup EXIT SIGINT SIGTERM
 # 5. Run the dogfood spec
 export OPENAI_COMPAT_BASE_URL="http://127.0.0.1:$PROXY_PORT"
 
-CHIKORY_CMD="run"
-if grep -q "chikory chain" "$SPEC_FILE"; then
-  CHIKORY_CMD="chain"
-fi
-
-echo "Running Chikory dogfooding command: pnpm chikory $CHIKORY_CMD ..."
-pnpm chikory "$CHIKORY_CMD" "$SPEC_FILE" --watch
+echo "Running Chikory dogfooding command: pnpm chikory $MODE ..."
+pnpm chikory "$MODE" "$SPEC_FILE" --watch

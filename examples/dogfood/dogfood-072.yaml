@@ -1,0 +1,191 @@
+# Dogfood-072: WP-233(a) — the PURE plan-gate FAILURE CLASSIFIER (infra/transport fault vs substantive plan rejection).
+# LAUNCH WITH `chikory run` (single durable run, NOT `chikory chain`). NO seam env.
+# ⚠️ HONOR THE LAUNCH MODE: dogfood-067/068/069/070/071 were all authored single-`run` and all launched as
+#    `chikory chain` — the F-72/F-74 defect, a 5-run standing operator bleed whose ROOT CAUSE was the old
+#    `devbox run dogfood` auto-detect (it grepped the spec for "chikory chain" and matched the header's WARNING).
+#    FIXED: the launcher is now split into explicit modes. Launch THIS single-run spec correctly:
+#      devbox run run-dogfood        # ← single `chikory run`; picks the latest spec (this one)
+#    (NEVER `devbox run chain-dogfood` for this spec.) Direct form: `bash scripts/dogfood.sh --run`.
+#    DOUBLE-ENFORCED: once dogfood-071's `cmdChain` wire is committed to HEAD, launching this single-`run`-marked
+#    spec as a chain is ALSO refused at zero LLM cost (the header carries "NOT `chikory chain`" /
+#    "single `chikory run`"). To deliberately override (do NOT): set CHIKORY_ALLOW_LAUNCH_MODE_MISMATCH=1.
+#
+# WHY THIS IS NEXT (2026-07-01): the WP-261 `cmdChain` launch-mode wire LANDED (dogfood-071 → WP-261 🟢), and
+# WP-257's pure literal verifier is landed — so both chain-pillar PURE guard-halves are done and their remaining
+# slices are operator-landed/track-B wires, NOT dogfood headlines (dogfood-070/071 status lines). The NEXT
+# headline is a thesis-stressing slice on a real, unblocked DURABLE-EXECUTION product WP. **WP-233 (durable,
+# resumable chain planning layer, plan.md §6 🔴, queued Next-up from dogfood-041 attempt-2 F-33)** is exactly
+# that: the chain's plan-gate runs host-side before any durable state exists, and a TRANSIENT infra fault
+# (router `transport error: fetch failed`) is TODAY conflated with a substantive plan rejection —
+# `runPlanJudgePass` (`src/planner/meta-judge-harness.ts:79-88`) folds a router FAILED into an ESCALATE
+# `PlanVerdict` with reason `plan meta-judge LLM call failed after N attempts: <reason>`, and downstream
+# `planAndGateChain`/`cmdChain` render "the gate stopped the chain" — so the operator cannot tell "the judge was
+# unreachable, safe to re-run" from "the plan was rejected". This run lands the PURE half: a classifier that
+# reads a plan-gate `PlanVerdict` and reports whether a non-PROCEED verdict is an INFRA fault (safe to re-run)
+# or a SUBSTANTIVE rejection. The `planAndGateChain` wire that surfaces the distinction + the Plan-persistence
+# half (resumable gate) are the SEPARATE §4 follow-ups (WP-233(b)) — mirroring how every prior chain pillar
+# landed its pure half first (WP-257 `planLiteralGaps`, WP-261 `assessLaunchModeMismatch`).
+#
+# Single `chikory run` (NOT a chain): one NEW pure module + one NEW test in one workspace; the goal does not
+# decompose, and this run BUILDS the classifier — it does not exercise a live gate (so no chain needed), and a
+# chain re-risks the F-64 paraphrase that has degraded the last five runs (dogfood-071 F-75 shipped real
+# contract drift GREEN because of it).
+#
+# ANTI-F-64/F-75 hardening: this is a single `run`, so the FULL goal (every mandated symbol, the three infra
+# prefixes, the truth table) reaches the executor verbatim — no planner paraphrase can drop a mandate. AC-1
+# greps the module for each mandated symbol AND the exact infra prefixes BEFORE vitest, so the classifier cannot
+# be built inertly or with the wrong discriminators.
+#
+# Gate verdicts (applied inline, dogfood-review §5, on CURRENT HEAD once the dogfood-071 delivery is committed):
+#   * §1.1 Failure-surface: ✅ — cross-file (NEW `src/chain/plan-gate-failure.ts` + NEW test). Real failure
+#     surface: the classifier must ANCHOR on the harness's three infra-reason PREFIXES (not a loose substring —
+#     a plan whose own rationale QUOTES "reply failed schema validation" must NOT false-positive), return null
+#     for PROCEED (not a failure), classify a substantive REVISE/ESCALATE (e.g. a coverage-floor override) as
+#     `substantive` / `safeToReRun: false`, and not mutate its input. 1–3 steps; an agent could plausibly fail
+#     (substring vs anchored match; PROCEED→null vs a class; the safe-to-re-run boolean polarity). Not a
+#     single-file deterministic PORT — it is net-new discrimination logic keyed to the live F-33 defect.
+#   * §1.2 Product-progress: ✅ — advances REAL open plan.md §6 WP-233 (🔴 → the durable/resumable chain-
+#     planning thesis pillar). Net-new real product code (`src/chain/plan-gate-failure.ts`) that
+#     `planAndGateChain` will CONSUME in the §4 wire — NOT throwaway scaffolding; the direct analog of the
+#     WP-257/WP-261 pure-half-first cadence.
+#   * §1.3 Mission-critical: ✅ PROCEED — a thesis-stressing DURABLE-EXECUTION slice on a real product WP,
+#     unblocked (the plan-gate code exists and runs; this adds the missing classification the F-33 report
+#     demanded). The §1.3 veto does NOT fire: neither busy nor scaffold-hosted, and every OTHER unblocked
+#     chain-pillar slice (WP-261/WP-257 remainders) is an operator-landed/track-B wire, not a headline.
+#     Recorded verdict: ✅ PROCEED.
+#
+# Zero-secrets launch (no API keys; CLI-OAuth judge via the shim; NO seam vars). The script auto-starts the
+# `agy`/Antigravity proxy for the gemini judge:
+#   devbox shell
+#   devbox run run-dogfood        # single `chikory run`, latest spec (this one)
+# (Manual path: `node scripts/cli-judge-proxy.mjs 8787 agy &`, set
+#  `OPENAI_COMPAT_BASE_URL=http://127.0.0.1:8787`, then
+#  `pnpm chikory run examples/dogfood/dogfood-072.yaml --watch`. `chikory run` validates the spec first.)
+#
+# Pre-launch discipline:
+#   * COMMIT EVERYTHING first — the workspace clones HEAD (F-30: launch ONCE). This review's report +
+#     living-doc edits AND the dogfood-071 delivery (`src/cli/chain.ts` + `test/cli/chain-launch-mode.test.ts`)
+#     are STAGED/uncommitted; commit them so HEAD is lint-GREEN before the run clones (the clone must pass this
+#     run's own AC `eslint .`) AND so the `cmdChain` launch-mode guard is active on HEAD.
+#   * F-45: the NEW file `src/chain/plan-gate-failure.ts` MUST be ABSENT on HEAD (this run creates it).
+#   * F-49: each AC `check` greps the mandated symbols + the exact infra prefixes BEFORE vitest.
+#   * Run Devbox commands sequentially (F-22). Bare `pnpm exec`, NOT `devbox run` (F-24). The AC toolchain is
+#     Temporal-free (grep + vitest + tsc + eslint) — well under the 120 s judge cap (scoped vitest ~1 s;
+#     full suite ~20 s).
+name: dogfood-072-wp233a-plan-gate-failure-classifier
+goal: >
+  Land the PURE plan-gate FAILURE CLASSIFIER for the durable chain planning layer (WP-233(a), the dogfood-041
+  attempt-2 F-33 fix-half): a pure function that reads a plan-gate `PlanVerdict` and reports whether a
+  non-PROCEED verdict is an INFRA/transport fault (the judge was unreachable — SAFE to re-run) or a SUBSTANTIVE
+  plan rejection (the plan was genuinely rejected — NOT safe to blindly re-run). Today `runPlanJudgePass`
+  (`src/planner/meta-judge-harness.ts`) folds a router FAILED into an ESCALATE `PlanVerdict` and downstream
+  `planAndGateChain` cannot tell the two apart. This run builds ONLY the pure classifier; the
+  `planAndGateChain` wire and the Plan-persistence/resume half are SEPARATE §4 follow-ups. Change exactly ONE
+  new file plus ONE new test file. Add no new dependency, and do NOT touch `types.ts`, any contract,
+  `meta-judge-harness.ts`, `chain.ts`, or any other existing file EXCEPT the barrel `src/index.ts` (one added
+  re-export line). Use strict TypeScript, ESM `.js` relative imports, named exports only, NO default exports,
+  and keep the function PURE (no I/O, clock, randomness, or input mutation). Run Devbox verification commands
+  sequentially with bare `pnpm exec`. If a verification step reports a failing test or type error, READ the
+  failure and fix the IMPLEMENTATION so every mandated assertion passes — do NOT weaken, rephrase, or remove
+  any mandated assertion (a grep enforces the symbols, the infra prefixes, and the behavioral assertions).
+
+  FILE 1 — packages/sdk-ts/src/chain/plan-gate-failure.ts (NEW). Import the `PlanVerdict` type only:
+
+    import type { PlanVerdict } from "../types.js";
+
+  Export an interface and the three infra-reason prefix constants and the classifier:
+
+    * `export interface PlanGateFailureClass { kind: "infra" | "substantive"; safeToReRun: boolean; reason: string; }`
+    * `export const PLAN_GATE_INFRA_REASON_PREFIXES: readonly string[]` = EXACTLY these three prefixes the
+      harness emits (`meta-judge-harness.ts:80,98,109`), verbatim:
+        - `"plan meta-judge LLM call failed after "`
+        - `"plan meta-judge reply was not valid JSON: "`
+        - `"plan meta-judge reply failed schema validation: "`
+    * `export function classifyPlanGateFailure(verdict: PlanVerdict): PlanGateFailureClass | null` — behavior:
+        - When `verdict.kind === "PROCEED"`, return `null` (a PROCEED is NOT a gate failure).
+        - Otherwise (REVISE or ESCALATE), decide by the rationale: if `verdict.rationale` STARTS WITH any of
+          `PLAN_GATE_INFRA_REASON_PREFIXES` (use `String.prototype.startsWith`, an ANCHORED prefix match — NOT
+          `includes`, so a plan whose rationale merely QUOTES one of these phrases mid-sentence is NOT
+          misclassified), return `{ kind: "infra", safeToReRun: true, reason: verdict.rationale }`.
+        - Every other non-PROCEED verdict (a substantive REVISE/ESCALATE — e.g. a coverage-floor override
+          `plan leaves goal criteria uncovered: …`) returns
+          `{ kind: "substantive", safeToReRun: false, reason: verdict.rationale }`.
+        - Do NOT mutate the input `verdict`.
+      Add a JSDoc block on `classifyPlanGateFailure` citing WP-233(a) and the F-33 conflation it resolves, and
+      note it mirrors the pure-first cadence of `assessLaunchModeMismatch`/`planLiteralGaps`.
+
+  FILE 2 — packages/sdk-ts/src/index.ts (EDIT — add ONE re-export line next to the other `./chain/*`
+  re-exports, around the existing `export { advanceChain, deriveChainStatus } from "./chain/advance.js";` /
+  `export { renderChainTrace } from "./chain/trace.js";` lines):
+
+    export { classifyPlanGateFailure, PLAN_GATE_INFRA_REASON_PREFIXES } from "./chain/plan-gate-failure.js";
+
+  Do NOT change any other export or reorder the barrel.
+
+  FILE 3 — packages/sdk-ts/test/chain/plan-gate-failure.test.ts (NEW Vitest file, ESM `.js` relative import of
+  `{ classifyPlanGateFailure, PLAN_GATE_INFRA_REASON_PREFIXES } from "../../src/chain/plan-gate-failure.js"`).
+  It MUST cover, using real `PlanVerdict` literals (graded by a grep — do not rephrase the calls or expected
+  values):
+    * a PROCEED verdict → `classifyPlanGateFailure(...)` returns `null` (assert `.toBeNull()`).
+    * the exact F-33 transport ESCALATE — rationale
+      `"plan meta-judge LLM call failed after 5 attempts: transport error: fetch failed"` →
+      `{ kind: "infra", safeToReRun: true, ... }` (assert both `kind` `toBe("infra")` and `safeToReRun`
+      `toBe(true)`).
+    * a not-valid-JSON ESCALATE and a schema-validation ESCALATE (rationales beginning with the other two
+      prefixes) → `kind: "infra"`, `safeToReRun: true`.
+    * a SUBSTANTIVE coverage-floor REVISE — rationale
+      `"plan leaves goal criteria uncovered: AC-1, AC-2"` → `{ kind: "substantive", safeToReRun: false }`
+      (assert `safeToReRun` `toBe(false)`).
+    * the ANCHOR discriminator: a substantive ESCALATE whose rationale merely CONTAINS an infra phrase mid-text
+      (e.g. `"the plan proposes to test that the reply failed schema validation path works"`) is classified
+      `substantive` / `safeToReRun: false`, NOT infra — proving `startsWith`, not `includes`.
+    * no-mutation: snapshot the input verdict (e.g. `structuredClone` or a field copy) and assert it is
+      unchanged after the call.
+    * `PLAN_GATE_INFRA_REASON_PREFIXES` has length 3.
+
+  Keep everything additive. The `planAndGateChain` consumer wire and the Plan-persistence/resume half are the
+  separate WP-233(b) §4 follow-ups; do not add them here.
+repos:
+  - url: /Users/nikitazolotarev/repos/chikory
+    writable: true
+acceptance_criteria:
+  - id: AC-1
+    description: >
+      the NEW pure module exists with the classifier, the interface, and the three verbatim infra prefixes, the
+      barrel re-exports both symbols, and the behavioral test invokes `classifyPlanGateFailure` and asserts the
+      PROCEED→null, infra→safeToReRun(true), substantive→safeToReRun(false), and anchored-match cases
+    check: >
+      cd packages/sdk-ts &&
+      grep -q "classifyPlanGateFailure" src/chain/plan-gate-failure.ts &&
+      grep -q "PLAN_GATE_INFRA_REASON_PREFIXES" src/chain/plan-gate-failure.ts &&
+      grep -q "interface PlanGateFailureClass" src/chain/plan-gate-failure.ts &&
+      grep -q "plan meta-judge LLM call failed after " src/chain/plan-gate-failure.ts &&
+      grep -q "plan meta-judge reply was not valid JSON: " src/chain/plan-gate-failure.ts &&
+      grep -q "plan meta-judge reply failed schema validation: " src/chain/plan-gate-failure.ts &&
+      grep -q "startsWith" src/chain/plan-gate-failure.ts &&
+      grep -q "classifyPlanGateFailure" src/index.ts &&
+      grep -q "classifyPlanGateFailure(" test/chain/plan-gate-failure.test.ts &&
+      grep -q "toBeNull" test/chain/plan-gate-failure.test.ts &&
+      grep -q "transport error: fetch failed" test/chain/plan-gate-failure.test.ts &&
+      pnpm exec vitest run test/chain/plan-gate-failure.test.ts
+  - id: AC-2
+    description: >
+      the SDK stays type- and lint-clean and the full existing suite remains green — proving the change is
+      additive (one new module + one barrel line + one new test) and no existing export, contract,
+      `meta-judge-harness.ts`, or `chain.ts` changed
+    check: cd packages/sdk-ts && pnpm exec tsc --noEmit && pnpm exec eslint . && pnpm exec vitest run
+budget_usd: 5
+max_steps: 5
+executor:
+  adapter: codex
+  family: openai
+judge:
+  family: openai-compat
+  cadence: 1
+  max_cost_share: 0.5
+routing:
+  stages:
+    plan: { provider: openai-compat, model: gpt-5.5 }
+    code: { provider: openai-compat, model: gpt-5.5 }
+    review: { provider: openai-compat, model: gpt-5.5 }
+    judge: { provider: openai-compat, model: gemini-3.1-pro-preview }

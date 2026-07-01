@@ -22,7 +22,8 @@
       "typecheck": "pnpm -r typecheck && (cd packages/sdk-py && uv run pyright)",
       "test": "pnpm -r test && (cd packages/sdk-py && uv run pytest) && bash scripts/test-harvest-chain.sh",
       "smoke": "bash scripts/smoke.sh",
-      "dogfood": "bash scripts/dogfood.sh",
+      "run-dogfood": "bash scripts/dogfood.sh --run",
+      "chain-dogfood": "bash scripts/dogfood.sh --chain",
       "dogfood-verify": "bash scripts/dogfood-verify.sh",
       "harvest": "bash scripts/harvest.sh \"\" main",
       "harvest-audit": "bash scripts/harvest-audit.sh"

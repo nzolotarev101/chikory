@@ -37,6 +37,7 @@ import { chainJournalPath, journalPath } from "../runner/paths.js";
 import { parseTaskSpec, TaskSpecValidationError } from "../taskspec.js";
 import type { ChainRecord, ChainStatus, Plan, PlanVerdict, Router, TaskSpec } from "../types.js";
 import { DEFAULT_ADAPTERS, type CliDeps, type CommonFlags } from "./commands.js";
+import { assessLaunchModeMismatch, detectIntendedSingleRun } from "./launch-mode-precheck.js";
 
 const CHAIN_TERMINAL: ReadonlySet<ChainStatus> = new Set(["SUCCESS", "FAILED"]);
 
@@ -397,6 +398,17 @@ export async function cmdChain(
     yamlText = await readFile(args.file, "utf8");
   } catch {
     ioPair.err(`chikory: cannot read goal spec '${args.file}'`);
+    return 1;
+  }
+  const launchModeMismatch = assessLaunchModeMismatch({
+    intendedSingleRun: detectIntendedSingleRun(yamlText),
+    launchedAsChain: true,
+  });
+  if (
+    launchModeMismatch !== null &&
+    process.env["CHIKORY_ALLOW_LAUNCH_MODE_MISMATCH"] !== "1"
+  ) {
+    ioPair.err(launchModeMismatch.warning);
     return 1;
   }
   let spec: TaskSpec;
