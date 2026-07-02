@@ -22,6 +22,8 @@
 import { existsSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 
+import { classifyPlanGateFailure } from "../chain/plan-gate-failure.js";
+import { renderPlanGateFailureNotice } from "../chain/plan-gate-notice.js";
 import { ChainJournal, chainRecordFrom, type ChainEntry } from "../chain/store.js";
 import { serializeWriteConflicts } from "../chain/write-set.js";
 import type { ChainNodeTemplate } from "../chain/node-spec.js";
@@ -128,7 +130,9 @@ export async function planAndGateChain(
 
   const costUsd = planned.costUsd + gated.costUsd;
   if (gated.verdict.kind !== "PROCEED") {
-    return { ok: false, phase: "gate", message: gated.verdict.rationale, verdict: gated.verdict, costUsd };
+    const failureClass = classifyPlanGateFailure(gated.verdict);
+    const message = failureClass ? renderPlanGateFailureNotice(failureClass) : gated.verdict.rationale;
+    return { ok: false, phase: "gate", message, verdict: gated.verdict, costUsd };
   }
   return { ok: true, plan: normalizedPlan, verdict: gated.verdict, costUsd };
 }

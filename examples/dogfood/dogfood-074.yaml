@@ -1,0 +1,180 @@
+# Dogfood-074: WP-264 — the judge-check runner must REAP the check's whole PROCESS TREE at the timeout cap
+# (port the WP-255(a) group-kill to `runCheck` — the dogfood-073 F-78 fix).
+# LAUNCH WITH `chikory run` (single durable run, NOT `chikory chain`). NO seam env.
+# ⚠️ HONOR THE LAUNCH MODE. dogfood-072 and dogfood-073 were the first TWO consecutive correct single-`run`
+#    launches after the 067–071 divergence streak (F-72/F-74). Keep the streak alive:
+#      devbox run run-dogfood        # ← single `chikory run`; picks the latest spec (this one)
+#    (NEVER `devbox run chain-dogfood` for this spec.) Direct form: `bash scripts/dogfood.sh --run`.
+#    DOUBLE-ENFORCED: the committed `cmdChain` launch-mode guard (WP-261) refuses this single-`run`-marked spec
+#    launched as a chain at zero LLM cost. To override (do NOT): `CHIKORY_ALLOW_LAUNCH_MODE_MISMATCH=1`.
+#
+# WHY THIS IS NEXT (2026-07-01): the dogfood-073 review's post-mortem of dogfood-072's step-1 AC-2 artifact
+# found 🔴 F-78: `runCheck` (`src/judge/evidence.ts:76-87`) executes every acceptance `check` via
+# `execFileAsync("/bin/sh", ["-c", check], { timeout })`, and Node's `timeout` kills ONLY the direct `/bin/sh`
+# child — never the process group. Grandchildren (vitest tinypool workers) keep the stdout/stderr pipes open,
+# so the promise doesn't settle until they die naturally: dogfood-072's post-kill AC-2 logged
+# `[check timed out after 120000ms]` yet ran **695,853 ms = 5.8× the cap** (tail: tinypool
+# `Error: Failed to terminate worker`). Two costs: (1) judge-pass wall time is unbounded in practice; (2) an
+# infra-hung check is indistinguishable from a genuine red AC — it blocked dogfood-072's already-available
+# SUCCESS seal (F-79: `agent-loop.ts:470-478` seals on PROCEED + all-criteria-pass after ANY step; the 96%
+# retry tax was this artifact, not a missing short-circuit) and under the 3-consecutive-fails rule could seal
+# a false FAILED on green code. This is byte-for-byte the pre-WP-255(a) defect recurring on the judge-check
+# path — and the fix, `runBounded` (`src/executors/process.ts`: `spawn(detached:true)` +
+# `process.kill(-pid)` SIGTERM→SIGKILL group-kill), is ALREADY LANDED and conformance-proven for executor
+# steps. This run is the mechanical port. Unblocks the WP-263 residual (reliable post-kill checks).
+#
+# Single `chikory run` (NOT a chain): one EDIT to `evidence.ts` + one NEW behavioral test. The goal does not
+# decompose; a chain re-risks the F-64 paraphrase that shipped contract drift green on dogfood-071 (F-75).
+#
+# ANTI-F-64/F-75 hardening: single `run`, so the full goal (the exact replacement call, the exact marker
+# string, the unit conversion, the fixture semantics) reaches the executor verbatim. AC-1 greps the mandated
+# symbols + the exact marker + the hang fixture BEFORE vitest, and negative-greps the old
+# `execFileAsync("/bin/sh"` call so the port cannot be skipped (the `git()` helper's execFileAsync stays).
+#
+# Gate verdicts (dogfood-review §5, applied inline on CURRENT HEAD once the dogfood-073 delivery is committed):
+#   * §1.1 Failure-surface: ✅ — cross-file (EDIT `src/judge/evidence.ts` + NEW `test/judge/check-timeout-reap.test.ts`)
+#     on the Agent-as-a-Judge pillar, with LIVE bug evidence. Real failure surface: the ms→seconds unit
+#     conversion (`maxSeconds: timeoutMs / 1000` — passing raw ms silently makes every cap ~1000× longer), the
+#     exitCode mapping (`timedOut` and killed-by-signal `null` must BOTH read nonzero — a timed-out check must
+#     never pass), preserving the EXACT `[check timed out after ${timeoutMs}ms]` marker + stdout+stderr
+#     concatenation, keeping `scrubExecutorEnv` + the 64 KiB `bound()`, and a hang-grandchild fixture that
+#     genuinely holds the pipe. 1–3 steps; a competent agent can plausibly invert the mapping or write an
+#     inert fixture. Not a 1-file port — the test drives the public `collectEvidence`.
+#   * §1.2 Product-progress: ✅ — advances REAL open plan.md §6 WP-264 (🔴, queued from dogfood-073 F-78):
+#     product judge-gate code consumed by EVERY judge pass of every run; reuses the landed `runBounded`
+#     (no new scaffolding, no new dependency).
+#   * §1.3 Mission-critical: ✅ PROCEED — the defect caused 96% of dogfood-072's cost, can starve any gate,
+#     and can drive a false 3-strike HALT on green code; loop-integrity on the judge pillar. Neither busy nor
+#     scaffold-hosted. Recorded verdict: ✅ PROCEED.
+#
+# Zero-secrets launch (no API keys; CLI-OAuth judge via the shim; NO seam vars). The script auto-starts the
+# `agy`/Antigravity proxy for the gemini judge:
+#   devbox shell
+#   devbox run run-dogfood        # single `chikory run`, latest spec (this one)
+# (Manual path: `node scripts/cli-judge-proxy.mjs 8787 agy &`, set
+#  `OPENAI_COMPAT_BASE_URL=http://127.0.0.1:8787`, then
+#  `pnpm chikory run examples/dogfood/dogfood-074.yaml --watch`. `chikory run` validates the spec first.)
+#
+# Pre-launch discipline:
+#   * COMMIT EVERYTHING first — the workspace clones HEAD (F-30: launch ONCE). The dogfood-073 delivery
+#     (4 staged files) AND this review's report/living-doc edits are uncommitted; commit them so HEAD is
+#     lint-GREEN before the run clones (the clone must pass this run's own AC `eslint .`).
+#   * F-45: the NEW file `test/judge/check-timeout-reap.test.ts` MUST be ABSENT on HEAD (this run creates it).
+#   * F-49: each AC `check` greps the mandated symbols + the exact marker BEFORE vitest.
+#   * F-76/F-80 (dogfood-072/073): codex previously blew the 600s wall-clock cap on a small task and ignored
+#     the bare-`pnpm exec` mandate. If either recurs here, record it — do NOT raise `budget_usd`/`max_steps`.
+#   * Run Devbox commands sequentially (F-22). Bare `pnpm exec`, NOT `devbox run` (F-24). The AC toolchain is
+#     Temporal-free (grep + vitest + tsc + eslint); the new reap test settles in ~1–2 s post-fix — well under
+#     the 120 s judge cap (scoped vitest a few seconds; full suite ~25 s).
+name: dogfood-074-wp264-judge-check-tree-reap
+goal: >
+  Make the judge-check runner wall-clock-safe — WP-264, the dogfood-073 F-78 fix. Today `runCheck` in
+  `packages/sdk-ts/src/judge/evidence.ts` executes each acceptance `check` with
+  `execFileAsync("/bin/sh", ["-c", criterion.check!], { cwd, timeout, maxBuffer, env })`; Node's `timeout`
+  kills ONLY the direct `/bin/sh` child, so a check whose grandchildren hold the stdout/stderr pipes (e.g.
+  vitest tinypool workers) runs FAR past the cap — dogfood-072's AC-2 logged `[check timed out after
+  120000ms]` yet ran 695,853 ms (5.8× the 120 s cap), and the infra hang read as a substantive red AC. Port
+  the already-landed WP-255(a) process-group kill to this call-site: replace the `execFileAsync` invocation
+  inside `runCheck` with `runBounded` from `../executors/process.js`, which spawns `detached: true` and
+  signals the WHOLE group (`process.kill(-pid, "SIGTERM")` then SIGKILL after a grace window). Change exactly
+  ONE existing file and ONE new test file. Add no new dependency, and do NOT touch
+  `src/executors/process.ts`, `types.ts`, any contract, `DEFAULT_CHECK_TIMEOUT_MS`, the `CheckRun` interface,
+  the `git()` helper (its `execFileAsync` STAYS), `collectEvidence`'s signature, or any other existing file.
+  Use strict TypeScript, ESM `.js` relative imports, named exports only. Run verification sequentially with
+  bare `pnpm exec`. If a verification step reports a failing test or type error, READ the failure and fix the
+  IMPLEMENTATION so every mandated assertion passes — do NOT weaken, rephrase, or remove any mandated
+  assertion.
+
+  FILE 1 — packages/sdk-ts/src/judge/evidence.ts (EDIT — the `runCheck` function ONLY). Add the import (top
+  of file, next to the other relative imports):
+
+    import { runBounded } from "../executors/process.js";
+
+  Rewrite `runCheck`'s body to call:
+
+    const bounded = await runBounded("/bin/sh", ["-c", criterion.check!], {
+      cwd: workspaceDir,
+      env: scrubExecutorEnv(process.env, []),
+      maxSeconds: timeoutMs / 1000,
+    });
+
+  and derive the returned `CheckRun` fields from `bounded`:
+    * `exitCode` — `bounded.exitCode ?? 1` normally, but ALWAYS nonzero when `bounded.timedOut` is true
+      (a timed-out check must NEVER read as a pass: `const exitCode = bounded.timedOut ? 1 :
+      (bounded.exitCode ?? 1);` — killed-by-signal `null` also maps to 1).
+    * `output` — `bounded.stdout + bounded.stderr`, appending the EXACT existing marker
+      `` `\n[check timed out after ${timeoutMs}ms]` `` when `bounded.timedOut` is true, then passed through
+      the EXISTING `bound(output, 64 * 1024)` truncation exactly as today.
+    * `durationMs` — `bounded.durationMs`.
+    * `criterionId` and `command` — unchanged.
+  The try/catch around the old `execFileAsync` may be removed (runBounded resolves with an exit code instead
+  of throwing on nonzero/kill); keep the JSDoc line on `runCheck` and extend it with one sentence citing
+  WP-264 / dogfood-073 F-78 (the group-kill port from WP-255(a)). Do NOT change `DEFAULT_CHECK_TIMEOUT_MS`,
+  the `CheckRun` shape, `bound`, `scrubExecutorEnv` usage, the `git()` helper, or anything outside `runCheck`
+  + the one import line.
+
+  FILE 2 — packages/sdk-ts/test/judge/check-timeout-reap.test.ts (NEW Vitest file). Mirror the workspace
+  harness of `test/judge/new-dependency-scan-evidence.test.ts` (mkdtemp + `git init` + config user + one base
+  commit; `rm -rf` cleanup in `afterEach`) and drive the PUBLIC `collectEvidence` from
+  `"../../src/judge/evidence.js"` with `createMemoryArtifactStore()` from `"../../src/artifacts/index.js"`.
+  Two `it` cases:
+    * "a check whose grandchild holds the pipe is reaped at the cap, not at the grandchild's leisure" — call
+      `collectEvidence` with `criteria: [{ id: "AC-HANG", description: "hang-grandchild",
+      check: "sleep 60 & sleep 60" }]` and `checkTimeoutMs: 1000` (the backgrounded `sleep 60 &` inherits
+      the stdout pipe — pre-fix, `runCheck` settles only when it exits, ~60 s). Assert on
+      `collected.checkRuns[0]`: `exitCode` not `0`; `output` `.toContain("[check timed out after 1000ms]")`;
+      and `durationMs` `.toBeLessThan(10_000)` (the reap bound — generous vs the 60 s pre-fix hang, tight
+      enough to prove the group kill). Give this test a vitest timeout of 30_000 ms so a regression FAILS
+      fast instead of hanging the suite.
+    * "a fast green check still passes through unchanged" — `criteria: [{ id: "AC-OK", description: "ok",
+      check: "echo reap-ok" }]` (default timeout). Assert `exitCode` is `0`, `output` `.toContain("reap-ok")`,
+      and `output` does NOT contain `"check timed out"`.
+  Compose through `collectEvidence` (the real call-site path) — do NOT re-export or reach into the private
+  `runCheck`.
+
+  Keep everything else byte-identical. The infra-vs-substantive check-failure marking (the WP-263 residual)
+  is a SEPARATE follow-up; do not add it here.
+repos:
+  - url: /Users/nikitazolotarev/repos/chikory
+    writable: true
+acceptance_criteria:
+  - id: AC-1
+    description: >
+      `runCheck` now runs checks through the group-killing `runBounded` (ms→seconds conversion, timedOut ⇒
+      nonzero exit, exact timeout marker preserved), the old direct-`/bin/sh` `execFileAsync` call is gone,
+      and the new behavioral test proves via the public `collectEvidence` that a pipe-holding grandchild is
+      reaped near the 1 s cap instead of running ~60 s
+    check: >
+      cd packages/sdk-ts &&
+      grep -q 'from "../executors/process.js"' src/judge/evidence.ts &&
+      grep -q "runBounded(" src/judge/evidence.ts &&
+      grep -q "maxSeconds: timeoutMs / 1000" src/judge/evidence.ts &&
+      grep -q "check timed out after" src/judge/evidence.ts &&
+      ! grep -q 'execFileAsync("/bin/sh"' src/judge/evidence.ts &&
+      grep -q "collectEvidence(" test/judge/check-timeout-reap.test.ts &&
+      grep -q "sleep 60 & sleep 60" test/judge/check-timeout-reap.test.ts &&
+      grep -q "check timed out after 1000ms" test/judge/check-timeout-reap.test.ts &&
+      grep -q "toBeLessThan(10_000)" test/judge/check-timeout-reap.test.ts &&
+      grep -q "reap-ok" test/judge/check-timeout-reap.test.ts &&
+      pnpm exec vitest run test/judge/check-timeout-reap.test.ts
+  - id: AC-2
+    description: >
+      the SDK stays type- and lint-clean and the full existing suite remains green — proving the port is
+      behavior-preserving for every green check (exit codes, output, marker, truncation) and nothing outside
+      `runCheck` + the import changed
+    check: cd packages/sdk-ts && pnpm exec tsc --noEmit && pnpm exec eslint . && pnpm exec vitest run
+budget_usd: 5
+max_steps: 5
+executor:
+  adapter: codex
+  family: openai
+judge:
+  family: openai-compat
+  cadence: 1
+  max_cost_share: 0.5
+routing:
+  stages:
+    plan: { provider: openai-compat, model: gpt-5.5 }
+    code: { provider: openai-compat, model: gpt-5.5 }
+    review: { provider: openai-compat, model: gpt-5.5 }
+    judge: { provider: openai-compat, model: gemini-3.1-pro-preview }

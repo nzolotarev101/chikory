@@ -5,7 +5,24 @@ This is the complete operating manual for executing Phase 2+ work packages
 task spec for a WP (every field explained), how to launch, supervise, and
 recover a run, and how to land the result as a normal PR.
 
-**LATEST (dogfood-069, `docs/reports/dogfood-069.md`): WP-257's pure literal-preservation
+**LATEST (dogfood-073, `docs/reports/dogfood-073.md`): WP-233(b) part 1 LANDED — the
+plan-gate failure NOTICE RENDERER (`renderPlanGateFailureNotice`, `src/chain/plan-gate-notice.ts`)
++ the `planAndGateChain` consumer WIRE (`src/cli/chain.ts:132-135`), the F-33 operator-facing
+fix: a non-PROCEED plan-gate verdict now renders "INFRA fault, SAFE to re-run: …" vs
+"REJECTED … NOT safe to re-run as-is: …" (raw-rationale fallback on null).** Single
+`chikory run` (2nd consecutive correct launch), `run-a5f8c5fe-…`, runtime `008d3fd`,
+SUCCESS 1 step $0.75/$5, PROCEED 2/2, full suite 574 passed | 19 skipped, harvest 4/4
+byte-IDENTICAL. **The review's post-mortem of dogfood-072's step-1 AC-2 artifact re-framed
+that run's retry tax (🔴 F-78 → WP-264, see §7):** the judge-check runner's 120 s timeout
+does NOT reap the check's process tree — `runCheck` (`src/judge/evidence.ts:76`) kills only
+the direct `/bin/sh`, and 072's post-kill AC-2 ran **695.9 s = 5.8× the cap** (vitest
+tinypool `Failed to terminate worker`), reading as a substantive red AC that blocked the
+already-available SUCCESS seal (F-79: `agent-loop.ts:470-478` seals on PROCEED +
+all-criteria-pass after ANY step — the WP-263 short-circuit already exists; the check
+infra was the blocker). Next headline: WP-264, port the WP-255(a) `runBounded` group-kill
+to `runCheck` (dogfood-074).
+
+**Earlier (dogfood-069, `docs/reports/dogfood-069.md`): WP-257's pure literal-preservation
 verifier LANDED (`planLiteralGaps`/`extractGoalLiterals`, `src/planner/literal-preservation.ts`
 + 7-case test, the `planCoverageGaps` analog) → WP-257 🟡; SUCCESS 3 steps, $2.73/$5, full
 suite 554 passed.** But the run **DOGFOODED ITS OWN BUG (🔴 F-70 → WP-261, see §7):** the
@@ -947,6 +964,7 @@ a first-attempt SUCCESS and produced three plan-changing findings
 | Steps fail instantly, `executor exited with code 1` | Read the failure: `pnpm chikory trace <run-id> --step 1`. Check the executor binary works headless in your env (`codex exec`/`claude -p` smoke test). |
 | Steps fail with a session/usage-limit message | Subscription executor ran dry (dogfood run 1). Reject the escalation, switch `executor` to the other CLI (or API-key auth), relaunch. |
 | Judge checks time out | 120 s/check cap. Bare `pnpm` not `devbox run` (§3.4); split slow suites into a focused test file per criterion. |
+| A judge check "times out" at 120 s but the judge pass takes MINUTES longer — and/or an AC reads red right after a wall-clock-killed step even though the workspace is complete | **The check-timeout kill does not reap the check's process tree** (dogfood-073 **F-78 → WP-264**). `runCheck` (`src/judge/evidence.ts:76`) runs each `check` via `execFileAsync("/bin/sh", ["-c", …], { timeout })`; Node's `timeout` kills only the direct `/bin/sh`, so grandchildren (vitest tinypool workers, etc.) hold the stdout/stderr pipes and the check doesn't settle until they die naturally — dogfood-072's post-kill AC-2 logged `[check timed out after 120000ms]` yet ran **695,853 ms = 5.8× the cap**, tail `Error: Failed to terminate worker`. Treat such a red as an INFRA artifact, not a code red: re-run the check by hand before trusting a FAILED verdict, and beware the 3-consecutive-fails HALT compounding it. Durable fix = WP-264 (port the WP-255(a) `runBounded` group-kill to `runCheck`). |
 | Judge verdict is ESCALATE with `judge raised concerns` | The rubric/concerns fired (e.g. scope creep, deleted tests). `trace --step <n>` shows the full form; approve or reject deliberately. |
 | CLI behaves like yesterday’s code (e.g. a just-harvested trace feature missing from `chikory trace`) | Stale `dist/`. `devbox run build`. `harvest.sh` now rebuilds before verification (dogfood-004 F-16); the dogfood script builds *pre-run*, so post-harvest forensics always need the rebuild. |
 | `chikory land` succeeded but the landed feature is invisible / verification not run | Pass `--verify` (since WP-224, dogfood-008): it reruns `devbox run build/lint/typecheck/test` against the fresh commit and exits 1 on the first red check (commit kept for inspection). Bare `land` (no flag) still only applies + commits — run the four commands by hand. The stray `Switched to a new branch …` lines are gone (F-18 fixed): git stderr is now captured and only surfaced inside `land failed: …` on real errors. |

@@ -71,6 +71,7 @@ export { buildPlanJudgeMessages, PLAN_JUDGE_SYSTEM_PROMPT, PLAN_VERDICT_RESPONSE
 export { buildPlanVerdict, type PlanJudgeReply } from "./planner/meta-judge-verdict.js";
 export { advanceChain, deriveChainStatus } from "./chain/advance.js";
 export { classifyPlanGateFailure, PLAN_GATE_INFRA_REASON_PREFIXES } from "./chain/plan-gate-failure.js";
+export { renderPlanGateFailureNotice } from "./chain/plan-gate-notice.js";
 export { renderChainTrace } from "./chain/trace.js";
 export { readyNodes } from "./chain/sequencing.js";
 export { hasDependencyCycle } from "./chain/validation.js";
