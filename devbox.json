@@ -25,6 +25,7 @@
       "run-dogfood": "bash scripts/dogfood.sh --run",
       "chain-dogfood": "bash scripts/dogfood.sh --chain",
       "dogfood-verify": "bash scripts/dogfood-verify.sh",
+      "dogfood-progression": "bash scripts/dogfood-progression.sh",
       "harvest": "bash scripts/harvest.sh \"\" main",
       "harvest-audit": "bash scripts/harvest-audit.sh"
     }

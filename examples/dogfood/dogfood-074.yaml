@@ -1,5 +1,10 @@
 # Dogfood-074: WP-264 — the judge-check runner must REAP the check's whole PROCESS TREE at the timeout cap
 # (port the WP-255(a) group-kill to `runCheck` — the dogfood-073 F-78 fix).
+# Format: track-B (prescribed — SANCTIONED 🔴 loop-integrity exception: an infra-hung check reads as a
+#   substantive red AC; gate verdict ✅ PROCEED recorded below. Last prescribed headline before the
+#   WP-265 horizon ladder — course correction 2026-07-02, plan.md §6.)
+# Ladder-rung: 0
+# Thesis-KPI: judge true-positive trust (a hang must never masquerade as a red AC)
 # LAUNCH WITH `chikory run` (single durable run, NOT `chikory chain`). NO seam env.
 # ⚠️ HONOR THE LAUNCH MODE. dogfood-072 and dogfood-073 were the first TWO consecutive correct single-`run`
 #    launches after the 067–071 divergence streak (F-72/F-74). Keep the streak alive:

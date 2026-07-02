@@ -22,6 +22,14 @@ devbox run -- bash scripts/dogfood-verify.sh <run-id>
 # or: devbox run dogfood-verify   # newest run
 ```
 
+Then run the **progression gate** (course correction 2026-07-02) and keep its
+output — phase 5 is bound by its verdict:
+
+```sh
+devbox run -- bash scripts/dogfood-progression.sh
+# ✅ PROGRESSING / ⛔ STALLED over docs/reports/dogfood-ledger.csv, + §1.5 cap check
+```
+
 It pulls the acceptance checks from the run's OWN journal (`task_json`, so
 they always match the run), and emits one markdown block:
 
@@ -107,17 +115,31 @@ judgment is yours); each earlier hit became a WP:
    Every friction item states the evidence and names the WP it spawns (or
    says why none).
 2. **plan.md** — mark the WP/slice done in §6 (cite run-id + landed
-   commit); turn each new friction item into a WP row queued by priority
-   (next free WP number, tag 🔴/🟡/🟢, "Next up (dogfood-NNN F-n)" note);
-   update the **Status** line.
+   commit); a new friction item becomes a WP row **only within the
+   DOGFOODING §1.5 friction budget** (🔴 loop-integrity → may queue as
+   headline; anything else → track-B note or hand-fix, still recorded);
+   **REPLACE lines inside the bounded status block (hard cap ≤30 lines —
+   never prepend a new paragraph)**; displaced prose moves verbatim to
+   `docs/PLAN-HISTORY.md` under a dated header. Do NOT touch the §6 table
+   header schema (`| WP | Title | Tag | Notes |` — F-81: adding a `Status`
+   column would activate the staleness gate with inverted semantics).
 3. **docs/REQUIREMENTS.md** — new WPs into the requirement rows they
    serve; reopen rows the findings prove aren't actually done; update WP
    status (e.g. IF-2 in-progress with landed commit).
 4. **docs/DOGFOODING.md** — new operational gotchas into §7
    (troubleshooting) or §8 (known limitations), citing the friction id;
-   update the header "proven path" line.
+   **REPLACE the bounded header status block (≤15 lines, same
+   PLAN-HISTORY.md overflow rule — never stack "LATEST/Earlier"
+   paragraphs)**.
 5. **examples/dogfood/README.md** — index row for this campaign:
    outcome, run-id, landed commit, report link.
+6. **docs/reports/dogfood-ledger.csv** — append THIS run's row (the
+   progression gate's data source; mandatory, one row per terminal run):
+   `run,wp,mode,outcome,steps,cost_usd,spec_format,class,resumes,judge_catches,rung`.
+   `spec_format` = `loose`/`prescribed` (what the spec actually was);
+   `class` = `product`/`meta` (§1.5 definition, by the deliverable's primary
+   surface); `rung` = highest WP-265 ladder rung this run satisfied (0 = none);
+   `judge_catches` = genuine true-positives only (not seam drills).
 
 Constraints: never rewrite the `goal`/criteria of a spec that already ran;
 keep `.chikory/runs/<run-id>` (journal + artifacts are the audit trail);
@@ -137,6 +159,21 @@ no spec is written without a recorded verdict from these gates. (`/dogfood-asses
 remains available for an explicit second opinion; if the user already ran it, honor
 its `⛔ VETO`.)
 
+0. **Progression gate (MECHANICAL, binding — runs before all judgment gates).**
+   Use the phase-0 `scripts/dogfood-progression.sh` output (re-run it if the
+   ledger row was just appended). Its verdict is not advisory:
+   - `⛔ STALLED` → the next headline **IS the current WP-265 ladder rung**
+     (plan.md §6 queue) — no exceptions. New 🔴 loop-integrity friction found
+     this review is **hand-fixed in the same sitting** (TASK-PROTOCOL §4) or
+     queued track-B; it does not headline. Write the ladder spec.
+   - `🔴 CAP BUSTED` → the next headline must be `class=product` regardless of
+     anything below.
+   - `✅ PROGRESSING` → proceed to gates 1–4, default candidate = next ladder
+     rung; a non-ladder candidate must beat the rung on thesis value AND pass
+     every gate below.
+   The candidate spec must carry `# Ladder-rung:` and `# Thesis-KPI:` headers
+   and pass `scripts/dogfood-progression.sh --spec <file>` format lint (a
+   prescribed headline without a sanctioned-exception declaration is a ⛔).
 1. **Failure-surface test (DOGFOODING §1.1).** A headline run must be something
    a competent agent could *plausibly fail*: 2–6 steps, cross-file or a thesis
    pillar (durable execution / multi-run chains WP-219 / judge-catching /
@@ -160,12 +197,22 @@ its `⛔ VETO`.)
    real-WP slice instead. A scaffold-hosted or busy headline is permitted ONLY when
    nothing real is unblocked. Record the verdict (`✅ PROCEED` / `⛔ VETO` /
    `🟡 ALLOW (fallback)`) in your output.
+4. **Friction-budget gate (DOGFOODING §1.5, mandatory — course correction
+   2026-07-02).** Compute the trailing-3-run meta:product headline ratio
+   (harness-meta = deliverable's primary surface is `scripts/`,
+   `examples/dogfood/`, launch prechecks, spec hygiene, or verifier plumbing).
+   A harness-meta candidate is **⛔ VETO** unless it is 🔴 loop-integrity AND
+   the cap (≤1 harness-meta headline per 3 runs) is not busted. Default
+   headline = the current WP-265 horizon-ladder rung (plan.md §6 queue).
 
-Then write `examples/dogfood/dogfood-<NNN+1>.yaml` per DOGFOODING §3: goal a
-self-contained brief naming exact files/symbols/tests **of the real product WP the
-run advances** — if a judge-catch seam or chain is the mechanism, it is seeded
-**into that WP's real code** (not a new disposable utility); for a chain dogfood, a
-goal that genuinely decomposes — launched with `chikory chain`, not `run`);
+Then write `examples/dogfood/dogfood-<NNN+1>.yaml` per DOGFOODING §3, **in the
+format the track demands**: a headline (ladder) spec is LOOSE — goal states the
+OUTCOME + constraints, ACs pin what done means, implementation left to the
+executor; a track-B spec may prescribe exact files/symbols/tests (parity ports,
+hand-off verification). Either way the run advances **a real open plan.md §6
+product WP** — a judge-catch seam or chain mechanism is seeded **into that WP's
+real code** (not a new disposable utility); for a chain dogfood, a goal that
+genuinely decomposes — launched with `chikory chain`, not `run`);
 judge-executed checks that fit the 120 s cap (time them — bare toolchain
 binaries, not `devbox run`); zero-secrets routing block if no API keys.
 Validate it parses (`parseTaskSpec` over the file, or `pnpm chikory run`/`chain`
@@ -182,5 +229,6 @@ Your output must end with a structured summary formatted for readability. To ens
    - Cost details: Total cost in USD, input/output tokens per step, and execution duration.
 3. **Structured Visual Layout**: Present cost metrics, step progress, or comparisons using markdown tables and bullet points. Avoid walls of text. Use visual status indicators (e.g., `🟢`, `🟡`, `🔴`, `⚠️`, `ℹ️`).
 4. **Acronym & Terminology Explanations**: Explain any complex domain terms (e.g., WP, AC, OTel spans, probe steps) in detail when summarizing, so a reader can digest it without needing external documentation.
-5. **Clear Call-to-Action**: End with the exact command to run the next spec (unblocked and verified). Leave all edits uncommitted for the user's review.
+5. **KPI Table (mandatory)**: Report the DOGFOODING §1.4 KPI values for this run and the trailing window: max horizon survived (steps / wall-clock), kill→resume count, judge true-positives pre-land, trailing-3-run meta:product headline ratio, per-step reliability (runs ≥5 steps), current ladder rung vs the P2 exit gate.
+6. **Clear Call-to-Action**: End with the exact command to run the next spec (unblocked and verified). Leave all edits uncommitted for the user's review.
 

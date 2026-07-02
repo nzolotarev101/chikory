@@ -51,6 +51,15 @@ fi
 
 echo "Dogfooding: Using spec file $SPEC_FILE"
 
+# 1b. Progression preflight (course correction 2026-07-02 — advisory, never
+# blocks: the BINDING enforcement lives in /dogfood-review phase 5 and
+# /dogfood-assessor; this surfaces a STALLED loop / off-format spec at launch
+# time so the operator sees it before spending).
+if [ -f scripts/dogfood-progression.sh ]; then
+  bash scripts/dogfood-progression.sh --spec "$SPEC_FILE" || true
+  echo
+fi
+
 # 2. Rebuild the SDK (stale dist can run old code)
 echo "Setup: Rebuilding Chikory SDK..."
 pnpm -r build

@@ -1,0 +1,11 @@
+run,wp,mode,outcome,steps,cost_usd,spec_format,class,resumes,judge_catches,rung
+064,WP-254,run,SUCCESS,1,0.0084,prescribed,product,0,0,0
+065,WP-255,run,SUCCESS,1,0.70,prescribed,product,0,0,0
+066,WP-256,chain,FAILED,3,3.76,prescribed,meta,0,0,0
+067,WP-256,chain,SUCCESS,2,2.51,prescribed,meta,0,0,0
+068,WP-258,chain,SUCCESS,2,1.70,prescribed,meta,0,0,0
+069,WP-257,chain,SUCCESS,3,2.73,prescribed,product,0,0,0
+070,WP-261,chain,SUCCESS,2,1.98,prescribed,meta,0,0,0
+071,WP-261,chain,SUCCESS,1,1.13,prescribed,meta,0,0,0
+072,WP-233,run,SUCCESS,2,0.42,prescribed,product,0,0,0
+073,WP-233,run,SUCCESS,1,0.75,prescribed,product,0,0,0

@@ -9,6 +9,15 @@ This skill is run to analyze the latest planned dogfooding run in the `examples/
 
 ## Steps for the Agent
 
+### Step 0: Run the Mechanical Progression Gate (binding input)
+
+Run `devbox run -- bash scripts/dogfood-progression.sh --spec <candidate.yaml>`
+first and carry its output into every later step. `⛔ STALLED` means the only
+permissible headline is the current WP-265 ladder rung — a candidate that is
+not that rung is `⛔ VETO` regardless of Steps 3–5. `🔴 CAP BUSTED` forces
+`class=product`. The spec-format lint result (loose vs prescribed, missing
+`# Ladder-rung:`/`# Thesis-KPI:` headers) feeds Step 3.4.
+
 ### Step 1: Locate and Read the Latest Planned Dogfood Run
 1. Scan the `examples/dogfood/` directory or read the index in `examples/dogfood/README.md` to identify the highest-numbered `dogfood-<NNN>.yaml` file that has not been executed yet (i.e., status is "not yet run" or has no report/outcome).
 2. Read the YAML file's contents, paying close attention to:
@@ -17,7 +26,10 @@ This skill is run to analyze the latest planned dogfooding run in the `examples/
    - The `acceptance_criteria` list.
 
 ### Step 2: Read `plan.md` to Determine the Goal of the Current Phase
-1. View the main `plan.md` file at the root of the repository.
+1. View the main `plan.md` file at the root of the repository. **Read the dated
+   "Course correction" subsection at the top of §6 first** — it carries the
+   binding queue (the WP-265 horizon ladder) and operating rules; the default
+   headline is the current ladder rung, not the freshest friction.
 2. Locate the current active phase (e.g., Phase 2 - Reliability & memory) and extract the **Goal of the Phase**.
 3. Identify the core architectural pillars and mission-critical work packages for that phase:
    - For Phase 2, mission-critical tasks include durable execution, goal decomposition/run chaining (WP-219), memory pointer store (WP-202), compaction (WP-203), tiered memory (WP-204), branching/rollback (WP-205), and HITL suspend/resume (WP-206).
@@ -31,6 +43,15 @@ This skill is run to analyze the latest planned dogfooding run in the `examples/
    - **🟡 Scaffold-hosted**: it stresses a thesis mechanism (judge-catch seam, chain) but the deliverable is a **fresh throwaway utility invented solely to host the seam** — passes axis A, fails axis B (zero product-WP progress). This is the dogfood-046/047/048 pattern.
    - **🟡 Busy Work**: a minor fix, CLI polish, formatter, or helper script — no thesis mechanism and no product-WP progress.
 3. Provide a clear justification, naming the deliverable WP (or noting there is none).
+4. **Friction-budget axis (DOGFOODING §1.5, course correction 2026-07-02):** if the
+   candidate is *harness-meta* (deliverable's primary surface is `scripts/`,
+   `examples/dogfood/`, launch prechecks, spec hygiene, or verifier plumbing),
+   it may headline ONLY if it is 🔴 loop-integrity (judge trust / durability /
+   silent divergence) AND the trailing-3-run cap (≤1 harness-meta headline per
+   3 runs) is not busted — otherwise `⛔ VETO`, queue the current WP-265 ladder
+   rung instead. Also check the spec FORMAT matches the track (DOGFOODING §3):
+   a headline/ladder spec must be LOOSE (outcome + ACs, no prescribed diff); a
+   fully-prescribed-diff spec is track-B by default.
 
 ### Step 4: Evaluate Three Preceding Runs (If "Busy Work" or "Scaffold-hosted")
 1. If the latest planned run is classified as **Busy Work** or **🟡 Scaffold-hosted**, identify the three immediately preceding runs in the `examples/dogfood/` folder (e.g., if the latest is `dogfood-014`, look at `dogfood-013`, `dogfood-012`, `dogfood-011`).

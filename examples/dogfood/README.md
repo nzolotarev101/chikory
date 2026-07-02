@@ -20,6 +20,16 @@ plan.md work-package slice through Chikory itself. Full operating manual:
 - After every terminal run: `/dogfood-review <run-id>` — the standardized
   review that verifies the delivery, writes the report, updates the plan,
   and readies the next spec (DOGFOODING.md §6.1).
+- **Spec-style graduation (course correction 2026-07-02):** headline (ladder)
+  specs are LOOSE — outcome + acceptance criteria, no prescribed diff;
+  fully-prescribed-diff specs are the track-B format. Selection rules:
+  DOGFOODING.md §1.5 (friction budget) + §3; queue: plan.md §6 course
+  correction (WP-265 horizon ladder).
+- **Mandatory spec headers (from dogfood-075):** `# Ladder-rung: <N>` +
+  `# Thesis-KPI: <§1.4 KPI>` (+ `# Format: track-B (…)` if prescribed).
+  Linted at launch by `scripts/dogfood-progression.sh --spec <file>`; the
+  progression verdict over `docs/reports/dogfood-ledger.csv` binds what may
+  headline next (DOGFOODING §1.5).
 
 ## Index
 

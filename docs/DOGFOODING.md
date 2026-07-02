@@ -5,516 +5,16 @@ This is the complete operating manual for executing Phase 2+ work packages
 task spec for a WP (every field explained), how to launch, supervise, and
 recover a run, and how to land the result as a normal PR.
 
-**LATEST (dogfood-073, `docs/reports/dogfood-073.md`): WP-233(b) part 1 LANDED — the
-plan-gate failure NOTICE RENDERER (`renderPlanGateFailureNotice`, `src/chain/plan-gate-notice.ts`)
-+ the `planAndGateChain` consumer WIRE (`src/cli/chain.ts:132-135`), the F-33 operator-facing
-fix: a non-PROCEED plan-gate verdict now renders "INFRA fault, SAFE to re-run: …" vs
-"REJECTED … NOT safe to re-run as-is: …" (raw-rationale fallback on null).** Single
-`chikory run` (2nd consecutive correct launch), `run-a5f8c5fe-…`, runtime `008d3fd`,
-SUCCESS 1 step $0.75/$5, PROCEED 2/2, full suite 574 passed | 19 skipped, harvest 4/4
-byte-IDENTICAL. **The review's post-mortem of dogfood-072's step-1 AC-2 artifact re-framed
-that run's retry tax (🔴 F-78 → WP-264, see §7):** the judge-check runner's 120 s timeout
-does NOT reap the check's process tree — `runCheck` (`src/judge/evidence.ts:76`) kills only
-the direct `/bin/sh`, and 072's post-kill AC-2 ran **695.9 s = 5.8× the cap** (vitest
-tinypool `Failed to terminate worker`), reading as a substantive red AC that blocked the
-already-available SUCCESS seal (F-79: `agent-loop.ts:470-478` seals on PROCEED +
-all-criteria-pass after ANY step — the WP-263 short-circuit already exists; the check
-infra was the blocker). Next headline: WP-264, port the WP-255(a) `runBounded` group-kill
-to `runCheck` (dogfood-074).
-
-**Earlier (dogfood-069, `docs/reports/dogfood-069.md`): WP-257's pure literal-preservation
-verifier LANDED (`planLiteralGaps`/`extractGoalLiterals`, `src/planner/literal-preservation.ts`
-+ 7-case test, the `planCoverageGaps` analog) → WP-257 🟡; SUCCESS 3 steps, $2.73/$5, full
-suite 554 passed.** But the run **DOGFOODED ITS OWN BUG (🔴 F-70 → WP-261, see §7):** the
-spec was authored single-`run` (header says "NOT a chain" 3×, *because a chain re-risks F-64*)
-yet was launched as `chikory chain` — the **3rd consecutive launch-mode divergence** — and
-F-64 recurred: the planner compressed the brief into a 2-sentence `node.goal` dropping **32 of
-35** mandated literals (`WP-25`/`WP-255`/`assessSpecStaleness`/…); steps 1-2 burned ~63% of
-cost failing AC-1, the run survived only because the F-49 grep pins persisted into the ACs.
-**F-71 (🟢): running the DELIVERED `planLiteralGaps` over this run's own `(parent, node)` goal
-returns exactly those 32 gaps — the verifier is proven correct against the LIVE defect, so the
-§4 `runPlannerPass`/`buildPlan` REVISE wire (operator-landed / track-B) is the top remaining
-WP-257 slice.**
-
-**Earlier PROVEN PATH (dogfood-068, `docs/reports/dogfood-068.md`): the durable CHAIN landed
-real open-WP product code end-to-end a SECOND consecutive time — the pillar is
-repeatable.** A single-`run`-authored spec was again launched as `chikory chain`
-(`chain-aa25aa5c-…`, runtime `e0da13f`) and SUCCEEDED 2/2: node-1 `precheck-module`
-(pure `evaluateSpecStalenessPrecheck` + test) sealed SUCCESS → **node-2 cloned node-1's
-handed-off tree (`baseCommit 4631f4d == node-1 head`) and consumed its module (WP-239
-dependent handoff)** → node-2 `wire-precheck-cli` (the `commands.ts` wire) sealed
-SUCCESS → chain SUCCESS ($1.6988, judge 0.62%, ~5m42s; AC re-run green tsc+eslint+547
-vitest). This WIRED WP-256's spec-staleness gate LIVE — `cmdRun` now warns on a stale
-spec at launch (F-65 orphan killed; WP-256 + WP-258 → 🟢). **A SHARPENED gotcha this
-surfaced (see §7/§8): the chain planner paraphrase (F-64) can now leak past a GREEN
-chain not just as wrong SEMANTICS (dogfood-067) but as wrong CONTRACT SHAPE.** The
-planner dropped node-1's mandated interface fields + param shape, so the executor
-shipped `evaluateSpecStalenessPrecheck` with NO `stale` field and POSITIONAL
-`(specText, planText)` args (vs the mandated `{ targetWpId, stale, warning }` /
-`{ goal, planText }`) — and it stayed GREEN because the AC grep pins symbol NAMES, not
-interface SHAPES (`grep -q "stale"` matched the test's `.toContain("stale")` string),
-and tsc/eslint only enforce internal consistency (**F-67 → WP-259**: assert the
-type-shape, not just the name). The wire also reads the target WP from the whole yaml,
-not `spec.goal` (**F-68 → WP-260**). **WP-257 is now triply-evidenced (066 HALT → 067
-wrong semantics → 068 wrong contract)** — the durable-chain pillar's own root bug.
-
-**Earlier (dogfood-067, `docs/reports/dogfood-067.md`): the FIRST durable chain to land
-real open-WP product code** (`chain-d18a8c1b-…`, runtime `a4b8e7a`, SUCCESS 2/2,
-$2.5073): node-1 `parseWpStatus` parser → node-2 `assessSpecStaleness` consumer via the
-WP-239 handoff, closing the dogfood-066 gap (node A HALTed there, handoff never ran).
-That run first surfaced F-64 (the planner dropped the "id in the FIRST cell / status in
-the THIRD cell" positional rule → a divergent header-driven parser that still passed the
-loose AC) and F-65 (the 4-files-only spec landed `assessSpecStaleness` ORPHANED).
-**Harden every load-bearing literal/rule into the AC `check` / AC description (which
-survive to the node verbatim), not just the goal prose (F-64 → WP-257).**
-
-**CLOSED (dogfood-048, `docs/reports/dogfood-048.md`): the CHAIN-LEVEL judge-catch
-is PROVEN.** The armed re-attempt of dogfood-047 landed the first chain-level
-true-positive catch: in `chain-b7665e97-…` (delivery `2c516d5`), node A wrote a
-correct `truncateDecimals` → SUCCESS, then node B (dependent, imports it via the
-WP-239 handoff) wrote a correct `truncateToCents` at step 0, the WP-246 seam
-(`CHIKORY_SEED_BAD_DIFF_NODE_INDEX=1`) overwrote it with `return value;`, node B's
-cadence-1 judge re-ran AC-2 → `vitest exited 1` → deterministic override → **AC-2
-FAILED (0/1), node B refused to seal SUCCESS (THE CATCH)** → executor restored a
-correct impl from the failing-test feedback → node B SUCCESS → **chain SUCCESS
-2/2.** Both dogfood-047 gaps were closed at spec-authoring time: **F-48** (the four
-`CHIKORY_SEED_BAD_DIFF_*` vars were baked into the launch header AND the seam was
-verified armed post-run — `debug.seedBadDiff` in node B `task_json`, node B took 2
-steps) and **F-49** (each AC `check` `grep`s the mandated literals verbatim before
-vitest, so the executor could not rewrite the gate). **WP-246 → 🟢 DOGFOOD-PROVEN.**
-Two residuals carried forward: **WP-245** (the seam STILL journals no telemetry —
-node B's trace reads `injections 0`, so the catch is invisible to `chikory trace`;
-§8 — **the chosen next headline, dogfood-050**) and **WP-247** (arming still relies on
-manual discipline — nothing in the launcher refuses a disarmed seam-spec; §7).
-**Update (dogfood-049, delivery `dde765b`, `docs/reports/dogfood-049.md`): WP-247's
-pure pre-flight decision LANDED** — `describeSeamArming(env): SeamArmingReport`
-(`packages/sdk-ts/src/cli/seam-precheck.ts`) reports armed/disarmed + optional
-`nodeIndex` + empty-CONTENT warning from the four `CHIKORY_SEED_BAD_DIFF_*` keys, the
-`evaluateBaselinePrecheck`/`precheck.ts` analog. One-shot SUCCESS, grep-pinned
-assertions (F-49). The 2-line launcher banner wire + the structural disarmed-spec
-guard are still owed (WP-247 → 🟡). New **F-51 → WP-249** (harvest-commit hygiene; §7):
-that delivery commit bundled an unrelated operator `land.test.ts` edit and cites no
-run-id, so `dogfood-verify §6` couldn't resolve the landed commit.
-
-**Latest (2026-06-24, the WP-207 act-half unlock — operator hand-design, branch
-`feat/wp207-pressure-compaction`):** the context-rot pillar is now ACTED ON, not just
-observed. The live pacing decision DRIVES compaction cadence — `agent-loop.ts` passes
-`underPressure = pacing.action !== "continue"` into the existing `compactContext` activity,
-which under pressure folds history beyond the verbatim window NOW (effective
-`{triggerAfterSteps: keepLastN}` policy) instead of waiting for the count trigger (8). Each
-`compaction` entry is tagged `trigger:"pacing"|"count"` (additive, no contract change);
-`chikory trace` renders ` (pacing)` on a pressure fold; a deterministic `debug.contextWindowTokens`
-seam (`CHIKORY_CONTEXT_WINDOW_TOKENS`, the `seedBadDiff`/`parkBeforeStep` convention) makes it
-provable without a 200k-token accumulation. Real-Temporal proof: `compaction-wiring.test.ts`
-"context-window pressure folds before the count trigger" (a 7-step run under a tiny window
-override folds at step 6 with `trigger:"pacing"`); full SDK suite 460 passed. So dogfood-052's
-602%-window PARK signal is no longer inert. **WP-203 → 🟢, WP-207 act half → 🟢; the `park`→
-durable-suspend remainder is WP-250.** dogfood-053 (`run-41f2744f-…`, runtime `4abb478`,
-`docs/reports/dogfood-053.md`) surfaced the new `trigger` field in the `chikory trace` TOTALS:
-a pure `summarizeCompaction(entries)` reducer (`src/runner/compaction-summary.ts`) renders
-`compactions N (pacing M)` additively (byte-identical no-compaction path); `codex`/`gpt-5.5`
-one-shot 5 files, judge ✓ PROCEED 1/1, $0.8086/$5, vitest 27 + tsc + eslint exit 0. **But the
-build run itself PARKED (`peak window 604% (compact 0 · park 1)`, 0 folds) — the new segment
-never rendered live → F-54 → WP-251 (telemetry unit-proven, not yet observed live; closes on a
-seam-forced multi-step fold, the F-53/F-52 close shape; see §8).** **CLOSED (dogfood-054,
-`run-f7106c03-…`, committed `cfb8bcd`, `docs/reports/dogfood-054.md`): the Agent-as-a-Judge
-true-positive catch now lands on REAL product-WP code, off the throwaway scaffolding.** The
-corrupted file was WP-215 S1's real `scanDiffForSecrets` (`src/judge/scan-secrets.ts`), not a
-disposable `clamp`/`roundTo`/`truncateDecimals`: `codex`/`gpt-5.5` wrote a correct scanner →
-the seam stubbed it to always-`[]` (102 bytes) after step 0 → cadence-1 judge `vitest` AC
-`exited 1` → deterministic override → AC FAILED (the catch) → executor restored from the
-failing-test feedback → SUCCESS in 2 steps, $1.33/$5, judge 1.0%, family-diverse. New **F-55 →
-WP-252** (§8): the `peak window 759%` denominator is a hardcoded uncalibrated 200k. **LANDED
-(dogfood-055, `run-73437934-…`, runtime `88d2102`, delivery uncommitted byte-IDENTICAL on the
-working tree, `docs/reports/dogfood-055.md`): WP-215 S2 — `scanDiffForSecrets` is now wired into
-the inner-loop judge evidence.** `codex`/`gpt-5.5` one-shot all 4 files in 1 step: `collectEvidence`
-calls the scanner over the FULL diff into a new REQUIRED `CollectedEvidence.secretScanLabels` field
-(before the prompt-excerpt truncation), `prompt.ts` renders a `## EVIDENCE — deterministic secret
-scan (added diff lines)` section, `harness.ts` threads it through, + a 2-case vitest. Judge
-`gemini-3.1-pro-preview` ✓ PROCEED 2/2 scope ✓; $0.7834/$5 (15.6%), judge 1.0%, 580k/5.0k tokens;
-vitest 471 passed, tsc+eslint exit 0. Additive, no contract change. NO new friction; the section
-rendered live but `(none)` (the run's own diff is secret-free by design — non-empty firing is
-unit-proven, deferred to the WP-253 dogfood). Park-saturation recurs (4th point 602/604/759/585%,
-F-54/WP-250/251) + denominator recurs (F-55/WP-252). **LANDED (dogfood-056, `run-37862cf7-…`,
-runtime `8e4661c`, delivery uncommitted byte-IDENTICAL on the working tree,
-`docs/reports/dogfood-056.md`): WP-253 / WP-215 S3 — the example-key allowlist that unblocks the
-deterministic `no_secrets_introduced` override.** `codex`/`gpt-5.5` one-shot all 3 files in 1 step:
-a new `src/judge/secret-allowlist.ts` (`EXAMPLE_SECRET_VALUES` + pure `isExampleSecret`, AWS's
-`AKIAIOSFODNN7EXAMPLE` built by concatenation) + a NEW `scanDiffForRealSecrets(diff)` in
-`scan-secrets.ts` (`.match`es the existing patterns, EXCLUDES allowlisted dummies; the
-evidence-facing `scanDiffForSecrets` behavior UNCHANGED — the 5-case S1 suite is the regression
-guard) + a 3-case vitest. Judge `gemini-3.1-pro-preview` ✓ PROCEED 2/2 scope ✓; $0.4744/$5 (9.4%,
-the cheapest WP-215-series headline), judge 2.0%, 328k/5.4k tokens; vitest 474 passed, tsc+eslint
-exit 0. Additive, no contract change. NO new friction; park-saturation recurs (5th point
-602/604/759/585/334%, F-54/WP-250/251) + denominator recurs (F-55/WP-252). The secret-scan
-evidence section again rendered `(none)` live — **self-trip discipline means any dogfood touching
-the live judge cannot carry a contiguous secret in its own diff, so the non-empty path can't be
-observed naturally in a build run; its closure belongs to a dedicated assertion in the override
-slice (§8), not a scaffold run.** The destructive override that consumes `scanDiffForRealSecrets`
-to flip the verdict pre-land = WP-253, the §4 hand-design follow-up (operator-landed). **LANDED
-(dogfood-057, `run-6b23da51-c440-432a-bbf8-51d4ee8a24af`, runtime `3a3dc8d`, delivery uncommitted
-byte-IDENTICAL on the working tree, `docs/reports/dogfood-057.md`): WP-252 — the pacing-window
-denominator is now CALIBRATED to the executor model.** `codex`/`gpt-5.5` one-shot all 3 files in 1
-step: a NEW pure `src/runner/context-window.ts` (`CONTEXT_WINDOW_TABLE` 14 rows + `lookupContextWindow`
-longest-prefix, the `lookupPricing` analog + `resolveContextWindowForSpec`) WIRED into `agent-loop.ts:355`
-so the live pacing decision divides by the routing model's REAL window (`gpt-5.5`→400k), the
-`debug.contextWindowTokens` seam still winning + a 6-case vitest. Judge `gemini-3.1-pro-preview`
-✓ PROCEED 2/2 scope ✓; $1.1870/$5 (23.7%), judge 0.8%, 898k/6.5k tokens (series-high input); vitest
-6 + full suite 480 passed, tsc+eslint exit 0. Additive, no contract change. **NO new friction; F-55
-FIXED IN CODE** (recurred dogfood-052→056) — closure is the F-53 live-read shape, the first calibrated
-read being the NEXT run (this run's own trace predates the wire, reads `peak window 904%`).
-Park-saturation recurs (6th point 602/604/759/585/334/904%, F-54/WP-250/251). **LANDED (dogfood-058,
-`run-67d39267-c99c-471e-b625-5de20a3bb8ca`, runtime `6292f62`, delivery uncommitted byte-IDENTICAL on
-the working tree, `docs/reports/dogfood-058.md`): WP-210 — the pure G-Eval scoring primitive opens the
-Agent-as-a-Judge SCORING-modes pillar.** `codex`/`gpt-5.5` one-shot all 3 files in 1 step: a NEW pure
-`src/judge/scoring.ts` (`normalizeGEvalScore` clamp→[0,1] divide-by-zero-guarded + `aggregateGEval`
-weighted-mean/missing-weight→1/≤0-weight-ignored/empty-degenerate/threshold-INCLUSIVE + 3 local types,
-the `buildVerdict` continuous-score analog, NO contract change) re-exported from `src/judge/index.ts`
-+ a 9-case vitest. Judge `gemini-3.1-pro-preview` ✓ PROCEED 2/2 scope ✓; $0.4905/$5 (9.8%), judge
-1.8%, 355k/3.8k tokens; vitest 9 + full suite 489 passed, tsc+eslint exit 0. Additive, no contract
-change, no new dep. **NO new friction; F-55 CLOSED BY OBSERVATION** — this is the first live un-seamed
-read with the WP-252 calibration committed: the journaled `pacing` entry reads `utilization 1.792485`
-= `716994/400000` and the trace renders the believable `peak window 179%` (vs the pre-wire 904%), with
-the calibrated window flipping the step from `park` to `compact` (`compact 1 · park 0`) — the first
-WP-203/WP-207 act-half payoff. The act half of WP-210 (`scoringMethod` field + the live judge wire that
-consumes `aggregateGEval`) is a §4 contract-touching follow-up, operator-landed, NOT a dogfood headline.
-
-**Earlier proven path:** dogfood-052 (`docs/reports/dogfood-052.md`) completed WP-207's
-**context-rot observability** and made it self-evidencing. dogfood-051 journaled a `pacing`
-entry per step but `chikory trace` only printed a bare `pacing events N` count; dogfood-052
-added a pure `summarizePacing(entries)` reducer (`src/runner/pacing-summary.ts`) that folds
-those entries into the run's PEAK window utilization + `compact`/`park` recommendation counts,
-surfaced additively as `peak window X% (compact C · park P)` in the same totals sub-line
-(byte-identical no-pacing path). `codex`/`gpt-5.5` one-shot all 5 files, judge ✓ PROCEED 1/1,
-$0.8032/$5 (16.0%), vitest 25 + tsc + eslint exit 0 (`run-7e13ae2a-…`, runtime `0880806`).
-**F-53 CLOSED — first live read:** this run journaled a real `pacing` entry and the new reducer
-rendered `peak window 602% (compact 0 · park 1)` over it (`action park · projectedTokens
-1,203,440 · remainingTokens -1,003,440 · utilization 6.0172`) — the executor ran at 6× the
-200k window with PARK recommended and unheeded (the *act* half is §4-blocked on the WP-203 S2
-runtime compaction trigger). _Earlier (dogfood-051):_ wired `decideContextWindowPacing` into
-the live loop + journaled the durable `pacing` entry per step (`recordPacingEvent`, idempotent
-`appendOnce` keyed on `pacingEventIndex`); the seam saga before that is settled
-(dogfood-046/048/050). **Next headline (dogfood-053):** prove the Agent-as-a-Judge true-positive
-catch on REAL product-WP code — a WP-215 pure `scanDiffForSecrets` security-evidence reducer
-with the WP-244/246 catch seam seeded INTO it (off the throwaway utilities of dogfood-046/047/048).
-**Earlier:** dogfood-050 (`docs/reports/dogfood-050.md`) made the
-judge-catch seam **self-documenting** — WP-245 seam telemetry: the `debug.seedBadDiff`
-seam now journals a durable replay-safe `seam` entry and `chikory trace` prints
-`seams fired N`, so "was the catch a *seeded* deterministic regression?" is answerable
-from telemetry instead of three-blob byte-archaeology (`run-55eb5422-…`, runtime
-`a4e9665`). dogfood-048
-(`docs/reports/dogfood-048.md`) is the first
-**chain-level Agent-as-a-Judge true-positive catch** — the §1.1 KPI sealed inside a
-dependent node of a durable chain (`chain-b7665e97-…`, delivery `2c516d5`; see the
-CLOSED item above). Its single-run predecessor dogfood-046 (`docs/reports/dogfood-046.md`)
-was the first **reproducible** catch — the §1.1 KPI sealed on demand. The WP-244
-`debug.seedBadDiff` seam (armed via `CHIKORY_SEED_BAD_DIFF_PATH`
-/`_CONTENT`/`_AT_STEP`) overwrote a correct `clamp` with `return value;` after the
-executor finished but before the judge ran; the cadence-1 judge's `vitest` AC went
-red (AC-1 `exited 1`), the deterministic override (`harness.ts:105`) blocked the
-SUCCESS seal (the catch), and the executor restored a correct impl from the
-failing-test feedback → SUCCESS in 2 steps (`run-b024565e-…`, runtime `ebab493`,
-delivery committed `5b6ca24`). The catch came from the judge-*executed* test, not
-the LLM diff read (the LLM verdict on the bug was PROCEED). Earlier:
-dogfood-044 (`docs/reports/dogfood-044.md`) is the first
-LIVE chain-level park→approve→resume proof: the re-run
-`chain-1bfb9d13-6c3f-4f9d-bcb0-abba4d6730df` SUCCESS 2/2 forced node B to park at
-step 0 with the WP-243 seam (`debug.parkBeforeStep` via `CHIKORY_PARK_BEFORE_STEP`
-/ `CHIKORY_PARK_NODE_INDEX`), the chain surfaced the parked child, and a single
-`chikory chain resume <chain-id> --add-budget 5` drove it to terminal SUCCESS with
-the parent worker attached (F-42/WP-241 closed live). Earlier: dogfood-043
-(`docs/reports/dogfood-043.md`) is the first
-artifact-backed fan-in chain: `chain-6f1bf0ee-ce7a-42be-9416-4843b366cf0d`
-SUCCESS 3/3, two independent predecessors (A=left, B=right, isolated baselines)
-both materialized into dependent consumer C through the WP-239 handoff (not a
-shared workspace), C's judge ran the canonical `fan-in-handoff.test.ts` in the
-inner loop, and chain-aware `devbox run harvest` reconciled the non-linear
-delivery (6 files, 397 TS + 82 Python tests green). Earlier: dogfood-042
-(`docs/reports/dogfood-042.md`) is the first green dependent *linear* chain —
-`chain-1cde6ae3-d05f-438e-b818-8af76419d6ae` SUCCESS 2/2, node B imported node
-A's handed-off module, a quota ESCALATE survived approve/resume, harvested
-`b1b825d`.
-
-Proven path: dogfood-001 (`docs/reports/dogfood-001.md`) implemented WP-202's
-first slice this way — 2 steps, 1 judge pass, 3/3 judge-executed checks,
-SUCCESS in 4 minutes. Dogfood-002 (`docs/reports/dogfood-002.md`) repeated it
-for WP-201 slice 1 — first-attempt SUCCESS, zero new harness code.
-Dogfood-003 (`docs/reports/dogfood-003.md`) had the engine modify its own
-runner loop (WP-217) — third first-attempt SUCCESS, and the landed trigger
-fired in the run that delivered it. Dogfood-004
-(`docs/reports/dogfood-004.md`) landed WP-218 slice 1 (honest cost meter) —
-fourth first-attempt SUCCESS, the first spec designed to *falsify* the old
-behavior (cadence > max_steps, so only the WP-217 milestone trigger could
-seal), and the delivered warning now flags that very run's trace.
-Dogfood-005 (`docs/reports/dogfood-005.md`) delivered WP-220
-(`chikory land`) — fifth first-attempt SUCCESS, the first fully *priced*
-campaign ($2.14/$5.00 metered by the WP-218 table), and the deliverable
-was verified by landing its own run into a clean clone. Dogfood-006
-(`docs/reports/dogfood-006.md`) delivered WP-222 slice 1 (executor env
-scrub) — sixth first-attempt SUCCESS, the first campaign with **no new
-friction numbers**, and the bug being fixed fired inside the run's own
-executor steps exactly as the spec predicted. Dogfood-007
-(`docs/reports/dogfood-007.md`) delivered WP-223 (watch renders journal
-transitions) — seventh first-attempt SUCCESS, closing F-15 by construction
-(three clean full-suite runs post-fix) and confirming F-14 closure (zero
-shim noise in the executor transcript, the acceptance test dogfood-006
-set). Dogfood-008 (`docs/reports/dogfood-008.md`) delivered WP-224
-(`chikory land --verify` + git-stderr capture) — eighth first-attempt
-SUCCESS, the **second campaign with no new friction**, closing F-17 (land
-never verified) and F-18 (git stderr leak): `land --verify` now reruns
-build/lint/typecheck/test against the fresh commit and exits nonzero on
-red. F-11's completion-probe tax recurred at a new record 25.4 % cost
-share (cheap productive step → proportionally larger wasted probe).
-Dogfood-009 (`docs/reports/dogfood-009.md`) delivered WP-225 (de-flake the
-WP-217 milestone test) — ninth first-attempt SUCCESS, the **third campaign
-with no new friction**, closing F-19 (the `agent-loop.test.ts` waitFor race
-that could spuriously fail a judge-executed check, now gated on the durable
-verdict; 8/8 host runs). F-11's probe tax recurred at a new record *low*
-5.8 % cost share — the probe step skipped the suite re-run — so the tax now
-spans 5.8 %–25.4 % across eight data points; the spread, not the magnitude,
-is the WP-221 argument. Dogfood-010 (`docs/reports/dogfood-010.md`)
-delivered WP-209 slice 1 (the issues-found:changes-made process metric in
-`chikory trace`, SE-3's concrete half) — tenth first-attempt SUCCESS, the
-**fourth campaign with no new friction**, hitting the prescribed footer
-string byte-for-byte under a tight two-file scope. F-11's probe tax recurred
-mid-spread at 16.1 % (the probe re-ran the full suite), confirming the tax
-tracks executor discretion across a 5.8 %–25.4 % range over nine data
-points. Dogfood-011 (`docs/reports/dogfood-011.md`) delivered WP-209 slice 2
-(the components-over-time timeline in `chikory trace`, SE-3's temporal half —
-both SE-3 footer halves now render) — eleventh first-attempt SUCCESS, the
-**fifth campaign with no new friction**, hitting the prescribed
-`components over time: s0 s1 j@1` footer string byte-for-byte under a tight
-two-file scope. F-11's probe tax set a new record *high* of 34.3 % (the probe
-re-ran the full suite while the productive step 1 was cheap, $0.58), widening
-the spread to **5.8 %–34.3 %** over ten data points. Dogfood-012
-(`docs/reports/dogfood-012.md`) opened WP-208 with slice 1 (the pure
-`notificationsFor` derivation — `JournalEntry[]` + `NotificationPolicy` →
-ordered notification messages; delivery + call-site deferred) — twelfth
-first-attempt SUCCESS, the **sixth campaign with no new friction**, hitting
-the prescribed escalate/milestone/terminal message strings and policy-filter
-behavior byte-for-byte under a strict two-NEW-file scope, proving the loop
-generalizes past the now-exhausted WP-209 trace-footer vein. F-11's probe tax
-recurred at 25.1 % (212k input tokens, full-suite re-run), within the
-established 5.8 %–34.3 % spread over eleven data points. Dogfood-013
-(`docs/reports/dogfood-013.md`) added WP-208 slice 2 (the pure `slackPayloadFor`
-formatter — `Notification` → Slack `{ text }` with a `🚨`/`✅`/`🏁` trigger
-prefix; webhook POST + call-site deferred) — thirteenth first-attempt SUCCESS,
-the **seventh campaign with no new friction**, hitting the prescribed emoji
-lookup and payload strings byte-for-byte under a strict two-NEW-file scope.
-F-11's probe tax set a **new record high of 35.1 %** (220k input tokens,
-full-suite re-run) — set from below, by the cheapest productive step yet
-($0.51), widening the spread to **5.8 %–35.1 %** over twelve data points. Dogfood-014
-(`docs/reports/dogfood-014.md`) added the slice-3 pure half (`desktopPayloadFor`
-— `Notification` → `{ title, body }`) — fourteenth first-attempt SUCCESS, and
-the **first run to modify an existing tracked file** (additive, beside
-`slackPayloadFor`) rather than create two new ones. That first surfaced **F-20**:
-the harvest tool silently dropped the modified files (non-interactive conflict
-skip) while reporting success — root-caused and fixed the same session
-(reconciliation guard + `harvest-audit`, which confirmed no past silent losses).
-F-11 was a mid-spread 24.1 %. **Then the contract wall fell by hand**: WP-219
-ADR-005 was accepted and its slice-1 contracts (`Plan`/chain types +
-`claimsComplete`/`budgetTokens`) landed — unblocking the dogfoodable chain
-implementation slices. Dogfood-015
-(`docs/reports/dogfood-015.md`) delivered that pure half — `readyNodes(plan,
-completed)`, the chain executor's dependency-resolution core — the **first
-slice to consume the ADR-005 contracts** (its own AC-2 kept the 77-test
-conformance suite green inside the run), and the cheapest campaign yet ($0.39).
-Its one new friction, **F-21**, is again in the *landing*, not the output: the
-harvested NEW files (`src/chain/`) were left untracked and the operator's
-commit shipped only the review docs under a "readyNodes" message — a "feat"
-commit with none of the feature's code (→ WP-226: harvest stages what it
-applies; fixed before the next campaign). Dogfood-016
-(`docs/reports/dogfood-016.md`) delivered the other S3 pure precondition,
-`hasDependencyCycle(plan)`, with the prescribed Kahn traversal and four focused
-tests — sixteenth first-attempt SUCCESS. It also proved WP-226 live: both new
-files were harvested byte-identically and staged. Three surrounding issues
-surfaced: parallel Devbox startup races (F-22, operational rule added), the
-terminal-boundary remainder of the F-15 observer race (F-23 → WP-227), and the
-env-prefixed explicit `dogfood-verify` command aborting Vitest under Devbox
-0.17.0 (F-24, command form fixed). F-11 was 7.6 %. Dogfood-017
-(`docs/reports/dogfood-017.md`) was the **first FAILED campaign — and the
-clearest thesis win**: WP-227 had already been hand-landed (`26b9964`) so the
-spec ran redundantly, the executor narrated completion over an empty diff, every
-acceptance check and rubric item passed, and the structurally-different judge
-still ESCALATEd on the diff-vs-claim mismatch. It surfaced F-25 (retire
-superseded specs; launch baseline-satisfied precheck → WP-228), F-26 (executor
-empty-diff completion claim → raises WP-221), and F-27 (the `--watch` ESCALATE
-line drops the judge reasoning → WP-229). Dogfood-018
-(`docs/reports/dogfood-018.md`) delivered WP-229 cleanly — `followRun` now
-renders `judge escalated: <reason>` on the watch stream before the
-AWAITING_APPROVAL line; diff byte-for-byte to spec, 3/3 AC + 4/4 rubric PROCEED,
-harvested byte-identically. **F-27 closed.** It surfaced F-28 (specs
-over-prescribed to the keystroke under-test the thesis — see §3) and F-11
-recurred at 34.8 % of run cost (top of the range). Dogfood-019
-(`docs/reports/dogfood-019.md`) delivered WP-221's pure trigger half —
-`isCompletionMilestone(record)` ORs `claimsComplete` into the WP-217 empty-diff
-trigger, behavior preserved — its eighteenth first-attempt SUCCESS. **But human
-review caught F-29**: the new test's fixtures violate the `ArtifactRef` contract
-(7 real `TS2353` errors) yet shipped green, because `typecheck` compiles only
-`src/**` and Vitest skips type-checking. A SUCCESS run again surfaced a
-plan-changing gap (dogfood-002's lesson). Dogfood-020
-(`docs/reports/dogfood-020.md`) delivered WP-230 — `typecheck` now runs a second
-`tsc -p tsconfig.test.json` pass so `test/**` is type-checked, verified to trip
-on a bad fixture (`TS2353`). **F-29 closed.** It surfaced **F-30** (the same
-spec was launched twice ~11 min apart, ~$1 wasted — operator ceremony, no WP).
-Dogfood-021 (`docs/reports/dogfood-021.md`) delivered **WP-221 Slice B** — the
-runner now reads the executor's `CHIKORY_TASK_COMPLETE` marker via pure
-`claimsCompleteFromSummary` → `StepRecord.claimsComplete`, so the productive step
-is judged directly and the F-11 probe step retires. Dogfood-022
-(`docs/reports/dogfood-022.md`) delivered **WP-219 S2 Slice 1** — the pure
-goal-planner prompt half (`planner/prompt.ts`, mirroring `judge/prompt.ts`) — but
-its headline is in the trace: as the **first real run on post-Slice-B code where
-the executor emits the marker**, it sealed SUCCESS in **ONE step with no
-empty-diff probe step** (`components over time: s0 j@0`, vs the `s0 s1 j@1` F-11
-signature of all twenty predecessors). **F-11 is CLOSED — by observation, not
-just in code.** Twenty-first first-attempt SUCCESS, no new friction, single clean
-launch (F-30 did not recur). The one watch-item: the productive step cost $1.26
-on **969k input tokens** (campaign high) — with the probe gone, input-side cost
-(WP-203 compaction / WP-207 pacing) is the next reliability lever. Dogfood-023
-(`docs/reports/dogfood-023.md`) delivered **WP-219 S2 Slice 2 — the pure
-plan-assembly half** (`planner/assemble.ts` `buildPlan(reply, input, opts): Plan`
-+ `BuildPlanOptions`, mirroring `buildVerdict`: three structural checks →
-the frozen `Plan`), completing S2's pure surface. Twenty-second first-attempt
-SUCCESS, the F-11-closed `s0 j@0` shape held for a second straight run, no new
-friction, single clean launch. Bright spot on the cost watch-item: input tokens
-fell to **451k** (lowest of the last four runs, ~half the 969k high) for a
-comparably small change — the 022 "climbing tokens" worry is **noise, not a
-ratchet**. Dogfood-024 (`docs/reports/dogfood-024.md`) delivered **WP-219 S2b —
-the pure plan meta-judge prompt half** (`planner/meta-judge-prompt.ts`:
-`PLAN_JUDGE_SYSTEM_PROMPT` + `PLAN_VERDICT_RESPONSE_SCHEMA` +
-`buildPlanJudgeMessages`, mirroring `judge/prompt.ts`); dogfood-025
-(`docs/reports/dogfood-025.md`) delivered **its pure verdict-assembly half**
-(`planner/meta-judge-verdict.ts`: `buildPlanVerdict`, mirroring `buildVerdict`,
-folding `planCoverageGaps` in as a deterministic coverage override that
-downgrades `PROCEED`→`REVISE` when a goal criterion is uncovered). **WP-219's
-entire pure surface is now landed** — both the S2 planner and the S2b plan
-meta-judge mirror the executor judge symbol-for-symbol; everything left in
-WP-219 is non-pure / hand-design (the `decompose` wrapper + plan-judge harness,
-TASK-PROTOCOL §4). Dogfood-026 (`docs/reports/dogfood-026.md`) then delivered **WP-203 S4 — the
-pure compaction-trace renderer** (`formatEntryLine` gains a `case "compaction"`
-rendering `tokensBefore→tokensAfter` + digest presence), the WP-209
-trace-renderer pattern; **WP-203's pure trace surface is now complete** and the
-compaction JIF entry is legible in `chikory trace --watch`. All three runs
-sealed SUCCESS in one step, no probe (F-11-closed shape, now five straight); no
-new friction. The input-token series ran a clean sawtooth across the six
-adjacent pure slices (862k → 969k → 451k → 976k → 467k → 807k), the smallest
-diff of the set drawing a mid-high 807k — cost is **noisy, not monotonic**, a
-variance/ceiling lever (WP-203/WP-207), not a runaway trend. Dogfood-027
-(`docs/reports/dogfood-027.md`) then delivered **WP-228 S1 — the pure
-launch-baseline-precheck decision** (`evaluateBaselinePrecheck`, the
-`buildVerdict`/`buildPlanVerdict` analog: partitions acceptance-check exit codes
-→ `{ satisfied, passedIds, failedIds, summary }`, dogfood-017 F-25), a sixth
-straight one-step no-probe SUCCESS, no new friction; input tokens 527k (low
-band), the largest diff of the recent set drawing one of the smallest input
-counts — cost tracks neither diff size nor run order. The non-pure
-check-execution + warn/`--force` launch wiring is the hand-design follow-up.
-Dogfood-028 (`docs/reports/dogfood-028.md`) then delivered **WP-202 / CM-3 — the
-pure Memory Pointer decision + reference renderer** (`shouldPointerize(bytes,
-policy)` + `formatPointerReference(ref)` in a new `src/runner/memory-pointer.ts`,
-the `buildVerdict`/`evaluateBaselinePrecheck` analog over the frozen
-`ArtifactRef`): a **seventh** straight one-step no-probe SUCCESS, no new
-friction; input tokens 410k, a new series low (021–028: 862k → 969k → 451k →
-976k → 467k → 807k → 527k → 410k) — cost stays noisy, not monotonic. The
-non-pure interception + `store.put` + injection wiring is the hand-design
-follow-up. Dogfood-029 (`docs/reports/dogfood-029.md`) then delivered **WP-203 S2
-— the pure compaction digest-prompt half** (`DIGEST_SYSTEM_PROMPT` +
-`buildDigestMessages(toDigest): Message[]` in a new
-`src/runner/compaction-prompt.ts`, the `planner/prompt.ts`/`judge/prompt.ts`
-analog over the frozen `CompactionPlan.toDigest` + `Message`, type-only `Message`,
-no schema/contract change): an **eighth** straight one-step no-probe SUCCESS, no
-new friction; input tokens 462k, low band (021–029: 862k → 969k → 451k → 976k →
-467k → 807k → 527k → 410k → 462k) — cost stays noisy, not monotonic. **WP-203's
-entire pure surface is now exhausted** (S4 trace + S2 digest-prompt); the digest
-wiring (router fold → `store.put` behind a Memory Pointer → journal
-`CompactionResult`) stays non-pure hand-design, blocked on the WP-202 store.
-Dogfood-030 (`docs/reports/dogfood-030.md`) then delivered **WP-201 Python-SDK
-parity — the pure compaction digest-prompt half** (`DIGEST_SYSTEM_PROMPT` +
-`build_digest_messages(to_digest) -> list[Message]` in a new
-`packages/sdk-py/src/chikory/compaction_prompt.py`, the Python parity of
-dogfood-029; mirrors the TS `compaction-prompt.ts` source-of-truth, `Message`
-already ported, no contract/runtime wiring change): a **ninth** straight
-one-step no-probe SUCCESS, no new friction; input tokens 434k, low band
-(021-030: 862k -> 969k -> 451k -> 976k -> 467k -> 807k -> 527k -> 410k ->
-462k -> 434k). Dogfood-031 (`docs/reports/dogfood-031.md`) then delivered
-**WP-207 context-window pacing** — the pure `decideContextWindowPacing` runner
-decision (`continue` / `compact` / `park`) before any non-pure runner/journal
-wiring: a **tenth** straight one-step no-probe SUCCESS, input tokens 375k (new
-low), but surfaced **F-31** — the landed commit `67eb167` mixed the verified
-three-file run diff with five unrelated warning-suppression edits outside the
-judge's evidence. Dogfood-032 (`docs/reports/dogfood-032.md`) delivered
-**WP-231 landing-scope audit** — `dogfood-verify` now includes a landed-scope
-section backed by `scripts/dogfood-landed-scope.sh`, which mechanically compares
-"what ran" to "what landed" and reports `MATCH`, `EXTRA_IN_COMMIT`,
-`MISSING_IN_COMMIT`, or `DIFFERS_FROM_RUN`. Its judge made a useful step-1
-ESCALATE on verifier abort behavior, step 2 fixed it, and F-31 is closed.
-Dogfood-033 (`docs/reports/dogfood-033.md`) then opened **WP-205 branching**
-with the pure `parseBranchTarget(input)` helper for `chikory branch
-<run-id>@<step>` targets: another one-step SUCCESS, no probe, no new friction,
-and the branch/worktree side effects still deferred. Dogfood-034
-(`docs/reports/dogfood-034.md`) completed **WP-205's pure surface** with
-`branchNameForTarget(target)`, deriving the default git branch name
-(`branch-<sanitized-run-id>-step-<n>` / `branch-<…>-base`) for a parsed target:
-an **eleventh** straight one-step no-probe SUCCESS, no new friction, input tokens
-594k (mid-band). The actual `chikory branch` command + journal/worktree fork is
-non-pure hand-design; with the TS pure backlog thin the dogfoodable thread
-shifts back to dual-SDK parity. Dogfood-035
-(`docs/reports/dogfood-035.md`) ported that WP-205 surface to the Python SDK —
-`parse_branch_target` + `branch_name_for_target` (local frozen `BranchTarget`
-dataclass) in `packages/sdk-py/src/chikory/branch_target.py`, mirroring the TS
-`src/cli/branch-target.ts` source-of-truth behavior-for-behavior, 16 pytest
-cases, no contract change: a **twelfth** straight one-step no-probe SUCCESS, no
-new friction, input tokens 318k (new series low). It was the first
-branch-target-series run committed to `HEAD` (`88e496c`) rather than staged, and
-`dogfood-landed-scope.sh` reported **MATCH** — the F-31 audit confirming the
-committed diff is exactly the verified run diff. Dogfood-036
-(`docs/reports/dogfood-036.md`) ported the WP-202 / CM-3 Memory Pointer pure
-surface to the Python SDK — `should_pointerize` + `format_pointer_reference` +
-a local frozen `MemoryPointerPolicy` dataclass in
-`packages/sdk-py/src/chikory/memory_pointer.py`, mirroring the TS
-`runner/memory-pointer.ts` source-of-truth byte-for-byte (12-char id truncation,
-em dash U+2014), `ArtifactRef` reused, 5 pytest cases, no contract change: a
-**thirteenth** straight one-step no-probe SUCCESS, no new friction, input tokens
-398k (low-mid band). **The S3 wall was then cleared by hand (2026-06-19):** the
-architect wrote the ADR-005 §S3 transition rules and froze the `NodeOutcome` +
-`ChainRecord.nodeOutcomes` contract across all langs, unblocking the WP-219
-**S3-pure chain-state reducer**. Dogfood-038
-(`docs/reports/dogfood-038.md`) then delivered it — `deriveChainStatus`
-(four-rule precedence ESCALATE→AWAITING_PLAN_APPROVAL / FAILED→FAILED /
-all-SUCCESS→SUCCESS / RUNNING) + a pure immutable `advanceChain` node-fold in a
-new `packages/sdk-ts/src/chain/advance.ts`, the `computeVerdict` analog and
-sibling of the landed `readyNodes`/`hasDependencyCycle`, type-only contract
-imports, re-export at `index.ts:72`, 6 vitest cases, no contract change: a
-**fourteenth** straight one-step no-probe SUCCESS, no new friction, input tokens
-625k (high-mid band). **WP-219's S3-pure primitive set is now complete**
-(`readyNodes` + `hasDependencyCycle` + `advanceChain` + `deriveChainStatus`).
-**The S3-wiring substrate was then hand-landed (2026-06-20, TASK-PROTOCOL §4):**
-the Temporal-native chain executor — `ChainJournal`/`chainRecordFrom` (the D4
-chain store), the `chainLoop` workflow that loops `readyNodes` →
-`executeChild(agentLoop)` per ready node → `advanceChain` fold →
-`node_started`/`node_sealed` journaling, halting on a `FAILED` seal, plus chain
-activities and pure node→TaskSpec helpers (both workflows share a bundle barrel).
-That substrate created a chain journal, which unblocked the **WP-219 S6 pure
-chain-trace renderer** — `renderChainTrace`, the chain analog of the per-run
-`renderTrace` — **delivered via dogfood-037 (`run-295b2947`, refocused off the
-deprioritized pacing parity port onto the critical path; 5 vitest cases, no
-contract change, `src/chain/trace.ts`)**. **WP-219's entire dogfoodable pure
-surface is now exhausted** (`readyNodes` + `hasDependencyCycle` + `advanceChain`
-+ `deriveChainStatus` + `renderChainTrace`), so the dogfood thread returned to
-dual-SDK parity. Dogfood-039 (`docs/reports/dogfood-039.md`) ported the S3
-chain-state reducer to the Python SDK — `derive_chain_status` (the four-rule
-ADR-005 §S3 precedence) + `advance_chain` (pure immutable node-fold) in a new
-`packages/sdk-py/src/chikory/chain_advance.py`, mirroring the TS
-`src/chain/advance.ts` source-of-truth 1:1, `ChainRecord`/`NodeOutcome`/`ChainStatus`
-reused from `chikory/types.py`, 6 pytest cases, no contract change: a
-**sixteenth** straight one-step no-probe SUCCESS, no new friction, input tokens
-755k (Python-parity-series high). The next dogfood stays on parity: **dogfood-040
-— the Python port of the WP-207 context-window pacing decision**
-(`decide_context_window_pacing` + local `ContextWindowUsage`/`ContextWindowPacingPolicy`/`ContextWindowPacingDecision`
-dataclasses, `chikory/pacing.py`, mirroring the TS `src/runner/pacing.ts`); the
-`renderChainTrace` Python parity stays blocked behind it (needs the
-not-yet-ported `ChainEntry` store type). Remaining hand-design follow-ups: D3
-halt-and-replan, S4 context handoff, S5 suspend/resume, and the
-`chikory chain`/`plan` + `chikory trace <chain-id>` CLI glue.
+**Status (2026-07-02, bounded — update discipline: REPLACE this block, ≤15 lines;
+displaced prose moves verbatim to [`PLAN-HISTORY.md`](PLAN-HISTORY.md); per-run detail:
+`docs/reports/dogfood-NNN.md`; queue + course correction: `plan.md` §6).**
+Latest: dogfood-073 landed WP-233(b) part 1 — plan-gate failure notice renderer + wire
+(`run-a5f8c5fe`, SUCCESS 1 step $0.75, `docs/reports/dogfood-073.md`); its review opened
+🔴 F-78 → WP-264 (the judge-check runner does not reap the check's process tree — next
+headline, dogfood-074). **Course correction 2026-07-02 (plan.md §6, binding):** headline
+runs now follow the WP-265 horizon ladder with LOOSE (outcome + AC) specs — see §1.5
+(friction budget), §1.4 (KPI table; the one-step-SUCCESS streak is retired), and §3
+(spec-style graduation: prescribed-diff = track-B format).
 
 Related docs: [`docs/spec/task-spec.md`](spec/task-spec.md) (schema
 reference) · [`docs/TASK-PROTOCOL.md`](TASK-PROTOCOL.md) (WP etiquette, §7 is
@@ -595,13 +95,70 @@ chance of a wrong turn** — enough rope for compounding error and for the judge
 to have something to catch. A goal that always finishes clean in one step is
 track-B (one step ≈ one focused agent session, ≤10 min, ≤25 turns).
 
-**Success signal (KPI):** judge "N straight one-step SUCCESS" as a *warning*,
-not a win — it means the picks stopped being hard. Track instead: regressions
-the judge caught **pre-land**, successful crash→resumes, measured per-step
-reliability over long (10+ step) horizons, **and product-WP progress per run**
-(did the landed diff advance an open `plan.md` §6 WP, or only host a thesis
-mechanism on throwaway code?). Reward catching failure **on real product work**,
-and selection follows.
+**KPI table (single source — plan.md references this; the dogfood-review skill
+reports these values on every review).** The "N straight one-step SUCCESS"
+streak is **RETIRED** as of the 2026-07-02 course correction (it rewarded
+triviality and camouflaged F-32). The values are **computed, not recalled**:
+`devbox run dogfood-progression` reads the per-run ledger
+`docs/reports/dogfood-ledger.csv` (one row per terminal run, appended by
+`/dogfood-review` phase 4) and emits the trend plus a binding
+✅ PROGRESSING / ⛔ STALLED verdict (see §1.5). Track:
+
+| KPI | Definition | Direction |
+|---|---|---|
+| Max horizon survived | Longest run to a clean terminal state, in executor steps AND wall-clock | ↑ toward the P2 exit gate (24h) |
+| Kill→resume count | Deliberate or genuine crash→`chikory resume` completions | ↑ (≥1 per ladder rung 2+) |
+| Judge true-positives pre-land | Real regressions the judge caught before landing (not seam-armed drills) | ↑ |
+| Meta:product headline ratio | Trailing-3-run ratio of harness-meta headlines to product-WP headlines (§1.5 definition) | ≤ 1:3 |
+| Per-step reliability | Steps sealed without judge intervention ÷ total steps, over runs ≥5 steps, from journals | ↑ toward 99% |
+| Exit-gate distance | Current ladder rung vs the P2 exit gate | rung number ↑ |
+
+### 1.5 Friction budget — when new friction may headline a run
+
+New friction from a run review spawns a **headline** dogfood ONLY if it is 🔴
+**loop-integrity**: it corrupts judge trust (a hang or infra fault reads as a
+substantive verdict), breaks durability (state loss, unresumable), or enables
+silent divergence (work ships green that doesn't match the mandate). Everything
+else — ergonomics, hygiene, telemetry polish, spec plumbing — is **track-B or an
+operator hand-fix** (TASK-PROTOCOL §4), recorded in plan.md but never the next
+headline by default.
+
+**Hard cap: ≤1 harness-meta headline per 3 runs.** *Harness-meta* = the
+deliverable's primary surface is `scripts/`, `examples/dogfood/`, launch
+prechecks, spec hygiene, or verifier plumbing — as opposed to product runtime
+(router / executors / runner / judge / chain / memory). The dogfood-review skill
+computes the trailing-3-run ratio mechanically each review; a pick that busts
+the cap is a ⛔ VETO regardless of how fresh the friction feels.
+
+**Mechanical enforcement (the part prose can't skip).**
+`scripts/dogfood-progression.sh` (also `devbox run dogfood-progression`)
+computes the verdict from `docs/reports/dogfood-ledger.csv` and is run at three
+points in the chain: `dogfood.sh` launch preflight (advisory), the
+`/dogfood-assessor` step 0 (binding), and `/dogfood-review` phase 0 + phase-5
+gate 0 (binding). Semantics:
+
+- **⛔ STALLED** — no thesis axis (max steps survived, ladder rung, resume,
+  spec looseness) moved across the trailing 3 runs vs the prior 3. The next
+  headline **is the current WP-265 ladder rung, no exceptions**. New 🔴
+  loop-integrity friction is **hand-fixed in the same review sitting**
+  (TASK-PROTOCOL §4) or queued track-B — under STALLED it never headlines.
+  (Rationale: 🔴s kept appearing for 14 straight runs; if a 🔴 can always
+  preempt, the ladder never starts.)
+- **🔴 CAP BUSTED** — >1 harness-meta headline in the trailing 3: next headline
+  must be `class=product` regardless of the verdict.
+- **✅ PROGRESSING** — the ladder is climbing; the next rung stays the default
+  headline, and any non-ladder candidate must beat it through §1.1–§1.3 AND
+  this budget.
+
+Hand-fix-first is the standing preference for ALL new friction: a friction
+item becomes a headline dogfood only when it (a) is 🔴 loop-integrity, (b)
+cannot be hand-fixed in a §4 sitting, (c) the cap allows it, and (d) the loop
+is not STALLED.
+
+Rationale (course correction 2026-07-02, plan.md §6): runs 060–073 headlined
+friction fixes exclusively while the P2 exit gate went unapproached — prose
+priority rules alone failed twice (dogfood-039/041); enforcement must live in
+executable scripts and the skills that run the process, not in prose alone.
 
 ## 2. One-time setup
 
@@ -665,6 +222,38 @@ examples: [`dogfood-002.yaml`](../examples/dogfood/dogfood-002.yaml) (ran
 SUCCESS), [`dogfood-003.yaml`](../examples/dogfood/dogfood-003.yaml) (next
 up). Schema
 reference with all validation rules: [`docs/spec/task-spec.md`](spec/task-spec.md).
+
+**Spec-style graduation (course correction 2026-07-02, plan.md §6 — binding).**
+Two spec formats, mapped to the two tracks:
+
+- **Headline format — LOOSE spec:** the `goal` states the OUTCOME and the
+  constraints; `acceptance_criteria` pin what done means; the **implementation
+  is the executor's problem**. The gap between outcome and diff is the failure
+  surface — it is what makes compounding error, judge catches, and per-step
+  reliability measurable at all. Ladder runs (WP-265) use this format only.
+- **Track-B format — PRESCRIBED diff:** the goal dictates files/symbols/code
+  (the dogfood-001…073 style). Still correct for parity ports and for
+  verifying hand-designed wiring — but a prescribed spec makes the executor a
+  typist and the judge a transcription checker, so it can never be thesis
+  evidence and never headlines.
+
+The prescribed style was the right bring-up format while the harness itself was
+untrustworthy (byte-IDENTICAL harvest, grep-pinned ACs caught real bugs — F-49,
+F-64). It graduates, not apologizes.
+
+**Machine-greppable spec headers (mandatory from dogfood-075 on;
+`scripts/dogfood-progression.sh --spec <file>` lints them at launch):**
+
+```yaml
+# Ladder-rung: 1            # WP-265 rung this run climbs (0 = off-ladder)
+# Thesis-KPI: max horizon survived   # which §1.4 KPI this run pushes
+# Format: track-B (prescribed — <why>)   # ONLY on a sanctioned prescribed spec
+```
+
+A prescribed-diff spec without the `# Format: track-B` declaration fails the
+lint; a headline spec must name a rung and a KPI. The point: "what does this
+run test MORE of than the last one?" is answered in the spec header, before
+any spend — not reconstructed in the review.
 
 ### 3.1 `name` (required)
 
