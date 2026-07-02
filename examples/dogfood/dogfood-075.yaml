@@ -1,0 +1,153 @@
+# Dogfood-075: WP-265 rung 1 — the FIRST loose-spec headline. Give the operator `chikory inject`.
+# Format: LOOSE (horizon-ladder headline — goal states the OUTCOME + constraints, the acceptance
+#   criteria pin what "done" means, the implementation/file-layout is LEFT TO THE EXECUTOR; NO prescribed
+#   diff, no mandated symbol list). This is the deliberate graduation off the prescribed-diff track that
+#   greened 74 straight runs without moving any thesis axis (progression gate ⛔ STALLED, plan.md §6).
+# Ladder-rung: 1
+# Thesis-KPI: horizon + operator-in-the-loop — a durable run can be STEERED mid-flight (guidance reaches the
+#   next step and is journaled) without losing progress; the operator tool every longer rung (2 kill→resume,
+#   3 overnight, 24h brownfield) needs to correct a drifting agent instead of killing the run.
+#
+# LAUNCH WITH `chikory run` (single durable run, NOT `chikory chain`). NO seam env.
+# ⚠️ HONOR THE LAUNCH MODE. dogfood-072/073/074 were the first THREE consecutive correct single-`run`
+#    launches after the 067–071 divergence streak (F-72/F-74). Keep the streak alive:
+#      devbox run run-dogfood        # ← single `chikory run`; picks the latest spec (this one)
+#    (NEVER `devbox run chain-dogfood` for this spec.) Direct form: `bash scripts/dogfood.sh --run`.
+#    DOUBLE-ENFORCED: the committed `cmdChain` launch-mode guard (WP-261) refuses this single-`run`-marked
+#    spec launched as a chain at zero LLM cost. To override (do NOT): `CHIKORY_ALLOW_LAUNCH_MODE_MISMATCH=1`.
+#
+# WHY THIS IS NEXT (2026-07-02): the progression gate reads ⛔ STALLED — 74 runs, all 1–3 prescribed-diff
+# steps, minutes long; no thesis axis (horizon, ladder rung, resume, spec looseness) has moved in 3 runs. The
+# 2026-07-02 course correction (plan.md §6, binding) makes the next headline the WP-265 horizon-ladder rung 1:
+# a LOOSE-spec run on a real open product WP. WP-212 (`chikory inject`, plan.md §6 🟡, requirement OB-2) is the
+# rung-1 host — small blast radius, and its deliverable (mid-run correction) is the operator tool the longer
+# rungs depend on. Crucially the durable-execution SUBSTRATE ALREADY EXISTS and is proven:
+#   * `agent-loop.ts:86,140` — `injectSignal = defineSignal<[string]>(SIGNAL_INJECT)` + its `setHandler` that
+#     pushes onto `pendingInjections`; `agent-loop.ts:290,365` splices them into the NEXT step's executor
+#     context (alongside acceptance criteria + judge feedback).
+#   * `runner/activities.ts:729-740` — each injection is journaled as an entry of kind `"injection"`
+#     (`JournalEntryKind`, `types.ts:336`) keyed by `injectionIndex`.
+#   * `runner.ts:89-91` — `RunHandle.inject(guidance)` fires `signal(SIGNAL_INJECT, guidance)`;
+#     `types.ts:422` declares it on the handle.
+# The OPEN GAP is purely the operator-facing CLI surface: there is NO `inject` case in `src/cli/main.ts` and
+# NO `cmdInject` in `src/cli/commands.ts`. The sibling signal commands `cmdApprove`/`cmdCancel`
+# (`commands.ts`: `const runner = createTemporalRunner(...); const handle = await runner.get(runId);
+# await handle.approve()/cancel(); ... finally { await runner.close(); }`) are the exact shape to mirror.
+# This is a REAL feature-completion on the durable-execution / HITL pillar (requirement OB-2), not scaffolding.
+#
+# WHY LOOSE (and why a plausible failure surface): the goal fixes the OUTCOME (`chikory inject <run-id>
+# "<guidance>"` steers a live run) and the constraints (reuse the signal path, don't touch the workflow/journal
+# contract, no new dependency, validate args), but leaves the executor to choose the file layout, the command
+# wiring, and — importantly — how to write a test that proves a mid-run injection actually lands. A competent
+# agent can plausibly fail this: the injection must fire while the run is STILL RUNNING (a timing race, like the
+# `cmdCancel` integration test in `test/cli/cli.test.ts`), the guidance string must survive the signal→journal
+# round-trip verbatim, missing-argument handling must exit nonzero, and the command must close the runner. It is
+# cross-file (CLI command + arg dispatch + a live behavioral test), 3–6 steps, on a thesis pillar.
+#
+# Gate verdicts (dogfood-review §5, applied inline on CURRENT HEAD):
+#   * §0 Progression: ⛔ STALLED (dogfood-ledger through row 074) → BINDING: the next headline IS the current
+#     WP-265 ladder rung. Rung 1 = WP-212. No exception invoked; this spec IS the ladder rung.
+#   * §1.1 Failure-surface: ✅ — cross-file, durable-execution/HITL pillar, live mid-run timing surface; a
+#     competent agent can plausibly fail the signal-timing race, the arg validation, or the journal assertion.
+#   * §1.2 Product-progress: ✅ — advances REAL open plan.md §6 WP-212 (🟡, requirement OB-2). Feature code
+#     completing the operator injection tool; reuses the landed signal/journal substrate — NO new scaffolding,
+#     NO new dependency, the thesis mechanism (durable steer) is seeded into WP-212's real code.
+#   * §1.3 Mission-critical: ✅ PROCEED — thesis-stressing HITL slice on a real product WP; neither busy nor
+#     scaffold-hosted; the veto does not fire (no un-landed contract blocks it, and the substrate is landed).
+#   * §1.5 Friction-budget: ✅ — `class=product`, `spec_format=loose`, NOT harness-meta; trailing-3 meta:product
+#     headline ratio 1/3 (071 meta · 072 product · 073 product → with 074 product, 1/3), cap not busted.
+#
+# Zero-secrets launch (no API keys; CLI-OAuth judge via the shim; NO seam vars). The script auto-starts the
+# `agy`/Antigravity proxy for the gemini judge:
+#   devbox shell
+#   devbox run run-dogfood        # single `chikory run`, latest spec (this one)
+# (Manual path: `node scripts/cli-judge-proxy.mjs 8787 agy &`, set
+#  `OPENAI_COMPAT_BASE_URL=http://127.0.0.1:8787`, then
+#  `pnpm chikory run examples/dogfood/dogfood-075.yaml --watch`. `chikory run` validates the spec first.)
+#
+# Pre-launch discipline:
+#   * COMMIT EVERYTHING first — the workspace clones HEAD (F-30: launch ONCE). The dogfood-074 delivery
+#     (2 staged files) AND this review's report/living-doc edits are uncommitted; ALSO run the queued §4
+#     hand-land session (WP-257 §4 wire + WP-262(a) + F-81) if you intend it before this run — so HEAD is
+#     lint-GREEN before the clone (the clone must pass this run's own AC `eslint .`).
+#   * F-45: any NEW test file this run creates MUST be ABSENT on HEAD.
+#   * F-49: each AC `check` greps the outcome anchors BEFORE running the suite.
+#   * F-76/F-80 (codex): if codex blows the 600s wall-clock cap or ignores the bare-`pnpm exec` mandate,
+#     RECORD it — do NOT raise `budget_usd`/`max_steps`.
+#   * Run Devbox commands sequentially (F-22). Bare `pnpm exec`, NOT `devbox run` (F-24). AC-2 runs the FULL
+#     suite once (which includes the new behavioral test — its live-Temporal integration reuses the global
+#     bundle, ~20s wall as in dogfood-074's AC-2); do NOT add a separate heavy scoped-vitest AC.
+name: dogfood-075-wp212-chikory-inject
+goal: >
+  Give the operator a way to STEER a durable run mid-flight — WP-212 / requirement OB-2. Today a Chikory run,
+  once launched, cannot be corrected without killing it: the durable-execution substrate can ACCEPT a mid-run
+  guidance injection (the Temporal `inject` signal handled in `src/workflow/agent-loop.ts`, journaled as a
+  kind-`injection` entry in `src/runner/activities.ts`, and spliced into the NEXT step's executor context), and
+  `RunHandle.inject(guidance)` (`src/runner.ts`) already fires that signal — but there is NO CLI command that
+  reaches it. Close that gap: add a `chikory inject <run-id> "<guidance>"` command so an operator can push a
+  correction into a running agent, and it takes effect on the run's next step and is durably recorded.
+
+  OUTCOME (what "done" means — the HOW is yours to design):
+    * `chikory inject <run-id> "<guidance text>"` resolves the run's durable handle and delivers the guidance
+      through the EXISTING `RunHandle.inject` / `SIGNAL_INJECT` path — do NOT invent a second injection
+      mechanism, do NOT change the workflow, the journal format, the `injection` journal-entry kind, or any
+      contract/type. Mirror the shape of the sibling signal commands `cmdApprove` / `cmdCancel` in
+      `src/cli/commands.ts` (construct the runner, `runner.get(runId)`, act on the handle, `runner.close()` in
+      `finally`), and register the command in `src/cli/main.ts`'s dispatch next to `approve` / `cancel`.
+    * The delivered guidance reaches the run: on the run's next step it is journaled as a kind-`injection`
+      entry whose payload carries the guidance text verbatim, and (via the existing splice) becomes available
+      to the next executor step. Do not drop, truncate, or mangle the guidance string.
+    * Argument validation: a missing run-id OR a missing/empty guidance argument prints an actionable error to
+      stderr and exits nonzero (mirror `requireArg`); a successful inject prints a short acknowledgement and
+      exits 0.
+    * Prove it with a REAL behavioral test (no mocking of the durable layer — CLAUDE.md rule): start a run on
+      the scripted test adapter that takes at least two steps, invoke your new command mid-run (mirror the
+      live `cmdCancel` timing pattern in `test/cli/cli.test.ts`), and assert the run's journal gains a
+      kind-`injection` entry whose payload contains the guidance you injected. Use a distinctive, greppable
+      guidance sentinel in the test so the assertion is unambiguous.
+
+  CONSTRAINTS: strict TypeScript, ESM `.js` relative imports, named exports only; no new dependency; no change
+  to `src/workflow/`, `src/runner/activities.ts`, `types.ts`, the `JournalEntryKind` union, or any contract;
+  the change is confined to the CLI surface (`src/cli/main.ts`, `src/cli/commands.ts`, optional `--json` output
+  parity with the sibling commands) plus the one new behavioral test. Run verification sequentially with bare
+  `pnpm exec`. If a verification step reports a failing test or type error, READ the failure and fix the
+  IMPLEMENTATION — do NOT weaken or delete any assertion.
+repos:
+  - url: /Users/nikitazolotarev/repos/chikory
+    writable: true
+acceptance_criteria:
+  - id: AC-1
+    description: >
+      A `chikory inject <run-id> "<guidance>"` command exists and is wired into the CLI dispatch next to the
+      other signal commands, and a real behavioral test proves that invoking it against a live durable run
+      delivers the guidance through the existing signal path and the run journals it as a kind-`injection`
+      entry carrying the guidance verbatim (with argument-validation for the missing-argument case).
+    check: >
+      cd packages/sdk-ts &&
+      grep -q 'case "inject"' src/cli/main.ts &&
+      grep -q '\.inject(' src/cli/commands.ts &&
+      ! grep -q 'defineSignal' src/cli/commands.ts &&
+      test -f test/cli/inject.test.ts &&
+      grep -q '"inject"' test/cli/inject.test.ts &&
+      grep -q 'injection' test/cli/inject.test.ts
+  - id: AC-2
+    description: >
+      the SDK stays type- and lint-clean and the FULL existing suite — including the new behavioral inject
+      test — is green, proving the command works end-to-end over the real durable layer and that nothing
+      outside the CLI surface changed (no workflow/journal/contract regression).
+    check: cd packages/sdk-ts && pnpm exec tsc --noEmit && pnpm exec eslint . && pnpm exec vitest run
+budget_usd: 6
+max_steps: 6
+executor:
+  adapter: codex
+  family: openai
+judge:
+  family: openai-compat
+  cadence: 1
+  max_cost_share: 0.5
+routing:
+  stages:
+    plan: { provider: openai-compat, model: gpt-5.5 }
+    code: { provider: openai-compat, model: gpt-5.5 }
+    review: { provider: openai-compat, model: gpt-5.5 }
+    judge: { provider: openai-compat, model: gemini-3.1-pro-preview }

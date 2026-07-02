@@ -65,6 +65,7 @@ export {
 } from "./taskspec.js";
 export * from "./judge/index.js";
 export { planCoverageGaps } from "./planner/coverage.js";
+export { extractGoalLiterals, planLiteralGaps } from "./planner/literal-preservation.js";
 export { buildPlannerMessages, PLANNER_SYSTEM_PROMPT, PLAN_RESPONSE_SCHEMA } from "./planner/prompt.js";
 export { buildPlan, type BuildPlanOptions } from "./planner/assemble.js";
 export { buildPlanJudgeMessages, PLAN_JUDGE_SYSTEM_PROMPT, PLAN_VERDICT_RESPONSE_SCHEMA } from "./planner/meta-judge-prompt.js";

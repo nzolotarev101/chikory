@@ -404,17 +404,6 @@ export async function cmdChain(
     ioPair.err(`chikory: cannot read goal spec '${args.file}'`);
     return 1;
   }
-  const launchModeMismatch = assessLaunchModeMismatch({
-    intendedSingleRun: detectIntendedSingleRun(yamlText),
-    launchedAsChain: true,
-  });
-  if (
-    launchModeMismatch !== null &&
-    process.env["CHIKORY_ALLOW_LAUNCH_MODE_MISMATCH"] !== "1"
-  ) {
-    ioPair.err(launchModeMismatch.warning);
-    return 1;
-  }
   let spec: TaskSpec;
   try {
     spec = parseTaskSpec(yamlText);
@@ -424,6 +413,25 @@ export async function cmdChain(
       return 1;
     }
     throw err;
+  }
+
+  // WP-261 / WP-262(a): after a successful parse and BEFORE any planning spend,
+  // refuse a spec that asks for a single `chikory run` but was launched as a
+  // chain. The single-run marker lives in the header comment, so match the raw
+  // yamlText (F-68). Overridable with a NON-EMPTY CHIKORY_ALLOW_LAUNCH_MODE_MISMATCH.
+  const launchModeMismatch = assessLaunchModeMismatch({
+    intendedSingleRun: detectIntendedSingleRun(yamlText),
+    launchedAsChain: true,
+  });
+  if (
+    launchModeMismatch !== null &&
+    (process.env["CHIKORY_ALLOW_LAUNCH_MODE_MISMATCH"] ?? "") === ""
+  ) {
+    ioPair.err(launchModeMismatch.warning);
+    ioPair.err(
+      "[chikory] relaunch with `chikory run`, or set CHIKORY_ALLOW_LAUNCH_MODE_MISMATCH=1 to override",
+    );
+    return 1;
   }
 
   // 1+2: decompose the goal and gate the plan (different-family meta-judge).

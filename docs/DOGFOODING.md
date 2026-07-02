@@ -8,13 +8,15 @@ recover a run, and how to land the result as a normal PR.
 **Status (2026-07-02, bounded — update discipline: REPLACE this block, ≤15 lines;
 displaced prose moves verbatim to [`PLAN-HISTORY.md`](PLAN-HISTORY.md); per-run detail:
 `docs/reports/dogfood-NNN.md`; queue + course correction: `plan.md` §6).**
-Latest: dogfood-073 landed WP-233(b) part 1 — plan-gate failure notice renderer + wire
-(`run-a5f8c5fe`, SUCCESS 1 step $0.75, `docs/reports/dogfood-073.md`); its review opened
-🔴 F-78 → WP-264 (the judge-check runner does not reap the check's process tree — next
-headline, dogfood-074). **Course correction 2026-07-02 (plan.md §6, binding):** headline
-runs now follow the WP-265 horizon ladder with LOOSE (outcome + AC) specs — see §1.5
-(friction budget), §1.4 (KPI table; the one-step-SUCCESS streak is retired), and §3
-(spec-style graduation: prescribed-diff = track-B format).
+Latest: dogfood-074 landed WP-264 — the judge-check runner now REAPS the check's whole
+process tree at the timeout cap (`run-6063231c`, SUCCESS 1 step $1.97, WP-264 → 🟢,
+F-78 closed, no new friction, `docs/reports/dogfood-074.md`): a `sleep 60 & sleep 60`
+pipe-holding grandchild reaped in 1104 ms on a 1 s cap. That was the LAST prescribed-diff
+headline. **Progression gate reads ⛔ STALLED (no thesis axis moved in 3 runs);** per the
+2026-07-02 course correction (plan.md §6, binding), the NEXT headline IS WP-265 horizon-ladder
+rung 1 — dogfood-075, the first LOOSE (outcome + AC, no prescribed diff) headline, on
+WP-212 `chikory inject`. See §1.5 (friction budget), §1.4 (KPI table; the one-step-SUCCESS
+streak is retired), §3 (spec-style graduation: prescribed-diff = track-B format).
 
 Related docs: [`docs/spec/task-spec.md`](spec/task-spec.md) (schema
 reference) · [`docs/TASK-PROTOCOL.md`](TASK-PROTOCOL.md) (WP etiquette, §7 is

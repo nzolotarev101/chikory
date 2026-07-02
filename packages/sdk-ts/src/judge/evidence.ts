@@ -11,6 +11,7 @@ import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 
 import { scrubExecutorEnv } from "../executors/env.js";
+import { runBounded } from "../executors/process.js";
 import type {
   AcceptanceCriterion,
   ArtifactStore,
@@ -63,34 +64,25 @@ function bound(text: string, maxChars: number): string {
   return `${text.slice(0, maxChars)}\n… [truncated ${text.length - maxChars} chars]`;
 }
 
-/** Run one criterion `check` in the workspace; exit code is the verdict input. */
+/** Run one criterion `check` in the workspace; exit code is the verdict input. WP-264 / dogfood-073 F-78 ports WP-255(a)'s process-group kill so pipe-holding grandchildren cannot outlive the cap. */
 async function runCheck(
   workspaceDir: string,
   criterion: AcceptanceCriterion,
   timeoutMs: number,
 ): Promise<CheckRun> {
-  const started = Date.now();
-  let exitCode = 0;
-  let output = "";
-  try {
-    const { stdout, stderr } = await execFileAsync("/bin/sh", ["-c", criterion.check!], {
-      cwd: workspaceDir,
-      timeout: timeoutMs,
-      maxBuffer: 16 * 1024 * 1024,
-      env: scrubExecutorEnv(process.env, []),
-    });
-    output = stdout + stderr;
-  } catch (err) {
-    const e = err as { code?: number | string; stdout?: string; stderr?: string; killed?: boolean };
-    exitCode = typeof e.code === "number" ? e.code : 1;
-    output = `${e.stdout ?? ""}${e.stderr ?? ""}${e.killed ? `\n[check timed out after ${timeoutMs}ms]` : ""}`;
-  }
+  const bounded = await runBounded("/bin/sh", ["-c", criterion.check!], {
+    cwd: workspaceDir,
+    env: scrubExecutorEnv(process.env, []),
+    maxSeconds: timeoutMs / 1000,
+  });
+  const exitCode = bounded.timedOut ? 1 : (bounded.exitCode ?? 1);
+  const output = `${bounded.stdout}${bounded.stderr}${bounded.timedOut ? `\n[check timed out after ${timeoutMs}ms]` : ""}`;
   return {
     criterionId: criterion.id,
     command: criterion.check!,
     exitCode,
     output: bound(output, 64 * 1024),
-    durationMs: Date.now() - started,
+    durationMs: bounded.durationMs,
   };
 }
 

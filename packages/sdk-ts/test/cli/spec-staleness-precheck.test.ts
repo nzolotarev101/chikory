@@ -7,18 +7,23 @@ import {
 } from "../../src/cli/spec-staleness-precheck.js";
 
 describe("extractTargetWpId", () => {
-  it("extracts the first WP id from a raw task spec", () => {
-    const specText = `
-name: dogfood-068-wp258-spec-staleness-precheck
-goal: |
-  Implement WP-258 without touching WP-256.
-`;
+  it("extracts the first WP id from the goal text", () => {
+    const goalText = "Implement WP-258 without touching WP-256.";
 
-    expect(extractTargetWpId(specText)).toBe("WP-258");
+    expect(extractTargetWpId(goalText)).toBe("WP-258");
   });
 
-  it("returns null when the raw task spec has no WP id", () => {
-    expect(extractTargetWpId("goal: Implement the requested pure module")).toBeNull();
+  it("WP-260: reads the goal's target, so a preamble that name-drops other WPs first is irrelevant", () => {
+    // The caller now passes spec.goal (not raw YAML), so preamble WP mentions
+    // like a ladder rung or prior run cannot hijack the target.
+    const goalText =
+      "Give the operator `chikory inject` — WP-212 / requirement OB-2. (rung 1 of WP-265.)";
+
+    expect(extractTargetWpId(goalText)).toBe("WP-212");
+  });
+
+  it("returns null when the goal has no WP id", () => {
+    expect(extractTargetWpId("Implement the requested pure module")).toBeNull();
   });
 });
 

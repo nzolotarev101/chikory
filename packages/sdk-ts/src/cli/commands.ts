@@ -239,7 +239,9 @@ export async function cmdRun(
   }
   const planText = await readPlanText(deps);
   if (planText !== null) {
-    const precheck = evaluateSpecStalenessPrecheck(yamlText, planText);
+    // WP-260: extract the staleness target from the parsed goal, not the raw
+    // yamlText (whose comment preamble name-drops many WPs → wrong target).
+    const precheck = evaluateSpecStalenessPrecheck(spec.goal, planText);
     if (precheck.warning !== null) {
       ioPair.err(precheck.warning);
     }

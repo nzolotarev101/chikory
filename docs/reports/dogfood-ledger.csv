@@ -9,3 +9,4 @@ run,wp,mode,outcome,steps,cost_usd,spec_format,class,resumes,judge_catches,rung
 071,WP-261,chain,SUCCESS,1,1.13,prescribed,meta,0,0,0
 072,WP-233,run,SUCCESS,2,0.42,prescribed,product,0,0,0
 073,WP-233,run,SUCCESS,1,0.75,prescribed,product,0,0,0
+074,WP-264,run,SUCCESS,1,1.97,prescribed,product,0,0,0

@@ -58,6 +58,83 @@ describe("buildPlanVerdict (WP-219 S2b, ADR-005 D2)", () => {
     expect(verdict.rationale).toContain("AC-3");
   });
 
+  it("downgrades PROCEED to REVISE when the plan drops a mandated goal literal (WP-257 §4, F-64)", () => {
+    const reply: PlanJudgeReply = { kind: "PROCEED", rationale: "The plan is sound." };
+    const paraphrasedPlan: Plan = {
+      ...plan,
+      goal: "Wire `assessLaunchModeMismatch` into `cmdChain`",
+      nodes: [
+        {
+          // the planner paraphrased away the two backtick literals
+          id: "N-1",
+          goal: "Add the launch-mode guard to the chain command",
+          acceptanceCriteria: [{ id: "AC-1", description: "The first slice is complete" }],
+          dependsOn: [],
+          budgetUsd: 1,
+        },
+        {
+          id: "N-2",
+          goal: "Implement the second plan slice",
+          acceptanceCriteria: [{ id: "AC-2", description: "The second slice is complete" }],
+          dependsOn: ["N-1"],
+          budgetUsd: 1,
+        },
+      ],
+    };
+
+    const verdict = buildPlanVerdict(reply, paraphrasedPlan, goalCriteria);
+
+    expect(verdict.kind).toBe("REVISE");
+    expect(verdict.rationale).toContain("literal override");
+    expect(verdict.rationale).toContain("assessLaunchModeMismatch");
+    expect(verdict.rationale).toContain("cmdChain");
+  });
+
+  it("stays PROCEED when every mandated goal literal is preserved by some node", () => {
+    const reply: PlanJudgeReply = { kind: "PROCEED", rationale: "The plan is sound." };
+    const faithfulPlan: Plan = {
+      ...plan,
+      goal: "Wire `assessLaunchModeMismatch` into `cmdChain`",
+      nodes: [
+        {
+          id: "N-1",
+          goal: "Call `assessLaunchModeMismatch` inside `cmdChain`",
+          acceptanceCriteria: [{ id: "AC-1", description: "The first slice is complete" }],
+          dependsOn: [],
+          budgetUsd: 1,
+        },
+        {
+          id: "N-2",
+          goal: "Implement the second plan slice",
+          acceptanceCriteria: [{ id: "AC-2", description: "The second slice is complete" }],
+          dependsOn: ["N-1"],
+          budgetUsd: 1,
+        },
+      ],
+    };
+
+    const verdict = buildPlanVerdict(reply, faithfulPlan, goalCriteria);
+
+    expect(verdict.kind).toBe("PROCEED");
+    expect(verdict.rationale).toBe(reply.rationale);
+  });
+
+  it("does not fire the literal override on a non-PROCEED reply even with dropped literals", () => {
+    const reply: PlanJudgeReply = {
+      kind: "ESCALATE",
+      rationale: "The plan needs human review.",
+    };
+    const paraphrasedPlan: Plan = {
+      ...plan,
+      goal: "Wire `assessLaunchModeMismatch` into `cmdChain`",
+    };
+
+    const verdict = buildPlanVerdict(reply, paraphrasedPlan, goalCriteria);
+
+    expect(verdict.kind).toBe("ESCALATE");
+    expect(verdict.rationale).toBe(reply.rationale);
+  });
+
   it("preserves a non-PROCEED reply when coverage is complete", () => {
     const reply: PlanJudgeReply = {
       kind: "ESCALATE",
