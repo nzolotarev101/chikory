@@ -1,0 +1,179 @@
+# Dogfood-076: WP-265 rung 2 — the FIRST at-horizon run. Build the WP-213 native raw-LLM loop executor.
+# Format: LOOSE (horizon-ladder headline — goal states the OUTCOME + constraints, the acceptance criteria pin
+#   what "done" means via OUTCOME SYMBOLS THE GOAL NAMES, the internal loop design / tool set / prompt / test
+#   layout is LEFT TO THE EXECUTOR; NO prescribed diff).
+# Ladder-rung: 2
+# Thesis-KPI: horizon + per-step reliability + durable resume — the FIRST ≥10-step run (compounding-error /
+#   context-rot measurement over a real multi-step build) AND the first LIVE kill→resume: the operator kills the
+#   worker mid-run and `chikory resume` completes it without re-executing any journaled step (durable execution).
+#
+# LAUNCH WITH `chikory run` (single durable run, NOT `chikory chain`). NO seam env.
+#      devbox run run-dogfood        # ← single `chikory run`; picks the latest spec (this one)
+#    (NEVER `devbox run chain-dogfood`. The committed `cmdChain` launch-mode guard refuses this single-`run`
+#    spec launched as a chain at zero LLM cost. Override — do NOT — `CHIKORY_ALLOW_LAUNCH_MODE_MISMATCH=1`.)
+#
+# ⚠️ RUNG-2 OPERATOR PROCEDURE — the deliberate mid-run kill→resume (this is what makes it rung 2):
+#   1. Launch `devbox run run-dogfood` and watch the stream.
+#   2. After the run has journaled AT LEAST 3–4 SUCCESS steps (so there is durable progress to preserve), in a
+#      second shell: `kill -9 <the chikory worker PID>` (the `run-dogfood` script prints it; or `pgrep -f chikory`).
+#   3. Resume: `devbox run -- pnpm chikory resume <run-id> --watch`. The run MUST continue from the last
+#      checkpoint — journaled steps are NOT re-executed (no duplicate spend; crash-recovery WP-123 is the unit
+#      analog, this is the live at-horizon proof). Record in the report: kill step #, resume step #, whether any
+#      step re-ran, and the pre/post checkpoint chain. This is the run's PRIMARY thesis artifact.
+#   If the run finishes before you kill it (fewer than ~10 steps), that itself is data — record it and note the
+#   build was smaller than the horizon target; do NOT pad the spec.
+#
+# WHY THIS IS NEXT (2026-07-02): dogfood-075 (rung 1) flipped the progression gate ⛔ STALLED → ✅ PROGRESSING
+# (rung 0→1, loose 0→1, max steps 2→3) by delivering `chikory inject` on a LOOSE spec — but it sealed FAILED on a
+# self-inflicted AC (F-82 → WP-266) and it was still only 3 steps. The thesis metrics (99%+ per-step reliability
+# over 60+ steps, context rot over hours, durable resume at horizon) have STILL never been measured. Rung 2 is the
+# first run built to produce that data: a genuine ≥10-step build with a live kill→resume. WP-213 (native raw-LLM
+# loop executor, plan.md §6 🟡, requirement IF-2 hedge) is the rung-2 host — it is a real open product WP, its
+# deliverable (a router-driven executor that needs no CLI agent) is the benchmark-control executor WP-301 needs
+# and the WP-111 "CLI agents change under us" hedge, and building a tool-calling agent loop is inherently a
+# multi-step, cross-file, plausibly-failing task.
+#
+# THE OPEN GAP: the two CLI executors (`src/executors/codex.ts`, `src/executors/claude-code.ts`) SHELL OUT to a
+# binary and parse its wire format. There is NO in-process executor that drives the LLM directly. The substrate
+# to build on already exists:
+#   * `ExecutorAdapter` (`src/types.ts:178`) — `{ name; modelFamily; runStep(input: StepInput): Promise<StepRecord> }`.
+#   * `StepInput` (`types.ts:186`) — `{ workspaceDir; instruction; context: ContextBundle; limits: StepLimits }`.
+#   * `StepRecord` (`types.ts:200`) — the required return shape (`status`, `diffRef`, `summary`, `toolCalls`,
+#     `tokens`, `costUsd`, `costEstimated`, `durationMs`, `transcriptRef`, optional `failure`/`claimsComplete`).
+#   * `ProviderAdapter.complete(req)` (`src/providers/provider.ts:24`) + the `Router` (`src/router.ts`) — the
+#     vendor-neutral LLM call the loop drives (NOT a shelled binary).
+#   * `captureWorkspaceDiff` (`src/executors/workspace.ts`) + the `ArtifactStore` (persist diff+transcript →
+#     `ArtifactRef`) — exactly as the codex/claude adapters use.
+#   * The `ADAPTERS` registry (`src/cli/commands.ts:24`) maps `"claude-code"`/`"codex"` → factory; a spec's
+#     `executor.adapter` selects one. A `"native"` entry is missing.
+# The INTERNAL design — which file tools to expose (read/write/list/edit/run), the loop/turn structure, the
+# system prompt, tool-call parsing, how the router is threaded into the adapter factory, and the test layout —
+# is YOURS to design. That is the loose surface and the real failure surface.
+#
+# WHY LOOSE (and a plausible failure surface): the goal fixes the OUTCOME (a `native` adapter, registered, that
+# drives a real router tool-loop to edit the workspace and returns a valid `StepRecord`) and the constraints
+# (implement `ExecutorAdapter`, use the Router/provider layer NOT a shelled binary, reuse `captureWorkspaceDiff`
+# + the ArtifactStore, no new dependency, don't touch the workflow/journal/contract), but leaves the loop design
+# to the executor. A competent agent can plausibly fail this: the tool-calling loop must terminate (no infinite
+# turn loop), tool errors must be fed back not crash the step, the diff must be captured into an `ArtifactRef`,
+# the `StepRecord` must be well-formed (a wrong `status`/missing `diffRef` breaks the runner), the router must be
+# threaded through the adapter factory (whose ctx today is only `{ store, model }`), and a real behavioral test
+# must drive the loop deterministically (a scripted in-memory `ProviderAdapter` that emits a fixed tool-call
+# sequence — testing the LOOP mechanics, NOT mocking to hide failure; CLAUDE.md forbids mocking the LLM only to
+# mask real failure modes, a deterministic scripted provider that exercises the real loop is the standard seam).
+# It is cross-file (new executor module + registry wire + behavioral test), ≥10 steps, on the horizon pillar.
+#
+# F-82 APPLIED (dogfood-075): the ACs below anchor on OUTCOME SYMBOLS THE GOAL NAMES (`createNativeAdapter`, the
+# `native` registry key, the `ExecutorAdapter` shape) and grep the test tree RECURSIVELY for the adapter symbol —
+# they do NOT pin a new test FILENAME the goal delegates. A LOOSE-spec AC must never `test -f <a-new-file>` for a
+# path the goal left to the executor (that is exactly what false-FAILED dogfood-075). WP-266 will lint this.
+#
+# Gate verdicts (dogfood-review §5, applied inline on CURRENT HEAD):
+#   * §0 Progression: ✅ PROGRESSING (dogfood-ledger through row 075) → next headline = the next WP-265 ladder
+#     rung. Rung 1 (WP-212) done-with-caveat; rung 2 = WP-213. This spec IS the ladder rung.
+#   * §1.1 Failure-surface: ✅ — ≥10-step cross-file build on the native-executor / horizon pillar; loop
+#     termination, tool-error handling, diff capture, StepRecord well-formedness, router threading, live resume.
+#   * §1.2 Product-progress: ✅ — advances REAL open plan.md §6 WP-213 (🟡, IF-2 hedge / WP-301 dependency).
+#     Net-new real product code; reuses the landed adapter/artifact/router substrate; NO scaffolding, NO new dep.
+#   * §1.3 Mission-critical: ✅ PROCEED — thesis-stressing horizon slice on a real product WP; not busy, not
+#     scaffold-hosted; the veto does not fire.
+#   * §1.5 Friction-budget: ✅ — `class=product`, `spec_format=loose`, NOT harness-meta; trailing-3 meta:product
+#     headline ratio 0/3, cap not busted.
+#
+# Zero-secrets launch (no API keys; CLI-OAuth judge via the shim; NO seam vars). The script auto-starts the
+# `agy`/Antigravity proxy for the gemini judge:
+#   devbox shell
+#   devbox run run-dogfood        # single `chikory run`, latest spec (this one)
+#
+# Pre-launch discipline:
+#   * COMMIT EVERYTHING first — the workspace clones HEAD (F-30: launch ONCE). The dogfood-075 delivery
+#     (3 staged files: `cli/commands.ts`, `cli/main.ts`, `test/cli/cli.test.ts`) AND this review's report/
+#     living-doc edits are uncommitted; land them so HEAD is lint-GREEN before the clone (the clone must pass
+#     this run's own AC `eslint .`).
+#   * F-45: any NEW test file this run creates MUST be ABSENT on HEAD (the native adapter's test is net-new).
+#   * F-49/F-82: each AC greps the OUTCOME anchors the goal NAMES before running the suite; no delegated-file pin.
+#   * F-76/F-80 (codex): a ≥10-step build WILL take a while — do NOT raise `budget_usd`/`max_steps` mid-run to
+#     rescue it; if codex blows the per-step wall-clock cap or ignores the bare-`pnpm exec` mandate, RECORD it.
+#   * Run Devbox commands sequentially (F-22). Bare `pnpm exec`, NOT `devbox run` (F-24), in the ACs.
+name: dogfood-076-wp213-native-executor
+goal: >
+  Build the WP-213 NATIVE raw-LLM loop executor — the first in-process Chikory executor that drives the LLM
+  DIRECTLY through the vendor-neutral provider/router layer, instead of shelling out to a CLI agent binary the
+  way the `codex` and `claude-code` adapters do. Today Chikory can only execute a step by spawning an external
+  CLI agent (`src/executors/codex.ts`, `src/executors/claude-code.ts`) and parsing its wire format; there is no
+  executor for benchmark-control runs or environments without a CLI agent installed. Close that gap.
+
+  OUTCOME (what "done" means — the HOW is yours to design):
+    * A new executor module `src/executors/native.ts` exports a factory `createNativeAdapter(...)` that returns an
+      object implementing the `ExecutorAdapter` interface (`src/types.ts:178`): `name` === "native", a
+      `modelFamily`, and `async runStep(input: StepInput): Promise<StepRecord>`.
+    * `runStep` drives a REAL tool-calling loop: it renders the step instruction + context into an LLM request,
+      calls the LLM through the project's provider/router layer (`ProviderAdapter.complete` / `Router` —
+      `src/providers/provider.ts`, `src/router.ts`), and executes the model's tool calls against `workspaceDir`
+      (at minimum: read a file, write/edit a file, list files) in a bounded loop that TERMINATES (respect
+      `input.limits.maxTurns`/`maxSeconds`; a tool error is fed back to the model as an observation, it does NOT
+      throw out of the step). Do NOT shell out to any CLI agent binary — the whole point is the direct LLM drive.
+    * `runStep` returns a well-formed `StepRecord`: `status` SUCCESS when the model signals completion / FAILED on
+      a hard error; the workspace diff captured via the existing `captureWorkspaceDiff` (`src/executors/workspace.ts`)
+      and persisted through the ArtifactStore into `diffRef`; `summary`, `toolCalls`, `tokens`, `costUsd`,
+      `costEstimated`, `durationMs`, `transcriptRef` all populated (mirror how `codex.ts`/`claude-code.ts` build
+      theirs). A malformed record (wrong status, missing `diffRef`/`transcriptRef`) breaks the runner — get it right.
+    * Register the adapter: add a `"native"` entry to the `ADAPTERS` map in `src/cli/commands.ts` so a task spec
+      with `executor: { adapter: native, family: … }` selects it. Thread whatever the factory needs (the router /
+      provider) through the adapter-construction path — the current factory ctx is `{ store, model }`; extend it
+      minimally and additively if the native adapter needs the router, without breaking the codex/claude entries.
+    * Prove it with a REAL behavioral test: drive `createNativeAdapter(...).runStep` end-to-end against a
+      DETERMINISTIC scripted `ProviderAdapter` (an in-memory `complete()` that emits a fixed tool-call sequence:
+      e.g. write a file, then signal done) over a real temp git workspace, and assert the step returns
+      `status` SUCCESS with a NON-empty captured diff and a well-formed `StepRecord`, and that a tool error the
+      script emits is fed back (the loop does not throw). This tests the LOOP, not the LLM — do not mock to hide
+      failure. Reference `createNativeAdapter` from the test so the outcome is greppable.
+
+  CONSTRAINTS: strict TypeScript, ESM `.js` relative imports, named exports only; NO new dependency; do NOT change
+  `src/workflow/`, `src/runner/activities.ts`, `types.ts`'s `ExecutorAdapter`/`StepRecord`/`StepInput` shapes, the
+  `JournalEntryKind` union, or any contract — CONSUME them. Reuse `captureWorkspaceDiff` and the ArtifactStore;
+  reuse the provider/router layer (do not invent a second LLM path). Re-export `createNativeAdapter` from
+  `src/executors/index.js`. Run verification sequentially with bare `pnpm exec`. If a verification step reports a
+  failing test or type error, READ the failure and fix the IMPLEMENTATION — do NOT weaken or delete any assertion.
+repos:
+  - url: /Users/nikitazolotarev/repos/chikory
+    writable: true
+acceptance_criteria:
+  - id: AC-1
+    description: >
+      A `native` executor adapter exists — `createNativeAdapter` in `src/executors/native.ts` implementing the
+      `ExecutorAdapter` shape (name "native", `runStep`), driving the LLM through the provider/router layer (not a
+      shelled binary) and capturing the workspace diff — it is registered in the `ADAPTERS` map in
+      `src/cli/commands.ts`, re-exported from the executors barrel, and a real behavioral test drives it end-to-end.
+      (OUTCOME anchors the goal NAMES; the test file layout is the executor's to choose — F-82.)
+    check: >
+      cd packages/sdk-ts &&
+      grep -q 'createNativeAdapter' src/executors/native.ts &&
+      grep -q '"native"' src/executors/native.ts &&
+      grep -Eq 'runStep' src/executors/native.ts &&
+      grep -Eq 'captureWorkspaceDiff' src/executors/native.ts &&
+      ! grep -Eq 'execFile|spawn' src/executors/native.ts &&
+      grep -q 'native' src/cli/commands.ts &&
+      grep -q 'createNativeAdapter' src/executors/index.ts &&
+      grep -rq 'createNativeAdapter' test/
+  - id: AC-2
+    description: >
+      the SDK stays type- and lint-clean and the FULL existing suite — including the new native-adapter
+      behavioral test — is green, proving the loop works end-to-end and nothing outside the executor surface
+      regressed (no workflow/journal/contract change).
+    check: cd packages/sdk-ts && pnpm exec tsc --noEmit && pnpm exec eslint . && pnpm exec vitest run
+budget_usd: 30
+max_steps: 16
+executor:
+  adapter: codex
+  family: openai
+judge:
+  family: openai-compat
+  cadence: 2
+  max_cost_share: 0.5
+routing:
+  stages:
+    plan: { provider: openai-compat, model: gpt-5.5 }
+    code: { provider: openai-compat, model: gpt-5.5 }
+    review: { provider: openai-compat, model: gpt-5.5 }
+    judge: { provider: openai-compat, model: gemini-3.1-pro-preview }

@@ -445,6 +445,34 @@ export async function cmdCancel(
   }
 }
 
+export async function cmdInject(
+  args: { runId: string; guidance: string } & CommonFlags,
+  deps: CliDeps = {},
+): Promise<number> {
+  const ioPair = io(deps);
+  if (args.guidance.length === 0) {
+    ioPair.err(`chikory: missing guidance text (see chikory --help)`);
+    return 1;
+  }
+  const runner = createTemporalRunner({ address: args.address, dataDir: args.dataDir });
+  try {
+    const handle = await runner.get(args.runId);
+    await handle.inject(args.guidance);
+    if (args.json) {
+      ioPair.out(JSON.stringify({ runId: args.runId, injected: true, guidance: args.guidance }));
+    } else {
+      ioPair.out(`guidance delivered to ${args.runId}`);
+      ioPair.out(`it will be applied at the next step boundary`);
+    }
+    return 0;
+  } catch (err) {
+    ioPair.err(`chikory: inject failed: ${actionable(err)}`);
+    return 1;
+  } finally {
+    await runner.close();
+  }
+}
+
 export async function cmdTrace(
   args: { runId: string; step?: number } & CommonFlags,
   deps: CliDeps = {},

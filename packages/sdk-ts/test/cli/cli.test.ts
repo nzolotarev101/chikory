@@ -5,7 +5,8 @@
  * status; `--json` output is machine-parseable (cli.md conventions).
  */
 import { randomUUID } from "node:crypto";
-import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { existsSync } from "node:fs";
+import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -15,8 +16,8 @@ import { followRun, type CliDeps } from "../../src/cli/commands.js";
 import { main } from "../../src/cli/main.js";
 import type { RunStatusReport } from "../../src/index.js";
 import { Journal } from "../../src/journal/journal.js";
-import { journalPath } from "../../src/runner/paths.js";
-import type { RunHandle } from "../../src/types.js";
+import { artifactsDir, journalPath } from "../../src/runner/paths.js";
+import type { ArtifactRef, ContextBundle, JournalEntry, RunHandle } from "../../src/types.js";
 import {
   initSourceRepo,
   judgeForm,
@@ -118,6 +119,21 @@ describe.skipIf(address === null)("chikory CLI (WP-141/142)", () => {
     const line = out.find((l) => l.startsWith("run-id: "));
     expect(line, `run-id line in: ${out.join("\n")}`).toBeDefined();
     return line!.slice("run-id: ".length);
+  }
+
+  function payloadWithText(entry: JournalEntry): { text: string; atStep: number } {
+    const payload = entry.payload;
+    expect(payload).toMatchObject({ text: expect.any(String), atStep: expect.any(Number) });
+    return payload as { text: string; atStep: number };
+  }
+
+  function checkpointPayload(entry: JournalEntry): { stepIndex: number; contextSnapshotRef: ArtifactRef } {
+    const payload = entry.payload;
+    expect(payload).toMatchObject({
+      stepIndex: expect.any(Number),
+      contextSnapshotRef: expect.objectContaining({ id: expect.any(String) }),
+    });
+    return payload as { stepIndex: number; contextSnapshotRef: ArtifactRef };
   }
 
   async function statusReport(runId: string, dataDir: string): Promise<RunStatusReport> {
@@ -267,6 +283,61 @@ describe.skipIf(address === null)("chikory CLI (WP-141/142)", () => {
     expect(report.status).toBe("CANCELLED");
   });
 
+  test("inject delivers operator guidance into a live run journal", async () => {
+    const guidance = "WP-212-INJECT-SENTINEL preserve this exact guidance";
+    const { dataDir, specFile } = await setup(
+      { delayMs: 500 },
+      { cadence: 50, maxSteps: 4, budget: 100 },
+    );
+
+    const run = cli();
+    const runPromise = main(["run", specFile, ...common(dataDir)], run.deps);
+    const runId = await waitFor(
+      async () => run.out.find((l) => l.startsWith("run-id: "))?.slice("run-id: ".length),
+      { what: "run-id printed" },
+    );
+    const path = journalPath(dataDir, runId);
+    await waitFor(
+      async () => {
+        if (!existsSync(path)) return undefined;
+        const journal = new Journal(path);
+        try {
+          return journal.entries("step").length >= 1 ? true : undefined;
+        } finally {
+          journal.close();
+        }
+      },
+      { intervalMs: 50, what: "first step journaled before injection" },
+    );
+
+    const injectCommand = cli();
+    expect(await main(["inject", runId, guidance, ...common(dataDir)], injectCommand.deps)).toBe(0);
+    expect(injectCommand.out.join("\n")).toContain(`guidance delivered to ${runId}`);
+
+    expect(await runPromise).toBe(1);
+    const journal = new Journal(path);
+    try {
+      const injections = journal.entries("injection");
+      expect(injections).toHaveLength(1);
+      const injection = payloadWithText(injections[0]!);
+      expect(injection.text).toBe(guidance);
+      expect(injections[0]!.payload).toMatchObject({
+        source: "human",
+        text: guidance,
+      });
+      const checkpoint = journal
+        .entries("checkpoint")
+        .map(checkpointPayload)
+        .find((entry) => entry.stepIndex === injection.atStep);
+      expect(checkpoint, `checkpoint for injected step ${injection.atStep}`).toBeDefined();
+      const snapshotPath = join(artifactsDir(dataDir, runId), checkpoint!.contextSnapshotRef.id);
+      const context = JSON.parse(await readFile(snapshotPath, "utf8")) as ContextBundle;
+      expect(context.injections).toContain(guidance);
+    } finally {
+      journal.close();
+    }
+  });
+
   test("actionable errors: bad spec, unknown command, missing run", async () => {
     const bad = cli();
     const tmp = await mkdtemp(join(tmpdir(), "chikory-cli-bad-"));
@@ -288,9 +359,21 @@ describe.skipIf(address === null)("chikory CLI (WP-141/142)", () => {
     expect(await main(["trace", "run-nope", "--data-dir", tmp], noRun.deps)).toBe(1);
     expect(noRun.err.join("\n")).toContain("no journal for run");
 
+    const noInjectRun = cli();
+    expect(await main(["inject"], noInjectRun.deps)).toBe(1);
+    expect(noInjectRun.err.join("\n")).toContain("missing run-id");
+
+    const noGuidance = cli();
+    expect(await main(["inject", "run-nope"], noGuidance.deps)).toBe(1);
+    expect(noGuidance.err.join("\n")).toContain("missing guidance text");
+
+    const emptyGuidance = cli();
+    expect(await main(["inject", "run-nope", ""], emptyGuidance.deps)).toBe(1);
+    expect(emptyGuidance.err.join("\n")).toContain("missing guidance text");
+
     const help = cli();
     expect(await main(["--help"], help.deps)).toBe(0);
-    for (const cmd of ["run", "resume", "status", "approve", "cancel", "trace"]) {
+    for (const cmd of ["run", "resume", "status", "approve", "inject", "cancel", "trace"]) {
       expect(help.out.join("\n")).toContain(cmd);
     }
   });

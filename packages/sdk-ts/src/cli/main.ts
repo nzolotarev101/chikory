@@ -10,6 +10,7 @@ import { DEFAULT_DATA_DIR } from "../runner/paths.js";
 import {
   cmdApprove,
   cmdCancel,
+  cmdInject,
   cmdResume,
   cmdRun,
   cmdStatus,
@@ -38,6 +39,9 @@ commands:
   status [<run-id>]   live run state: current step, spend vs budget, last
                       verdict, checkpoints; no argument lists all local runs
   approve <run-id>    answer an ESCALATE (default approves)
+  inject <run-id> <guidance>
+                      steer a running agent with operator guidance; delivered
+                      at the next step boundary
   cancel <run-id>     graceful stop at the next step boundary (final
                       checkpoint is written)
   trace <run-id>      trajectory forensics from the journal: per-step
@@ -171,6 +175,7 @@ export async function main(argv: string[], deps: LandDeps = {}): Promise<number>
         break;
       case "status":
       case "cancel":
+      case "inject":
         parsed = parseCommand(rest, {});
         break;
       default:
@@ -253,6 +258,16 @@ export async function main(argv: string[], deps: LandDeps = {}): Promise<number>
       const runId = requireArg(positionals, "run-id", io);
       if (runId === undefined) return 1;
       return cmdCancel({ runId, ...flags }, deps);
+    }
+    case "inject": {
+      const runId = requireArg(positionals, "run-id", io);
+      if (runId === undefined) return 1;
+      const guidance = positionals[1];
+      if (guidance === undefined || guidance.length === 0) {
+        io.err(`chikory: missing guidance text (see chikory --help)`);
+        return 1;
+      }
+      return cmdInject({ runId, guidance, ...flags }, deps);
     }
     case "trace": {
       const runId = requireArg(positionals, "run-id", io);
