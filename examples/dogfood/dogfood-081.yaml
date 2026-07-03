@@ -1,0 +1,145 @@
+# Dogfood-081: WP-269 — INTRA-RUN STEP-FORCING, the rung-3 ENABLER that dogfood-080
+#   proved is required. dogfood-077/079/080 established (F-86/F-94/F-95) that codex
+#   ONE-SHOTS any single-run goal: it self-declares completion (`StepRecord.claimsComplete`)
+#   after one session, `isCompletionMilestone` fires, the judge PROCEEDs, the run seals
+#   in ~1 durable step — so the intra-run ≥5-step horizon / per-step-reliability curve /
+#   a meaningful mid-run kill→resume are UNREACHABLE by "make the goal bigger". They must
+#   be FORCED by the harness. This run builds that mechanism: a bounded-work-unit policy
+#   that DEFERS a premature completion and re-enters the durable loop with an "advance the
+#   next increment only" directive until a minimum durable-step floor is met, so ONE
+#   `chikory run` accumulates many sealed checkpoints.
+#
+# CARVE-OUT DECLARATION (DOGFOODING §1.2 fallback / TASK-PROTOCOL §4): the default rung-3
+#   headline (a rung-3 HORIZON run) is BLOCKED — it depends on this harness capability that
+#   does not yet exist (F-95: no run can produce a ≥5-step intra-run horizon until step-forcing
+#   lands). This WP IS that blocking dependency; building it is the sanctioned next priority,
+#   after which dogfood-082 runs the rung-3 horizon + mid-run kill→resume ON this machinery.
+#
+# Format: LOOSE (headline — goal states the OUTCOME + constraints; ACs pin what "done"
+#   means via OUTCOME SYMBOLS THE GOAL NAMES; module/test layout LEFT TO THE EXECUTOR,
+#   F-82/F-83; NO prescribed diff).
+# Ladder-rung: 3
+# Thesis-KPI: INTRA-run durable step count — the mechanism that makes a single `chikory run`
+#   seal ≥N durable checkpoints for a multi-part goal (per-step reliability / compounding-error
+#   over one long session, and a mid-run kill→resume that lands BETWEEN sealed steps of one run).
+#
+# NOTE: this ENABLER run will itself likely one-shot (it is a normal feature build, not the
+#   horizon proof) — that is expected and fine; the DELIVERABLE is the step-forcing machinery,
+#   the horizon PROOF comes next on it (dogfood-082).
+#
+# LAUNCH WITH `chikory run` (a single durable run):
+#      devbox run run-dogfood       # <- `chikory run`; picks the latest spec (this one)
+
+name: dogfood-081-wp269-intra-run-step-forcing
+goal: >
+  Make INTRA-RUN STEP-FORCING a first-class, OPT-IN durable-loop capability so a single
+  `chikory run` accumulates MANY sealed durable checkpoints for a multi-part goal instead
+  of collapsing into one executor session. Today the executor self-declares completion via
+  `StepRecord.claimsComplete`, `isCompletionMilestone` (`src/workflow/judge-trigger.ts`) fires
+  on the first session, the judge PROCEEDs, and the run seals in ~1 durable step — so the
+  intra-run horizon is unreachable (F-95, dogfood-080). Build the harness lever that forces it:
+
+    * PART 1 — PURE DECISION: add a pure, deterministic, side-effect-free `decideStepForcing`
+      function that, given the current loop state (durable steps sealed so far, whether the
+      executor claimed completion this step, whether the acceptance criteria are met) and an
+      opt-in bounded-work-unit policy, returns whether to DEFER the completion milestone and
+      FORCE another increment, plus the increment directive text to hand the executor next.
+      It MUST be a sibling of the existing pure decision modules (`decideContextWindowPacing`,
+      the verdict/pacing reducers): no I/O, no Temporal, no clock — a total function over its
+      inputs, unit-tested exhaustively (floor not yet met → force-continue with a directive;
+      floor met AND criteria satisfied → allow completion; no policy → NEVER force, the
+      default path is untouched).
+
+    * PART 2 — DURABLE-LOOP WIRE (depends on 1): call `decideStepForcing` in the agent loop's
+      completion-milestone path (`src/workflow/agent-loop.ts`) so that, under an active policy,
+      a premature `claimsComplete` does NOT seal the run — instead the loop records the
+      increment directive into the next step's context and re-enters, sealing a durable
+      checkpoint per increment, until the step floor is met AND the judge confirms the ACs.
+      With NO policy present the behavior MUST be byte-for-byte identical to today (the
+      completion milestone still fires exactly as before) — this is purely additive and
+      opt-in. The bounded-work-unit policy is an ADDITIVE OPTIONAL field on the run's spec
+      input; do NOT change the shape of any existing shared contract (`StepRecord`,
+      `JournalEntry`, `Checkpoint`) — the policy is optional INPUT, not a contract mutation.
+
+    * PART 3 — LIVE PROOF (depends on 2): add a LIVE Temporal test that drives a real single
+      `chikory run` whose goal has several parts under an active step-forcing policy, and
+      asserts the run seals AT LEAST the policy's floor of DURABLE CHECKPOINTS (a genuine
+      intra-run horizon — more than one sealed step), each advancing the work, reaching a
+      SUCCESS terminal state; and asserts that with NO policy the SAME goal still seals in the
+      unchanged one-shot path (the additive guarantee). Reuse the existing live-Temporal test
+      harness (`createTemporalRunner`/`createRunnerWorker`, the scripted registry + `waitFor`
+      helpers) — do NOT mock the workflow.
+
+  CONSTRAINTS: strict TypeScript, ESM `.js` relative imports, named exports only; NO new
+  dependency; the NO-policy path MUST stay byte-identical (default runs unchanged); do NOT
+  change any existing contract or shared type shape (`StepRecord` / `JournalEntry` /
+  `Checkpoint`) — the policy is an additive OPTIONAL spec field, `decideStepForcing` is a NEW
+  pure module, the loop wire is additive. Reuse `isCompletionMilestone` and the existing pure
+  `decide*` module pattern; do NOT re-implement completion detection. Do NOT weaken the WP-123
+  crash-recovery or WP-206 suspend/resume resume paths. If a verification step reports a
+  failing test or type error, READ the failure and fix the IMPLEMENTATION — do NOT weaken or
+  delete any assertion.
+
+repos:
+  - url: /Users/nikitazolotarev/repos/chikory
+    writable: true
+
+acceptance_criteria:
+  - id: AC-1
+    description: >
+      The pure `decideStepForcing` decision exists in the workflow source, a side-effect-free
+      total function over loop state + the opt-in policy. (OUTCOME symbol the goal NAMES —
+      `decideStepForcing` — absent on HEAD so a recursive grep cannot false-green on an
+      incumbent file, F-90. Module/test layout is the executor's, F-82/F-83.)
+    check: >
+      cd packages/sdk-ts &&
+      grep -rq 'decideStepForcing' src/workflow/
+
+  - id: AC-2
+    description: >
+      The durable agent loop HONORS the decision — `decideStepForcing` is called from the
+      loop's completion-milestone path so an active policy defers a premature completion and
+      re-enters. (Same symbol, scoped to the loop file, proving the wire — the def+wire
+      pattern of dogfood-052/WP-245.)
+    check: >
+      cd packages/sdk-ts &&
+      grep -rq 'decideStepForcing' src/workflow/agent-loop.ts
+
+  - id: AC-3
+    description: >
+      A LIVE test exercises step-forcing end-to-end through the durable loop (drive one real
+      `chikory run` under an active policy and assert it seals more than one durable checkpoint
+      — a real intra-run horizon — plus the no-policy path stays one-shot). (Anchored on the
+      net-new `decideStepForcing` symbol appearing in the test tree — net-new on HEAD so no
+      incumbent file false-greens it, F-90; the test filename is the executor's, F-82.)
+    check: >
+      cd packages/sdk-ts &&
+      grep -rq 'decideStepForcing' test/
+
+  - id: AC-4
+    description: >
+      The SDK stays type- and lint-clean and the FULL existing suite — including the new
+      step-forcing unit + live tests — is green, proving step-forcing is additive and nothing
+      outside it regressed (no contract/`StepRecord`/`Checkpoint` change; the WP-123
+      crash-recovery and WP-206 suspend/resume tests still pass, and the no-policy default
+      path is unchanged).
+    check: cd packages/sdk-ts && pnpm exec tsc --noEmit && pnpm exec eslint . && pnpm exec vitest run
+
+budget_usd: 40
+max_steps: 30
+
+executor:
+  adapter: codex
+  family: openai
+
+judge:
+  family: openai-compat
+  cadence: 2
+  max_cost_share: 0.5
+
+routing:
+  stages:
+    plan: { provider: openai-compat, model: gpt-5.5 }
+    code: { provider: openai-compat, model: gpt-5.5 }
+    review: { provider: openai-compat, model: gpt-5.5 }
+    judge: { provider: openai-compat, model: gemini-3.1-pro-preview }

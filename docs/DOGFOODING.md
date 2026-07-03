@@ -8,18 +8,18 @@ recover a run, and how to land the result as a normal PR.
 **Status (2026-07-02, bounded — update discipline: REPLACE this block, ≤15 lines;
 displaced prose moves verbatim to [`PLAN-HISTORY.md`](PLAN-HISTORY.md); per-run detail:
 `docs/reports/dogfood-NNN.md`; queue + course correction: `plan.md` §6).**
-Latest: dogfood-079 — WP-265 rung-2 CHAIN re-host (WP-508) on WP-204 tiered memory (`chain-f4b08133`,
-`docs/reports/dogfood-079.md`). 🟢 **SUCCESS · 4/4 nodes — RUNG 2 REACHED (1st time, after 4 misses).** The
-`chikory chain` planner DECOMPOSED WP-204 into 4 sequential judge-gated nodes (`min_nodes: 4` — WP-509 live),
-crossed **13 durable checkpoints**, and survived the FIRST live at-horizon mid-chain `kill -9` →
-`chikory chain resume` WITHOUT re-executing the completed node (core seal ts `12:18:20.307` byte-identical +
-$1.01 unchanged post-resume = journal replay, not re-run). WP-204 tiered memory (core/archival/recall +
-provenance-reject) DELIVERED, all-green (621 passed), harvested `9304c68`, pushed → **WP-204/WP-508 → 🟢.**
-Cost: WP-510 needed FOUR writeSet false-fail fixes (🟡 F-91 → WP-512: exact-path is wrong for LOOSE chains);
-the WP-257 literal floor REVISE-rejected the decomposed plan (🟡 F-92 → WP-513); the launch-guard false-tripped
-on a header comment (🟡 F-93 → WP-514) — all harness-meta track-B. ℹ️ F-94: each node one-shot in 1 step →
-horizon was inter-node; the intra-run ≥5-step reliability curve is still owed (rung 3). NEXT: **rung 3 — the
-~8h overnight unattended run.** See §7 (troubleshooting), §8 (chain writeSet limitation), §1.5, §1.4, §3.
+Latest: dogfood-080 — WP-265 rung-3 (FIRST intra-run horizon attempt) on WP-205 branching (`run-233e7d7f`,
+`docs/reports/dogfood-080.md`). 🟢 **SUCCESS but RUNG 3 NOT REACHED — the decisive negative result.** WP-205
+branching landed COMPLETE: `cmdBranch` + `forkRunAtCheckpoint` (journal fork through the checkpoint + `branch_fork`
+provenance + git-worktree at the checkpoint commit) + an additive `"BRANCH"` verdict (ROLLBACK still first) + a
+LIVE Temporal proof (child resumes from the fork, parent intact); all-green (629 passed), scope-clean,
+byte-IDENTICAL to the workspace (uncommitted — harvest pending). **BUT codex ONE-SHOT the deliberately 4-part
+decomposed goal in a SINGLE 57-tool-call step** — the "2 steps" is 1 attempt + 1 accidental 600s step-cap
+auto-retry on a hanging live test; no operator kill→resume fired. 🔴 **F-95: the intra-run horizon is UNREACHABLE
+by goal size (dogfood-077/079/080 all one-shot) — it must be HARNESS-FORCED → **WP-269 intra-run step-forcing**
+(dogfood-081, `decideStepForcing` defers premature `claimsComplete`) is the next headline, NOT a bigger goal.** 🟡 F-96 → WP-515: the killed step reported `$0.00 / 0 tokens` while
+the retry re-billed the full context — budget undercounts timed-out spend (ℹ️ same kill proved WP-268's hard cap
+holds at exactly 1.00×). See §7 (troubleshooting), §8 (known limitations), §1.5, §1.4, §3.
 
 Related docs: [`docs/spec/task-spec.md`](spec/task-spec.md) (schema
 reference) · [`docs/TASK-PROTOCOL.md`](TASK-PROTOCOL.md) (WP etiquette, §7 is
@@ -702,6 +702,22 @@ a first-attempt SUCCESS and produced three plan-changing findings
   passed 0 false-fails. If a node still seals FAILED on a writeSet gate, hand-harvest the
   workspace delivery (`git -C <run>/workspace diff main HEAD | git apply` at repo root) and re-run
   the full AC against the working tree — the FAILED seal is chain bookkeeping, not a code defect.
+- **Even a DELIBERATELY multi-part SINGLE-run goal one-shots — the intra-run horizon (rung 3)
+  cannot be summoned by goal size, it must be HARNESS-FORCED** (F-95, dogfood-080 → WP-213 /
+  step-forcing). dogfood-080's WP-205 goal was purpose-built (per F-94) to force a long intra-run
+  horizon: ONE `chikory run` goal DECOMPOSED into 4 ordered dependent PARTS (command → journal fork
+  → workspace fork → branch-on-verdict + live proof), each "with its own tests folded in so the run
+  accumulates real durable steps." codex produced ALL 4 parts / 10 files / 626 new lines in step 1's
+  single 57-tool-call turn; the run's "2 steps" was 1 attempt + 1 accidental 600s step-cap retry on a
+  hanging live test, NOT feature-step accumulation. **This reconfirms F-86 across dogfood-077/079/080:
+  the executor collapses ANY single-run goal into one mega-step regardless of internal part structure,
+  so the intra-run ≥5-step reliability curve is un-measurable this way.** Do NOT author a rung-3 headline
+  as "a bigger, more-decomposed single goal" — it will one-shot again. Rung 3 needs the HARNESS to force
+  step boundaries: **WP-213's native tool-loop** (checkpoints at bounded `maxTurns`/`maxSeconds` work-units)
+  or an explicit per-part seal-and-re-enter / tool-call-budget mechanism. Additionally, a step KILLED by the
+  `maxSeconds` cap reports `$0.00 / 0 tokens` even after 10m / 57 tool calls of real spend, and the retry
+  re-bills the full context — the budget gate undercounts timed-out steps (**F-96 → WP-515**; the same kill
+  proved WP-268's hard step-cap now holds at exactly 1.00×).
 - **Two more chain-authoring gotchas from dogfood-079:** (a) the **WP-257 literal-preservation
   floor fights a decomposing planner** — `planLiteralGaps` REVISE-rejects a plan whose paraphrased
   node goals dropped any backtick literal from `plan.goal`, but decomposition NECESSARILY

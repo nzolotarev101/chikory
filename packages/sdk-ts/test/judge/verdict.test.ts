@@ -97,6 +97,29 @@ describe("computeVerdict (CONTRACTS.md §4)", () => {
     expect(decision.kind).toBe("PROCEED");
   });
 
+  it("BRANCH: explicit branch concerns recommend branching additively", () => {
+    const decision = computeVerdict(
+      form({ concerns: ["BRANCH: try an alternative implementation strategy"] }),
+      {},
+    );
+    expect(decision.kind).toBe("BRANCH");
+    expect(decision.rationale).toContain("alternative implementation strategy");
+  });
+
+  it("precedence: destructive ROLLBACK still beats BRANCH recommendation", () => {
+    const rubric = STANDING_RUBRIC.map((r) =>
+      r.id === "no_unrelated_deletions" ? fail(r.id) : pass(r.id),
+    );
+    const decision = computeVerdict(
+      form({
+        rubricResults: rubric,
+        concerns: ["BRANCH: try preserving the deleted files on another line"],
+      }),
+      {},
+    );
+    expect(decision.kind).toBe("ROLLBACK");
+  });
+
   it("default: mid-run criteria failures without history → PROCEED (work in progress)", () => {
     const decision = computeVerdict(
       form({ criterionResults: [pass("AC-1"), fail("AC-2")] }),

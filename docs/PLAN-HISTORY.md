@@ -4,6 +4,14 @@
 > per-run detail lives in [`docs/reports/`](reports/). Content below was moved
 > verbatim out of the living docs on 2026-07-02 (course correction — plan.md §6).
 
+## Archived 2026-07-03 — displaced by dogfood-080
+
+Displaced from the plan.md "Last 3 runs" block and the DOGFOODING.md status block
+when dogfood-080 landed (see `docs/reports/dogfood-080.md`):
+
+- **(was Last-3-runs) dogfood-077** — WP-265 rung 2: WP-206 HITL suspend/resume (`run-d14fb74c`, 🟢 **SUCCESS**, WP-206 → 🟢; but codex ONE-SHOT the 13-file feature in 1 step so horizon+kill→resume missed a 3rd time, 🟡 F-86 → WP-508).
+- **(was DOGFOODING header) Latest: dogfood-079** — WP-265 rung-2 CHAIN re-host (WP-508) on WP-204 tiered memory (`chain-f4b08133`, `docs/reports/dogfood-079.md`). 🟢 **SUCCESS · 4/4 nodes — RUNG 2 REACHED (1st time, after 4 misses).** The `chikory chain` planner DECOMPOSED WP-204 into 4 sequential judge-gated nodes (`min_nodes: 4` — WP-509 live), crossed **13 durable checkpoints**, and survived the FIRST live at-horizon mid-chain `kill -9` → `chikory chain resume` WITHOUT re-executing the completed node (core seal ts `12:18:20.307` byte-identical + $1.01 unchanged post-resume = journal replay, not re-run). WP-204 tiered memory (core/archival/recall + provenance-reject) DELIVERED, all-green (621 passed), harvested `9304c68`, pushed → **WP-204/WP-508 → 🟢.** Cost: WP-510 needed FOUR writeSet false-fail fixes (🟡 F-91 → WP-512); the WP-257 literal floor REVISE-rejected the decomposed plan (🟡 F-92 → WP-513); the launch-guard false-tripped on a header comment (🟡 F-93 → WP-514) — all harness-meta track-B. ℹ️ F-94: each node one-shot in 1 step → horizon was inter-node; the intra-run ≥5-step reliability curve is still owed (rung 3).
+
 ## Archived 2026-07-03 — DOGFOODING.md status block displaced by dogfood-079
 
 Displaced from the DOGFOODING.md bounded status block when dogfood-079 landed

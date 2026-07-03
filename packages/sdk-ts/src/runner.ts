@@ -13,6 +13,7 @@ import { join } from "node:path";
 import { Client, Connection } from "@temporalio/client";
 
 import { Journal, reportFromJournal } from "./journal/journal.js";
+import { parseBranchTarget } from "./cli/branch-target.js";
 import {
   QUERY_STATUS,
   SIGNAL_APPROVE,
@@ -23,6 +24,7 @@ import {
   SIGNAL_TOP_UP,
   TASK_QUEUE_DEFAULT,
 } from "./runner/api.js";
+import { forkRunAtCheckpoint } from "./runner/branch.js";
 import { DEFAULT_DATA_DIR, journalPath } from "./runner/paths.js";
 import type { ChainNodeTemplate } from "./chain/node-spec.js";
 import type { DurableRunner, Plan, RunHandle, RunStatusReport, TaskSpec } from "./types.js";
@@ -142,8 +144,16 @@ export function createTemporalRunner(opts: TemporalRunnerOptions = {}): Temporal
       return makeHandle(runId);
     },
 
-    async branch(): Promise<RunHandle> {
-      throw new Error("branch() is P2 (WP-205)");
+    async branch(from): Promise<RunHandle> {
+      const target = parseBranchTarget(from);
+      const fork = await forkRunAtCheckpoint({ dataDir, target });
+      const client = await getClient();
+      await client.workflow.start("agentLoop", {
+        workflowId: fork.childRunId,
+        taskQueue,
+        args: [fork.spec],
+      });
+      return makeHandle(fork.childRunId);
     },
 
     async get(runId): Promise<RunHandle> {

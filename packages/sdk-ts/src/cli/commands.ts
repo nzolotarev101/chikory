@@ -22,6 +22,7 @@ import { journalPath } from "../runner/paths.js";
 import { createRunnerWorker } from "../runner/worker.js";
 import { parseTaskSpec, TaskSpecValidationError } from "../taskspec.js";
 import type { RunHandle, RunStatus, RunStatusReport, TaskSpec } from "../types.js";
+import { parseBranchTarget, type BranchTarget } from "./branch-target.js";
 import { evaluateSpecStalenessPrecheck } from "./spec-staleness-precheck.js";
 import { formatEntryLine, renderStepDetail, renderTrace, traceJson } from "./trace.js";
 
@@ -56,6 +57,8 @@ export interface CliDeps {
   taskQueue?: string;
   /** Optional plan.md reader for launch prechecks (tests can inject fixture text). */
   readPlanText?: () => Promise<string>;
+  /** Branch seam for unit tests; production delegates to TemporalRunner.branch. */
+  branchRun?: (target: BranchTarget, flags: CommonFlags) => Promise<{ runId: string }>;
   out?: (line: string) => void;
   err?: (line: string) => void;
   /** Status/journal poll cadence for run/resume/--watch. */
@@ -390,6 +393,53 @@ export async function cmdResume(
     );
   } catch (err) {
     ioPair.err(`chikory: ${actionable(err)}`);
+    return 1;
+  }
+}
+
+export async function cmdBranch(
+  args: { target: string } & CommonFlags,
+  deps: CliDeps = {},
+): Promise<number> {
+  const ioPair = io(deps);
+  let target: BranchTarget;
+  try {
+    target = parseBranchTarget(args.target);
+  } catch (err) {
+    ioPair.err(`chikory: ${err instanceof Error ? err.message : String(err)}`);
+    return 1;
+  }
+  try {
+    const handle =
+      deps.branchRun !== undefined
+        ? await deps.branchRun(target, args)
+        : await (async () => {
+            const runner = createTemporalRunner({
+              address: args.address,
+              dataDir: args.dataDir,
+              taskQueue: deps.taskQueue,
+            });
+            try {
+              return await runner.branch(target.checkpointId);
+            } finally {
+              await runner.close();
+            }
+          })();
+    if (args.json) {
+      ioPair.out(
+        JSON.stringify({
+          parentRunId: target.runId,
+          forkCheckpoint: target.checkpointId,
+          childRunId: handle.runId,
+        }),
+      );
+    } else {
+      ioPair.out(`branched ${target.checkpointId} -> ${handle.runId}`);
+      ioPair.out(`continue with: chikory resume ${handle.runId}`);
+    }
+    return 0;
+  } catch (err) {
+    ioPair.err(`chikory: branch failed: ${actionable(err)}`);
     return 1;
   }
 }

@@ -14,7 +14,7 @@ export const HALT_CONSECUTIVE_FAILS = 3;
 export const FLIP_FLOPS_TO_ESCALATE = 2;
 
 export interface VerdictDecision {
-  kind: "PROCEED" | "ROLLBACK" | "HALT" | "ESCALATE";
+  kind: "PROCEED" | "ROLLBACK" | "HALT" | "ESCALATE" | "BRANCH";
   rationale: string;
   escalateReason?: string;
 }
@@ -57,6 +57,14 @@ export function computeVerdict(
     return {
       kind: "ROLLBACK",
       rationale: `destructive rubric failure → ROLLBACK — ${describe(destructiveFails)}`,
+    };
+  }
+
+  const branchConcern = form.concerns.find((concern) => /\bbranch\b/i.test(concern));
+  if (branchConcern !== undefined) {
+    return {
+      kind: "BRANCH",
+      rationale: `judge recommends BRANCH for alternative exploration — ${branchConcern}`,
     };
   }
 

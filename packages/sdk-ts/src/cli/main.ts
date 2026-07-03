@@ -9,6 +9,7 @@ import { parseArgs } from "node:util";
 import { DEFAULT_DATA_DIR } from "../runner/paths.js";
 import {
   cmdApprove,
+  cmdBranch,
   cmdCancel,
   cmdInject,
   cmdResume,
@@ -37,6 +38,9 @@ commands:
                       and follow the chain to its terminal state (WP-241)
   resume <run-id>     reattach a worker and continue a run from its last
                       checkpoint (budget halts, escalations, machine moves)
+  branch <run-id@step|run-id@base>
+                      fork a run at a committed checkpoint into a new child
+                      run; continue it with chikory resume <child-run-id>
   status [<run-id>]   live run state: current step, spend vs budget, last
                       verdict, checkpoints; no argument lists all local runs
   approve <run-id>    answer an ESCALATE (default approves)
@@ -177,6 +181,7 @@ export async function main(argv: string[], deps: LandDeps = {}): Promise<number>
         });
         break;
       case "status":
+      case "branch":
       case "cancel":
       case "suspend":
       case "inject":
@@ -252,6 +257,11 @@ export async function main(argv: string[], deps: LandDeps = {}): Promise<number>
     }
     case "status":
       return cmdStatus({ runId: positionals[0], ...flags }, deps);
+    case "branch": {
+      const target = requireArg(positionals, "branch target (<run-id>@<step|base>)", io);
+      if (target === undefined) return 1;
+      return cmdBranch({ target, ...flags }, deps);
+    }
     case "approve": {
       const runId = requireArg(positionals, "run-id", io);
       if (runId === undefined) return 1;

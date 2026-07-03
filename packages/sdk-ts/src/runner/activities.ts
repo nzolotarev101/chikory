@@ -17,7 +17,7 @@ import { heartbeat } from "@temporalio/activity";
 
 import { createLocalArtifactStore } from "../artifacts/index.js";
 import { buildVerdict, enforceFamilyDiversity, runJudgePass } from "../judge/index.js";
-import { Journal, runTotals } from "../journal/journal.js";
+import { Journal, reportFromJournal, runTotals } from "../journal/journal.js";
 import { getTracer, recordJudgePassSpan } from "../otel.js";
 import { createRouter, type RouterOptions } from "../router.js";
 import type {
@@ -94,6 +94,29 @@ export interface VerdictPayload {
   verdict: JudgeVerdict;
 }
 
+export interface RestoredWorkflowState {
+  stepIndex: number;
+  spentUsd: number;
+  spentTokens: number;
+  budgetUsd: number;
+  judgeIndex: number;
+  injectionIndex: number;
+  budgetEventIndex: number;
+  seamEventIndex: number;
+  pacingEventIndex: number;
+  escalationIndex: number;
+  controlEventIndex: number;
+  consecutiveFailures: number;
+  recentSummaries: string[];
+  stepCosts: number[];
+  stepTokens: number[];
+  lastVerdict?: { kind: JudgeVerdict["kind"]; atStep: number };
+  lastGoodCheckpointId?: string;
+  judgeFeedback?: string;
+  checkpoints: Checkpoint[];
+  sinceCommit?: string;
+}
+
 /** journal-format.md §3 `judge` entry: evidence refs + form + model + cost. */
 export interface JudgePayload {
   judgeIndex: number;
@@ -151,7 +174,34 @@ function sharedHandoffStore(deps: RunnerActivityDeps): ArtifactStore {
 }
 
 /** Git tag marking the workspace state right after prepareRun (= `<runId>@base`). */
-const BASE_TAG = "chikory-base";
+export const BASE_TAG = "chikory-base";
+
+export async function resolveCheckpointCommit(input: {
+  dataDir: string;
+  runId: string;
+  checkpointId: string;
+}): Promise<string> {
+  const ws = workspaceDir(input.dataDir, input.runId);
+  if (input.checkpointId === `${input.runId}@base`) {
+    return git(ws, ["rev-parse", `${BASE_TAG}^{commit}`]);
+  }
+  const journal = new Journal(journalPath(input.dataDir, input.runId));
+  try {
+    const entry = journal
+      .entries("checkpoint")
+      .find((e) => (e.payload as Checkpoint).id === input.checkpointId);
+    if (!entry) {
+      throw new Error(`rollback target checkpoint not found: ${input.checkpointId}`);
+    }
+    const commits = Object.values((entry.payload as Checkpoint).gitCommits);
+    if (commits.length === 0 || !commits[0]) {
+      throw new Error(`checkpoint ${input.checkpointId} has no git commit recorded`);
+    }
+    return commits[0];
+  } finally {
+    journal.close();
+  }
+}
 
 /**
  * Per-criterion pass booleans from previous JUDGE verdicts, oldest first
@@ -535,30 +585,91 @@ export function createRunnerActivities(deps: RunnerActivityDeps) {
     async restoreCheckpoint(input: { runId: string; checkpointId: string }): Promise<void> {
       return withHeartbeat(async () => {
         const ws = workspaceDir(deps.dataDir, input.runId);
-        let sha: string;
-        if (input.checkpointId === `${input.runId}@base`) {
-          sha = await git(ws, ["rev-parse", `${BASE_TAG}^{commit}`]);
-        } else {
-          const journal = openJournal(deps, input.runId);
-          try {
-            const entry = journal
-              .entries("checkpoint")
-              .find((e) => (e.payload as Checkpoint).id === input.checkpointId);
-            if (!entry) {
-              throw new Error(`rollback target checkpoint not found: ${input.checkpointId}`);
-            }
-            const commits = Object.values((entry.payload as Checkpoint).gitCommits);
-            if (commits.length === 0 || !commits[0]) {
-              throw new Error(`checkpoint ${input.checkpointId} has no git commit recorded`);
-            }
-            sha = commits[0];
-          } finally {
-            journal.close();
-          }
-        }
+        const sha = await resolveCheckpointCommit({
+          dataDir: deps.dataDir,
+          runId: input.runId,
+          checkpointId: input.checkpointId,
+        });
         await git(ws, ["reset", "--hard", sha]);
         await git(ws, ["clean", "-fd"]);
       });
+    },
+
+    async restoreWorkflowState(input: { runId: string; baseCommit: string }): Promise<RestoredWorkflowState> {
+      const journal = openJournal(deps, input.runId);
+      try {
+        const report = reportFromJournal(journal);
+        const steps = journal.entries("step").map((e) => e.payload as StepPayload);
+        const checkpoints = journal.entries("checkpoint").map((e) => e.payload as Checkpoint & { stepIndex?: number });
+        const verdictEntries = journal.entries("verdict").map((e) => e.payload as VerdictPayload);
+        const lastVerdictPayload = verdictEntries[verdictEntries.length - 1];
+        const lastVerdict =
+          lastVerdictPayload === undefined
+            ? undefined
+            : { kind: lastVerdictPayload.verdict.kind, atStep: lastVerdictPayload.atStep };
+        const lastGoodCheckpoint = [...checkpoints].reverse().find((checkpoint) => checkpoint.lastGood);
+        const verdictCheckpoint =
+          lastVerdictPayload === undefined
+            ? undefined
+            : [...checkpoints]
+                .reverse()
+                .find((checkpoint) => checkpoint.stepIndex === lastVerdictPayload.atStep);
+        const sinceCommit =
+          verdictCheckpoint === undefined
+            ? input.baseCommit
+            : (Object.values(verdictCheckpoint.gitCommits)[0] ?? input.baseCommit);
+        const budgetUsd =
+          (journal.getRun()?.task.budgetUsd ?? report?.budgetUsd ?? 0) +
+          journal.entries("budget_event").reduce((sum, entry) => {
+            const payload = entry.payload as { event?: string; details?: { addedUsd?: number } };
+            return payload.event === "top_up" ? sum + (payload.details?.addedUsd ?? 0) : sum;
+          }, 0);
+        const stepIndex =
+          steps.length === 0 ? 0 : Math.max(...steps.map((step) => step.stepIndex)) + 1;
+        const stepCosts = steps.map((step) => step.record.costUsd);
+        const stepTokens = steps.map((step) => step.record.tokens.input + step.record.tokens.output);
+        const lastStep = steps[steps.length - 1];
+        const consecutiveFailures = [...steps]
+          .reverse()
+          .findIndex((step) => step.record.status !== "FAILED");
+        const failedTail =
+          consecutiveFailures === -1 ? steps.length : consecutiveFailures;
+
+        function nextPayloadIndex(kind: Parameters<Journal["entries"]>[0], field: string): number {
+          const values = journal.entries(kind).map((entry) => {
+            const value = (entry.payload as Record<string, unknown>)[field];
+            return typeof value === "number" ? value : -1;
+          });
+          return values.length === 0 ? 0 : Math.max(...values) + 1;
+        }
+
+        return {
+          stepIndex,
+          spentUsd: journal.totalCostUsd(),
+          spentTokens: stepTokens.reduce((sum, tokens) => sum + tokens, 0),
+          budgetUsd,
+          judgeIndex: nextPayloadIndex("verdict", "judgeIndex"),
+          injectionIndex: nextPayloadIndex("injection", "injectionIndex"),
+          budgetEventIndex: nextPayloadIndex("budget_event", "budgetEventIndex"),
+          seamEventIndex: nextPayloadIndex("seam", "seamEventIndex"),
+          pacingEventIndex: nextPayloadIndex("pacing", "pacingEventIndex"),
+          escalationIndex: nextPayloadIndex("verdict", "escalationIndex"),
+          controlEventIndex: nextPayloadIndex("control_event", "controlEventIndex"),
+          consecutiveFailures: lastStep?.record.status === "FAILED" ? failedTail : 0,
+          recentSummaries: steps.map((step) => step.record.summary),
+          stepCosts,
+          stepTokens,
+          ...(lastVerdict !== undefined ? { lastVerdict } : {}),
+          ...(lastGoodCheckpoint !== undefined ? { lastGoodCheckpointId: lastGoodCheckpoint.id } : {}),
+          ...(lastVerdictPayload !== undefined && lastVerdictPayload.verdict.kind !== "PROCEED"
+            ? { judgeFeedback: lastVerdictPayload.verdict.rationale }
+            : {}),
+          checkpoints,
+          sinceCommit,
+        };
+      } finally {
+        journal.close();
+      }
     },
 
     /**

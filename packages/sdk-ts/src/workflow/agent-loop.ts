@@ -225,6 +225,29 @@ export async function agentLoop(spec: TaskSpec): Promise<RunStatus> {
   const { baseCommit } = prepared;
   // Judge diffs cover everything since the last verdict (or the run base).
   let sinceCommit = baseCommit;
+  const restored = await activities.restoreWorkflowState({ runId, baseCommit });
+  stepIndex = restored.stepIndex;
+  spentUsd = restored.spentUsd;
+  spentTokens = restored.spentTokens;
+  budgetUsd = restored.budgetUsd;
+  judgeIndex = restored.judgeIndex;
+  injectionIndex = restored.injectionIndex;
+  budgetEventIndex = restored.budgetEventIndex;
+  seamEventIndex = restored.seamEventIndex;
+  pacingEventIndex = restored.pacingEventIndex;
+  escalationIndex = restored.escalationIndex;
+  controlEventIndex = restored.controlEventIndex;
+  consecutiveFailures = restored.consecutiveFailures;
+  recentSummaries.push(...restored.recentSummaries);
+  stepCosts.push(...restored.stepCosts);
+  stepTokens.push(...restored.stepTokens);
+  if (restored.lastVerdict !== undefined) lastVerdict = restored.lastVerdict;
+  if (restored.lastGoodCheckpointId !== undefined) {
+    lastGoodCheckpointId = restored.lastGoodCheckpointId;
+  }
+  if (restored.judgeFeedback !== undefined) judgeFeedback = restored.judgeFeedback;
+  checkpoints.push(...restored.checkpoints);
+  sinceCommit = restored.sinceCommit ?? baseCommit;
 
   for (;;) {
     if (cancelRequested) return seal("CANCELLED", "cancelled by user");
@@ -517,6 +540,8 @@ export async function agentLoop(spec: TaskSpec): Promise<RunStatus> {
         judgeFeedback = completionMilestone ? verdict.rationale : undefined;
       } else if (verdict.kind === "HALT") {
         return seal("FAILED", `judge HALT: ${verdict.rationale}`);
+      } else if (verdict.kind === "BRANCH") {
+        judgeFeedback = verdict.rationale;
       } else if (verdict.kind === "ESCALATE") {
         judgeFeedback = verdict.rationale;
         status = "AWAITING_APPROVAL";
