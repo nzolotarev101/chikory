@@ -111,13 +111,13 @@ goal: >
   exceed the context window, so folding accumulated history CANNOT make it fit — the run must durably SUSPEND
   at ZERO compute instead of folding-and-continuing INTO a guaranteed-overflow step, and later resume to a
   normal terminal state without re-executing any already-journaled step. Today the workflow loop treats `park`
-  and `compact` identically (agent-loop.ts:430, underPressure = pacing.action !== "continue") and charges
+  and compact identically (agent-loop.ts:430, underPressure = pacing.action !== "continue") and charges
   the overflow step. Close that gap by REUSING the existing durable-park machinery (the WP-206 operator-suspend
   condition wait + control_event journal at agent-loop.ts:199, and the WP-243 budget-park cause
   precedent), NOT by inventing a second suspend mechanism or a second LLM/durable path.
 
   OUTCOME (what "done" means — the HOW is yours to design; this decomposes into sequential deliverables):
-    * A PURE decision that separates a fold-and-continue `compact` from a must-suspend `park`: a `park` action
+    * A PURE decision that separates a fold-and-continue compact from a must-suspend `park`: a `park` action
       (next step cannot fit even after compaction) maps to "durably suspend"; continue/compact do NOT. Pure,
       typed, tested — the sibling of decideContextWindowPacing, reading only the pacing result.
     * When the loop hits a `park` action, it durably parks the run at status = SUSPENDED on a Temporal
