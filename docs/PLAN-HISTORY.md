@@ -4,6 +4,14 @@
 > per-run detail lives in [`docs/reports/`](reports/). Content below was moved
 > verbatim out of the living docs on 2026-07-02 (course correction — plan.md §6).
 
+## Archived 2026-07-03 — displaced by dogfood-081
+
+Displaced from the plan.md "Last 3 runs" block and the DOGFOODING.md status block
+when dogfood-081 landed (see `docs/reports/dogfood-081.md`):
+
+- **(was Last-3-runs) dogfood-078** — WP-265 rung 2 CHAIN re-host on WP-250 window-park (`chain-6dff03ee`, **FAILED** — delivery COMPLETE + all-green, hand-harvested; F-88 → WP-509, F-89 → WP-510; WP-250 → 🟡).
+- **(was DOGFOODING header) Latest: dogfood-080** — WP-265 rung-3 (FIRST intra-run horizon attempt) on WP-205 branching (`run-233e7d7f`, `docs/reports/dogfood-080.md`). 🟢 **SUCCESS but RUNG 3 NOT REACHED — the decisive negative result.** WP-205 branching landed COMPLETE (`cmdBranch` + `forkRunAtCheckpoint` journal fork through the checkpoint + `branch_fork` provenance + git-worktree at the checkpoint commit + an additive `"BRANCH"` verdict with ROLLBACK still first + a LIVE Temporal proof); all-green (629 passed), scope-clean, byte-IDENTICAL to the workspace (uncommitted). BUT codex ONE-SHOT the deliberately 4-part decomposed goal in a SINGLE 57-tool-call step (the "2 steps" = 1 attempt + 1 accidental 600s step-cap auto-retry on a hanging live test); no operator kill→resume fired. 🔴 F-95: the intra-run horizon is UNREACHABLE by goal size (dogfood-077/079/080 all one-shot) — must be HARNESS-FORCED → WP-269 step-forcing (delivered dogfood-081). 🟡 F-96 → WP-515 (killed step reported `$0.00/0 tokens`; ℹ️ same kill proved WP-268's hard cap holds at 1.00×).
+
 ## Archived 2026-07-03 — displaced by dogfood-080
 
 Displaced from the plan.md "Last 3 runs" block and the DOGFOODING.md status block

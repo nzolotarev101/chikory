@@ -148,6 +148,11 @@ export { summarizePacing, type PacingSummary } from "./runner/pacing-summary.js"
 export { summarizeCompaction, type CompactionSummary } from "./runner/compaction-summary.js";
 export { DIGEST_SYSTEM_PROMPT, buildDigestMessages } from "./runner/compaction-prompt.js";
 export {
+  decideStepForcing,
+  type StepForcingDecision,
+  type StepForcingState,
+} from "./workflow/step-forcing.js";
+export {
   Journal,
   MAX_PAYLOAD_BYTES,
   reportFromJournal,

@@ -26,7 +26,7 @@ Every requirement in [`project.md`](../project.md), assigned a stable ID, mapped
 
 | ID | Requirement | WP(s) | Phase | Status |
 |---|---|---|---|---|
-| DX-1 | State, memory, task context across minutes → weeks | WP-121, WP-122; cross-session memory WP-204 | P1→P2 | in-progress — cross-session tiered memory WP-204 → 🟢 DONE (dogfood-079); durable journal/checkpoint state (WP-121/122) live |
+| DX-1 | State, memory, task context across minutes → weeks | WP-121, WP-122; cross-session memory WP-204; intra-run step-forcing WP-269 | P1→P2 | in-progress — cross-session tiered memory WP-204 → 🟢 DONE (dogfood-079); durable journal/checkpoint state (WP-121/122) live; **intra-run step-forcing WP-269 → 🟢 DONE (dogfood-081, `run-464b7b77`, uncommitted byte-IDENTICAL pending harvest, `docs/reports/dogfood-081.md`)** — the rung-3 ENABLER that makes ONE `chikory run` accumulate MANY sealed durable checkpoints instead of collapsing into one executor session: a pure total `decideStepForcing(state, policy?)` + an opt-in `boundedWorkUnit` spec-input policy that DEFERS a premature `claimsComplete` and re-enters `agent-loop.ts` until a durable-step floor is met AND the judge confirms the ACs; contract-additive (no `StepRecord`/`JournalEntry`/`Checkpoint` change), no-policy path byte-identical, LIVE-proven (one run seals 3 durable checkpoints under an active policy while no-policy stays one-shot). Unblocks the WP-265 rung-3 intra-run horizon PROOF (dogfood-082). |
 | DX-2 | Journal/replay: each LLM/tool call a deterministic journaled step | WP-121 | P1 | done |
 | DX-3 | Crash → resurrect from point of failure via memoized results | WP-123 | P1 | done |
 | DX-4 | Checkpoint per LLM/tool call; pause, inspect, resume | WP-122, WP-141 | P1 | done |

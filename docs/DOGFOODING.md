@@ -8,18 +8,18 @@ recover a run, and how to land the result as a normal PR.
 **Status (2026-07-02, bounded — update discipline: REPLACE this block, ≤15 lines;
 displaced prose moves verbatim to [`PLAN-HISTORY.md`](PLAN-HISTORY.md); per-run detail:
 `docs/reports/dogfood-NNN.md`; queue + course correction: `plan.md` §6).**
-Latest: dogfood-080 — WP-265 rung-3 (FIRST intra-run horizon attempt) on WP-205 branching (`run-233e7d7f`,
-`docs/reports/dogfood-080.md`). 🟢 **SUCCESS but RUNG 3 NOT REACHED — the decisive negative result.** WP-205
-branching landed COMPLETE: `cmdBranch` + `forkRunAtCheckpoint` (journal fork through the checkpoint + `branch_fork`
-provenance + git-worktree at the checkpoint commit) + an additive `"BRANCH"` verdict (ROLLBACK still first) + a
-LIVE Temporal proof (child resumes from the fork, parent intact); all-green (629 passed), scope-clean,
-byte-IDENTICAL to the workspace (uncommitted — harvest pending). **BUT codex ONE-SHOT the deliberately 4-part
-decomposed goal in a SINGLE 57-tool-call step** — the "2 steps" is 1 attempt + 1 accidental 600s step-cap
-auto-retry on a hanging live test; no operator kill→resume fired. 🔴 **F-95: the intra-run horizon is UNREACHABLE
-by goal size (dogfood-077/079/080 all one-shot) — it must be HARNESS-FORCED → **WP-269 intra-run step-forcing**
-(dogfood-081, `decideStepForcing` defers premature `claimsComplete`) is the next headline, NOT a bigger goal.** 🟡 F-96 → WP-515: the killed step reported `$0.00 / 0 tokens` while
-the retry re-billed the full context — budget undercounts timed-out spend (ℹ️ same kill proved WP-268's hard cap
-holds at exactly 1.00×). See §7 (troubleshooting), §8 (known limitations), §1.5, §1.4, §3.
+Latest: dogfood-081 — WP-265 rung-3 **ENABLER** = WP-269 intra-run step-forcing (`run-464b7b77`,
+`docs/reports/dogfood-081.md`). 🟢 **SUCCESS · 1 step — the rung-3 blocking dependency (F-95) is now BUILT.**
+Delivered a pure total `decideStepForcing(state, policy?)` (sibling of `decideContextWindowPacing`) + an opt-in
+`boundedWorkUnit` spec-input policy that DEFERS a premature `claimsComplete` and re-enters `agent-loop.ts` with an
+increment directive until a durable-step floor is met AND the judge confirms the ACs — **contract-additive** (no
+`StepRecord`/`JournalEntry`/`Checkpoint` change), no-policy path byte-identical. A LIVE Temporal test drives ONE
+real run sealing **3 durable checkpoints under an active policy** while the no-policy path stays one-shot — the
+first mechanically-demonstrated intra-run horizon. All-green (636 passed), scope-clean (8 files), byte-IDENTICAL to
+the workspace (uncommitted — harvest pending). One-shot as the spec predicted (ENABLER build, not the proof).
+🟡 F-97 → WP-266/511 (track-B): the grep ACs didn't re-require the PART-3 LIVE test (executor over-delivered it) →
+extend the loose-AC lint; **dogfood-082 (rung-3 horizon PROOF + mid-run kill→resume ON this machinery) must pin its
+≥5-checkpoint horizon numerically.** See §7 (troubleshooting), §8 (known limitations), §1.5, §1.4, §3.
 
 Related docs: [`docs/spec/task-spec.md`](spec/task-spec.md) (schema
 reference) · [`docs/TASK-PROTOCOL.md`](TASK-PROTOCOL.md) (WP etiquette, §7 is

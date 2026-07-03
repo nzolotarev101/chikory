@@ -16,6 +16,7 @@ import { afterEach, describe, expect, inject, test } from "vitest";
 import {
   createRunnerWorker,
   createTemporalRunner,
+  decideStepForcing,
   Journal,
   journalPath,
   type JudgeVerdict,
@@ -271,6 +272,100 @@ describe.skipIf(address === null)("agent loop (WP-121)", () => {
       expect(wire.hits).toBe(1);
     } finally {
       journal.close();
+    }
+  });
+
+  test("step-forcing policy creates an intra-run durable checkpoint horizon while no-policy stays one-shot", async () => {
+    const multiPartGoal =
+      "Complete a three-part scripted goal: part A, part B, and part C, one durable increment at a time.";
+    const floor = 3;
+
+    expect(
+      decideStepForcing(
+        {
+          durableStepsSealed: 1,
+          executorClaimedCompletion: true,
+          acceptanceCriteriaMet: true,
+        },
+        { minDurableSteps: floor },
+      ).deferCompletionMilestone,
+    ).toBe(true);
+
+    const forcedWire = await startFakeJudgeWire([judgeForm({ criteria: { "AC-1": true } })]);
+    cleanups.push(() => forcedWire.close());
+    const forced = await setup({
+      judgeWireUrl: forcedWire.url,
+      scriptedConfig: {
+        claimsCompleteSteps: [1, 2, 3],
+        echoJudgeFeedback: true,
+      },
+    });
+    const directive = "Complete exactly the next numbered part before claiming the run is done.";
+    const forcedSpec = makeJudgedSpec({
+      repoUrl: forced.repoUrl,
+      goal: multiPartGoal,
+      maxSteps: 5,
+      cadence: 10,
+      boundedWorkUnit: { minDurableSteps: floor, directive },
+    });
+
+    const forcedHandle = await forced.runner.start(forcedSpec);
+    const forcedReport = await awaitTerminal(forcedHandle);
+
+    expect(forcedReport.status).toBe("SUCCESS");
+    expect(forcedReport.currentStep).toBeGreaterThanOrEqual(floor);
+    expect(forcedReport.checkpoints).toHaveLength(floor);
+    expect(forcedReport.lastVerdict).toEqual({ kind: "PROCEED", atStep: floor - 1 });
+    expect(forcedWire.hits).toBe(floor);
+
+    const forcedJournal = new Journal(journalPath(forced.dataDir, forcedHandle.runId));
+    try {
+      const steps = forcedJournal.entries("step").map((e) => e.payload as StepPayload);
+      expect(steps).toHaveLength(floor);
+      expect(steps.map((step) => step.stepIndex)).toEqual([0, 1, 2]);
+      expect(steps.every((step) => step.record.status === "SUCCESS")).toBe(true);
+      expect(steps.every((step) => step.record.claimsComplete === true)).toBe(true);
+      expect(steps[1]!.record.summary).toContain(directive);
+      expect(steps[2]!.record.summary).toContain(directive);
+      expect(forcedJournal.entries("checkpoint")).toHaveLength(floor);
+      expect((forcedJournal.entries("terminal")[0]!.payload as { status: string }).status).toBe(
+        "SUCCESS",
+      );
+    } finally {
+      forcedJournal.close();
+    }
+
+    const oneShotWire = await startFakeJudgeWire([judgeForm({ criteria: { "AC-1": true } })]);
+    cleanups.push(() => oneShotWire.close());
+    const oneShot = await setup({
+      judgeWireUrl: oneShotWire.url,
+      scriptedConfig: { claimsCompleteSteps: [1], echoJudgeFeedback: true },
+    });
+    const oneShotSpec = makeJudgedSpec({
+      repoUrl: oneShot.repoUrl,
+      goal: multiPartGoal,
+      maxSteps: 5,
+      cadence: 10,
+    });
+
+    const oneShotHandle = await oneShot.runner.start(oneShotSpec);
+    const oneShotReport = await awaitTerminal(oneShotHandle);
+
+    expect(oneShotReport.status).toBe("SUCCESS");
+    expect(oneShotReport.currentStep).toBe(1);
+    expect(oneShotReport.checkpoints).toHaveLength(1);
+    expect(oneShotReport.lastVerdict).toEqual({ kind: "PROCEED", atStep: 0 });
+    expect(oneShotWire.hits).toBe(1);
+
+    const oneShotJournal = new Journal(journalPath(oneShot.dataDir, oneShotHandle.runId));
+    try {
+      expect(oneShotJournal.entries("step")).toHaveLength(1);
+      expect(oneShotJournal.entries("checkpoint")).toHaveLength(1);
+      expect((oneShotJournal.entries("terminal")[0]!.payload as { status: string }).status).toBe(
+        "SUCCESS",
+      );
+    } finally {
+      oneShotJournal.close();
     }
   });
 

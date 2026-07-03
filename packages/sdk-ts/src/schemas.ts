@@ -163,6 +163,13 @@ export const PacingPolicySchema = z
   })
   .strict();
 
+export const BoundedWorkUnitPolicySchema = z
+  .object({
+    minDurableSteps: z.number().int().positive(),
+    directive: z.string().min(1).optional(),
+  })
+  .strict();
+
 export const NotificationPolicySchema = z
   .object({
     on: z.array(z.enum(["escalate", "milestone", "terminal"])),
@@ -220,6 +227,7 @@ export const TaskSpecSchema = z
     judge: JudgePolicySchema,
     routing: RoutingPolicySchema,
     pacing: PacingPolicySchema.optional(),
+    boundedWorkUnit: BoundedWorkUnitPolicySchema.optional(),
     notifications: NotificationPolicySchema.optional(),
     chainLink: ChainLinkSchema.optional(),
   })

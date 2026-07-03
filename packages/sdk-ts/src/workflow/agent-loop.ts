@@ -55,6 +55,7 @@ import type {
 } from "../types.js";
 import { shouldPointerize, type MemoryPointerPolicy } from "../runner/memory-pointer.js";
 import { isCompletionMilestone } from "./judge-trigger.js";
+import { decideStepForcing } from "./step-forcing.js";
 
 /** Step bound when the TaskSpec doesn't say otherwise (executors.md). */
 export const DEFAULT_STEP_LIMITS: StepLimits = { maxSeconds: 600 };
@@ -536,7 +537,20 @@ export async function agentLoop(spec: TaskSpec): Promise<RunStatus> {
         // Run-level SUCCESS needs PROCEED *and* every criterion passing — a
         // non-PROCEED verdict with passing criteria (e.g. a secret in the
         // diff) must never seal SUCCESS.
-        if (allCriteriaPass(verdict)) return seal("SUCCESS");
+        const acceptanceCriteriaMet = allCriteriaPass(verdict);
+        const stepForcing = decideStepForcing(
+          {
+            durableStepsSealed: checkpoints.length,
+            executorClaimedCompletion: record.claimsComplete === true,
+            acceptanceCriteriaMet,
+          },
+          spec.boundedWorkUnit,
+        );
+        if (stepForcing.deferCompletionMilestone) {
+          judgeFeedback = stepForcing.incrementDirective;
+          continue;
+        }
+        if (acceptanceCriteriaMet) return seal("SUCCESS");
         judgeFeedback = completionMilestone ? verdict.rationale : undefined;
       } else if (verdict.kind === "HALT") {
         return seal("FAILED", `judge HALT: ${verdict.rationale}`);

@@ -121,6 +121,13 @@ const RawTaskSpecYaml = z
       .strict()
       .optional(),
     pacing: z.object({ mode: z.enum(["auto", "fixed"]) }).strict().optional(),
+    bounded_work_unit: z
+      .object({
+        min_durable_steps: z.number().int().positive(),
+        directive: z.string().min(1).optional(),
+      })
+      .strict()
+      .optional(),
     notifications: z
       .object({
         on: z.array(z.enum(["escalate", "milestone", "terminal"])),
@@ -181,6 +188,12 @@ export function parseTaskSpec(yamlText: string, opts: ParseTaskSpecOptions = {})
     },
     routing: raw.routing ?? defaultPolicy(raw.executor.family, raw.judge.family),
     pacing: raw.pacing,
+    boundedWorkUnit: raw.bounded_work_unit
+      ? {
+          minDurableSteps: raw.bounded_work_unit.min_durable_steps,
+          directive: raw.bounded_work_unit.directive,
+        }
+      : undefined,
     notifications: raw.notifications
       ? { on: raw.notifications.on, slackWebhookEnv: raw.notifications.slack_webhook_env }
       : undefined,

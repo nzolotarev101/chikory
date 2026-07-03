@@ -1,0 +1,185 @@
+# Dogfood-082: WP-265 RUNG-3 HORIZON PROOF — the first INTRA-RUN ≥5-durable-step run, driven by
+#   the WP-269 step-forcing machinery dogfood-081 just delivered, hosted on the genuinely-open
+#   WP-219 chain-runtime residuals (D3 halt-and-replan + structured compaction-note handoff — the
+#   two capabilities `src/chain/chain-loop.ts` itself names as "remain deferred").
+#
+# WHY THIS IS THE HEADLINE (progression gate ✅ PROGRESSING → next WP-265 ladder rung = rung 3;
+#   dogfood-081 landed the rung-3 ENABLER, so this is the pre-declared rung-3 PROOF):
+#   dogfood-077/079/080 proved codex ONE-SHOTS any single-run goal (F-86/F-95), so the intra-run
+#   ≥5-step horizon / per-step-reliability curve / a mid-run kill→resume were UNREACHABLE by goal
+#   size. dogfood-081 (WP-269) built the harness lever — an opt-in `bounded_work_unit` policy whose
+#   `decideStepForcing` DEFERS a premature `claimsComplete` and re-enters the durable loop until a
+#   `min_durable_steps` floor is met AND the judge confirms the ACs. THIS run is the first to ARM
+#   that policy on a real product goal: `bounded_work_unit: { min_durable_steps: 5 }` forces ONE
+#   `chikory run` to seal ≥5 durable checkpoints even though codex wants to one-shot.
+#
+# THE TWO RUNG-3 KPIs THIS RUN CAPTURES (verified at review from the run's OWN journal, the way
+#   dogfood-079/080 verified their horizons — NOT via a working-tree AC, which cannot read the
+#   run's checkpoint count):
+#     (1) INTRA-RUN HORIZON — the trace shows ≥5 sealed durable checkpoints in ONE `chikory run`
+#         (first per-step-reliability / compounding-error data over a single long session).
+#     (2) MID-RUN KILL→RESUME — the OPERATOR does a real `kill -9` on the worker BETWEEN two sealed
+#         steps, then `chikory resume <run-id>`; the resumed run must NOT re-execute any sealed step
+#         (journal replay), and must reach a terminal state. This is the operator action the spec
+#         itself cannot perform — DO IT BY HAND mid-run (see LAUNCH below).
+#   ⚠️ EXPECTED FINDING (record it either way, dogfood-080 precedent): step-forcing only DEFERS the
+#   SEAL — it does not CHUNK the executor's work. If codex still front-loads all 5 parts into step 1,
+#   steps 2–5 will seal REAL-but-thin checkpoints (a partly-hollow horizon) → that IS a valid rung-3
+#   result pointing at the NEXT mechanism (per-step work-unit CHUNKING, not just seal-deferral). The
+#   host is chosen so the FIRST step does real product work regardless.
+#
+# HOST CHOICE (dogfood-081 review, 2026-07-03): WP-213 (the plan's named step-forcing sibling) is
+#   ALREADY SHIPPED (`0db60ba`, `src/executors/native.ts`) — the §6 row is stale — so it fails the
+#   §1.1 failure-surface gate (an agent can't plausibly fail rebuilding it). WP-211 needs Playwright
+#   (heavy new dep + browser install + 120 s judge-check cap risk + the CLAUDE.md UI wall). The
+#   genuinely-open ≥5-part intra-run host with NO new dep on the durable-execution pillar is the
+#   WP-219 chain-runtime residuals named as deferred in `chain-loop.ts` — BUILT via a single
+#   `chikory run` (intra-run axis, correct for rung 3), not launched as a chain.
+#
+# Format: LOOSE (headline — goal states the OUTCOME + constraints; ACs anchor on OUTCOME SYMBOLS THE
+#   GOAL NAMES (`decideReplan`, `node_replanned`) — net-new on HEAD so a grep cannot false-green on
+#   an incumbent file, F-90; module/test layout LEFT TO THE EXECUTOR, F-82/F-83; NO prescribed diff).
+# Ladder-rung: 3
+# Thesis-KPI: INTRA-run durable step count — ONE `chikory run` seals ≥5 durable checkpoints under an
+#   active `bounded_work_unit` policy (per-step reliability / compounding-error over one long
+#   session) + a LIVE operator mid-run `kill -9` → `chikory resume` landing BETWEEN sealed steps.
+#
+# F-97 (dogfood-081) APPLIED FORWARD: AC-3 does NOT merely grep the net-new symbol in `test/` (which
+#   a UNIT test would false-green) — it requires the symbol to co-live with the LIVE chain driver
+#   `createChainActivities` in a `test/chain/` file that asserts the `node_replanned` outcome, so the
+#   LIVE replan test is actually enforced, not just any reference to the symbol.
+#
+# LAUNCH WITH `chikory run` (a SINGLE durable run — this is intra-run rung 3, NOT a chain):
+#      devbox run run-dogfood        # <- `chikory run`; picks the latest spec (this one)
+#   THEN, mid-run (after ≥2 steps have sealed — watch `chikory trace <run-id> --watch`), perform the
+#   deliberate durability proof BY HAND:
+#      kill -9 <worker-pid>          # kill the worker BETWEEN two sealed checkpoints
+#      devbox run -- pnpm chikory resume <run-id>   # resume; assert NO sealed step re-executes
+
+name: dogfood-082-wp219-chain-replan-rung3-horizon
+goal: >
+  Advance the WP-219 CHAIN RUNTIME with the two capabilities `src/chain/chain-loop.ts` itself names
+  as "remain deferred" — D3 HALT-AND-REPLAN and STRUCTURED COMPACTION-NOTE handoff — as a SINGLE
+  `chikory run` under an ACTIVE bounded-work-unit policy, so this one run accumulates a genuine
+  INTRA-RUN HORIZON of at least the policy floor of DURABLE CHECKPOINTS instead of collapsing into
+  one executor session. Today a `FAILED` node unconditionally halts the chain
+  (`deriveChainStatus` → FAILED) and the S4 handoff carries only a git bundle + a static note; build
+  the deferred behavior additively:
+
+    * PART 1 — PURE REPLAN DECISION: add a pure, deterministic, side-effect-free `decideReplan`
+      function — a sibling of the existing pure chain reducers `deriveChainStatus` / `advanceChain`
+      (`src/chain/advance.ts`) — that, given a `ChainRecord` with a just-`FAILED` node id and a
+      bounded max-replan budget, returns whether to REPLAN the remaining (not-yet-sealed) nodes or
+      HALT the chain terminally, plus the reason. Total function over its inputs: no I/O, no Temporal,
+      no clock, no id-gen; a REPLAN is refused once the max-replan budget is exhausted (so a
+      perpetually-failing node HALTs rather than looping forever). Unit-tested exhaustively (first
+      failure under budget → replan; budget exhausted → halt; no failed node → halt/none).
+
+    * PART 2 — PURE STRUCTURED COMPACTION NOTE: add a pure function that condenses a sealed
+      predecessor node's outcome into a BOUNDED structured handoff note (the "structured compaction
+      notes" `chain-loop.ts` defers) — deterministic, size-bounded, no I/O — to be carried into a
+      successor node's context ALONGSIDE the existing artifact bundle, not replacing it. Unit-tested.
+
+    * PART 3 — REPLAN WIRE (depends on 1): call `decideReplan` from the chain loop's FAILED-node path
+      (`src/chain/chain-loop.ts`) so that, instead of unconditionally halting, a REPLAN decision
+      re-invokes the planner over the remaining goals, splices the revised nodes into the running
+      chain, and journals a `node_replanned` control event; a HALT decision seals FAILED exactly as
+      today. This MUST be additive: with the replan budget at zero the behavior is byte-for-byte the
+      current halt-on-FAILED path, and the dogfood-079 chain `kill -9` → `chikory chain resume`
+      replay path MUST stay green.
+
+    * PART 4 — HANDOFF WIRE (depends on 2): thread the PART-2 structured compaction note into the S4
+      handoff path (`src/chain/node-spec.ts` / `chain-loop.ts`) additively, so a successor node's
+      context carries the predecessor's structured note in ADDITION to the git bundle. Do NOT change
+      the shape of any frozen chain contract (`ChainRecord`, `NodeOutcome`, `ChainEntry`, `Plan`,
+      `ChainNodeHandoff`) — the note rides existing/optional fields, and `node_replanned` is at most
+      an additive journal-event kind, never a mutation of an existing entry's shape.
+
+    * PART 5 — LIVE PROOF (depends on 3): add a LIVE Temporal chain test (reuse the existing
+      live-chain harness — `createChainActivities`, `createRunnerWorker`, the scripted registry +
+      `waitFor` helpers, `describe.skipIf(address === null)` — do NOT mock the workflow) that drives a
+      REAL chain in which one node FAILS, asserts `decideReplan` fires a REPLAN, a `node_replanned`
+      event is journaled, and the chain then reaches a SUCCESS terminal state; and asserts that with
+      the replan budget at zero the SAME failing chain seals FAILED on the unchanged halt path.
+
+  CONSTRAINTS: strict TypeScript, ESM `.js` relative imports, named exports only; NO new dependency;
+  reuse `deriveChainStatus` / `advanceChain` / `readyNodes` — do NOT re-implement chain state; do NOT
+  change any frozen chain contract shape (`ChainRecord` / `NodeOutcome` / `ChainEntry` / `Plan` /
+  `ChainNodeHandoff`); `decideReplan` and the compaction-note builder are NEW pure modules, the loop
+  edits are additive, `node_replanned` is an additive journal-event kind. Do NOT weaken the WP-123
+  crash-recovery, WP-206 suspend/resume, or the dogfood-079 chain kill→resume replay paths. If a
+  verification step reports a failing test or type error, READ the failure and fix the
+  IMPLEMENTATION — do NOT weaken or delete any assertion.
+
+repos:
+  - url: /Users/nikitazolotarev/repos/chikory
+    writable: true
+
+# The rung-3 lever: force ≥5 durable checkpoints in ONE run even though codex one-shots.
+bounded_work_unit:
+  min_durable_steps: 5
+  directive: >
+    Advance exactly ONE of the five numbered PARTs of the goal in this increment, then stop and let
+    the checkpoint seal — do NOT declare the whole run complete until every PART has landed with its
+    tests and the acceptance criteria pass. Prefer the next unstarted PART in dependency order
+    (1 pure replan → 2 pure note → 3 replan wire → 4 handoff wire → 5 live proof).
+
+acceptance_criteria:
+  - id: AC-1
+    description: >
+      The pure `decideReplan` decision exists in the chain source — a side-effect-free total function
+      over a `ChainRecord` + failed-node id + a bounded replan budget, a sibling of the pure chain
+      reducers. (OUTCOME symbol the goal NAMES — `decideReplan` — absent on HEAD, so a recursive grep
+      cannot false-green on an incumbent file, F-90. Module/test layout is the executor's, F-82/F-83.)
+    check: >
+      cd packages/sdk-ts &&
+      grep -rq 'decideReplan' src/chain/
+
+  - id: AC-2
+    description: >
+      The durable chain loop HONORS the decision — `decideReplan` is called from
+      `src/chain/chain-loop.ts`'s FAILED-node path so a REPLAN re-enters instead of halting. (Same
+      symbol, scoped to the loop file, proving the wire — the def+wire pattern of dogfood-052/081.)
+    check: >
+      cd packages/sdk-ts &&
+      grep -rq 'decideReplan' src/chain/chain-loop.ts
+
+  - id: AC-3
+    description: >
+      A LIVE Temporal chain test exercises replan end-to-end. (F-97-SAFE, dogfood-081 lesson: not a
+      bare symbol grep a UNIT test would false-green — it requires a `test/chain/` file that
+      references BOTH the net-new `decideReplan` symbol AND the LIVE-chain driver `createChainActivities`
+      AND asserts the `node_replanned` outcome the goal names, so the LIVE replan test is actually
+      enforced. All three are OUTCOME symbols the goal names; test filename is the executor's, F-82.)
+    check: >
+      cd packages/sdk-ts &&
+      for f in $(grep -rl 'decideReplan' test/chain/ 2>/dev/null); do
+        grep -q 'createChainActivities' "$f" && grep -q 'node_replanned' "$f" && { echo ok; break; };
+      done | grep -q ok
+
+  - id: AC-4
+    description: >
+      The SDK stays type- and lint-clean and the FULL existing suite — including the new replan unit
+      + live chain tests — is green, proving the additive guarantee (no frozen chain-contract change;
+      the WP-123 crash-recovery, WP-206 suspend/resume, and dogfood-079 chain kill→resume replay tests
+      still pass, and the zero-budget path is the unchanged halt-on-FAILED behavior).
+    check: cd packages/sdk-ts && pnpm exec tsc --noEmit && pnpm exec eslint . && pnpm exec vitest run
+
+budget_usd: 50
+max_steps: 30
+
+executor:
+  adapter: codex
+  family: openai
+
+judge:
+  family: openai-compat
+  cadence: 2
+  max_cost_share: 0.5
+
+routing:
+  stages:
+    plan: { provider: openai-compat, model: gpt-5.5 }
+    code: { provider: openai-compat, model: gpt-5.5 }
+    review: { provider: openai-compat, model: gpt-5.5 }
+    judge: { provider: openai-compat, model: gemini-3.1-pro-preview }

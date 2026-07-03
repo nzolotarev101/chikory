@@ -91,6 +91,8 @@ export interface TaskSpec {
   routing: RoutingPolicy;
   /** P2 (WP-207); absent = fixed defaults. */
   pacing?: PacingPolicy;
+  /** Opt-in intra-run durable checkpoint floor; absent = default one-shot behavior. */
+  boundedWorkUnit?: BoundedWorkUnitPolicy;
   /** P2 (WP-208). */
   notifications?: NotificationPolicy;
   /** P2 (WP-219, ADR-005) — present when this run is a node in a chain. */
@@ -169,6 +171,13 @@ export interface JudgePolicy {
 /** P2 (WP-207) — reserved; shape finalized after dogfood-001 data. */
 export interface PacingPolicy {
   mode: "auto" | "fixed";
+}
+
+export interface BoundedWorkUnitPolicy {
+  /** Minimum number of durable step checkpoints required before run success. */
+  minDurableSteps: number;
+  /** Optional directive surfaced to the executor for forced increments. */
+  directive?: string;
 }
 
 /** P2 (WP-208) — reserved. */
