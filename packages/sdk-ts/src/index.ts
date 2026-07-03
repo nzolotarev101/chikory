@@ -43,6 +43,7 @@ export {
   CLAUDE_CODE_DEFAULT_MAX_TURNS,
   createClaudeCodeAdapter,
   createCodexAdapter,
+  createNativeAdapter,
   parseClaudeCodeOutput,
   parseCodexOutput,
   renderStepPrompt,
@@ -51,6 +52,7 @@ export {
   type ClaudeCodeAdapterOptions,
   type CliStepOptions,
   type CodexAdapterOptions,
+  type NativeAdapterOptions,
   type ParsedCliResult,
 } from "./executors/index.js";
 export {

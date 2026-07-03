@@ -34,6 +34,7 @@ import type {
   JudgeForm,
   JudgeVerdict,
   ModelChoice,
+  Router,
   RoutingPolicy,
   StepLimits,
   StepRecord,
@@ -62,7 +63,13 @@ export const DEFAULT_COMPACTION_POLICY: CompactionPolicy = {
 const execFileAsync = promisify(execFile);
 
 /** Adapters are constructed per run — the store is run-scoped. */
-export type AdapterFactory = (ctx: { store: ArtifactStore; model?: string }) => ExecutorAdapter;
+export type AdapterFactory = (ctx: {
+  store: ArtifactStore;
+  model?: string;
+  modelFamily?: TaskSpec["executor"]["family"];
+  /** Lazy so wrapped-CLI adapters do not require executor provider env. */
+  createCodeRouter?: () => Router;
+}) => ExecutorAdapter;
 export type AdapterRegistry = Record<string, AdapterFactory>;
 
 export interface RunnerActivityDeps {
@@ -313,7 +320,19 @@ export function createRunnerActivities(deps: RunnerActivityDeps) {
             );
           }
           const store = createLocalArtifactStore(artifactsDir(deps.dataDir, input.runId));
-          const adapter = factory({ store, model: spec.routing.stages.code.model });
+          const codeModel = spec.routing.stages.code;
+          const codeRouting: RoutingPolicy = {
+            stages: { plan: codeModel, code: codeModel, review: codeModel, judge: codeModel },
+            ...(spec.routing.failover?.code
+              ? { failover: { code: spec.routing.failover.code } }
+              : {}),
+          };
+          const adapter = factory({
+            store,
+            model: codeModel.model,
+            modelFamily: spec.executor.family,
+            createCodeRouter: () => createRouter(codeRouting, deps.routerOptions),
+          });
 
           const record = await adapter.runStep({
             workspaceDir: workspaceDir(deps.dataDir, input.runId),

@@ -9,7 +9,11 @@ import { existsSync } from "node:fs";
 import { readdir, readFile } from "node:fs/promises";
 import { join } from "node:path";
 
-import { createClaudeCodeAdapter, createCodexAdapter } from "../executors/index.js";
+import {
+  createClaudeCodeAdapter,
+  createCodexAdapter,
+  createNativeAdapter,
+} from "../executors/index.js";
 import { Journal, reportFromJournal, runTotals } from "../journal/journal.js";
 import type { RouterOptions } from "../router.js";
 import { createTemporalRunner } from "../runner.js";
@@ -21,11 +25,23 @@ import type { RunHandle, RunStatus, RunStatusReport, TaskSpec } from "../types.j
 import { evaluateSpecStalenessPrecheck } from "./spec-staleness-precheck.js";
 import { formatEntryLine, renderStepDetail, renderTrace, traceJson } from "./trace.js";
 
-/** The wrapped-CLI executors that ship in P1 (ADR-003; WP-112/113). */
-export const DEFAULT_ADAPTERS: AdapterRegistry = {
+/** The executor adapters that ship in P1 (ADR-003; WP-112/113; WP-213). */
+export const ADAPTERS: AdapterRegistry = {
   "claude-code": (ctx) => createClaudeCodeAdapter({ store: ctx.store, model: ctx.model }),
   codex: (ctx) => createCodexAdapter({ store: ctx.store, model: ctx.model }),
+  native: (ctx) => {
+    if (!ctx.createCodeRouter || !ctx.modelFamily) {
+      throw new Error("native adapter requires createCodeRouter and modelFamily");
+    }
+    return createNativeAdapter({
+      store: ctx.store,
+      router: ctx.createCodeRouter(),
+      modelFamily: ctx.modelFamily,
+    });
+  },
 };
+
+export const DEFAULT_ADAPTERS: AdapterRegistry = ADAPTERS;
 
 const TERMINAL: ReadonlySet<RunStatus> = new Set(["SUCCESS", "FAILED", "CANCELLED"]);
 

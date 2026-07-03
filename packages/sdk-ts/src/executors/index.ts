@@ -18,3 +18,4 @@ export {
   type ClaudeCodeAdapterOptions,
 } from "./claude-code.js";
 export { createCodexAdapter, parseCodexOutput, type CodexAdapterOptions } from "./codex.js";
+export { createNativeAdapter, type NativeAdapterOptions } from "./native.js";
