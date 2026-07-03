@@ -69,4 +69,27 @@ describe("undeclaredWritePaths", () => {
       undeclaredWritePaths(node, ["src/left.ts", "src/rogue.ts", "test/left.test.ts"]),
     ).toEqual(["src/rogue.ts"]);
   });
+
+  it("admits an executor-named NEW file in a declared directory (WP-510/F-89, dogfood-079)", () => {
+    // Planner declared src/memory/core.ts; the loose executor created its own
+    // src/memory/tiered-memory.ts in the same area — a net-new file → admit.
+    const node = plan([["src/memory/core.ts", "src/memory/index.ts"]]).nodes[0]!;
+    const changed = ["src/memory/index.ts", "src/memory/tiered-memory.ts"];
+    expect(undeclaredWritePaths(node, changed, ["src/memory/tiered-memory.ts"])).toEqual([]);
+  });
+
+  it("still fails a MODIFIED undeclared file in a declared directory (rogue edit)", () => {
+    // A pre-existing sibling that was edited (not in addedPaths) stays a violation.
+    const node = plan([["src/memory/core.ts"]]).nodes[0]!;
+    expect(undeclaredWritePaths(node, ["src/memory/core.ts", "src/memory/other.ts"], [])).toEqual([
+      "src/memory/other.ts",
+    ]);
+  });
+
+  it("does not admit a NEW file in a directory with no declared entry", () => {
+    const node = plan([["src/memory/core.ts"]]).nodes[0]!;
+    expect(
+      undeclaredWritePaths(node, ["src/memory/core.ts", "src/runner/rogue.ts"], ["src/runner/rogue.ts"]),
+    ).toEqual(["src/runner/rogue.ts"]);
+  });
 });

@@ -86,10 +86,40 @@ function isTestPath(path: string): boolean {
   return /\.(test|spec)\.[cm]?[jt]sx?$/.test(base);
 }
 
-/** Actual node output must stay inside the planner-declared write boundary. */
-export function undeclaredWritePaths(node: PlanNode, changedPaths: string[]): string[] {
-  const declared = new Set((node.writeSet ?? []).map(normalizeWritePath));
+/** Repo-relative POSIX dirname ("" for a top-level file). */
+function parentDir(path: string): string {
+  const slash = path.lastIndexOf("/");
+  return slash < 0 ? "" : path.slice(0, slash);
+}
+
+/**
+ * Actual node output must stay inside the planner-declared write boundary.
+ *
+ * WP-510/F-89 (dogfood-079 extension): a LOOSE goal delegates file LAYOUT to the
+ * executor (F-82/F-83), so the planner's exact-path writeSet routinely guesses a
+ * filename the executor doesn't use (planner declared `src/memory/core.ts`, the
+ * executor created `src/memory/tiered-memory.ts`). Admit a NEWLY-CREATED file
+ * that shares a directory with a declared writeSet entry — the executor may name
+ * its own new files inside the area the node already owns — while a MODIFIED
+ * undeclared file (a rogue edit to an existing out-of-scope file) is still
+ * FAILED. `addedPaths` = the git `--diff-filter=A` set; when empty (non-chain /
+ * legacy callers) the gate keeps the exact-match + test-tree behaviour.
+ */
+export function undeclaredWritePaths(
+  node: PlanNode,
+  changedPaths: string[],
+  addedPaths: Iterable<string> = [],
+): string[] {
+  const declared = (node.writeSet ?? []).map(normalizeWritePath);
+  const declaredSet = new Set(declared);
+  const declaredDirs = new Set(declared.map(parentDir).filter((dir) => dir.length > 0));
+  const added = new Set([...addedPaths].map(normalizeWritePath));
   return changedPaths
     .map(normalizeWritePath)
-    .filter((path) => !declared.has(path) && !isTestPath(path));
+    .filter(
+      (path) =>
+        !declaredSet.has(path) &&
+        !isTestPath(path) &&
+        !(added.has(path) && declaredDirs.has(parentDir(path))),
+    );
 }
