@@ -4,6 +4,26 @@
 > per-run detail lives in [`docs/reports/`](reports/). Content below was moved
 > verbatim out of the living docs on 2026-07-02 (course correction — plan.md §6).
 
+## Archived 2026-07-02 — plan.md §preamble status prose displaced by dogfood-077
+
+Displaced from the "Last 3 runs" / "Queue" bounded block when dogfood-077 landed
+(see `docs/reports/dogfood-077.md`):
+
+- **(was Last-3-runs) dogfood-074** — WP-264 judge-check tree-reap (`run-6063231c`, SUCCESS, WP-264 → 🟢, LAST prescribed headline).
+- **(was Queue) NEXT HEADLINE dogfood-077 = WP-265 rung 2 (re-attempt), HOST = WP-206 HITL suspend/resume** (spec ready, WP-266 lint 🟢) — ≥10-step LOOSE run building `chikory suspend <run-id>` + deliberate mid-run `kill -9` → `chikory resume`. **Outcome:** WP-206 DELIVERED clean (SUCCESS, WP-206 → 🟢) but codex one-shot it in 1 step → rung-2 horizon + kill→resume missed a 3rd time (F-86 → WP-508: rung 2 must be chain-hosted).
+
+## Archived 2026-07-02 — DOGFOODING.md header status block displaced by dogfood-077
+
+> Was the "Latest: dogfood-076" bounded status block in `docs/DOGFOODING.md`.
+
+Latest: dogfood-076 — WP-265 rung-2 attempt on WP-213 native executor (`run-17a57451`). The native
+raw-LLM loop executor (`createNativeAdapter`) was BUILT well and all-green at step 2 (WP-213 effectively
+done) but UNHARVESTED. The run sealed FAILED on a self-inflicted AC (the 2nd loose headline in a row):
+AC-1's `! grep -Eq 'execFile|spawn' native.ts` matched the doc comment "…is spawned" → false-FAILED →
+budget-waste HALT. 🔴 F-83 → WP-266 (loose-AC lint) FIXED; 🔴 F-84 → WP-267 (enforce at launch); 🟡 F-85
+→ WP-268 (codex steps ran 1.76×/1.98× past the 600s cap). Rung-2 ≥10-step horizon + live kill→resume
+KPIs remained UN-measured (build was ~2 steps; run auto-terminated before the operator's kill).
+
 ## Archived 2026-07-02 — plan.md §preamble status prose displaced by dogfood-076
 
 Displaced from the "Last 3 runs" / "Queue" / "Top open friction" bounded block when

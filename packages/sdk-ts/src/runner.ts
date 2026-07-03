@@ -18,6 +18,8 @@ import {
   SIGNAL_APPROVE,
   SIGNAL_CANCEL,
   SIGNAL_INJECT,
+  SIGNAL_RESUME,
+  SIGNAL_SUSPEND,
   SIGNAL_TOP_UP,
   TASK_QUEUE_DEFAULT,
 } from "./runner/api.js";
@@ -90,6 +92,10 @@ export function createTemporalRunner(opts: TemporalRunnerOptions = {}): Temporal
         const client = await getClient();
         await client.workflow.getHandle(runId).signal(SIGNAL_INJECT, guidance);
       },
+      async suspend() {
+        const client = await getClient();
+        await client.workflow.getHandle(runId).signal(SIGNAL_SUSPEND);
+      },
       async cancel() {
         const client = await getClient();
         await client.workflow.getHandle(runId).signal(SIGNAL_CANCEL);
@@ -129,6 +135,9 @@ export function createTemporalRunner(opts: TemporalRunnerOptions = {}): Temporal
         await client.workflow
           .getHandle(runId)
           .signal(SIGNAL_TOP_UP, { amountUsd: runOpts.addBudgetUsd });
+      } else {
+        const client = await getClient();
+        await client.workflow.getHandle(runId).signal(SIGNAL_RESUME);
       }
       return makeHandle(runId);
     },

@@ -12,6 +12,10 @@ export const SIGNAL_APPROVE = "approve";
 export const SIGNAL_INJECT = "inject";
 /** `chikory resume --add-budget` (WP-124 / DX-7). */
 export const SIGNAL_TOP_UP = "topUp";
+/** Operator HITL park request (WP-206). */
+export const SIGNAL_SUSPEND = "suspend";
+/** Operator HITL unpark request (WP-206). */
+export const SIGNAL_RESUME = "resume";
 /** Graceful, checkpointed cancel. */
 export const SIGNAL_CANCEL = "cancel";
 /** `chikory status` reads live without disturbing the run. */

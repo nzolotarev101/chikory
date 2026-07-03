@@ -1,0 +1,188 @@
+# Dogfood-078: WP-265 rung 2 (CHAIN RE-HOST) — the ≥10-step at-horizon run, decomposed so the horizon is REAL.
+# Format: LOOSE (horizon-ladder headline — goal states the OUTCOME + constraints; the ACs pin what "done"
+#   means via OUTCOME SYMBOLS THE GOAL NAMES; the internal decision/wire/test design is LEFT TO THE EXECUTOR;
+#   NO prescribed diff).
+# Ladder-rung: 2
+# Thesis-KPI: horizon (≥10 DURABLE STEP/CHECKPOINT boundaries across the chain's nodes) + per-step reliability
+#   (compounding-error over a genuinely multi-step build) + the first LIVE mid-run kill→resume: the operator
+#   kills the worker BETWEEN chain nodes and the chain continues WITHOUT re-executing any completed node/step.
+#
+# ⚠️ LAUNCH WITH `chikory chain` (a DECOMPOSED multi-node run). This is the whole point of this spec:
+#      devbox run chain-dogfood      # ← `chikory chain`; picks the latest spec (this one)
+#   The planner decomposes the goal below into sequential NODES, each its own durable run + checkpoint, so the
+#   campaign crosses ≥10 durable step boundaries — the horizon a big SINGLE-goal build can NEVER reach (F-86,
+#   dogfood-077: codex journals ~1 step per clean session; 075/076/077 = 3/4/1 steps regardless of feature
+#   size). Do NOT launch this as `devbox run run-dogfood` — a single run would collapse the whole feature into
+#   ~1 step and re-whiff the horizon KPI for the 4th time. Do NOT set CHIKORY_ALLOW_LAUNCH_MODE_MISMATCH.
+#
+# ⚠️ PRE-LAUNCH LINT (WP-266/267, F-82/F-83/F-84 — MANDATORY):
+#      bash scripts/dogfood-progression.sh --spec examples/dogfood/dogfood-078.yaml
+#   MUST print "🟢 AC checks: no F-82 file-pin / F-83 prose-grep hazard (WP-266 lint)." and exit 0. The ACs
+#   below are POSITIVE symbol greps + a bare-toolchain build/test — no `test -f`, no bare-word negative grep.
+#   `scripts/dogfood.sh` ENFORCES this automatically (WP-267): a launch whose loose ACs ⛔ is REFUSED at zero
+#   LLM cost. This spec already passes the lint 🟢.
+#
+# ⚠️ RUNG-2 OPERATOR PROCEDURE — the deliberate mid-CHAIN kill→resume (this is what makes it rung 2):
+#   1. Launch `devbox run chain-dogfood` and watch the stream (the chain id + worker PID are printed).
+#   2. After AT LEAST 2–3 chain NODES have completed (durable multi-node progress to preserve), in a second
+#      shell: `kill -9 <the chikory worker PID>` (or `pgrep -f chikory`).
+#   3. Resume: restart the worker (relaunch is fine — the chain workflow lives durably in Temporal) and/or
+#      `devbox run -- pnpm chikory chain resume <chain-id> --watch`. The chain MUST continue from the last
+#      completed node — NO completed node/step is re-executed (no duplicate spend). Record in the report:
+#      which node # was in flight at the kill, which node it resumed into, whether any completed node re-ran,
+#      and the pre/post checkpoint chain. THIS mid-chain kill→resume is the run's PRIMARY thesis artifact.
+#   If the chain finishes before you kill it, that itself is data — record it and note node/step counts; do
+#   NOT pad the spec.
+#
+# WHY THIS IS NEXT (2026-07-02): dogfood-077 DELIVERED WP-206 HITL suspend/resume cleanly (SUCCESS, all-green,
+# real live durable test, WP-206 → 🟢) but codex ONE-SHOT the 13-file feature in 1 durable step, so the
+# rung-2 KPIs (≥10-step horizon + live kill→resume) missed a 3rd straight time. F-86 → WP-508 proved the miss
+# is STRUCTURAL, not a sizing accident: step count = judge-retry rounds, not feature size, so a bigger single
+# goal can NEVER buy horizon. The horizon must come from SEQUENTIAL DECOMPOSITION — a `chikory chain` whose K
+# nodes each contribute ≥1 durable checkpoint. This spec hosts that chain on WP-250 (plan.md §6 🟡, the DIRECT
+# next P2 exit-gate dependency, now UNBLOCKED by the WP-206 suspend machinery dogfood-077 just landed):
+# pacing `park` → durable suspend on context-window overflow. WP-250 genuinely decomposes into ≥6 sequential
+# deliverables (pure decision → window-cause journal → workflow wire → operator surface → resume → live test),
+# each a node, so the chain crosses ≥10 durable steps AND the mid-chain kill lands between real checkpoints.
+#
+# THE OPEN GAP (WP-250): today the pacing decision (`decideContextWindowPacing`, `agent-loop.ts:409`) can
+# return action `park` — meaning the SINGLE next step's `estimatedNextStepTokens > contextWindowTokens`, so
+# folding accumulated history CANNOT make that step fit — but the loop treats `park` and `compact` identically
+# (`underPressure = pacing.action !== "continue"` `:430`) and just folds-and-continues INTO the guaranteed
+# overflow. The honest act on a `park` is to durably SUSPEND the run (zero compute, resumable) rather than
+# charge the overflow step. The substrate already exists: the WP-206 operator suspend machinery
+# (`parkIfOperatorSuspended` condition-park + the `control_event` journal, `agent-loop.ts:199`), the WP-243
+# budget-park (`recordBudgetEvent`, `cause` field precedent), and the FROZEN `debug.contextWindowTokens` seam
+# (`types.ts:125`) that forces a deterministic `park` from a tiny window — so this is deterministically
+# dogfoodable WITHOUT any real 200k-token accumulation.
+#
+# WHY LOOSE (and a plausible failure surface): the goal fixes the OUTCOME (a `park` pacing action durably
+# suspends the run at zero compute with a distinct window cause, surfaced with an unblock command, and a
+# resume continues to terminal with NO journaled step re-executed) and the CONSTRAINTS (reuse the WP-206
+# condition-park + journal, no new dependency, additive — no `StepRecord`/`JournalEntry`/pacing-decision
+# contract-shape change), but leaves the decision/wire/test design to the executor. A competent agent can
+# plausibly fail this: parking on the WRONG action (suspending on `compact`, which SHOULD fold-and-continue);
+# a park-check placed where a completed step re-executes on resume (duplicate spend — the exact
+# compounding-error failure the thesis targets); a poll/sleep instead of a zero-compute `condition` wait; a
+# resume that loses the folded digest; a test that mocks the durable layer instead of driving a real
+# Temporal run through the frozen seam.
+#
+# F-82/F-83 APPLIED: the ACs below are POSITIVE greps on OUTCOME SYMBOLS THE GOAL NAMES as they appear in code
+# (the `window` park cause; the `debug.contextWindowTokens` seam the live test drives; the `SUSPENDED` status
+# the run reaches) + a bare-toolchain build/test — NO `test -f <new-file>`, NO bare-word NEGATIVE grep. The
+# node-level greps anchor only on symbols a one-line node paraphrase will naturally still contain (DOGFOODING
+# §8 chain-paraphrase rule — WP-257 partial); load-bearing rules live in the AC descriptions, which pass to
+# each node verbatim.
+#
+# Gate verdicts (dogfood-review §5, applied inline on CURRENT HEAD):
+#   * §0 Progression: ✅ PROGRESSING (ledger through 077) → next headline = the current WP-265 ladder rung.
+#     Rung 2 is STILL UN-satisfied (077 one-shot to 1 step, rung=1) → this spec re-hosts rung 2 the ONLY way
+#     that can reach it: a decomposed chain.
+#   * §1.1 Failure-surface: ✅ — ≥10-step multi-node chain on the durable-execution pillar; durable park
+#     correctness, no-step-re-execution on resume (per node AND on the live kill), status transitions, a live
+#     Temporal test through the frozen window seam, and the mid-chain kill→resume.
+#   * §1.2 Product-progress: ✅ — advances REAL open plan.md §6 WP-250 (🟡, the DIRECT next P2 exit-gate
+#     dependency, unblocked by WP-206). Net-new real product control-flow seeded INTO WP-250's real code;
+#     reuses the WP-206/WP-243 substrate; NO scaffolding, NO new dep. The chain mechanism is the vehicle, WP-250
+#     is the real host.
+#   * §1.3 Mission-critical: ✅ PROCEED — thesis-stressing horizon slice on a real product WP; not busy, not
+#     scaffold-hosted; the veto does not fire.
+#   * §1.5 Friction-budget: ✅ — class=product, spec_format=loose, NOT harness-meta; trailing-3 (075/076/077)
+#     meta:product headline ratio 0/3, cap not busted.
+#
+# Zero-secrets launch (no API keys; CLI-OAuth judge via the shim; NO seam vars beyond the frozen
+# `debug.contextWindowTokens` the test itself sets). The script auto-starts the `agy`/Antigravity proxy for
+# the gemini judge:
+#   devbox shell
+#   bash scripts/dogfood-progression.sh --spec examples/dogfood/dogfood-078.yaml   # WP-266 lint MUST pass
+#   devbox run chain-dogfood       # `chikory chain`, latest spec (this one)
+#
+# Pre-launch discipline:
+#   * COMMIT EVERYTHING first — the workspace clones HEAD (F-30: launch ONCE). The dogfood-077 review edits AND
+#     the STAGED WP-206 delivery (13 files) must be committed so HEAD is lint-GREEN before the clone (the clone
+#     must pass this run's own AC `eslint .`).
+#   * F-45: any NEW test file this run creates MUST be ABSENT on HEAD (the window-park durable test is net-new).
+#   * F-76/F-80/F-85 (codex): a multi-node chain WILL take a while; do NOT raise `budget_usd`/`max_steps`
+#     mid-run to rescue it; RECORD any per-node step-cap overrun (F-85 → WP-268).
+#   * Run Devbox commands sequentially (F-22). Bare `pnpm exec`, NOT `devbox run` (F-24), in the ACs.
+name: dogfood-078-wp250-window-park-durable-suspend
+goal: >
+  Close WP-250: when the pacing decision returns action `park` — the SINGLE next step's estimated tokens
+  exceed the context window, so folding accumulated history CANNOT make it fit — the run must durably SUSPEND
+  at ZERO compute instead of folding-and-continuing INTO a guaranteed-overflow step, and later resume to a
+  normal terminal state without re-executing any already-journaled step. Today the workflow loop treats `park`
+  and `compact` identically (`agent-loop.ts:430` `underPressure = pacing.action !== "continue"`) and charges
+  the overflow step. Close that gap by REUSING the existing durable-park machinery (the WP-206 operator-suspend
+  `condition` wait + `control_event` journal at `agent-loop.ts:199`, and the WP-243 budget-park `cause`
+  precedent), NOT by inventing a second suspend mechanism or a second LLM/durable path.
+
+  OUTCOME (what "done" means — the HOW is yours to design; this decomposes into sequential deliverables):
+    * A PURE decision that separates a fold-and-continue `compact` from a must-suspend `park`: a `park` action
+      (next step cannot fit even after compaction) maps to "durably suspend"; `continue`/`compact` do NOT. Pure,
+      typed, tested — the sibling of `decideContextWindowPacing`, reading only the pacing result.
+    * When the loop hits a `park` action, it durably parks the run at `status = "SUSPENDED"` on a Temporal
+      `condition(...)` wait (ZERO compute, NOT a poll or `sleep`), journaling the park with a DISTINCT window
+      cause — `cause: "window"` — so the audit trail distinguishes a window park from an operator suspend
+      (WP-206) and a budget breach (WP-243). The park-check MUST sit where NO already-journaled step is
+      re-executed on resume.
+    * The operator surface (`chikory status` / `--watch`) reports the window-park state and an ACTIONABLE
+      unblock hint (shrink the next step or start a fresh-context resume), mirroring how the budget halt
+      surfaces its top-up command.
+    * A resume path continues a window-parked run to a NORMAL terminal state with the SAME journaled steps
+      (no duplicate step entries / no duplicate spend), preserving any folded digest.
+    * Prove it with a REAL behavioral test that drives a LIVE Temporal-backed run (mirror the WP-123
+      crash-recovery, WP-212 inject, and WP-206 suspend tests — do NOT mock the durable layer): use the FROZEN
+      `debug.contextWindowTokens` seam to force a deterministic `park`, assert the run reaches `SUSPENDED` at
+      zero compute and does NOT advance while parked, resume it, and assert it reaches a terminal state having
+      re-executed ZERO journaled steps. Reference `contextWindowTokens` from the test so the outcome is
+      greppable.
+
+  CONSTRAINTS: strict TypeScript, ESM `.js` relative imports, named exports only; NO new dependency; do NOT
+  change the `StepRecord`/`JournalEntry`/pacing-decision (`decideContextWindowPacing`) contract SHAPES, and do
+  NOT remove or repurpose the existing `SUSPENDED`/`RunStatus` values, the existing signals, the operator-suspend
+  path (WP-206), or the budget-park path (WP-243) — EXTEND them additively. Reuse the `condition`/`control_event`
+  park machinery and the frozen `debug.contextWindowTokens` seam; do not invent a second suspend mechanism, a
+  second durable path, or read the window size from env. If a verification step reports a failing test or type
+  error, READ the failure and fix the IMPLEMENTATION — do NOT weaken or delete any assertion.
+repos:
+  - url: /Users/nikitazolotarev/repos/chikory
+    writable: true
+acceptance_criteria:
+  - id: AC-1
+    description: >
+      A context-window `park` durably suspends the run and is resumable — the workflow parks at
+      `status = "SUSPENDED"` on a Temporal `condition` when the pacing action is `park`, journals the park with
+      a DISTINCT `window` cause (separate from the WP-206 operator suspend and the WP-243 budget breach), and a
+      real behavioral test drives the live park→resume path end-to-end through the frozen
+      `debug.contextWindowTokens` seam, asserting zero journaled-step re-execution on resume. (OUTCOME anchors
+      the symbols the goal NAMES — `window` cause, `contextWindowTokens` seam, `SUSPENDED` status — as they
+      appear in code; the module/test layout is the executor's to choose — F-82/F-83.)
+    check: >
+      cd packages/sdk-ts &&
+      grep -q 'window' src/workflow/agent-loop.ts &&
+      grep -q 'SUSPENDED' src/workflow/agent-loop.ts &&
+      grep -q 'condition' src/workflow/agent-loop.ts &&
+      grep -rq 'contextWindowTokens' test/ &&
+      grep -rq 'SUSPENDED' test/
+  - id: AC-2
+    description: >
+      the SDK stays type- and lint-clean and the FULL existing suite — including the new live context-window
+      park/resume durable test — is green, proving the park is a real zero-compute durable wait, the resume
+      re-executes no journaled step, and nothing outside the window-park surface regressed (no
+      contract/StepRecord/pacing-decision shape change).
+    check: cd packages/sdk-ts && pnpm exec tsc --noEmit && pnpm exec eslint . && pnpm exec vitest run
+budget_usd: 40
+max_steps: 8
+executor:
+  adapter: codex
+  family: openai
+judge:
+  family: openai-compat
+  cadence: 2
+  max_cost_share: 0.5
+routing:
+  stages:
+    plan: { provider: openai-compat, model: gpt-5.5 }
+    code: { provider: openai-compat, model: gpt-5.5 }
+    review: { provider: openai-compat, model: gpt-5.5 }
+    judge: { provider: openai-compat, model: gemini-3.1-pro-preview }

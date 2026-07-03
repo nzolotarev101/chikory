@@ -14,6 +14,7 @@ import {
   cmdResume,
   cmdRun,
   cmdStatus,
+  cmdSuspend,
   cmdTrace,
   type CommonFlags,
 } from "./commands.js";
@@ -42,6 +43,8 @@ commands:
   inject <run-id> <guidance>
                       steer a running agent with operator guidance; delivered
                       at the next step boundary
+  suspend <run-id>    durably park a running run at the next step boundary;
+                      continue with chikory resume <run-id>
   cancel <run-id>     graceful stop at the next step boundary (final
                       checkpoint is written)
   trace <run-id>      trajectory forensics from the journal: per-step
@@ -175,6 +178,7 @@ export async function main(argv: string[], deps: LandDeps = {}): Promise<number>
         break;
       case "status":
       case "cancel":
+      case "suspend":
       case "inject":
         parsed = parseCommand(rest, {});
         break;
@@ -258,6 +262,11 @@ export async function main(argv: string[], deps: LandDeps = {}): Promise<number>
       const runId = requireArg(positionals, "run-id", io);
       if (runId === undefined) return 1;
       return cmdCancel({ runId, ...flags }, deps);
+    }
+    case "suspend": {
+      const runId = requireArg(positionals, "run-id", io);
+      if (runId === undefined) return 1;
+      return cmdSuspend({ runId, ...flags }, deps);
     }
     case "inject": {
       const runId = requireArg(positionals, "run-id", io);

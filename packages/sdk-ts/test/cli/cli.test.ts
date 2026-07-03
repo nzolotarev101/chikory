@@ -363,6 +363,10 @@ describe.skipIf(address === null)("chikory CLI (WP-141/142)", () => {
     expect(await main(["inject"], noInjectRun.deps)).toBe(1);
     expect(noInjectRun.err.join("\n")).toContain("missing run-id");
 
+    const noSuspendRun = cli();
+    expect(await main(["suspend"], noSuspendRun.deps)).toBe(1);
+    expect(noSuspendRun.err.join("\n")).toContain("missing run-id");
+
     const noGuidance = cli();
     expect(await main(["inject", "run-nope"], noGuidance.deps)).toBe(1);
     expect(noGuidance.err.join("\n")).toContain("missing guidance text");
@@ -373,7 +377,7 @@ describe.skipIf(address === null)("chikory CLI (WP-141/142)", () => {
 
     const help = cli();
     expect(await main(["--help"], help.deps)).toBe(0);
-    for (const cmd of ["run", "resume", "status", "approve", "inject", "cancel", "trace"]) {
+    for (const cmd of ["run", "resume", "status", "approve", "inject", "suspend", "cancel", "trace"]) {
       expect(help.out.join("\n")).toContain(cmd);
     }
   });
@@ -412,6 +416,7 @@ describe.skipIf(address === null)("chikory CLI (WP-141/142)", () => {
       },
       approve: async () => {},
       inject: async () => {},
+      suspend: async () => {},
       cancel: async () => {},
     };
 
@@ -472,6 +477,7 @@ describe.skipIf(address === null)("chikory CLI (WP-141/142)", () => {
       },
       approve: async () => {},
       inject: async () => {},
+      suspend: async () => {},
       cancel: async () => {},
     };
 

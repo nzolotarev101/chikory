@@ -334,6 +334,7 @@ export type JournalEntryKind =
   | "checkpoint"
   | "verdict"
   | "injection"
+  | "control_event"
   | "budget_event"
   | "compaction"
   | "pacing"
@@ -420,6 +421,8 @@ export interface RunHandle {
   approve(decision: { approved: boolean; reason?: string }): Promise<void>;
   /** WP-212. */
   inject(guidance: string): Promise<void>;
+  /** Operator HITL pause; parks at the next durable step boundary. */
+  suspend(): Promise<void>;
   /** Graceful, checkpointed. */
   cancel(): Promise<void>;
 }

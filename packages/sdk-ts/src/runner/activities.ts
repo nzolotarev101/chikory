@@ -770,6 +770,34 @@ export function createRunnerActivities(deps: RunnerActivityDeps) {
       }
     },
 
+    /** Operator HITL suspend/resume audit trail (WP-206). */
+    async recordControlEvent(input: {
+      runId: string;
+      controlEventIndex: number;
+      event: "suspend" | "resume";
+      atStep: number;
+    }): Promise<void> {
+      const journal = openJournal(deps, input.runId);
+      try {
+        journal.appendOnce(
+          { field: "controlEventIndex", value: input.controlEventIndex },
+          {
+            kind: "control_event",
+            payload: {
+              controlEventIndex: input.controlEventIndex,
+              event: input.event,
+              source: "operator",
+              atStep: input.atStep,
+            },
+            costDeltaUsd: 0,
+            artifactRefs: [],
+          },
+        );
+      } finally {
+        journal.close();
+      }
+    },
+
     /**
      * WP-244 dogfood/test-only judge-catch seam: overwrite a workspace-relative
      * file with known-wrong content, deterministically introducing a regression

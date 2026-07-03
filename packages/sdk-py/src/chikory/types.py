@@ -24,6 +24,7 @@ JournalEntryKind = Literal[
     "checkpoint",
     "verdict",
     "injection",
+    "control_event",
     "budget_event",
     "compaction",
     "pacing",

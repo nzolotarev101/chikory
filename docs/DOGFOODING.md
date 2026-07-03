@@ -8,18 +8,17 @@ recover a run, and how to land the result as a normal PR.
 **Status (2026-07-02, bounded — update discipline: REPLACE this block, ≤15 lines;
 displaced prose moves verbatim to [`PLAN-HISTORY.md`](PLAN-HISTORY.md); per-run detail:
 `docs/reports/dogfood-NNN.md`; queue + course correction: `plan.md` §6).**
-Latest: dogfood-076 — WP-265 rung-2 attempt on WP-213 native executor (`run-17a57451`,
-`docs/reports/dogfood-076.md`). The native raw-LLM loop executor (`createNativeAdapter`) was
-BUILT well and all-green at step 2 (AC-2: 589 passed) — WP-213 effectively done, but UNHARVESTED.
-**The run sealed FAILED on a self-inflicted AC (the SECOND loose headline in a row to do so):**
-AC-1's `! grep -Eq 'execFile|spawn' native.ts` matched the doc comment "…is spawned" → false-FAILED
-all 3 passes → budget-waste HALT. New 🔴 **F-83 → WP-266** (loose-AC lint, a new variant of F-82) —
-**FIXED THIS SITTING** (`dogfood-progression.sh --spec` now ⛔s `test -f`/`test -e` + bare-word
-negative greps). Also: 🔴 **F-84 → WP-267** (the lint isn't enforced at launch — wire it into the
-precheck) and 🟡 **F-85 → WP-268** (codex steps ran 1.76×/1.98× past the maxSeconds=600 step cap).
-Rung-2's ≥10-step horizon + live kill→resume KPIs remain UN-measured (the build was ~2 steps; the
-run auto-terminated before the operator's kill). NEXT: WP-267 hand-fix, then re-attempt rung 2 on
-a ≥10-step-sized host with a lint-clean spec. See §1.5, §1.4 (KPI table), §7, §3.
+Latest: dogfood-077 — WP-265 rung-2 re-attempt on WP-206 HITL suspend/resume (`run-d14fb74c`,
+`docs/reports/dogfood-077.md`). 🟢 **SUCCESS, all-green:** `chikory suspend <run-id>` durably parks a
+healthy run at ZERO compute (Temporal `condition` wait, journaled `control_event`, resume re-executes
+NO journaled step), proven by a net-new LIVE Temporal durable test + synced across TS/zod/py/journal-doc.
+**WP-206 → 🟢** (delivery STAGED uncommitted, byte-IDENTICAL to the workspace). **But codex ONE-SHOT the
+13-file feature in 1 durable step**, so the rung-2 ≥10-step horizon + live kill→resume missed a 3rd
+straight time — now proven STRUCTURAL: step count = judge-retry rounds, NOT feature size (075/076/077 =
+3/4/1). 🟡 **F-86 → WP-508:** rung 2 must be **chain-hosted** (K goals → ≥K durable checkpoints, kill/resume
+BETWEEN children) — a bigger single goal can never buy horizon. ℹ️ **F-87:** durable resume IS unit-proven
+(new test + WP-123 crash-recovery green), just not a live dogfood artifact yet. Prior loose-AC guards
+(WP-266/267) held 🟢. NEXT: the WP-508 chain-hosted rung-2 spec. See §1.5, §1.4 (KPI table), §7, §3.
 
 Related docs: [`docs/spec/task-spec.md`](spec/task-spec.md) (schema
 reference) · [`docs/TASK-PROTOCOL.md`](TASK-PROTOCOL.md) (WP etiquette, §7 is
@@ -665,8 +664,20 @@ a first-attempt SUCCESS and produced three plan-changing findings
   passed the whole `yamlText` (incl. comment preamble) to the precheck instead of the
   mandated `spec.goal`, correct only by the dogfood-header-leads-with-target convention
   (**F-68 → WP-260**).
-- **Single repo**, no `inject`, no `branch`, no suspend-for-days HITL UX, no
-  pacing — all P2 (WP-214, -212, -205, -206, -207).
+- **A clean `chikory run` journals ~ONE durable step per agent session — step count
+  tracks judge-retry rounds, NOT feature size** (F-86, dogfood-077 → WP-508). The codex
+  executor completes a whole single-goal build inside one `runStep` (dogfood-077: 51 tool
+  calls, 13 files, 2.9M input tokens — ALL in step 1), so the run has ONE checkpoint. Three
+  rung-2 attempts on progressively larger single-goal features produced 3/4/1 steps
+  (075/076/077); the fewest-step run (077) had the LARGEST clean diff. **Consequence:** the
+  WP-265 rung-2 ≥10-step horizon + a meaningful mid-run `kill -9` → `chikory resume` are
+  UNREACHABLE by "pick a bigger feature" — 1 step = 1 checkpoint = nothing mid-horizon to
+  kill into or measure reliability across. **A ≥10-step durable horizon must come from
+  sequential decomposition (`chikory chain`: K goals → ≥K checkpoints), not a heavier single
+  goal.** Do NOT size a horizon headline as one big single-goal `chikory run`; use a chain.
+- **Single repo**, no `branch`, no suspend-for-days HITL UX, no
+  pacing — P2 (WP-214, -205, -207). (`inject` DONE dogfood-075/WP-212; operator
+  suspend/resume DONE dogfood-077/WP-206.)
 - **A telemetry-*instrumenting* dogfood shows its own new counter at 0** (F-52):
   a run that adds a journal/trace counter for a mechanism it does **not** itself
   trigger will read that counter at `0` on its OWN trace — by design, not a bug.

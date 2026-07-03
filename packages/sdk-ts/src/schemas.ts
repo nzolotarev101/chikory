@@ -371,6 +371,7 @@ export const JournalEntryKindSchema = z.enum([
   "checkpoint",
   "verdict",
   "injection",
+  "control_event",
   "budget_event",
   "compaction",
   "pacing",

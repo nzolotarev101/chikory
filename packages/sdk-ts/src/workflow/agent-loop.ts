@@ -22,6 +22,8 @@ import {
   SIGNAL_APPROVE,
   SIGNAL_CANCEL,
   SIGNAL_INJECT,
+  SIGNAL_RESUME,
+  SIGNAL_SUSPEND,
   SIGNAL_TOP_UP,
   type ApproveDecision,
 } from "../runner/api.js";
@@ -86,6 +88,8 @@ export const cancelSignal = defineSignal(SIGNAL_CANCEL);
 export const injectSignal = defineSignal<[string]>(SIGNAL_INJECT);
 export const approveSignal = defineSignal<[ApproveDecision]>(SIGNAL_APPROVE);
 export const topUpSignal = defineSignal<[{ amountUsd: number }]>(SIGNAL_TOP_UP);
+export const suspendSignal = defineSignal(SIGNAL_SUSPEND);
+export const resumeSignal = defineSignal(SIGNAL_RESUME);
 export const statusQuery = defineQuery<RunStatusReport>(QUERY_STATUS);
 
 /** CG-1 loop-breaker: N consecutive FAILED steps → escalate, never spin. */
@@ -114,10 +118,13 @@ export async function agentLoop(spec: TaskSpec): Promise<RunStatus> {
   let seamEventIndex = 0;
   let pacingEventIndex = 0;
   let escalationIndex = 0;
+  let controlEventIndex = 0;
   let consecutiveFailures = 0;
   let parkInjected = false;
   let badDiffInjected = false;
   let cancelRequested = false;
+  let suspendRequested = false;
+  let resumeRequested = false;
   let lastVerdict: { kind: JudgeVerdict["kind"]; atStep: number } | undefined;
   let lastGoodCheckpointId: string | undefined;
   let judgeFeedback: string | undefined;
@@ -139,6 +146,12 @@ export async function agentLoop(spec: TaskSpec): Promise<RunStatus> {
   });
   setHandler(injectSignal, (text) => {
     pendingInjections.push(text);
+  });
+  setHandler(suspendSignal, () => {
+    suspendRequested = true;
+  });
+  setHandler(resumeSignal, () => {
+    if (status === "SUSPENDED" && suspendRequested) resumeRequested = true;
   });
   setHandler(topUpSignal, ({ amountUsd }) => {
     pendingTopUps.push(amountUsd);
@@ -183,6 +196,29 @@ export async function agentLoop(spec: TaskSpec): Promise<RunStatus> {
     return status;
   }
 
+  async function parkIfOperatorSuspended(): Promise<RunStatus | undefined> {
+    if (!suspendRequested) return undefined;
+    await activities.recordControlEvent({
+      runId,
+      controlEventIndex: controlEventIndex++,
+      event: "suspend",
+      atStep: stepIndex,
+    });
+    status = "SUSPENDED";
+    await condition(() => resumeRequested || cancelRequested);
+    if (cancelRequested) return seal("CANCELLED", "cancelled while operator-suspended");
+    resumeRequested = false;
+    suspendRequested = false;
+    await activities.recordControlEvent({
+      runId,
+      controlEventIndex: controlEventIndex++,
+      event: "resume",
+      atStep: stepIndex,
+    });
+    status = "RUNNING";
+    return undefined;
+  }
+
   const prepared = await activities.prepareRun({ runId, spec });
   if (prepared.status === "FAILED") return seal("FAILED", prepared.reason);
   const { baseCommit } = prepared;
@@ -191,6 +227,8 @@ export async function agentLoop(spec: TaskSpec): Promise<RunStatus> {
 
   for (;;) {
     if (cancelRequested) return seal("CANCELLED", "cancelled by user");
+    const operatorParkTerminal = await parkIfOperatorSuspended();
+    if (operatorParkTerminal !== undefined) return operatorParkTerminal;
     if (stepIndex >= maxSteps) {
       return seal("FAILED", `maxSteps (${maxSteps}) reached without meeting acceptance criteria`);
     }

@@ -41,6 +41,7 @@ The persisted/exported form of a run's journal. Single format consumed by: `chik
 | `verdict` | `{ judgeIndex, atStep, verdict: JudgeVerdict }` (judge-sourced), or the runner-sourced loop-breaker escalation `{ escalationIndex, source: "runner", atStep, verdict: { kind: "ESCALATE", rationale, escalateReason } }` — no JudgeForm/judgeModel because no judge ran (WP-124) |
 | `checkpoint` | `Checkpoint` |
 | `injection` | `{ source: "human", text, atStep }` |
+| `control_event` | `{ controlEventIndex, event: "suspend"\|"resume", source: "operator", atStep }` |
 | `budget_event` | `{ event: "estimate"\|"halt"\|"top_up", remainingUsd, details }` + WP-218 additive token fields `cause?: "usd"\|"tokens"` (absent ⇒ `"usd"`, back-compatible) and `remainingTokens?` on a token HALT; token figures (`spentTokens`/`budgetTokens`/`estimateTokens`) ride `details`. The USD path omits both, so pre-WP-218 journals stay byte-identical |
 | `compaction` | `{ tokensBefore, tokensAfter, digestRef }` (WP-203 — emitted at the checkpoint boundary; see CONTRACTS.md §6a) |
 | `pacing` | `{ decision, batchSize, reasoning }` (P2) |

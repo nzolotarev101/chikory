@@ -461,6 +461,30 @@ export async function cmdCancel(
   }
 }
 
+export async function cmdSuspend(
+  args: { runId: string } & CommonFlags,
+  deps: CliDeps = {},
+): Promise<number> {
+  const ioPair = io(deps);
+  const runner = createTemporalRunner({ address: args.address, dataDir: args.dataDir });
+  try {
+    const handle = await runner.get(args.runId);
+    await handle.suspend();
+    if (args.json) {
+      ioPair.out(JSON.stringify({ runId: args.runId, suspendRequested: true }));
+    } else {
+      ioPair.out(`suspend requested — ${args.runId} parks at the next step boundary`);
+      ioPair.out(`continue with: chikory resume ${args.runId}`);
+    }
+    return 0;
+  } catch (err) {
+    ioPair.err(`chikory: suspend failed: ${actionable(err)}`);
+    return 1;
+  } finally {
+    await runner.close();
+  }
+}
+
 export async function cmdInject(
   args: { runId: string; guidance: string } & CommonFlags,
   deps: CliDeps = {},
