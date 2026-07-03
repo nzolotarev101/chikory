@@ -111,37 +111,37 @@ goal: >
   exceed the context window, so folding accumulated history CANNOT make it fit — the run must durably SUSPEND
   at ZERO compute instead of folding-and-continuing INTO a guaranteed-overflow step, and later resume to a
   normal terminal state without re-executing any already-journaled step. Today the workflow loop treats `park`
-  and `compact` identically (`agent-loop.ts:430` `underPressure = pacing.action !== "continue"`) and charges
+  and `compact` identically (agent-loop.ts:430, underPressure = pacing.action !== "continue") and charges
   the overflow step. Close that gap by REUSING the existing durable-park machinery (the WP-206 operator-suspend
-  `condition` wait + `control_event` journal at `agent-loop.ts:199`, and the WP-243 budget-park `cause`
+  condition wait + control_event journal at agent-loop.ts:199, and the WP-243 budget-park cause
   precedent), NOT by inventing a second suspend mechanism or a second LLM/durable path.
 
   OUTCOME (what "done" means — the HOW is yours to design; this decomposes into sequential deliverables):
     * A PURE decision that separates a fold-and-continue `compact` from a must-suspend `park`: a `park` action
-      (next step cannot fit even after compaction) maps to "durably suspend"; `continue`/`compact` do NOT. Pure,
-      typed, tested — the sibling of `decideContextWindowPacing`, reading only the pacing result.
-    * When the loop hits a `park` action, it durably parks the run at `status = "SUSPENDED"` on a Temporal
-      `condition(...)` wait (ZERO compute, NOT a poll or `sleep`), journaling the park with a DISTINCT window
-      cause — `cause: "window"` — so the audit trail distinguishes a window park from an operator suspend
+      (next step cannot fit even after compaction) maps to "durably suspend"; continue/compact do NOT. Pure,
+      typed, tested — the sibling of decideContextWindowPacing, reading only the pacing result.
+    * When the loop hits a `park` action, it durably parks the run at status = SUSPENDED on a Temporal
+      condition wait (ZERO compute, NOT a poll or sleep), journaling the park with a DISTINCT window
+      cause — cause: window — so the audit trail distinguishes a window park from an operator suspend
       (WP-206) and a budget breach (WP-243). The park-check MUST sit where NO already-journaled step is
       re-executed on resume.
-    * The operator surface (`chikory status` / `--watch`) reports the window-park state and an ACTIONABLE
+    * The operator surface (chikory status / --watch) reports the window-park state and an ACTIONABLE
       unblock hint (shrink the next step or start a fresh-context resume), mirroring how the budget halt
       surfaces its top-up command.
     * A resume path continues a window-parked run to a NORMAL terminal state with the SAME journaled steps
       (no duplicate step entries / no duplicate spend), preserving any folded digest.
     * Prove it with a REAL behavioral test that drives a LIVE Temporal-backed run (mirror the WP-123
       crash-recovery, WP-212 inject, and WP-206 suspend tests — do NOT mock the durable layer): use the FROZEN
-      `debug.contextWindowTokens` seam to force a deterministic `park`, assert the run reaches `SUSPENDED` at
+      debug.contextWindowTokens seam to force a deterministic `park`, assert the run reaches SUSPENDED at
       zero compute and does NOT advance while parked, resume it, and assert it reaches a terminal state having
-      re-executed ZERO journaled steps. Reference `contextWindowTokens` from the test so the outcome is
+      re-executed ZERO journaled steps. Reference contextWindowTokens from the test so the outcome is
       greppable.
 
-  CONSTRAINTS: strict TypeScript, ESM `.js` relative imports, named exports only; NO new dependency; do NOT
-  change the `StepRecord`/`JournalEntry`/pacing-decision (`decideContextWindowPacing`) contract SHAPES, and do
-  NOT remove or repurpose the existing `SUSPENDED`/`RunStatus` values, the existing signals, the operator-suspend
-  path (WP-206), or the budget-park path (WP-243) — EXTEND them additively. Reuse the `condition`/`control_event`
-  park machinery and the frozen `debug.contextWindowTokens` seam; do not invent a second suspend mechanism, a
+  CONSTRAINTS: strict TypeScript, ESM .js relative imports, named exports only; NO new dependency; do NOT
+  change the StepRecord/JournalEntry/pacing-decision (decideContextWindowPacing) contract SHAPES, and do
+  NOT remove or repurpose the existing SUSPENDED/RunStatus values, the existing signals, the operator-suspend
+  path (WP-206), or the budget-park path (WP-243) — EXTEND them additively. Reuse the condition/control_event
+  park machinery and the frozen debug.contextWindowTokens seam; do not invent a second suspend mechanism, a
   second durable path, or read the window size from env. If a verification step reports a failing test or type
   error, READ the failure and fix the IMPLEMENTATION — do NOT weaken or delete any assertion.
 repos:
