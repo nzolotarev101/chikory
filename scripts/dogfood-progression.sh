@@ -31,7 +31,8 @@
 #   Additionally: 🔴 CAP BUSTED when >1 harness-meta headline in the trailing 3
 #      (DOGFOODING §1.5) — the next headline MUST be class=product.
 #
-# Exit code: 0 = PROGRESSING, 1 = STALLED (callers can gate on it), 2 = usage.
+# Exit code: 0 = PROGRESSING, 1 = STALLED (callers can gate on it), 2 = usage,
+#            3 = candidate-spec AC lint ⛔ (WP-266: loose AC file-pins / prose-greps).
 
 set -euo pipefail
 
@@ -133,6 +134,37 @@ if [ -n "$SPEC" ]; then
     echo "🟢 $(grep -iE '^# *Thesis-KPI:' "$SPEC" | head -1)"
   else
     echo "⚠️  No '# Thesis-KPI: <§1.4 KPI this run pushes>' header."
+  fi
+
+  # ---------- WP-266: loose-spec AC-check lint (F-82 file-pin + F-83 prose-grep) ----------
+  # A LOOSE spec delegates file layout AND implementation to the executor, so its ACs must
+  # anchor on OUTCOME SYMBOLS the goal NAMES — never file-exist-pin a delegated path (F-82,
+  # dogfood-075) and never negative-grep a BARE WORD that also matches comments/strings/prose
+  # (F-83, dogfood-076: `! grep 'execFile|spawn'` matched the comment "…is spawned").
+  if [ "$PRESCRIBED" -eq 0 ]; then
+    AC_BLOCK=$(awk '/^acceptance_criteria:/{f=1} f' "$SPEC")
+    LINT_HIT=0
+    if printf '%s\n' "$AC_BLOCK" | grep -qE 'test +-[fe] '; then
+      echo "⛔ F-82: an AC \`check\` uses \`test -f\`/\`test -e\` — a LOOSE spec must not pin a file"
+      echo "    the goal delegates; grep an OUTCOME symbol the goal NAMES instead."
+      printf '%s\n' "$AC_BLOCK" | grep -nE 'test +-[fe] ' | sed 's/^/      /'
+      LINT_HIT=1
+    fi
+    NEG=$(printf '%s\n' "$AC_BLOCK" | grep -E '(! *grep|grep +-[a-zA-Z]*v)' || true)
+    # A bare-word negated pattern = quoted pattern of only [A-Za-z0-9|_-] (no `(` / `\b` / `=`
+    # code anchor) — it will fire on the term wherever it appears, comments and prose included.
+    if [ -n "$NEG" ] && printf '%s\n' "$NEG" | grep -qE "'[A-Za-z0-9|_-]+'"; then
+      echo "⛔ F-83: a negative AC grep matches a BARE WORD — it also fires on the term in COMMENTS,"
+      echo "    STRINGS, or prose (dogfood-076). Anchor to a call form (e.g. \`\\bspawn\\(\`) or scope"
+      echo "    out comments; a negative grep over source must never test a plain identifier/word."
+      printf '%s\n' "$NEG" | sed 's/^/      /'
+      LINT_HIT=1
+    fi
+    if [ "$LINT_HIT" -eq 0 ]; then
+      echo "🟢 AC checks: no F-82 file-pin / F-83 prose-grep hazard (WP-266 lint)."
+    else
+      EXIT_FLAG=3
+    fi
   fi
 fi
 

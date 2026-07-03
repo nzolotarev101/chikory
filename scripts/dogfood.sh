@@ -51,13 +51,34 @@ fi
 
 echo "Dogfooding: Using spec file $SPEC_FILE"
 
-# 1b. Progression preflight (course correction 2026-07-02 — advisory, never
-# blocks: the BINDING enforcement lives in /dogfood-review phase 5 and
-# /dogfood-assessor; this surfaces a STALLED loop / off-format spec at launch
-# time so the operator sees it before spending).
+# 1b. Progression preflight (course correction 2026-07-02).
+# The progression/format REPORT is advisory (STALLED / off-format surface the
+# loop state so the operator sees it before spending; the BINDING progression
+# enforcement lives in /dogfood-review phase 5 and /dogfood-assessor).
+# BUT the WP-266 loose-AC lint is a HARD REFUSAL (WP-267, F-84): an AC that
+# grep-pins a delegated file (F-82) or negative-greps a bare word that also
+# matches comments/prose (F-83) is GUARANTEED to false-FAIL a correct delivery
+# and burn budget on the phantom (dogfood-075 AND 076 both died this way — the
+# lint existed but nothing enforced it). Exit code 3 from the --spec run is
+# exactly that hazard; refuse the launch at ZERO LLM cost. Override for a
+# deliberate exception: CHIKORY_ALLOW_LOOSE_AC_HAZARD=1.
 if [ -f scripts/dogfood-progression.sh ]; then
-  bash scripts/dogfood-progression.sh --spec "$SPEC_FILE" || true
+  set +e
+  bash scripts/dogfood-progression.sh --spec "$SPEC_FILE"
+  PROGRESSION_RC=$?
+  set -e
   echo
+  if [ "$PROGRESSION_RC" -eq 3 ]; then
+    if [ "${CHIKORY_ALLOW_LOOSE_AC_HAZARD:-}" = "1" ]; then
+      echo "⚠️  WP-266 loose-AC lint ⛔ — OVERRIDDEN by CHIKORY_ALLOW_LOOSE_AC_HAZARD=1. Launching anyway." >&2
+    else
+      echo "⛔ REFUSING LAUNCH (WP-267): the spec's loose ACs would false-FAIL a correct delivery" >&2
+      echo "   (WP-266 lint above). Fix the AC to grep an OUTCOME symbol as it appears in CODE —" >&2
+      echo "   never \`test -f <new-file>\` and never a bare-word negative grep. Then relaunch." >&2
+      echo "   Deliberate override: CHIKORY_ALLOW_LOOSE_AC_HAZARD=1 devbox run run-dogfood" >&2
+      exit 3
+    fi
+  fi
 fi
 
 # 2. Rebuild the SDK (stale dist can run old code)
