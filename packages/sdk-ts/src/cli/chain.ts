@@ -258,11 +258,20 @@ export function childParkedState(
         const p = entry.payload as {
           event: string;
           cause?: string;
-          details?: { spentUsd?: number; budgetUsd?: number };
+          details?: {
+            spentUsd?: number;
+            budgetUsd?: number;
+            projectedTokens?: number;
+            remainingTokens?: number;
+            utilizationPercent?: number;
+          };
         };
         if (p.event === "halt") {
           const spent = p.details?.spentUsd;
           const budget = p.details?.budgetUsd;
+          const projected = p.details?.projectedTokens;
+          const remaining = p.details?.remainingTokens;
+          const utilization = p.details?.utilizationPercent;
           parked = {
             nodeId,
             childRunId,
@@ -272,6 +281,10 @@ export function childParkedState(
             reason:
               p.cause === "debug"
                 ? "debug park-injection (WP-243)"
+                : p.cause === "window"
+                  ? projected !== undefined && remaining !== undefined && utilization !== undefined
+                    ? `context window (${projected} projected tokens, ${remaining} remaining, ${utilization}% window)`
+                    : "context window"
                 : spent !== undefined && budget !== undefined
                   ? `budget cap ($${spent.toFixed(2)} / $${budget.toFixed(2)})`
                   : "budget cap",
@@ -289,8 +302,11 @@ export function childParkedState(
 
 /** The chain-level command that unblocks a parked child (WP-241). */
 function unblockHint(chainId: string, parked: ChildParked): string {
-  return parked.kind === "AWAITING_APPROVAL"
-    ? `unblock with: chikory chain approve ${chainId} [--reject "<reason>"]`
+  if (parked.kind === "AWAITING_APPROVAL") {
+    return `unblock with: chikory chain approve ${chainId} [--reject "<reason>"]`;
+  }
+  return parked.reason.startsWith("context window")
+    ? `unblock with: chikory chain resume ${chainId}`
     : `unblock with: chikory chain resume ${chainId} --add-budget <usd>`;
 }
 

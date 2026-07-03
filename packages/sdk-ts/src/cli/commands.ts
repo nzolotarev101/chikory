@@ -109,6 +109,56 @@ function journalReport(dataDir: string, runId: string): RunStatusReport | undefi
   }
 }
 
+function suspendedReasonFromJournal(dataDir: string, runId: string): string | undefined {
+  const path = journalPath(dataDir, runId);
+  if (!existsSync(path)) return undefined;
+  const journal = new Journal(path);
+  try {
+    let reason: string | undefined;
+    for (const entry of journal.entries()) {
+      if (entry.kind === "terminal") return undefined;
+      if (entry.kind !== "budget_event") continue;
+      const payload = entry.payload as {
+        event?: string;
+        cause?: string;
+        details?: {
+          spentUsd?: number;
+          budgetUsd?: number;
+          projectedTokens?: number;
+          remainingTokens?: number;
+          utilizationPercent?: number;
+        };
+      };
+      if (payload.event === "top_up") {
+        reason = undefined;
+        continue;
+      }
+      if (payload.event !== "halt") continue;
+      if (payload.cause === "window") {
+        const projected = payload.details?.projectedTokens;
+        const remaining = payload.details?.remainingTokens;
+        const utilization = payload.details?.utilizationPercent;
+        reason =
+          projected !== undefined && remaining !== undefined && utilization !== undefined
+            ? `context-window pressure (${projected} projected tokens, ${remaining} remaining, ${utilization}% window)`
+            : "context-window pressure";
+      } else if (payload.cause === "debug") {
+        reason = "debug park-injection (WP-243)";
+      } else {
+        const spent = payload.details?.spentUsd;
+        const budget = payload.details?.budgetUsd;
+        reason =
+          spent !== undefined && budget !== undefined
+            ? `budget cap ($${spent.toFixed(2)} / $${budget.toFixed(2)})`
+            : "budget cap";
+      }
+    }
+    return reason;
+  } finally {
+    journal.close();
+  }
+}
+
 /**
  * Poll the run until a terminal status, surfacing state transitions (and,
  * with --watch, every new journal entry) as they land. The run itself is
@@ -134,14 +184,38 @@ export async function followRun(
         if (entry.kind === "budget_event") {
           const payload = entry.payload as {
             event: string;
-            details: { spentUsd: number; budgetUsd: number };
+            cause?: string;
+            details?: {
+              spentUsd?: number;
+              budgetUsd?: number;
+              projectedTokens?: number;
+              remainingTokens?: number;
+              utilizationPercent?: number;
+            };
           };
           if (payload.event === "halt") {
-            opts.io.out(
-              `run is SUSPENDED at the budget cap ($${payload.details.spentUsd.toFixed(2)} of ` +
-                `$${payload.details.budgetUsd.toFixed(2)}) — top up with: chikory resume ` +
-                `${handle.runId} --add-budget <usd>`,
-            );
+            if (payload.cause === "window") {
+              const projected = payload.details?.projectedTokens;
+              const remaining = payload.details?.remainingTokens;
+              const utilization = payload.details?.utilizationPercent;
+              opts.io.out(
+                `run is SUSPENDED for context-window pressure` +
+                  (projected !== undefined && remaining !== undefined && utilization !== undefined
+                    ? ` (${projected} projected tokens, ${remaining} remaining, ${utilization}% window)`
+                    : "") +
+                  ` — resume with: chikory resume ${handle.runId}`,
+              );
+            } else {
+              const spent = payload.details?.spentUsd;
+              const budget = payload.details?.budgetUsd;
+              opts.io.out(
+                `run is SUSPENDED at the budget cap` +
+                  (spent !== undefined && budget !== undefined
+                    ? ` ($${spent.toFixed(2)} of $${budget.toFixed(2)})`
+                    : "") +
+                  ` — top up with: chikory resume ${handle.runId} --add-budget <usd>`,
+              );
+            }
           }
         } else if (entry.kind === "verdict") {
           const payload = entry.payload as {
@@ -320,10 +394,15 @@ export async function cmdResume(
   }
 }
 
-function renderReport(runId: string, report: RunStatusReport): string {
+type CliRunStatusReport = RunStatusReport & { suspendedReason?: string };
+
+function renderReport(runId: string, report: CliRunStatusReport): string {
   const lines: string[] = [];
   lines.push(`run ${runId}`);
   lines.push(`  status       ${report.status}`);
+  if (report.status === "SUSPENDED" && report.suspendedReason !== undefined) {
+    lines.push(`  suspended    ${report.suspendedReason}`);
+  }
   lines.push(`  step         ${report.currentStep}`);
   lines.push(`  spend        $${report.spentUsd.toFixed(2)} / $${report.budgetUsd.toFixed(2)}`);
   if (report.lastVerdict) {
@@ -366,8 +445,16 @@ export async function cmdStatus(
     try {
       const handle = await runner.get(args.runId);
       const report = await handle.status();
+      const suspendedReason =
+        report.status === "SUSPENDED"
+          ? suspendedReasonFromJournal(args.dataDir, args.runId)
+          : undefined;
+      const displayReport: CliRunStatusReport =
+        suspendedReason !== undefined ? { ...report, suspendedReason } : report;
       ioPair.out(
-        args.json ? JSON.stringify({ runId: args.runId, ...report }) : renderReport(args.runId, report),
+        args.json
+          ? JSON.stringify({ runId: args.runId, ...displayReport })
+          : renderReport(args.runId, displayReport),
       );
       return report.status === "FAILED" ? 1 : 0;
     } catch (err) {

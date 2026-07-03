@@ -123,3 +123,8 @@ export function decideContextWindowPacing(
     utilization,
   };
 }
+
+/** Pure workflow gate: a `park` pacing decision requires a durable human resume. */
+export function shouldParkForWindow(decision: ContextWindowPacingDecision): boolean {
+  return decision.action === "park";
+}

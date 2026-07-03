@@ -5,6 +5,7 @@ import {
   estimateResidentContextTokens,
   estimateTokensFromText,
   buildResidentContextParts,
+  shouldParkForWindow,
   CHARS_PER_TOKEN,
   type ContextWindowPacingPolicy,
   type ContextWindowUsage,
@@ -85,6 +86,25 @@ describe("context-window pacing pure helper", () => {
       remainingTokens: -1,
       utilization: 1.001,
     });
+  });
+
+  it("exposes a pure park gate for workflow suspension", () => {
+    expect(
+      shouldParkForWindow({
+        action: "park",
+        projectedTokens: 1001,
+        remainingTokens: -1,
+        utilization: 1.001,
+      }),
+    ).toBe(true);
+    expect(
+      shouldParkForWindow({
+        action: "compact",
+        projectedTokens: 801,
+        remainingTokens: 199,
+        utilization: 0.801,
+      }),
+    ).toBe(false);
   });
 
   it("does not mutate input objects", () => {

@@ -8,17 +8,18 @@ recover a run, and how to land the result as a normal PR.
 **Status (2026-07-02, bounded — update discipline: REPLACE this block, ≤15 lines;
 displaced prose moves verbatim to [`PLAN-HISTORY.md`](PLAN-HISTORY.md); per-run detail:
 `docs/reports/dogfood-NNN.md`; queue + course correction: `plan.md` §6).**
-Latest: dogfood-077 — WP-265 rung-2 re-attempt on WP-206 HITL suspend/resume (`run-d14fb74c`,
-`docs/reports/dogfood-077.md`). 🟢 **SUCCESS, all-green:** `chikory suspend <run-id>` durably parks a
-healthy run at ZERO compute (Temporal `condition` wait, journaled `control_event`, resume re-executes
-NO journaled step), proven by a net-new LIVE Temporal durable test + synced across TS/zod/py/journal-doc.
-**WP-206 → 🟢** (delivery STAGED uncommitted, byte-IDENTICAL to the workspace). **But codex ONE-SHOT the
-13-file feature in 1 durable step**, so the rung-2 ≥10-step horizon + live kill→resume missed a 3rd
-straight time — now proven STRUCTURAL: step count = judge-retry rounds, NOT feature size (075/076/077 =
-3/4/1). 🟡 **F-86 → WP-508:** rung 2 must be **chain-hosted** (K goals → ≥K durable checkpoints, kill/resume
-BETWEEN children) — a bigger single goal can never buy horizon. ℹ️ **F-87:** durable resume IS unit-proven
-(new test + WP-123 crash-recovery green), just not a live dogfood artifact yet. Prior loose-AC guards
-(WP-266/267) held 🟢. NEXT: the WP-508 chain-hosted rung-2 spec. See §1.5, §1.4 (KPI table), §7, §3.
+Latest: dogfood-078 — WP-265 rung-2 CHAIN re-host (WP-508) on WP-250 window-park (`chain-6dff03ee`,
+`docs/reports/dogfood-078.md`). 🔴 **FAILED — but NOT a delivery failure; two harness defects.** The
+WP-250 window-park feature was BUILT correctly + all-green (pure `shouldParkForWindow` → `agent-loop.ts:559`
+`condition`-park at `SUSPENDED` with a distinct `cause:"window"`, operator/chain surfaces + resume; suite
+594 passed), hand-HARVESTED + PUSHED this review. But (1) 🔴 **F-88 → WP-509:** the `chikory chain` planner
+COLLAPSED the decomposable goal into ONE node → rung-2 ≥10-step horizon missed a **4th** time, now at the
+PLANNER; (2) 🔴 **F-89 → WP-510:** the writeSet gate FALSE-FAILED the delivery for writing the two test
+files its AC requires (planner auto-writeSet was src-only) — judge had PROCEEDED, suite all-green. 🟡 **F-90
+→ WP-511:** AC-1's recursive `grep -rq contextWindowTokens test/` false-greened on incumbent files, so the
+spec's required LIVE durable window-park test went missing (WP-250 → 🟡, owes it). **The chain rung-2 re-host
+is BLOCKED until WP-509 + WP-510 land (both hand-fix / track-B).** NEXT: land WP-510 then WP-509, then re-host
+rung 2 as a chain. See §7 (troubleshooting), §8 (chain writeSet limitation), §1.5, §1.4 (KPI table), §3.
 
 Related docs: [`docs/spec/task-spec.md`](spec/task-spec.md) (schema
 reference) · [`docs/TASK-PROTOCOL.md`](TASK-PROTOCOL.md) (WP etiquette, §7 is
@@ -675,6 +676,27 @@ a first-attempt SUCCESS and produced three plan-changing findings
   kill into or measure reliability across. **A ≥10-step durable horizon must come from
   sequential decomposition (`chikory chain`: K goals → ≥K checkpoints), not a heavier single
   goal.** Do NOT size a horizon headline as one big single-goal `chikory run`; use a chain.
+- **But `chikory chain` does not GUARANTEE decomposition — the planner can collapse a
+  multi-deliverable goal into ONE node, and its src-only auto-writeSet then FALSE-FAILS a
+  node that writes the tests its AC requires** (F-88 → WP-509, F-89 → WP-510, dogfood-078).
+  dogfood-078's WP-250 goal was authored (per WP-508) to decompose into ≥6 sequential
+  deliverables; the chain planner emitted a SINGLE node `wp-250-implementation` and folded
+  the whole feature into it (1 checkpoint) — so chain-hosting bought ZERO horizon (rung-2 miss
+  #4, now at the planner). That single node's planner-derived `writeSet` was **src-only** (6
+  files), so when the executor also wrote the two AC-required test files, the writeSet gate
+  (`activities.ts:1015`) sealed the node **FAILED** — even though the judge had PROCEEDED and
+  `tsc`/`eslint`/the full vitest suite were all green. **Until WP-509 (planner decomposes on a
+  `min_nodes`/explicit node list) AND WP-510 (writeSet admits the AC-referenced `test/**`) land,
+  a chain rung-2 re-host cannot both reach the horizon and pass its own tests.** If you must
+  ship such work now, hand-harvest the FAILED node's workspace delivery (`git -C
+  <run>/workspace diff main HEAD | git apply` at repo root) and re-run the full AC-2 against the
+  working tree — the FAILED seal is chain bookkeeping, not a code defect.
+- **A recursive positive grep AC (`grep -rq '<symbol>' test/`) cannot pin a NET-NEW test** —
+  it false-greens on any incumbent file that already contains the symbol (F-90 → WP-511,
+  dogfood-078: the required live window-park durable test was absent, yet `grep -rq
+  'contextWindowTokens' test/` passed on `compaction-wiring.test.ts`/`trace.test.ts`). For a
+  net-new-test AC, anchor on a fresh file (F-45: the new test file must be ABSENT on HEAD) or a
+  `git diff`-scoped grep, never a recursive whole-tree grep.
 - **Single repo**, no `branch`, no suspend-for-days HITL UX, no
   pacing — P2 (WP-214, -205, -207). (`inject` DONE dogfood-075/WP-212; operator
   suspend/resume DONE dogfood-077/WP-206.)

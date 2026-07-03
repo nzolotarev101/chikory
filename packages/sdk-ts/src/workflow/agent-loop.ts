@@ -38,6 +38,7 @@ import {
   estimateResidentContextTokens,
   estimateTokensFromText,
   buildResidentContextParts,
+  shouldParkForWindow,
   type ContextWindowPacingPolicy,
 } from "../runner/pacing.js";
 import { resolveContextWindowForSpec } from "../runner/context-window.js";
@@ -553,6 +554,40 @@ export async function agentLoop(spec: TaskSpec): Promise<RunStatus> {
         );
       }
       consecutiveFailures = 0;
+      status = "RUNNING";
+    }
+
+    // Window gate (WP-250): if even an empty execution window cannot fit the
+    // estimated next step, stop spending compute at a durable checkpoint and
+    // wait for an operator to resume after changing the task/model/context
+    // conditions. This is a condition wait, so worker restarts replay back to
+    // the same SUSPENDED state without re-running the completed step.
+    if (shouldParkForWindow(pacing)) {
+      await activities.recordBudgetEvent({
+        runId,
+        budgetEventIndex: budgetEventIndex++,
+        event: "halt",
+        cause: "window",
+        remainingUsd: budgetUsd - spentUsd,
+        details: {
+          projectedTokens: pacing.projectedTokens,
+          remainingTokens: pacing.remainingTokens,
+          utilizationPercent: Math.round(pacing.utilization * 100),
+          atStep: stepIndex,
+        },
+      });
+      status = "SUSPENDED";
+      await condition(() => resumeRequested || cancelRequested);
+      if (cancelRequested) return seal("CANCELLED", "cancelled while parked for context window");
+      resumeRequested = false;
+      await activities.recordBudgetEvent({
+        runId,
+        budgetEventIndex: budgetEventIndex++,
+        event: "top_up",
+        cause: "window",
+        remainingUsd: budgetUsd - spentUsd,
+        details: { resumed: 1, atStep: stepIndex },
+      });
       status = "RUNNING";
     }
   }

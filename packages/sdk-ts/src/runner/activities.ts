@@ -901,8 +901,9 @@ export function createRunnerActivities(deps: RunnerActivityDeps) {
       /**
        * WP-218: which budget tripped. Absent ⇒ "usd" (back-compatible).
        * WP-243: "debug" marks a deterministic dogfood park-injection halt.
+       * WP-250: "window" marks a context-window pacing suspension.
        */
-      cause?: "usd" | "tokens" | "debug";
+      cause?: "usd" | "tokens" | "debug" | "window";
       /** WP-218: token headroom at a token HALT (rides the token gate). */
       remainingTokens?: number;
     }): Promise<void> {

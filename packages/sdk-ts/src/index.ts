@@ -130,6 +130,7 @@ export {
   estimateResidentContextTokens,
   estimateTokensFromText,
   buildResidentContextParts,
+  shouldParkForWindow,
   CHARS_PER_TOKEN,
   type ContextWindowPacingDecision,
   type ContextWindowPacingPolicy,

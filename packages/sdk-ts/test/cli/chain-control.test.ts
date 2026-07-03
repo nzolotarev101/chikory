@@ -119,6 +119,33 @@ describe("childParkedState", () => {
     });
   });
 
+  it("reports a context-window halt as SUSPENDED with window figures", () => {
+    childJournal(runId, [
+      {
+        kind: "budget_event",
+        payload: {
+          event: "halt",
+          cause: "window",
+          details: { projectedTokens: 1200, remainingTokens: -200, utilizationPercent: 120 },
+        },
+      },
+    ]);
+    expect(childParkedState(dataDir, "node-b", runId)).toEqual({
+      nodeId: "node-b",
+      childRunId: runId,
+      kind: "SUSPENDED",
+      reason: "context window (1200 projected tokens, -200 remaining, 120% window)",
+    });
+  });
+
+  it("clears a context-window park once a resume marker lands", () => {
+    childJournal(runId, [
+      { kind: "budget_event", payload: { event: "halt", cause: "window", details: { projectedTokens: 1200 } } },
+      { kind: "budget_event", payload: { event: "top_up", cause: "window", details: { resumed: 1 } } },
+    ]);
+    expect(childParkedState(dataDir, "node-b", runId)).toBeUndefined();
+  });
+
   it("WP-243: clears the injected debug park once a top-up lands", () => {
     childJournal(runId, [
       { kind: "budget_event", payload: { event: "halt", cause: "debug", details: { injected: 1 } } },
