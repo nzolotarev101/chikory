@@ -1,0 +1,143 @@
+# Dogfood-080: WP-265 rung 3 on WP-205 branching/rollback — the FIRST intra-run
+#   horizon run. Unlike rung 2 (dogfood-079, where the horizon came BETWEEN chain
+#   nodes), rung 3 must build up MANY durable steps INSIDE ONE `chikory run`, so
+#   the run finally stresses per-step reliability / compounding-error (95%->99%)
+#   over a genuinely long single session — plus a deliberate mid-run kill -9 ->
+#   chikory resume on that long run.
+# Format: LOOSE (horizon-ladder headline — goal states the OUTCOME + constraints;
+#   ACs pin what "done" means via OUTCOME SYMBOLS THE GOAL NAMES; the module/test
+#   layout is LEFT TO THE EXECUTOR — F-82/F-83; NO prescribed diff).
+# Ladder-rung: 3
+# Thesis-KPI: INTRA-run horizon (many DURABLE step boundaries inside a SINGLE run,
+#   not decomposed across chain nodes) + per-step reliability (compounding-error
+#   over a long single session) + a live mid-run kill -9 -> chikory resume on that
+#   long run (resume must re-execute NO journaled step).
+# Design note (F-94): rung 2 proved the INTER-node horizon; codex tends to one-shot
+#   a single deliverable (F-86: step count = judge-retry rounds, not feature size).
+#   This run is the experiment for whether a large, genuinely multi-part single-run
+#   goal + a tight judge cadence produces a long INTRA-run horizon. If it still
+#   one-shots, that is itself the finding that pushes toward WP-213 (native loop)
+#   or an explicit step-forcing mechanism.
+#
+# LAUNCH WITH `chikory run` (rung 3 is intra-run — a SINGLE long durable run, NOT a chain):
+#      devbox run run-dogfood       # <- `chikory run`; picks the latest spec (this one)
+
+name: dogfood-080-wp205-branching-rollback
+goal: >
+  Close WP-205: make BRANCHING a first-class durable operation so an operator can
+  fork a run at any committed checkpoint and explore an alternative line WITHOUT
+  losing or corrupting the original. The pure surface already exists and MUST be
+  reused: parseBranchTarget and branchNameForTarget in the branch-target module
+  parse and name a run-id@step (or run-id@base) target; the WP-132 restoreCheckpoint
+  activity already hard-resets a run workspace to a checkpoint's recorded git commit.
+  Build the operator-facing command and its durable machinery on top of them, as a
+  new cmdBranch command wired into the CLI dispatch under the branch verb. This work
+  DECOMPOSES into ordered parts — build them in sequence, each with its own tests
+  folded in, so the single run accumulates real durable steps:
+
+    * PART 1 — BRANCH COMMAND SURFACE: add cmdBranch and a branch case to the CLI
+      dispatch/help, parsing the run-id@step argument via the existing
+      parseBranchTarget, validating the run and checkpoint exist, and failing with a
+      nonzero exit + actionable message on a missing run-id, malformed target, or
+      unknown checkpoint. Unit-tested via a dependency-injected fake so no real run
+      is needed.
+    * PART 2 — JOURNAL FORK (depends on 1): forking a target creates a NEW child run
+      whose journal is seeded with the parent's entries UP TO AND INCLUDING the fork
+      checkpoint (and no later entries), recording the parent run-id and fork
+      checkpoint as provenance on the child so the lineage is auditable. Deterministic,
+      unit-tested.
+    * PART 3 — WORKSPACE FORK (depends on 2): the child run's workspace is created
+      from the fork checkpoint's recorded git commit (reuse the restoreCheckpoint
+      commit-resolution precedent — a git worktree or clone at that commit), so the
+      branched run starts from EXACTLY the tree the parent had at that checkpoint.
+      Unit-tested against a real temporary git repo (no mocking of git).
+    * PART 4 — BRANCH-ON-VERDICT + LIVE PROOF (depends on 3): let the judge RECOMMEND
+      a branch (a BRANCH recommendation surfaced additively alongside the existing
+      PROCEED/HALT/ROLLBACK/ESCALATE handling, never replacing ROLLBACK), and add a
+      LIVE Temporal test that drives a real multi-step run to a checkpoint, branches
+      it, and asserts the child resumes from the fork point with the forked journal
+      and workspace while the PARENT run is left intact and independently resumable.
+
+  CONSTRAINTS: strict TypeScript, ESM .js relative imports, named exports only; NO
+  new dependency; do NOT change any existing contract or shared type shape (the
+  StepRecord / JournalEntry / Checkpoint contracts) or the existing WP-132 rollback
+  restore path — EXTEND additively. Reuse parseBranchTarget / branchNameForTarget /
+  restoreCheckpoint; do not re-implement target parsing or checkpoint-commit
+  resolution. Do not weaken the crash-recovery (WP-123) or suspend/resume (WP-206)
+  resume paths. If a verification step reports a failing test or type error, READ the
+  failure and fix the IMPLEMENTATION — do NOT weaken or delete any assertion.
+
+repos:
+  - url: /Users/nikitazolotarev/repos/chikory
+    writable: true
+
+acceptance_criteria:
+  - id: AC-1
+    description: >
+      The operator-facing `cmdBranch` command exists and is wired into the CLI
+      dispatch under the `branch` verb, reusing the existing `parseBranchTarget`.
+      (OUTCOME symbol the goal NAMES — `cmdBranch` — as it appears in code; it is
+      absent on HEAD so a recursive grep cannot false-green on an incumbent file,
+      F-90. Module/test layout is the executor's, F-82/F-83.)
+    check: >
+      cd packages/sdk-ts &&
+      grep -rq 'cmdBranch' src/cli/
+
+  - id: AC-2
+    description: >
+      Branching forks a NEW child run whose journal is seeded from the parent up to
+      the fork checkpoint, and the child records the parent run-id + fork checkpoint
+      as provenance. (Symbol `parseBranchTarget` is REUSED — the pure slice is not
+      re-implemented — as it appears in the new command code.)
+    check: >
+      cd packages/sdk-ts &&
+      grep -rq 'parseBranchTarget' src/cli/
+
+  - id: AC-3
+    description: >
+      The child workspace is forked from the fork checkpoint's recorded git commit
+      via a `worktree` (or equivalent git checkout at that commit), reusing the
+      WP-132 checkpoint-commit resolution. (Symbol `worktree` as it appears in the
+      new fork code; scoped to the runtime source.)
+    check: >
+      cd packages/sdk-ts &&
+      grep -rq 'worktree' src/
+
+  - id: AC-4
+    description: >
+      A LIVE test exercises the branch end-to-end through the new `cmdBranch` surface
+      (drive a run to a checkpoint, branch, assert the child resumes from the fork
+      with the forked journal/workspace and the parent stays intact). (Anchored on
+      the net-new `cmdBranch` symbol appearing in the test tree — net-new on HEAD so
+      no incumbent file false-greens it, F-90; the test filename is the executor's,
+      F-82.)
+    check: >
+      cd packages/sdk-ts &&
+      grep -rq 'cmdBranch' test/
+
+  - id: AC-5
+    description: >
+      The SDK stays type- and lint-clean and the FULL existing suite — including the
+      new branch unit + live tests — is green, proving branching is additive and
+      nothing outside it regressed (no contract/StepRecord/Checkpoint change; the
+      WP-123 crash-recovery and WP-206 suspend/resume tests still pass).
+    check: cd packages/sdk-ts && pnpm exec tsc --noEmit && pnpm exec eslint . && pnpm exec vitest run
+
+budget_usd: 60
+max_steps: 40
+
+executor:
+  adapter: codex
+  family: openai
+
+judge:
+  family: openai-compat
+  cadence: 2
+  max_cost_share: 0.5
+
+routing:
+  stages:
+    plan: { provider: openai-compat, model: gpt-5.5 }
+    code: { provider: openai-compat, model: gpt-5.5 }
+    review: { provider: openai-compat, model: gpt-5.5 }
+    judge: { provider: openai-compat, model: gemini-3.1-pro-preview }

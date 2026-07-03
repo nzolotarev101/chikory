@@ -4,6 +4,20 @@
 > per-run detail lives in [`docs/reports/`](reports/). Content below was moved
 > verbatim out of the living docs on 2026-07-02 (course correction — plan.md §6).
 
+## Archived 2026-07-03 — DOGFOODING.md status block displaced by dogfood-079
+
+Displaced from the DOGFOODING.md bounded status block when dogfood-079 landed
+(see `docs/reports/dogfood-079.md`):
+
+- Latest: dogfood-078 — WP-265 rung-2 CHAIN re-host (WP-508) on WP-250 window-park (`chain-6dff03ee`, `docs/reports/dogfood-078.md`). 🔴 **FAILED — but NOT a delivery failure; two harness defects.** The WP-250 window-park feature was BUILT correctly + all-green (pure `shouldParkForWindow` → `agent-loop.ts:559` `condition`-park at `SUSPENDED` with a distinct `cause:"window"`, operator/chain surfaces + resume; suite 594 passed), hand-HARVESTED + PUSHED. But (1) 🔴 **F-88 → WP-509:** the `chikory chain` planner COLLAPSED the decomposable goal into ONE node → rung-2 ≥10-step horizon missed a 4th time, now at the PLANNER; (2) 🔴 **F-89 → WP-510:** the writeSet gate FALSE-FAILED the delivery for writing the two test files its AC requires (planner auto-writeSet was src-only) — judge had PROCEEDED, suite all-green. 🟡 **F-90 → WP-511:** AC-1's recursive `grep -rq contextWindowTokens test/` false-greened on incumbent files, so the spec's required LIVE durable window-park test went missing (WP-250 → 🟡, owes it).
+
+## Archived 2026-07-03 — plan.md §preamble status prose displaced by dogfood-079
+
+Displaced from the "Last 3 runs" bounded block when dogfood-079 landed
+(see `docs/reports/dogfood-079.md`):
+
+- **(was Last-3-runs) dogfood-076** — WP-265 rung 2 attempt: WP-213 native executor (`run-17a57451`, **FAILED** — native adapter BUILT + all-green@step2 but SECOND consecutive loose false-FAILED, 🔴 F-83 → WP-266 LANDED).
+
 ## Archived 2026-07-02 — plan.md §preamble status prose displaced by dogfood-077
 
 Displaced from the "Last 3 runs" / "Queue" bounded block when dogfood-077 landed

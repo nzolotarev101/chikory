@@ -14,3 +14,4 @@ run,wp,mode,outcome,steps,cost_usd,spec_format,class,resumes,judge_catches,rung
 076,WP-213,run,FAILED,4,3.71,loose,product,0,0,0
 077,WP-206,run,SUCCESS,1,3.79,loose,product,0,0,1
 078,WP-250,chain,FAILED,1,2.80,loose,product,0,0,0
+079,WP-204,chain,SUCCESS,4,4.36,loose,product,1,0,2

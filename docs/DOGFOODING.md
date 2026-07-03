@@ -8,18 +8,18 @@ recover a run, and how to land the result as a normal PR.
 **Status (2026-07-02, bounded — update discipline: REPLACE this block, ≤15 lines;
 displaced prose moves verbatim to [`PLAN-HISTORY.md`](PLAN-HISTORY.md); per-run detail:
 `docs/reports/dogfood-NNN.md`; queue + course correction: `plan.md` §6).**
-Latest: dogfood-078 — WP-265 rung-2 CHAIN re-host (WP-508) on WP-250 window-park (`chain-6dff03ee`,
-`docs/reports/dogfood-078.md`). 🔴 **FAILED — but NOT a delivery failure; two harness defects.** The
-WP-250 window-park feature was BUILT correctly + all-green (pure `shouldParkForWindow` → `agent-loop.ts:559`
-`condition`-park at `SUSPENDED` with a distinct `cause:"window"`, operator/chain surfaces + resume; suite
-594 passed), hand-HARVESTED + PUSHED this review. But (1) 🔴 **F-88 → WP-509:** the `chikory chain` planner
-COLLAPSED the decomposable goal into ONE node → rung-2 ≥10-step horizon missed a **4th** time, now at the
-PLANNER; (2) 🔴 **F-89 → WP-510:** the writeSet gate FALSE-FAILED the delivery for writing the two test
-files its AC requires (planner auto-writeSet was src-only) — judge had PROCEEDED, suite all-green. 🟡 **F-90
-→ WP-511:** AC-1's recursive `grep -rq contextWindowTokens test/` false-greened on incumbent files, so the
-spec's required LIVE durable window-park test went missing (WP-250 → 🟡, owes it). **The chain rung-2 re-host
-is BLOCKED until WP-509 + WP-510 land (both hand-fix / track-B).** NEXT: land WP-510 then WP-509, then re-host
-rung 2 as a chain. See §7 (troubleshooting), §8 (chain writeSet limitation), §1.5, §1.4 (KPI table), §3.
+Latest: dogfood-079 — WP-265 rung-2 CHAIN re-host (WP-508) on WP-204 tiered memory (`chain-f4b08133`,
+`docs/reports/dogfood-079.md`). 🟢 **SUCCESS · 4/4 nodes — RUNG 2 REACHED (1st time, after 4 misses).** The
+`chikory chain` planner DECOMPOSED WP-204 into 4 sequential judge-gated nodes (`min_nodes: 4` — WP-509 live),
+crossed **13 durable checkpoints**, and survived the FIRST live at-horizon mid-chain `kill -9` →
+`chikory chain resume` WITHOUT re-executing the completed node (core seal ts `12:18:20.307` byte-identical +
+$1.01 unchanged post-resume = journal replay, not re-run). WP-204 tiered memory (core/archival/recall +
+provenance-reject) DELIVERED, all-green (621 passed), harvested `9304c68`, pushed → **WP-204/WP-508 → 🟢.**
+Cost: WP-510 needed FOUR writeSet false-fail fixes (🟡 F-91 → WP-512: exact-path is wrong for LOOSE chains);
+the WP-257 literal floor REVISE-rejected the decomposed plan (🟡 F-92 → WP-513); the launch-guard false-tripped
+on a header comment (🟡 F-93 → WP-514) — all harness-meta track-B. ℹ️ F-94: each node one-shot in 1 step →
+horizon was inter-node; the intra-run ≥5-step reliability curve is still owed (rung 3). NEXT: **rung 3 — the
+~8h overnight unattended run.** See §7 (troubleshooting), §8 (chain writeSet limitation), §1.5, §1.4, §3.
 
 Related docs: [`docs/spec/task-spec.md`](spec/task-spec.md) (schema
 reference) · [`docs/TASK-PROTOCOL.md`](TASK-PROTOCOL.md) (WP etiquette, §7 is
@@ -685,12 +685,31 @@ a first-attempt SUCCESS and produced three plan-changing findings
   #4, now at the planner). That single node's planner-derived `writeSet` was **src-only** (6
   files), so when the executor also wrote the two AC-required test files, the writeSet gate
   (`activities.ts:1015`) sealed the node **FAILED** — even though the judge had PROCEEDED and
-  `tsc`/`eslint`/the full vitest suite were all green. **Until WP-509 (planner decomposes on a
-  `min_nodes`/explicit node list) AND WP-510 (writeSet admits the AC-referenced `test/**`) land,
-  a chain rung-2 re-host cannot both reach the horizon and pass its own tests.** If you must
-  ship such work now, hand-harvest the FAILED node's workspace delivery (`git -C
-  <run>/workspace diff main HEAD | git apply` at repo root) and re-run the full AC-2 against the
-  working tree — the FAILED seal is chain bookkeeping, not a code defect.
+  `tsc`/`eslint`/the full vitest suite were all green. **✅ RESOLVED (dogfood-079):** WP-509 landed
+  a `min_nodes` decompose floor (`031baa7`) + hardened planner prompt — a `min_nodes: N` spec that
+  the planner under-decomposes now FAILS LOUD pre-judge; and WP-510 admits the executor's real
+  writes. But WP-510 took **FOUR** iterations because exact-path enforcement is fundamentally
+  wrong for a LOOSE chain that delegates file LAYOUT: the gate false-FAILED (1) the AC test tree,
+  (2) an **executor-named NEW file** in a declared dir (`src/memory/tiered.ts` where the planner
+  guessed `core.ts`), (3) a downstream node **MODIFYING** that file, and (4) an additive **barrel
+  `index.*`** re-export. `undeclaredWritePaths` (`src/chain/write-set.ts:130`) is now
+  DIRECTORY-scoped: a changed path is admitted if it matches a declared path exactly, is a test
+  artifact, is a barrel `index.*`, or sits in a directory a declared entry owns (added OR modified);
+  only a write to a directory NO declared entry owns still FAILS. ⚠️ This erodes the writeSet's
+  conflict-safety for LOOSE chains — **F-91 → WP-512** asks whether exact-path is the right
+  primitive at all (fine for the linear LOOSE chains this targets: no parallel writers, judge +
+  full-build AC are the backstop). With both landed, dogfood-079 decomposed into 4 nodes and
+  passed 0 false-fails. If a node still seals FAILED on a writeSet gate, hand-harvest the
+  workspace delivery (`git -C <run>/workspace diff main HEAD | git apply` at repo root) and re-run
+  the full AC against the working tree — the FAILED seal is chain bookkeeping, not a code defect.
+- **Two more chain-authoring gotchas from dogfood-079:** (a) the **WP-257 literal-preservation
+  floor fights a decomposing planner** — `planLiteralGaps` REVISE-rejects a plan whose paraphrased
+  node goals dropped any backtick literal from `plan.goal`, but decomposition NECESSARILY
+  paraphrases; keep grep-pinned literals in the **acceptance criteria** (copied verbatim into
+  nodes), NOT the goal prose, and de-backtick the narrative (F-92 → WP-513). (b) the **launch-mode
+  guard false-trips on comment prose** — a header `#` comment that merely MENTIONS "single `chikory
+  run`" matches `SINGLE_RUN_PATTERNS`; avoid the guard's keywords in narrative comments until
+  WP-514 scopes it to intent-bearing fields (F-93 → WP-514).
 - **A recursive positive grep AC (`grep -rq '<symbol>' test/`) cannot pin a NET-NEW test** —
   it false-greens on any incumbent file that already contains the symbol (F-90 → WP-511,
   dogfood-078: the required live window-park durable test was absent, yet `grep -rq
