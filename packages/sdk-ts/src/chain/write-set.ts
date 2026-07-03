@@ -86,6 +86,18 @@ function isTestPath(path: string): boolean {
   return /\.(test|spec)\.[cm]?[jt]sx?$/.test(base);
 }
 
+/**
+ * WP-510/F-89: a barrel (`index.ts`) is a re-export aggregator; every LOOSE node
+ * that adds a primitive must append its export to the shared package barrel, but
+ * the planner assigns that one file to a single node's writeSet. Admit additive
+ * barrel edits like the test tree — the judge and the full-build AC catch any
+ * non-additive damage.
+ */
+function isBarrelPath(path: string): boolean {
+  const base = path.slice(path.lastIndexOf("/") + 1);
+  return /^index\.[cm]?[jt]sx?$/.test(base);
+}
+
 /** Repo-relative POSIX dirname ("" for a top-level file). */
 function parentDir(path: string): string {
   const slash = path.lastIndexOf("/");
@@ -103,12 +115,14 @@ function parentDir(path: string): string {
  *   2. the executor creates its own filename (`src/memory/tiered-memory.ts`) where
  *      the planner guessed `src/memory/core.ts`;
  *   3. a downstream node must MODIFY the file an upstream node created under that
- *      executor-chosen name.
+ *      executor-chosen name;
+ *   4. every node adds its export to the shared package barrel (`src/index.ts`),
+ *      which the planner assigns to only one node's writeSet.
  * So the runtime boundary is DIRECTORY-SCOPED: a changed path is admitted when it
- * (a) matches a declared path exactly, (b) is a test artifact, or (c) sits in a
- * directory a declared entry already owns — added or modified. A write to a
- * directory NO declared entry owns (e.g. an out-of-scope `src/runner/…` edit) is
- * still FAILED, and planning-time conflict serialization
+ * (a) matches a declared path exactly, (b) is a test artifact, (c) is a barrel
+ * `index.*`, or (d) sits in a directory a declared entry already owns — added or
+ * modified. A write to a directory NO declared entry owns (e.g. an out-of-scope
+ * `src/runner/…` edit) is still FAILED, and planning-time conflict serialization
  * (`serializeWriteConflicts`) is unchanged. For the linear LOOSE chains this
  * targets there are no parallel writers, so directory scope loses no real
  * conflict-safety; the judge remains the semantic backstop.
@@ -121,6 +135,9 @@ export function undeclaredWritePaths(node: PlanNode, changedPaths: string[]): st
     .map(normalizeWritePath)
     .filter(
       (path) =>
-        !declaredSet.has(path) && !isTestPath(path) && !declaredDirs.has(parentDir(path)),
+        !declaredSet.has(path) &&
+        !isTestPath(path) &&
+        !isBarrelPath(path) &&
+        !declaredDirs.has(parentDir(path)),
     );
 }

@@ -86,4 +86,13 @@ describe("undeclaredWritePaths", () => {
       "src/runner/rogue.ts",
     ]);
   });
+
+  it("admits an additive edit to the shared package barrel (WP-510/F-89, dogfood-079)", () => {
+    // A memory-scoped node re-exports its primitive from the top-level barrel,
+    // one directory up from its declared writeSet → admit the index.ts edit.
+    const node = plan([["src/memory/core.ts"]]).nodes[0]!;
+    expect(
+      undeclaredWritePaths(node, ["src/memory/core.ts", "src/index.ts"]),
+    ).toEqual([]);
+  });
 });
