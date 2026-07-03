@@ -13,7 +13,7 @@
 #   floor + stronger prompt) and WP-510 (writeSet gate admits the AC-required test
 #   tree) — both landed track-B before this spec. dogfood-078 died on both.
 #
-# LAUNCH WITH `chikory chain` (decomposed durable run, NOT single `chikory run`):
+# LAUNCH WITH `chikory chain` (a decomposed, durable, multi-node chain):
 #      devbox run chain-dogfood     # ← `chikory chain`; picks the latest spec (this one)
 
 name: dogfood-079-wp204-tiered-memory
