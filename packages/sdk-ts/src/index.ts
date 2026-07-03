@@ -36,6 +36,7 @@ export {
   createMemoryArtifactStore,
   MAX_SUMMARY_CHARS,
 } from "./artifacts/index.js";
+export * from "./memory/index.js";
 export {
   assertGitWorkspace,
   captureWorkspaceDiff,
