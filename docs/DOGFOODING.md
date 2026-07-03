@@ -8,16 +8,18 @@ recover a run, and how to land the result as a normal PR.
 **Status (2026-07-02, bounded — update discipline: REPLACE this block, ≤15 lines;
 displaced prose moves verbatim to [`PLAN-HISTORY.md`](PLAN-HISTORY.md); per-run detail:
 `docs/reports/dogfood-NNN.md`; queue + course correction: `plan.md` §6).**
-Latest: dogfood-075 — the FIRST loose-spec headline (WP-265 rung 1, WP-212 `chikory inject`,
-`run-bb715500`, `docs/reports/dogfood-075.md`). The `chikory inject <run-id> "<guidance>"`
-operator-steer command is DELIVERED, functionally complete, and live-proven (the injected
-sentinel is journaled kind-`injection` verbatim + reaches the next step's context); WP-212 → 🟢.
-**But the run sealed FAILED on a self-inflicted AC:** AC-1 pinned `test -f test/cli/inject.test.ts`
-while the LOOSE goal delegated file layout and steered the test into `cli.test.ts`, so the correct
-delivery false-FAILED and the budget-waste HALT guard fired at 3 consecutive AC-1 fails ($3.85/$6).
-New 🔴 **F-82 → WP-266** (loose-AC lint; see §3). Progression gate ⛔ STALLED → ✅ PROGRESSING
-(rung 0→1, loose 0→1, steps 2→3). NEXT headline = WP-265 rung 2 (dogfood-076): ≥10-step loose run
-on WP-213 native executor + mid-run `kill -9` → `chikory resume`. See §1.5, §1.4 (KPI table), §3.
+Latest: dogfood-076 — WP-265 rung-2 attempt on WP-213 native executor (`run-17a57451`,
+`docs/reports/dogfood-076.md`). The native raw-LLM loop executor (`createNativeAdapter`) was
+BUILT well and all-green at step 2 (AC-2: 589 passed) — WP-213 effectively done, but UNHARVESTED.
+**The run sealed FAILED on a self-inflicted AC (the SECOND loose headline in a row to do so):**
+AC-1's `! grep -Eq 'execFile|spawn' native.ts` matched the doc comment "…is spawned" → false-FAILED
+all 3 passes → budget-waste HALT. New 🔴 **F-83 → WP-266** (loose-AC lint, a new variant of F-82) —
+**FIXED THIS SITTING** (`dogfood-progression.sh --spec` now ⛔s `test -f`/`test -e` + bare-word
+negative greps). Also: 🔴 **F-84 → WP-267** (the lint isn't enforced at launch — wire it into the
+precheck) and 🟡 **F-85 → WP-268** (codex steps ran 1.76×/1.98× past the maxSeconds=600 step cap).
+Rung-2's ≥10-step horizon + live kill→resume KPIs remain UN-measured (the build was ~2 steps; the
+run auto-terminated before the operator's kill). NEXT: WP-267 hand-fix, then re-attempt rung 2 on
+a ≥10-step-sized host with a lint-clean spec. See §1.5, §1.4 (KPI table), §7, §3.
 
 Related docs: [`docs/spec/task-spec.md`](spec/task-spec.md) (schema
 reference) · [`docs/TASK-PROTOCOL.md`](TASK-PROTOCOL.md) (WP etiquette, §7 is
@@ -609,6 +611,8 @@ a first-attempt SUCCESS and produced three plan-changing findings
 | The run diff is exact, but the landed commit contains extra files outside the spec | Post-run commit-scope contamination (dogfood-031 **F-31**): the judge reviewed the run workspace diff, but `HEAD` (`67eb167`) also included unrelated warning-suppression edits. Since WP-231 / dogfood-032, run `bash scripts/dogfood-landed-scope.sh .chikory/runs/<run-id>/workspace <landed-commit>` or read `dogfood-verify`'s `Landed commit scope` section. It reports `MATCH`, `EXTRA_IN_COMMIT`, `MISSING_IN_COMMIT`, or `DIFFERS_FROM_RUN` and exits nonzero on mismatch. |
 | A run's tests pass and `typecheck` is clean, but a test fixture has the wrong shape for a real type | **Fixed by WP-230** (dogfood-020): `typecheck` now type-checks `test/**` via a second `tsc -p tsconfig.test.json` pass, so a wrong-shaped fixture fails the gate. If you still suspect a gap, the manual check below still works. The original gap (dogfood-019 **F-29**): The `typecheck` AC (`tsc --noEmit`) compiles only `src/**` (`tsconfig.json` `include`), and Vitest transpiles tests via esbuild **without** type-checking — so type errors *in test code* are invisible to every dogfood signal (dogfood-019 **F-29**: `judge-trigger.test.ts` built `ArtifactRef` fixtures as `{uri,sha256,bytes}` vs the real `{id,kind,bytes,summary}` — 7 `TS2353` errors, all green). To check a suspect test: add it to a temp tsconfig that `extends ./tsconfig.json`, sets `compilerOptions.rootDir: "."`, and includes both `src/**/*` and the test file, then `pnpm --filter @chikory/sdk exec tsc --noEmit -p <that-config>`. **WP-230** makes a test-inclusive typecheck a standing AC. |
 | Live `--watch` shows `verdict ⚠ ESCALATE` and `run is AWAITING_APPROVAL` but no reason | **Fixed by WP-229** (dogfood-018, `run-59115f35`): `followRun` now prints `judge escalated: <reason>` immediately before the AWAITING_APPROVAL line whenever the ESCALATE verdict carries a non-empty `escalateReason`. If you still see no reason, the verdict had an empty `escalateReason` (the line is suppressed by design) — fall back to `pnpm chikory trace <run-id> --step <n>` for the full judge form, or read the `verdict` entry in `.chikory/runs/<run-id>/journal.db`. |
+| A LOOSE run sealed FAILED via the 3-consecutive-AC-fail HALT even though the delivery is complete and AC-2 (build/lint/suite) is GREEN — one AC's grep is unsatisfiable | **The AC grep is testing a substring the delivered CODE legitimately produces, or a file layout the goal delegated** (dogfood-075 **F-82**, dogfood-076 **F-83**). Two shapes: (F-82) `test -f <a-new-file>` for a path the loose goal left to the executor; (F-83) a NEGATIVE grep on a BARE WORD that also appears in comments/strings/prose — dogfood-076's `! grep -Eq 'execFile\|spawn' native.ts` matched the doc comment "…is spawned" even though the code has zero `execFile`/`spawn` calls. Either makes the AC false on correct work → it fails every pass → the budget-waste HALT guard fires (a *true* guard fire on a *false* criterion), and later steps flail against the phantom (dogfood-076 steps 3–4 burned ~37 min and broke AC-2). **Prevention (WP-266, LANDED):** run `bash scripts/dogfood-progression.sh --spec <yaml>` before launching — it ⛔s (exit 3) `test -f`/`test -e` in a loose AC and bare-word negative greps. **Authoring rule:** a loose AC's grep must anchor on an OUTCOME symbol as it appears in CODE — a call form (`grep -E '\bcreateNativeAdapter\('`), a registry key, an import — never a bare word natural language can produce, and never a new-file existence test. **The launcher now REFUSES automatically (WP-267, F-84 — `scripts/dogfood.sh` exits on the lint's exit-3 hazard; override `CHIKORY_ALLOW_LOOSE_AC_HAZARD=1`).** |
+| Codex steps run far past their `maxSeconds` cap (e.g. ~2×) before being killed, recording 0 tokens / $0 / FAILED | Codex ignores the wall-clock deadline / SIGTERM until it is SIGKILLed (dogfood-076 **F-85 → WP-268**, family of F-76/F-80): steps 3 & 4 ran 1057s (1.76×) and 1188s (1.98×) past the 600s step cap. The cap is enforced LATE (~2×). Treat a run whose wall-clock is dominated by hung dead steps as this, not real work — check per-step `dur` in the trace. Durable fix = WP-268 (escalate to SIGKILL of the executor process group at ~1× the cap). Do NOT raise `budget_usd`/`max_steps` mid-run to rescue it. |
 
 ## 8. Known P1 limitations (so you don't fight them)
 

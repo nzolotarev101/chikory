@@ -1,0 +1,187 @@
+# Dogfood-077: WP-265 rung 2 (RE-ATTEMPT) — the ≥10-step at-horizon run on WP-206 HITL suspend/resume.
+# Format: LOOSE (horizon-ladder headline — goal states the OUTCOME + constraints; the ACs pin what "done"
+#   means via OUTCOME SYMBOLS THE GOAL NAMES; the internal signal/loop/prompt/test design is LEFT TO THE
+#   EXECUTOR; NO prescribed diff).
+# Ladder-rung: 2
+# Thesis-KPI: horizon + per-step reliability + durable resume — a genuine ≥10-step build (compounding-error /
+#   context-rot measurement over a real multi-step feature) AND the first LIVE at-horizon kill→resume: the
+#   operator kills the worker mid-run and `chikory resume` completes it without re-executing any journaled step.
+#
+# LAUNCH WITH `chikory run` (single durable run, NOT `chikory chain`). NO seam env.
+#      devbox run run-dogfood        # ← single `chikory run`; picks the latest spec (this one)
+#    (NEVER `devbox run chain-dogfood` — the committed `cmdChain` launch-mode guard refuses this single-`run`
+#    spec launched as a chain. Do NOT set CHIKORY_ALLOW_LAUNCH_MODE_MISMATCH=1.)
+#
+# ⚠️ PRE-LAUNCH LINT (WP-266, F-84 — MANDATORY, the whole reason dogfood-075 AND 076 false-FAILED):
+#      bash scripts/dogfood-progression.sh --spec examples/dogfood/dogfood-077.yaml
+#   MUST print "🟢 AC checks: no F-82 file-pin / F-83 prose-grep hazard (WP-266 lint)." and exit 0. If it ⛔s,
+#   FIX THE AC before launching — a loose AC must grep OUTCOME symbols as they appear in CODE (a call form / a
+#   registry key / an import), never `test -f <new-file>` and never a bare-word negative grep that also matches
+#   comments/strings/prose (dogfood-076's `! grep 'execFile|spawn'` matched the comment "…is spawned"). NOTE:
+#   `scripts/dogfood.sh` now ENFORCES this automatically (WP-267) — a launch whose loose ACs ⛔ is REFUSED at
+#   zero LLM cost (override `CHIKORY_ALLOW_LOOSE_AC_HAZARD=1`). This spec already passes the lint 🟢.
+#
+# ⚠️ RUNG-2 OPERATOR PROCEDURE — the deliberate mid-run kill→resume (this is what makes it rung 2):
+#   1. Launch `devbox run run-dogfood` and watch the stream.
+#   2. After the run has journaled AT LEAST 3–4 SUCCESS steps (durable progress to preserve), in a second shell:
+#      `kill -9 <the chikory worker PID>` (the `run-dogfood` script prints it; or `pgrep -f chikory`).
+#   3. Resume: `devbox run -- pnpm chikory resume <run-id> --watch`. The run MUST continue from the last
+#      checkpoint — journaled steps are NOT re-executed (no duplicate spend; WP-123 crash-recovery is the unit
+#      analog, this is the live at-horizon proof). Record in the report: kill step #, resume step #, whether any
+#      step re-ran, and the pre/post checkpoint chain. THIS crash kill→resume is the run's PRIMARY thesis artifact
+#      and is SEPARATE from the operator suspend/resume FEATURE the run BUILDS (the run exercises durable resume
+#      twice: the feature's own live test, and this manual crash-resume).
+#   If the run finishes before you kill it, that itself is data — record it and note the build was smaller than
+#   the horizon target; do NOT pad the spec.
+#
+# WHY THIS IS NEXT (2026-07-02): dogfood-076 (rung-2 attempt on WP-213 native executor) BUILT a good native
+# adapter but sealed FAILED on a self-inflicted AC (F-83, the F-82 class in a new costume — `! grep 'spawn'`
+# matched a comment), and WP-213 built in only ~2 steps so it could never BE a ≥10-step horizon host. WP-213 is
+# now hand-landed (harvested, AC-2 green). Rung 2's KPIs (≥10-step horizon + LIVE kill→resume) are STILL
+# un-measured. This spec hosts rung 2 on a GENUINELY ≥10-step slice: WP-206 HITL suspend/resume (plan.md §6 🟡,
+# a DIRECT P2 exit-gate dependency), whose deliverable — an operator-initiated durable park at zero compute —
+# is inherently multi-step (types + workflow signal/condition + runner handle + CLI + live durable test) and
+# thematically IS durable resume, so the crash kill→resume artifact and the feature reinforce each other.
+#
+# THE OPEN GAP: today a run enters `SUSPENDED` ONLY on a budget breach (`agent-loop.ts:215` and `:242`:
+# `status = "SUSPENDED"; await condition(() => pendingTopUps.length > 0 || cancelRequested)` — a durable park at
+# ZERO compute until a `top_up` signal). There is NO way for an OPERATOR to durably park a HEALTHY run and later
+# continue it. The substrate to build on already exists:
+#   * The signal pattern: `defineSignal` + `setHandler` + a Temporal `condition(...)` wait — see the existing
+#     `cancelSignal`/`injectSignal`/`approveSignal`/`topUpSignal` (`src/workflow/agent-loop.ts:85-88,137-149`)
+#     and the budget-park `condition` wait (`:216`, `:243`). An operator suspend is the SAME shape: a signal
+#     sets a flag, the loop parks at `status = "SUSPENDED"` on a `condition` that a resume signal clears.
+#   * `RunStatus` already includes `"SUSPENDED"` (`src/types.ts:411`) and the `statusQuery` surfaces it.
+#   * `RunHandle` (`src/runner.ts`) already exposes `approve`/`inject`/`cancel` as thin signal senders — a new
+#     durable park is its sibling.
+#   * The CLI dispatch (`src/cli/main.ts`) and command handlers (`src/cli/commands.ts` — `cmdCancel`/`cmdInject`)
+#     are the operator surface; `chikory suspend <run-id>` is the missing sibling.
+#   * The journal (`recordBudgetEvent` etc.) is how the park/unpark is made durable + auditable.
+# The INTERNAL design — the exact signal names, whether resume reuses `chikory resume` or adds its own path,
+# the journal kind, where in the loop the park-check sits, and the test layout — is YOURS. That is the loose
+# surface and the real failure surface: the park MUST be a durable `condition` wait (ZERO compute, NOT a poll or
+# `sleep`), it MUST sit where no journaled step is re-executed on resume, the status MUST surface `SUSPENDED`,
+# and a resume MUST continue the run to terminal with the SAME journaled steps (no duplicate spend).
+#
+# WHY LOOSE (and a plausible failure surface): the goal fixes the OUTCOME (an operator can `chikory suspend` a
+# RUNNING run → it durably parks at zero compute, status SUSPENDED, journaled → a resume continues it from the
+# exact next step with NO journaled step re-executed) and the constraints (reuse the signal/condition pattern,
+# no new dependency, don't change the `StepRecord`/`ExecutorAdapter`/`JournalEntry` contract shapes), but leaves
+# the signal/loop/test design to the executor. A competent agent can plausibly fail this: a park on a poll/sleep
+# burns compute instead of zero-compute-waiting; a park-check in the wrong place re-executes a completed step on
+# resume (duplicate spend — the exact compounding-error failure the thesis targets); a missing status transition
+# leaves the run reading RUNNING while parked; the live durable test must drive a REAL Temporal run (mirror the
+# WP-123 crash-recovery test + the WP-212 live inject test — NOT a mock of the durable layer).
+#
+# F-82/F-83 APPLIED: the ACs below anchor on OUTCOME SYMBOLS THE GOAL NAMES as they appear in CODE (`cmdSuspend`,
+# the `suspend` CLI dispatch, a `SIGNAL_SUSPEND`/`suspendSignal` durable signal, a `RunHandle` suspend method) and
+# grep the test tree RECURSIVELY for the outcome — NO `test -f <a-new-file>`, NO bare-word NEGATIVE grep. Run the
+# WP-266 lint (top of file) before launch to confirm.
+#
+# Gate verdicts (dogfood-review §5, applied inline on CURRENT HEAD):
+#   * §0 Progression: ✅ PROGRESSING (ledger through 076) → next headline = the next WP-265 ladder rung. Rung 2
+#     is still UN-satisfied (076 rung=0) → this spec re-hosts rung 2.
+#   * §1.1 Failure-surface: ✅ — ≥10-step cross-file build on the durable-execution pillar; durable park
+#     correctness, no-step-re-execution on resume, status transitions, live Temporal test.
+#   * §1.2 Product-progress: ✅ — advances REAL open plan.md §6 WP-206 (🟡, direct P2 exit-gate dependency).
+#     Net-new real product code; reuses the signal/condition substrate; NO scaffolding, NO new dep.
+#   * §1.3 Mission-critical: ✅ PROCEED — thesis-stressing horizon slice on a real product WP; not busy, not
+#     scaffold-hosted; the veto does not fire.
+#   * §1.5 Friction-budget: ✅ — class=product, spec_format=loose, NOT harness-meta; trailing-3 meta:product
+#     headline ratio 0/3, cap not busted.
+#
+# Zero-secrets launch (no API keys; CLI-OAuth judge via the shim; NO seam vars). The script auto-starts the
+# `agy`/Antigravity proxy for the gemini judge:
+#   devbox shell
+#   bash scripts/dogfood-progression.sh --spec examples/dogfood/dogfood-077.yaml   # WP-266 lint MUST pass
+#   devbox run run-dogfood        # single `chikory run`, latest spec (this one)
+#
+# Pre-launch discipline:
+#   * COMMIT EVERYTHING first — the workspace clones HEAD (F-30: launch ONCE). The dogfood-076 review edits AND
+#     the harvested WP-213 delivery (6 files) are uncommitted; land them so HEAD is lint-GREEN before the clone
+#     (the clone must pass this run's own AC `eslint .`).
+#   * F-45: any NEW test file this run creates MUST be ABSENT on HEAD (the suspend durable test is net-new).
+#   * F-49/F-82/F-83: each AC greps the OUTCOME anchors the goal NAMES as they appear in CODE; no delegated-file
+#     pin, no bare-word negative grep.
+#   * F-76/F-80/F-85 (codex): a ≥10-step build WILL take a while and codex may run ~2× past a step cap — do NOT
+#     raise `budget_usd`/`max_steps` mid-run to rescue it; RECORD any step-cap overrun (F-85 → WP-268).
+#   * Run Devbox commands sequentially (F-22). Bare `pnpm exec`, NOT `devbox run` (F-24), in the ACs.
+name: dogfood-077-wp206-hitl-suspend-resume
+goal: >
+  Give the OPERATOR first-class HITL suspend/resume for a durable run — the ability to durably PARK a healthy,
+  RUNNING run at ZERO compute and later continue it, closing the WP-206 gap. Today a run only ever enters the
+  existing `SUSPENDED` state on a budget breach (`src/workflow/agent-loop.ts:215`,`:242`:
+  `status = "SUSPENDED"; await condition(() => pendingTopUps.length > 0 || cancelRequested)` — a durable
+  zero-compute wait until a top-up signal); there is NO operator-initiated way to pause a healthy run and resume
+  it. Close that gap by mirroring the EXISTING durable-signal pattern (the sibling of `cancelSignal`/`injectSignal`/
+  `approveSignal`/`topUpSignal`), not by inventing a second mechanism.
+
+  OUTCOME (what "done" means — the HOW is yours to design):
+    * A NEW operator command `chikory suspend <run-id>` — its handler `cmdSuspend` in `src/cli/commands.ts`
+      (mirroring `cmdCancel`/`cmdInject`: resolve the durable handle, send the suspend request, close the runner)
+      and a `case "suspend"` dispatch + help line in `src/cli/main.ts`. Missing run-id → actionable stderr +
+      nonzero exit; success → an ack + exit 0.
+    * A durable SUSPEND SIGNAL on the workflow — a `SIGNAL_SUSPEND` constant + a `suspendSignal`
+      (`defineSignal`) + a `setHandler` in `src/workflow/agent-loop.ts`, mirroring the existing signals. When the
+      operator suspends, the run loop parks at `status = "SUSPENDED"` on a Temporal `condition(...)` wait — ZERO
+      compute, NOT a poll or `sleep` — until a resume request (or cancel) clears it, then transitions back to
+      `RUNNING`. The park-check MUST sit where NO already-journaled step is re-executed on resume, and the
+      park/unpark MUST be journaled so the audit trail shows the suspend and the resume.
+    * A `RunHandle` method (`src/runner.ts`) that sends the suspend signal — the sibling of `approve`/`inject`/
+      `cancel`, a thin signal sender. Wire whatever resume path you choose (extend the existing `chikory resume`,
+      or add a resume signal) so a suspended run can be continued to terminal — YOUR design, but it MUST end the
+      run at a normal terminal state with the SAME journaled steps.
+    * Prove it with a REAL behavioral test that drives a LIVE Temporal-backed run (mirror the WP-123
+      crash-recovery test and the WP-212 live inject test — do NOT mock the durable layer): start a run, suspend
+      it after at least one journaled step, assert the run reaches `SUSPENDED` and does NOT advance while parked,
+      resume it, and assert the run reaches a terminal state having re-executed ZERO journaled steps (no
+      duplicate step entries / no duplicate spend). Reference `cmdSuspend` from the test so the outcome is
+      greppable.
+
+  CONSTRAINTS: strict TypeScript, ESM `.js` relative imports, named exports only; NO new dependency; do NOT change
+  the `StepRecord`/`ExecutorAdapter`/`StepInput` shapes, and do NOT remove or repurpose the existing
+  `SUSPENDED`/`RunStatus` values, the existing signals, or the budget-park path — EXTEND them additively. Reuse
+  the `defineSignal`/`setHandler`/`condition` pattern and the journal; do not invent a second suspend mechanism or
+  a second LLM/durable path. If a verification step reports a failing test or type error, READ the failure and fix
+  the IMPLEMENTATION — do NOT weaken or delete any assertion.
+repos:
+  - url: /Users/nikitazolotarev/repos/chikory
+    writable: true
+acceptance_criteria:
+  - id: AC-1
+    description: >
+      An operator can durably suspend/resume a run — `cmdSuspend` exists in `src/cli/commands.ts` with a
+      `suspend` dispatch in `src/cli/main.ts`, a durable `SIGNAL_SUSPEND`/`suspendSignal` + handler in
+      `src/workflow/agent-loop.ts` that parks the loop on a Temporal `condition` at `status = "SUSPENDED"`, a
+      `RunHandle` suspend sender in `src/runner.ts`, and a real behavioral test drives the live suspend→resume
+      path end-to-end. (OUTCOME anchors the goal NAMES as they appear in code; the test file layout is the
+      executor's to choose — F-82/F-83.)
+    check: >
+      cd packages/sdk-ts &&
+      grep -q 'cmdSuspend' src/cli/commands.ts &&
+      grep -q 'suspend' src/cli/main.ts &&
+      grep -Eq 'SIGNAL_SUSPEND|suspendSignal' src/workflow/agent-loop.ts &&
+      grep -q 'condition' src/workflow/agent-loop.ts &&
+      grep -q 'suspend' src/runner.ts &&
+      grep -rq 'cmdSuspend' test/
+  - id: AC-2
+    description: >
+      the SDK stays type- and lint-clean and the FULL existing suite — including the new live suspend/resume
+      durable test — is green, proving the park is a real zero-compute durable wait, the resume re-executes no
+      journaled step, and nothing outside the suspend surface regressed (no contract/StepRecord change).
+    check: cd packages/sdk-ts && pnpm exec tsc --noEmit && pnpm exec eslint . && pnpm exec vitest run
+budget_usd: 30
+max_steps: 16
+executor:
+  adapter: codex
+  family: openai
+judge:
+  family: openai-compat
+  cadence: 2
+  max_cost_share: 0.5
+routing:
+  stages:
+    plan: { provider: openai-compat, model: gpt-5.5 }
+    code: { provider: openai-compat, model: gpt-5.5 }
+    review: { provider: openai-compat, model: gpt-5.5 }
+    judge: { provider: openai-compat, model: gemini-3.1-pro-preview }
