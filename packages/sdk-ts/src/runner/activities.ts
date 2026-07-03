@@ -995,14 +995,6 @@ export function createRunnerActivities(deps: RunnerActivityDeps) {
           if (changedPaths.length === 0) {
             return { status: "FAILED", reason: `node ${link.nodeId} produced no repository changes` };
           }
-          // WP-510/F-89: net-new files the executor created (its own file-layout
-          // choice) are admitted when they sit in a declared directory; modified
-          // undeclared files are still rejected. See undeclaredWritePaths.
-          const addedPaths = (
-            await git(ws, ["diff", "--name-only", "--diff-filter=A", `${BASE_TAG}..HEAD`])
-          )
-            .split("\n")
-            .filter(Boolean);
           const undeclared =
             link.writeSet === undefined
               ? []
@@ -1016,7 +1008,6 @@ export function createRunnerActivities(deps: RunnerActivityDeps) {
                     budgetUsd: spec.budgetUsd,
                   },
                   changedPaths,
-                  addedPaths,
                 );
           if (undeclared.length > 0) {
             return {

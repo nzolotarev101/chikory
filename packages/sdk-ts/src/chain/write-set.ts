@@ -95,31 +95,32 @@ function parentDir(path: string): string {
 /**
  * Actual node output must stay inside the planner-declared write boundary.
  *
- * WP-510/F-89 (dogfood-079 extension): a LOOSE goal delegates file LAYOUT to the
- * executor (F-82/F-83), so the planner's exact-path writeSet routinely guesses a
- * filename the executor doesn't use (planner declared `src/memory/core.ts`, the
- * executor created `src/memory/tiered-memory.ts`). Admit a NEWLY-CREATED file
- * that shares a directory with a declared writeSet entry — the executor may name
- * its own new files inside the area the node already owns — while a MODIFIED
- * undeclared file (a rogue edit to an existing out-of-scope file) is still
- * FAILED. `addedPaths` = the git `--diff-filter=A` set; when empty (non-chain /
- * legacy callers) the gate keeps the exact-match + test-tree behaviour.
+ * WP-510/F-89: exact-path writeSet enforcement is fundamentally incompatible with
+ * a LOOSE chain, which delegates file LAYOUT to the executor (F-82/F-83). Three
+ * ways it false-FAILS a correct, judge-PROCEEDed delivery, all seen on
+ * dogfood-078/079:
+ *   1. the AC forces test files the src-only writeSet can't name;
+ *   2. the executor creates its own filename (`src/memory/tiered-memory.ts`) where
+ *      the planner guessed `src/memory/core.ts`;
+ *   3. a downstream node must MODIFY the file an upstream node created under that
+ *      executor-chosen name.
+ * So the runtime boundary is DIRECTORY-SCOPED: a changed path is admitted when it
+ * (a) matches a declared path exactly, (b) is a test artifact, or (c) sits in a
+ * directory a declared entry already owns — added or modified. A write to a
+ * directory NO declared entry owns (e.g. an out-of-scope `src/runner/…` edit) is
+ * still FAILED, and planning-time conflict serialization
+ * (`serializeWriteConflicts`) is unchanged. For the linear LOOSE chains this
+ * targets there are no parallel writers, so directory scope loses no real
+ * conflict-safety; the judge remains the semantic backstop.
  */
-export function undeclaredWritePaths(
-  node: PlanNode,
-  changedPaths: string[],
-  addedPaths: Iterable<string> = [],
-): string[] {
+export function undeclaredWritePaths(node: PlanNode, changedPaths: string[]): string[] {
   const declared = (node.writeSet ?? []).map(normalizeWritePath);
   const declaredSet = new Set(declared);
   const declaredDirs = new Set(declared.map(parentDir).filter((dir) => dir.length > 0));
-  const added = new Set([...addedPaths].map(normalizeWritePath));
   return changedPaths
     .map(normalizeWritePath)
     .filter(
       (path) =>
-        !declaredSet.has(path) &&
-        !isTestPath(path) &&
-        !(added.has(path) && declaredDirs.has(parentDir(path))),
+        !declaredSet.has(path) && !isTestPath(path) && !declaredDirs.has(parentDir(path)),
     );
 }
