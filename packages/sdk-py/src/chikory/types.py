@@ -188,6 +188,7 @@ class TaskSpec(ContractModel):
     budget_usd: float = Field(gt=0)
     budget_tokens: int | None = Field(default=None, gt=0)
     max_steps: int | None = None
+    min_nodes: int | None = Field(default=None, gt=0)
     executor: ExecutorConfig
     judge: JudgePolicy
     routing: RoutingPolicy

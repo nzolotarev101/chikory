@@ -72,6 +72,7 @@ export interface TaskSpec {
   budgetUsd: number;                  // CG-2 hard cap
   budgetTokens?: number;              // P2 (WP-218 slice 2) — token cap, complements budgetUsd
   maxSteps?: number;
+  minNodes?: number;                  // P2 (WP-509) — chain-only decompose floor; reject a plan with fewer nodes
   executor: { adapter: string; family: LLMProvider };
   judge: JudgePolicy;
   routing: RoutingPolicy;

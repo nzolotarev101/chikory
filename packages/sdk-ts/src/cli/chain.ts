@@ -87,6 +87,7 @@ export async function planAndGateChain(
       acceptanceCriteria: spec.acceptanceCriteria,
       budgetUsd: spec.budgetUsd,
       family: spec.executor.family,
+      ...(spec.minNodes !== undefined ? { minNodes: spec.minNodes } : {}),
     },
     planId: ids.newPlanId(),
     createdAt: ids.now(),
@@ -103,6 +104,21 @@ export async function planAndGateChain(
       ok: false,
       phase: "plan",
       message: err instanceof Error ? err.message : String(err),
+      costUsd: planned.costUsd,
+    };
+  }
+
+  // WP-509/F-88: deterministic decomposition floor. A planner that collapses a
+  // decomposable goal into too few nodes is caught here — before any judge
+  // budget is spent — and surfaced as an actionable stop instead of silently
+  // shipping a one-node "chain" with no horizon.
+  if (spec.minNodes !== undefined && normalizedPlan.nodes.length < spec.minNodes) {
+    return {
+      ok: false,
+      phase: "plan",
+      message:
+        `planner under-decomposed: ${normalizedPlan.nodes.length} node(s) < min_nodes ` +
+        `${spec.minNodes} — the goal was collapsed too coarsely; re-run or lower min_nodes`,
       costUsd: planned.costUsd,
     };
   }

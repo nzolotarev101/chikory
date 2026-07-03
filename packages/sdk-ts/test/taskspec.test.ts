@@ -45,6 +45,14 @@ describe("parseTaskSpec", () => {
     expect(spec.acceptanceCriteria.map((c) => c.id)).toEqual(["AC-1", "AC-2", "AC-3"]);
   });
 
+  it("parses the optional chain decomposition floor min_nodes (WP-509/F-88)", () => {
+    expect(parseTaskSpec(read("valid-minimal.yaml"), { env }).minNodes).toBeUndefined();
+
+    const withFloor = parseTaskSpec(`${read("valid-minimal.yaml")}\nmin_nodes: 4\n`, { env });
+    expect(TaskSpecSchema.safeParse(withFloor).success).toBe(true);
+    expect(withFloor.minNodes).toBe(4);
+  });
+
   it("applies defaults when optional fields are omitted (minimal spec)", () => {
     const spec = parseTaskSpec(read("valid-minimal.yaml"), { env });
     expect(TaskSpecSchema.safeParse(spec).success).toBe(true);

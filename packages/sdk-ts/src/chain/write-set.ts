@@ -71,8 +71,25 @@ export function serializeWriteConflicts(
   return { ...plan, nodes };
 }
 
+/**
+ * WP-510/F-89: a loose "prove it with a test" AC forces the executor to write
+ * test files whose exact paths the planner's src-only writeSet cannot predict
+ * (file layout is the executor's — F-82/F-83). Admit the test tree at the
+ * runtime boundary so a complete, all-green delivery is not false-FAILED. This
+ * relaxes only the runtime check; planning-time conflict serialization
+ * (`serializeWriteConflicts`) still runs on the declared writeSet unchanged.
+ */
+function isTestPath(path: string): boolean {
+  const segments = path.split("/");
+  if (segments.some((segment) => segment === "test" || segment === "tests")) return true;
+  const base = segments[segments.length - 1] ?? "";
+  return /\.(test|spec)\.[cm]?[jt]sx?$/.test(base);
+}
+
 /** Actual node output must stay inside the planner-declared write boundary. */
 export function undeclaredWritePaths(node: PlanNode, changedPaths: string[]): string[] {
   const declared = new Set((node.writeSet ?? []).map(normalizeWritePath));
-  return changedPaths.map(normalizeWritePath).filter((path) => !declared.has(path));
+  return changedPaths
+    .map(normalizeWritePath)
+    .filter((path) => !declared.has(path) && !isTestPath(path));
 }

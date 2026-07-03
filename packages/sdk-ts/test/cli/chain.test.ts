@@ -96,6 +96,29 @@ describe("planAndGateChain", () => {
     }
   });
 
+  it("stops at decomposition when the plan has fewer nodes than min_nodes (WP-509/F-88)", async () => {
+    const oneNode = { nodes: [THREE_NODES.nodes[0]] };
+    const router = stagedRouter(
+      ok(JSON.stringify(oneNode), "openai"),
+      ok(JSON.stringify({ kind: "PROCEED", rationale: "ok" }), "openai-compat"),
+    );
+    const result = await planAndGateChain({ ...SPEC, minNodes: 3 }, router, ids);
+    expect(result).toMatchObject({ ok: false, phase: "plan" });
+    if (!result.ok) {
+      expect(result.message).toContain("min_nodes");
+      expect(result.message).toContain("under-decomposed");
+    }
+  });
+
+  it("proceeds when the plan meets min_nodes", async () => {
+    const router = stagedRouter(
+      ok(JSON.stringify(THREE_NODES), "openai"),
+      ok(JSON.stringify({ kind: "PROCEED", rationale: "covers AC-1" }), "openai-compat"),
+    );
+    const result = await planAndGateChain({ ...SPEC, minNodes: 3 }, router, ids);
+    expect(result.ok).toBe(true);
+  });
+
   it("stops at the gate when the plan-judge shares the planner family (no opt-in)", async () => {
     // routing.judge provider === executor family (openai) → FamilyDiversityError.
     const sameFamily: TaskSpec = {

@@ -80,6 +80,12 @@ export interface TaskSpec {
   /** P2 (WP-218 slice 2) — token-denominated cap, complements budgetUsd (CG-2). */
   budgetTokens?: number;
   maxSteps?: number;
+  /**
+   * WP-509/F-88 — chain-only decomposition floor. When set, `chikory chain`
+   * rejects a plan with fewer nodes (the planner collapsed a decomposable goal
+   * too coarsely). Absent = no floor. Ignored by single `chikory run`.
+   */
+  minNodes?: number;
   executor: { adapter: string; family: LLMProvider };
   judge: JudgePolicy;
   routing: RoutingPolicy;
@@ -496,6 +502,8 @@ export interface PlanInput {
   budgetUsd: number;
   /** Planner model family — the plan meta-judge must differ from it (D2). */
   family: LLMProvider;
+  /** WP-509/F-88 — decomposition floor surfaced to the planner; absent = none. */
+  minNodes?: number;
 }
 
 /**

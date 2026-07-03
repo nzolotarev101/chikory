@@ -50,4 +50,23 @@ describe("undeclaredWritePaths", () => {
       "src/extra.ts",
     ]);
   });
+
+  it("admits the AC-required test tree the src-only writeSet cannot predict (WP-510/F-89)", () => {
+    const node = plan([["src/left.ts"]]).nodes[0]!;
+    expect(
+      undeclaredWritePaths(node, [
+        "src/left.ts",
+        "packages/sdk-ts/test/runner/pacing.test.ts",
+        "packages/sdk-ts/tests/foo.ts",
+        "src/left.spec.ts",
+      ]),
+    ).toEqual([]);
+  });
+
+  it("still fails a genuine undeclared src path even when test files are also written", () => {
+    const node = plan([["src/left.ts"]]).nodes[0]!;
+    expect(
+      undeclaredWritePaths(node, ["src/left.ts", "src/rogue.ts", "test/left.test.ts"]),
+    ).toEqual(["src/rogue.ts"]);
+  });
 });

@@ -90,6 +90,7 @@ const RawTaskSpecYaml = z
       .min(1),
     budget_usd: z.number().gt(0),
     max_steps: z.number().int().positive().optional(),
+    min_nodes: z.number().int().positive().optional(),
     executor: z
       .object({ adapter: z.string().min(1), family: z.enum(["anthropic", "openai", "gemini", "openai-compat"]) })
       .strict(),
@@ -167,6 +168,7 @@ export function parseTaskSpec(yamlText: string, opts: ParseTaskSpecOptions = {})
     })),
     budgetUsd: raw.budget_usd,
     maxSteps: raw.max_steps ?? DEFAULT_MAX_STEPS,
+    ...(raw.min_nodes !== undefined ? { minNodes: raw.min_nodes } : {}),
     executor: { adapter: raw.executor.adapter, family: raw.executor.family },
     judge: {
       family: raw.judge.family,

@@ -1,0 +1,127 @@
+# Dogfood-079: WP-265 rung 2 (CHAIN RE-HOST, WP-508) on WP-204 tiered memory —
+#   the ≥10-step at-horizon run, decomposed so the horizon is REAL and the
+#   operator can `kill -9` the worker BETWEEN nodes and `chikory chain resume`.
+# Format: LOOSE (horizon-ladder headline — goal states the OUTCOME + constraints;
+#   ACs pin what "done" means via OUTCOME SYMBOLS THE GOAL NAMES; the module/test
+#   layout is LEFT TO THE EXECUTOR — F-82/F-83; NO prescribed diff).
+# Ladder-rung: 2
+# Thesis-KPI: horizon (≥10 DURABLE step/checkpoint boundaries across the chain's
+#   nodes) + per-step reliability (compounding-error over a genuinely multi-step
+#   build) + the first LIVE mid-chain kill→resume (operator kills the worker
+#   between nodes and the chain continues WITHOUT re-executing any completed node).
+# Harness fixes this run EXERCISES: WP-509 (planner must decompose — `min_nodes`
+#   floor + stronger prompt) and WP-510 (writeSet gate admits the AC-required test
+#   tree) — both landed track-B before this spec. dogfood-078 died on both.
+#
+# LAUNCH WITH `chikory chain` (decomposed durable run, NOT single `chikory run`):
+#      devbox run chain-dogfood     # ← `chikory chain`; picks the latest spec (this one)
+
+name: dogfood-079-wp204-tiered-memory
+goal: >
+  Close WP-204: give the agent TIERED MEMORY — a core/archival/recall memory with
+  PROVENANCE on every write (the poisoning safeguard) — so long-horizon runs keep
+  durable, queryable, trustworthy cross-step state instead of one flat unbounded
+  buffer. Build it as pure, typed, unit-tested primitives in a NEW `src/memory/`
+  area, mirroring the existing `src/judge/` primitive pattern (pure functions,
+  no I/O, named exports, each slice independently judge-gated). This goal
+  DECOMPOSES into four sequential deliverables — build them in order, each with
+  its own diff and tests folded in:
+
+    * DELIVERABLE 1 — CORE TIER: a pure typed core memory store (a `TieredMemory`
+      core: put an entry, get by id/key, list). Bounded, deterministic, no I/O.
+      The sibling of the `src/judge/` primitives. Unit-tested.
+    * DELIVERABLE 2 — ARCHIVAL TIER (depends on 1): when the core tier exceeds its
+      bound, entries OVERFLOW into an `archival` tier rather than being dropped;
+      archival is append-only and retains everything evicted from core. Unit-tested.
+    * DELIVERABLE 3 — RECALL TIER (depends on 2): a `recall` query that searches
+      ACROSS both core and archival and returns the matching entries (most-recent
+      or best-match ordering — your design). Unit-tested.
+    * DELIVERABLE 4 — PROVENANCE (depends on 3): every memory write records its
+      `provenance` (the source ref / origin of the entry); a write with NO
+      provenance is REJECTED (the memory-poisoning safeguard — spec §Memory).
+      Unit-tested.
+
+  CONSTRAINTS: strict TypeScript, ESM `.js` relative imports, named exports only;
+  NO new dependency; do NOT change any existing contract/`types.ts` shape, the
+  `StepRecord`/`JournalEntry` contracts, or the existing memory-pointer code
+  (`src/runner/memory-pointer.ts`) — this is a NEW additive `src/memory/` area.
+  Reuse the `src/judge/` pure-primitive pattern and the barrel re-export
+  (`src/index.ts`); do not invent a second memory mechanism or read state from
+  env. If a verification step reports a failing test or type error, READ the
+  failure and fix the IMPLEMENTATION — do NOT weaken or delete any assertion.
+
+repos:
+  - url: /Users/nikitazolotarev/repos/chikory
+    writable: true
+
+acceptance_criteria:
+  - id: AC-1
+    description: >
+      The CORE tier exists as a pure typed primitive in the NEW `src/memory/`
+      area — a `TieredMemory` core store (put/get/list) with no I/O — and is
+      unit-tested. (OUTCOME anchors the symbol the goal NAMES — `TieredMemory` —
+      as it appears in code; the module/test layout is the executor's to choose,
+      F-82/F-83. The grep is scoped to the net-new `src/memory/` directory, which
+      is absent on HEAD, so it cannot false-green on incumbent files — F-90.)
+    check: >
+      cd packages/sdk-ts &&
+      grep -rq 'TieredMemory' src/memory/
+
+  - id: AC-2
+    description: >
+      The ARCHIVAL tier exists — core-tier overflow spills into an append-only
+      `archival` tier (nothing evicted from core is lost) — as a pure primitive in
+      `src/memory/`, unit-tested. (Symbol `archival` as it appears in code; scoped
+      to the net-new directory.)
+    check: >
+      cd packages/sdk-ts &&
+      grep -rq 'archival' src/memory/
+
+  - id: AC-3
+    description: >
+      The RECALL tier exists — a `recall` query that searches ACROSS core and
+      archival and returns the matches — as a pure primitive in `src/memory/`,
+      unit-tested. (Symbol `recall` scoped to the net-new `src/memory/` directory
+      so the incumbent `recallPointerExcerpt` in `src/runner/` cannot false-green
+      it — F-90.)
+    check: >
+      cd packages/sdk-ts &&
+      grep -rq 'recall' src/memory/
+
+  - id: AC-4
+    description: >
+      PROVENANCE is enforced — every memory write records its `provenance` and a
+      write with none is REJECTED (the poisoning safeguard) — in `src/memory/`,
+      unit-tested. (Symbol `provenance` as it appears in code; scoped to the
+      net-new directory.)
+    check: >
+      cd packages/sdk-ts &&
+      grep -rq 'provenance' src/memory/
+
+  - id: AC-5
+    description: >
+      The SDK stays type- and lint-clean and the FULL existing suite — including
+      the new per-tier unit tests — is green, proving the tiered-memory primitives
+      are pure and nothing outside the new `src/memory/` area regressed (no
+      contract/StepRecord/memory-pointer change).
+    check: cd packages/sdk-ts && pnpm exec tsc --noEmit && pnpm exec eslint . && pnpm exec vitest run
+
+budget_usd: 50
+max_steps: 10
+min_nodes: 4
+
+executor:
+  adapter: codex
+  family: openai
+
+judge:
+  family: openai-compat
+  cadence: 2
+  max_cost_share: 0.5
+
+routing:
+  stages:
+    plan: { provider: openai-compat, model: gpt-5.5 }
+    code: { provider: openai-compat, model: gpt-5.5 }
+    review: { provider: openai-compat, model: gpt-5.5 }
+    judge: { provider: openai-compat, model: gemini-3.1-pro-preview }

@@ -64,6 +64,19 @@ describe("planner prompt (WP-219 S2, ADR-005 D1)", () => {
     expect(PLANNER_SYSTEM_PROMPT).toContain("verification-only");
   });
 
+  it("renders a minimum-decomposition directive when minNodes is set, omits it otherwise (WP-509/F-88)", () => {
+    expect(buildPlannerMessages(input)[1]?.content).not.toContain("MINIMUM DECOMPOSITION");
+
+    const floored = buildPlannerMessages({ ...input, minNodes: 4 })[1]?.content;
+    expect(floored).toContain("MINIMUM DECOMPOSITION");
+    expect(floored).toContain("AT LEAST 4 nodes");
+  });
+
+  it("instructs the planner to decompose into per-deliverable nodes (WP-509/F-88)", () => {
+    expect(PLANNER_SYSTEM_PROMPT).toContain("DECOMPOSE");
+    expect(PLANNER_SYSTEM_PROMPT).toContain("ONE node per deliverable");
+  });
+
   it("renders a placeholder when no acceptance criteria are defined", () => {
     const messages = buildPlannerMessages({ ...input, acceptanceCriteria: [] });
 
