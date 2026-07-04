@@ -6,11 +6,15 @@ import { join } from "node:path";
 import { afterEach, describe, expect, inject, test } from "vitest";
 
 import {
+  artifactsDir,
+  createLocalArtifactStore,
   createRunnerWorker,
   createTemporalRunner,
   decideWorkChunk,
   Journal,
   journalPath,
+  type Checkpoint,
+  type ContextBundle,
   type RunStatusReport,
   type StepPayload,
 } from "../../src/index.js";
@@ -48,6 +52,29 @@ describe("decideWorkChunk", () => {
     expect(decideWorkChunk({ consumedChunks: 1 }, policy)).toEqual({
       action: "use_chunk",
       chunk: policy.workChunks![1],
+    });
+  });
+
+  test("uses the ordered chunk list as the completion horizon, not the durable-step floor", () => {
+    const longerThanFloor: BoundedWorkUnitPolicy = {
+      minDurableSteps: 1,
+      workChunks: policy.workChunks,
+    };
+
+    expect(decideWorkChunk({ consumedChunks: 0 }, longerThanFloor)).toEqual({
+      action: "use_chunk",
+      chunk: policy.workChunks![0],
+    });
+    expect(decideWorkChunk({ consumedChunks: 1 }, longerThanFloor)).toEqual({
+      action: "use_chunk",
+      chunk: policy.workChunks![1],
+    });
+    expect(decideWorkChunk({ consumedChunks: 2 }, longerThanFloor)).toEqual({
+      action: "use_chunk",
+      chunk: policy.workChunks![2],
+    });
+    expect(decideWorkChunk({ consumedChunks: 3 }, longerThanFloor)).toEqual({
+      action: "all_chunks_consumed",
     });
   });
 
@@ -193,7 +220,19 @@ describe.skipIf(address === null)("work-chunk live Temporal proof", () => {
       expect(new Set(steps.map((step) => step.record.diffRef.summary)).size).toBe(
         chunks.length,
       );
-      expect(chunkedJournal.entries("checkpoint").length).toBeGreaterThanOrEqual(chunks.length);
+      const checkpoints = chunkedJournal
+        .entries("checkpoint")
+        .map((entry) => entry.payload as Checkpoint);
+      expect(checkpoints.length).toBeGreaterThanOrEqual(chunks.length);
+      const store = createLocalArtifactStore(artifactsDir(chunked.dataDir, chunkedHandle.runId));
+      const contextSnapshots = await Promise.all(
+        checkpoints.slice(0, chunks.length).map(async (checkpoint) => {
+          const bytes = await store.get(checkpoint.contextSnapshotRef);
+          return JSON.parse(new TextDecoder().decode(bytes)) as ContextBundle;
+        }),
+      );
+      expect(contextSnapshots.map((context) => context.goal)).toEqual(directives);
+      expect(contextSnapshots.map((context) => context.planItem)).toEqual(directives);
       expect((chunkedJournal.entries("terminal")[0]!.payload as { status: string }).status).toBe(
         "SUCCESS",
       );
@@ -242,6 +281,26 @@ describe.skipIf(address === null)("work-chunk live Temporal proof", () => {
       expect(steps.map((step) => step.instruction)).toEqual([fullGoal, fullGoal, fullGoal]);
       expect(steps[1]!.record.summary).toContain(noChunkDirective);
       expect(steps[2]!.record.summary).toContain(noChunkDirective);
+      const checkpoints = noChunkJournal
+        .entries("checkpoint")
+        .map((entry) => entry.payload as Checkpoint);
+      const store = createLocalArtifactStore(artifactsDir(noChunk.dataDir, noChunkHandle.runId));
+      const contextSnapshots = await Promise.all(
+        checkpoints.map(async (checkpoint) => {
+          const bytes = await store.get(checkpoint.contextSnapshotRef);
+          return JSON.parse(new TextDecoder().decode(bytes)) as ContextBundle;
+        }),
+      );
+      expect(contextSnapshots.map((context) => context.goal)).toEqual([
+        fullGoal,
+        fullGoal,
+        fullGoal,
+      ]);
+      expect(contextSnapshots.map((context) => context.planItem)).toEqual([
+        fullGoal,
+        fullGoal,
+        fullGoal,
+      ]);
       expect((noChunkJournal.entries("terminal")[0]!.payload as { status: string }).status).toBe(
         "SUCCESS",
       );
