@@ -125,6 +125,16 @@ const RawTaskSpecYaml = z
       .object({
         min_durable_steps: z.number().int().positive(),
         directive: z.string().min(1).optional(),
+        work_chunks: z
+          .array(
+            z
+              .object({
+                name: z.string().min(1),
+                directive: z.string().min(1),
+              })
+              .strict(),
+          )
+          .optional(),
       })
       .strict()
       .optional(),
@@ -192,6 +202,10 @@ export function parseTaskSpec(yamlText: string, opts: ParseTaskSpecOptions = {})
       ? {
           minDurableSteps: raw.bounded_work_unit.min_durable_steps,
           directive: raw.bounded_work_unit.directive,
+          workChunks: raw.bounded_work_unit.work_chunks?.map((chunk) => ({
+            name: chunk.name,
+            directive: chunk.directive,
+          })),
         }
       : undefined,
     notifications: raw.notifications

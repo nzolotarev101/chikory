@@ -56,6 +56,7 @@ import type {
 import { shouldPointerize, type MemoryPointerPolicy } from "../runner/memory-pointer.js";
 import { isCompletionMilestone } from "./judge-trigger.js";
 import { decideStepForcing } from "./step-forcing.js";
+import { decideWorkChunk } from "./work-chunk.js";
 
 /** Step bound when the TaskSpec doesn't say otherwise (executors.md). */
 export const DEFAULT_STEP_LIMITS: StepLimits = { maxSeconds: 600 };
@@ -360,10 +361,17 @@ export async function agentLoop(spec: TaskSpec): Promise<RunStatus> {
       });
     }
 
+    const activeWorkChunk = decideWorkChunk(
+      { consumedChunks: checkpoints.length },
+      spec.boundedWorkUnit,
+    );
+    const stepInstruction =
+      activeWorkChunk.action === "use_chunk" ? activeWorkChunk.chunk.directive : spec.goal;
+
     const context: ContextBundle = {
-      goal: spec.goal,
+      goal: stepInstruction,
       acceptanceCriteria: spec.acceptanceCriteria,
-      planItem: spec.goal,
+      planItem: stepInstruction,
       notes: {},
       recentSteps: recentSummaries.slice(-RECENT_STEPS_WINDOW),
       judgeFeedback,
@@ -374,7 +382,7 @@ export async function agentLoop(spec: TaskSpec): Promise<RunStatus> {
     const record = await activities.executeStep({
       runId,
       stepIndex,
-      instruction: spec.goal,
+      instruction: stepInstruction,
       context,
       limits: DEFAULT_STEP_LIMITS,
     });
@@ -546,6 +554,14 @@ export async function agentLoop(spec: TaskSpec): Promise<RunStatus> {
           },
           spec.boundedWorkUnit,
         );
+        const nextWorkChunk = decideWorkChunk(
+          { consumedChunks: checkpoints.length },
+          spec.boundedWorkUnit,
+        );
+        if (nextWorkChunk.action === "use_chunk") {
+          judgeFeedback = nextWorkChunk.chunk.directive;
+          continue;
+        }
         if (stepForcing.deferCompletionMilestone) {
           judgeFeedback = stepForcing.incrementDirective;
           continue;

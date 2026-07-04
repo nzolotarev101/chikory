@@ -20,10 +20,13 @@ name: wp-201-python-contracts-parity
 
 ### `goal` (required, string)
 
-**The most important field.** This exact text is the executor's instruction on
-**every step** (P1 has no planner; the loop re-sends `goal` with accumulated
-context each turn). Write it like a complete brief to a competent engineer who
-has the repo open and `AGENTS.md` read:
+**The most important field.** By default, this exact text is the executor's
+instruction on **every step** (P1 has no planner; the loop re-sends `goal` with
+accumulated context each turn). When `bounded_work_unit.work_chunks` is set, the
+durable loop instead hands the current chunk's `directive` as that step's
+instruction/context goal, while the judge still evaluates the run against this
+top-level goal and the acceptance criteria. Write it like a complete brief to a
+competent engineer who has the repo open and `AGENTS.md` read:
 
 - Name every file path to create or modify.
 - Spell out the public API: exported names, signatures, defaults.
@@ -311,6 +314,37 @@ id the backend CLI accepts.
 | `code` | `model` fed as `-m` flag to the CLI | Router calls code model |
 | `review` | **Unused** | Router calls review model |
 | `judge` | **Always router-called** — judge is never a CLI in P1 | Same |
+
+## `bounded_work_unit` block (optional)
+
+Opt-in durable-loop pacing for a single `chikory run`. Absent = default
+one-shot behavior. With only `min_durable_steps`, the WP-269 path is unchanged:
+the loop defers premature completion and re-enters with the normal forced
+increment directive until the floor is met and the judge confirms the criteria.
+
+```yaml
+bounded_work_unit:
+  min_durable_steps: 3
+  directive: Continue one bounded increment before claiming done.
+  work_chunks:
+    - name: parser
+      directive: Implement only the parser increment.
+    - name: cli
+      directive: Wire only the CLI increment.
+    - name: regression-test
+      directive: Add only the focused regression test.
+```
+
+| Field | Required | Notes |
+|---|---|---|
+| `min_durable_steps` | yes | Minimum sealed checkpoints before SUCCESS is allowed |
+| `directive` | no | Floor-only forced-step directive; ignored when the next `work_chunks` entry exists |
+| `work_chunks` | no | Ordered list of named per-step directives; absent or empty preserves the WP-269 floor-only path |
+
+Each chunk is handed out once, in order. Completion is not allowed while any
+configured chunk remains unconsumed, even if the executor claims completion
+early and the judge confirms the current diff. No `StepRecord`, `JournalEntry`,
+or `Checkpoint` shape changes are made for chunking.
 
 ---
 

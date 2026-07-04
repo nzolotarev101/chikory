@@ -160,6 +160,11 @@ export {
   type StepForcingState,
 } from "./workflow/step-forcing.js";
 export {
+  decideWorkChunk,
+  type WorkChunkDecision,
+  type WorkChunkState,
+} from "./workflow/work-chunk.js";
+export {
   Journal,
   MAX_PAYLOAD_BYTES,
   reportFromJournal,

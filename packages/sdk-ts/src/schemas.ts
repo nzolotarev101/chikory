@@ -43,6 +43,7 @@ import type {
   TaskSpec,
   TestResultArtifact,
   TokenUsage,
+  WorkChunk,
 } from "./types.js";
 
 // ─── §1 Providers & routing ─────────────────────────────────────────────────
@@ -163,10 +164,18 @@ export const PacingPolicySchema = z
   })
   .strict();
 
+export const WorkChunkSchema: z.ZodType<WorkChunk> = z
+  .object({
+    name: z.string().min(1),
+    directive: z.string().min(1),
+  })
+  .strict();
+
 export const BoundedWorkUnitPolicySchema = z
   .object({
     minDurableSteps: z.number().int().positive(),
     directive: z.string().min(1).optional(),
+    workChunks: z.array(WorkChunkSchema).optional(),
   })
   .strict();
 

@@ -178,6 +178,15 @@ export interface BoundedWorkUnitPolicy {
   minDurableSteps: number;
   /** Optional directive surfaced to the executor for forced increments. */
   directive?: string;
+  /** Optional ordered per-step chunks; absent = WP-269 floor-only behavior. */
+  workChunks?: WorkChunk[];
+}
+
+export interface WorkChunk {
+  /** Stable human-readable chunk name for logs and policy authors. */
+  name: string;
+  /** The bounded sub-goal handed to the executor for one durable step. */
+  directive: string;
 }
 
 /** P2 (WP-208) — reserved. */

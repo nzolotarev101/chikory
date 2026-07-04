@@ -53,6 +53,32 @@ describe("parseTaskSpec", () => {
     expect(withFloor.minNodes).toBe(4);
   });
 
+  it("maps optional bounded work-unit chunks from YAML to camel-case policy input", () => {
+    const spec = parseTaskSpec(
+      `${read("valid-minimal.yaml")}
+bounded_work_unit:
+  min_durable_steps: 3
+  directive: Continue one bounded increment.
+  work_chunks:
+    - name: parser
+      directive: Implement only the parser increment.
+    - name: cli
+      directive: Wire only the CLI increment.
+`,
+      { env },
+    );
+
+    expect(TaskSpecSchema.safeParse(spec).success).toBe(true);
+    expect(spec.boundedWorkUnit).toEqual({
+      minDurableSteps: 3,
+      directive: "Continue one bounded increment.",
+      workChunks: [
+        { name: "parser", directive: "Implement only the parser increment." },
+        { name: "cli", directive: "Wire only the CLI increment." },
+      ],
+    });
+  });
+
   it("applies defaults when optional fields are omitted (minimal spec)", () => {
     const spec = parseTaskSpec(read("valid-minimal.yaml"), { env });
     expect(TaskSpecSchema.safeParse(spec).success).toBe(true);
