@@ -2,6 +2,8 @@
 
 System shape for Stage 1 (local-first SDK + CLI). Stage 2 control plane extends this without changing the core loop ([control-plane.md](components/control-plane.md)).
 
+Build status (2026-07-04): P1 MVP shipped 2026-06-11 — router, wrapped-CLI executors ([ADR-003](spec/ADR-003-mvp-executor-strategy.md)), Temporal durable runner ([ADR-001](spec/ADR-001-durable-execution-substrate.md)), family-diverse judge ([ADR-002](spec/ADR-002-judge-model-selection.md)), CLI. P2 (compaction [ADR-006](spec/ADR-006-compaction-at-checkpoint-boundaries.md), chains [ADR-005](spec/ADR-005-goal-decomposition-run-chaining.md)/[ADR-007](spec/ADR-007-artifact-backed-fan-in-handoff.md), horizon ladder) in progress — live WP status in `plan.md` §6, including the 2026-07-02 course correction toward long-horizon thesis evidence.
+
 ## 1. System overview
 
 ```

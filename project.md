@@ -2,8 +2,8 @@
 
 Working title: LLM Agent Orchestration Service
 Category statement: A vendor-neutral control plane for long-running, self-correcting software agents
-Status: Concept / pre-MVP synthesis
-Date: June 7, 2026
+Status: P1 MVP shipped (2026-06-11, all 5 exit gates passed); P2 reliability & memory in progress — live plan and WP status in `plan.md`
+Date: June 7, 2026 (synthesis) · last status sync July 4, 2026
 Source basis: Consolidates the starting idea note, three independent market-research reports (Claude, ChatGPT, Gemini), and the supplementary feature-ideas note.
 
 ---

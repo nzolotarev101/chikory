@@ -1,7 +1,15 @@
 # ADR-002: Agent-as-a-Judge Model Selection
 
-**Status**: Open  
+**Status**: Accepted (2026-07-04; opened 2026-06-09)  
 **Date**: 2026-06-09
+
+> Accepted: the different-family default has run enforced in production since
+> P1 — `parseTaskSpec` rejects `judge.family == executor.family` unless
+> `allow_same_family: true` (then warns loudly), and omitted routing
+> auto-picks a different-family judge (`DEFAULT_JUDGE_FAMILY`,
+> `packages/sdk-ts/src/taskspec.ts`). All 80+ dogfood runs used
+> family-diverse pairs. Still open for Stage 2+: fine-tuned evaluator,
+> multi-model debate; judge-recall measurement rides DOGFOODING §1.6 drills.
 
 ## Context
 
