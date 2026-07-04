@@ -8,18 +8,18 @@ recover a run, and how to land the result as a normal PR.
 **Status (2026-07-02, bounded — update discipline: REPLACE this block, ≤15 lines;
 displaced prose moves verbatim to [`PLAN-HISTORY.md`](PLAN-HISTORY.md); per-run detail:
 `docs/reports/dogfood-NNN.md`; queue + course correction: `plan.md` §6).**
-Latest: dogfood-082 — **WP-265 RUNG-3 HORIZON PROOF REACHED** on the WP-219 chain residuals (`run-ef4824e2-a91c-4633-aac3-bb26608217c4`,
-`docs/reports/dogfood-082.md`). 🟢 **SUCCESS · 6 steps · $6.76/$50 · 57m16s.** ONE `chikory run` under
-`bounded_work_unit:{min_durable_steps:5}` sealed **6 durable checkpoints** (first intra-run horizon) AND survived a
-**LIVE mid-run `kill -9` → `chikory resume` landing between sealed steps with zero step re-execution** (~37-min replay
-gap, journal byte-identical). Delivered WP-219 D3 halt-and-replan (`decideReplan`) + S4 structured compaction-note
-handoff, additive/frozen-contract-safe (`node_replanned` = one additive journal kind), LIVE-proven; all-green in-workspace
-(655 tests in-workspace; sdk-ts 651 passed on the harvested tree), 14 files, **harvested `1d2c7e5`** (before harvest the phase-0 §3 AC re-run FALSE-FAILED because it grepped the
-un-harvested tree — the run's own judge is the trustworthy green; harvest flips AC-1/2/3 green). ℹ️ **F-100 (pre-declared,
-THE next headline → WP-270): the horizon is REAL but HOLLOW** — seal-deferral DEFERS the seal but doesn't CHUNK work, so
-step 1 front-loaded all product code ($4.96/28KB) and steps 2–6 sealed thin test-tweaks ($0.27–$0.49); per-step chunking
-is the next mechanism. 🔴 **F-99 (track-B, §7): a bare `chikory resume` silently lost `OPENAI_COMPAT_BASE_URL` → Temporal
-masked it as a ~30-min stall** — add a fail-fast resume precondition. See §7 (troubleshooting), §8 (known limitations), §1.5, §1.4, §3.
+Latest: dogfood-083 — **WP-270 PER-STEP WORK-UNIT CHUNKING** (`run-d3879dab-c1e4-4dde-930e-27f679a75d10`,
+`docs/reports/dogfood-083.md`). 🟢 **SUCCESS · 3 steps · $4.09/$40 · 10m22s.** Built the rung-3 QUALITY lever F-100
+demanded: opt-in ordered `work_chunks` on `bounded_work_unit` + a pure `decideWorkChunk` (`src/workflow/work-chunk.ts`)
+wired into `agent-loop.ts` step-forcing, so each forced durable step carries EXACTLY the next chunk's directive instead
+of the whole goal. Additive (no list = byte-for-byte WP-269, no policy = one-shot); frozen contracts held; no new dep;
+LIVE-proven in a real Temporal test (each step's instruction = its ordered chunk, all distinct, none = full goal, distinct
+per-step diffs; the no-chunk-list variant stays on WP-269), 658 tests green; harvest byte-IDENTICAL. 🟡 **F-101 (track-B,
+§8): the chunk counter keys on raw `checkpoints.length`** — a ROLLBACK/non-PROCEED chunk step advances the pointer past
+the reverted chunk (latent, self-corrected by the terminal AC gate) → count only PROCEED checkpoints. ℹ️ the build run
+ITSELF front-loaded (F-100 recurred: step 1 = $3.56/20.5KB) because the new field can't be referenced in its own launch
+YAML (HEAD `.strict()` rejects it) — proven in-code. **NEXT: dogfood-084 — the NON-HOLLOW rung-3 horizon on `work_chunks`**
+(a ≥5-step run whose every sealed checkpoint carries a distinct non-trivial diff). See §7 (troubleshooting), §8 (known limitations), §1.5, §1.4, §3.
 
 Related docs: [`docs/spec/task-spec.md`](spec/task-spec.md) (schema
 reference) · [`docs/TASK-PROTOCOL.md`](TASK-PROTOCOL.md) (WP etiquette, §7 is
@@ -617,19 +617,31 @@ a first-attempt SUCCESS and produced three plan-changing findings
 
 ## 8. Known P1 limitations (so you don't fight them)
 
-- **`bounded_work_unit` DEFERS the seal but does NOT CHUNK the executor's work**
-  (F-100 → WP-270, dogfood-082): an active `bounded_work_unit:{min_durable_steps:N}`
-  policy (WP-269) forces ONE `chikory run` to seal ≥N durable checkpoints by
-  re-entering the loop after a premature `claimsComplete` — but it does NOT make
-  codex spread its work across those N steps. In dogfood-082 codex front-loaded
-  ALL product code into step 1 ($4.96 / 28KB diff / all 5 goal PARTs) and steps
-  2–6 sealed real-but-thin test-tweak checkpoints ($0.27–$0.49). The intra-run
-  horizon is REACHED but HOLLOW: the per-step-reliability / compounding-error KPI
-  those steps are meant to measure is not yet trustworthy (5 of 6 "durable steps"
-  did trivial work that essentially cannot fail). Until WP-270 (per-step
-  work-unit chunking) lands, read a `min_durable_steps` horizon as "N seals," NOT
-  "N independent failure surfaces," and choose a host goal whose FIRST step does
-  the real product work regardless.
+- **`bounded_work_unit` seal-deferral (WP-269) alone yields a HOLLOW horizon —
+  use `work_chunks` (WP-270) to distribute work per step** (F-100 → WP-270 CLOSED,
+  dogfood-082/083): an active `bounded_work_unit:{min_durable_steps:N}` policy
+  forces ONE `chikory run` to seal ≥N durable checkpoints by re-entering the loop
+  after a premature `claimsComplete` — but seal-deferral ALONE does NOT make codex
+  spread its work across those N steps (dogfood-082: all product code front-loaded
+  into step 1, steps 2–6 thin test-tweaks). **WP-270 (dogfood-083) added the
+  missing half:** an OPTIONAL ordered `work_chunks: [{name, directive}, …]` list on
+  `bounded_work_unit` — with it set, each forced step's instruction is EXACTLY the
+  next chunk's directive (not the whole goal), and completion defers until every
+  chunk is handed out AND the judge confirms the ACs. So to get a NON-hollow
+  horizon (N independent failure surfaces), author a `work_chunks` list with one
+  bounded dependency-ordered sub-goal per step. With NO `work_chunks` the behavior
+  is byte-for-byte WP-269 seal-deferral — read that as "N seals," NOT "N failure
+  surfaces," and pick a host goal whose FIRST step does the real work.
+- **`work_chunks` counter advances on a ROLLBACK/non-PROCEED step** (F-101 →
+  WP-270-adjacent, dogfood-083, track-B): chunk consumption keys on raw
+  `checkpoints.length`, which increments on every sealed step including one whose
+  judge verdict was `ROLLBACK`. A rolled-back chunk step therefore advances the
+  chunk pointer past the reverted chunk rather than re-handing it. Latent (a
+  chunked run that draws a non-PROCEED verdict on a chunk step); self-corrected by
+  the terminal gate (run-level SUCCESS still requires every AC to pass, so a
+  skipped chunk's missing work fails the final judge — it cannot false-seal
+  SUCCESS). Fix pending: count only PROCEED/`lastGood` checkpoints for chunk
+  consumption.
 
 - **No planner for `chikory run`**: every step gets the full `goal` as its
   instruction, plus the last 5 step summaries, judge feedback, and acceptance

@@ -4,6 +4,15 @@
 > per-run detail lives in [`docs/reports/`](reports/). Content below was moved
 > verbatim out of the living docs on 2026-07-02 (course correction — plan.md §6).
 
+## Archived 2026-07-04 — displaced by dogfood-083
+
+Displaced from the plan.md "Last 3 runs" / "Queue" / "Top open friction" blocks
+and the DOGFOODING header when dogfood-083 landed (see `docs/reports/dogfood-083.md`):
+
+- **(was Last-3-runs) dogfood-080** — WP-265 rung-3 attempt on WP-205 branching (`run-233e7d7f`, 🟢 SUCCESS but rung 3 NOT reached — codex ONE-SHOT the 4-part goal; 🔴 F-95 → intra-run horizon is harness-unreachable by goal size). **WP-205 → 🟢.**
+- **(was Queue) NEXT HEADLINE ⑤ dogfood-083** — WP-270 PER-STEP WORK-UNIT CHUNKING (`examples/dogfood/dogfood-083.yaml`): opt-in mechanism (successor to WP-269's seal-deferral) handing the executor ONE bounded dependency-ordered sub-goal per durable step so each sealed checkpoint carries real, distinct product progress. DELIVERED (`run-d3879dab`, 🟢 SUCCESS · 3 steps, harvest byte-IDENTICAL) — see report. §1.2 fallback carve-out applied: the NON-hollow horizon was BLOCKED on chunking not existing.
+- **(was Top-friction) ℹ️ F-100 → WP-270 (PRE-DECLARED, dogfood-082):** `bounded_work_unit` DEFERS the seal but does not CHUNK the executor's work — dogfood-082 step 1 front-loaded all product code ($4.96/28KB); steps 2–6 sealed real-but-thin test-only checkpoints ($0.27–$0.49), so the intra-run horizon was real but HOLLOW. CLOSED by WP-270 (dogfood-083).
+
 ## Archived 2026-07-03 — displaced by dogfood-082
 
 Displaced from the plan.md "Last 3 runs" / "Queue" / "Top open friction" blocks

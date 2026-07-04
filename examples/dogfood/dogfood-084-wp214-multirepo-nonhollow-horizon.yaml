@@ -1,0 +1,201 @@
+# Dogfood-084: WP-214 MULTI-REPO WORKSPACES, hosting the NON-HOLLOW rung-3 HORIZON.
+#   dogfood-082 REACHED the intra-run ≥5-durable-step horizon but HOLLOW (F-100): seal-deferral
+#   without work-CHUNKING let codex front-load ALL product code into step 1 while steps 2–6
+#   sealed thin test-tweaks — so the per-step-reliability / compounding-error KPI (95%→5% over
+#   60 steps → target 99%+) was NOT trustworthy. dogfood-083 built the fix: WP-270 per-step
+#   work-unit CHUNKING (`work_chunks` on `bounded_work_unit` + pure `decideWorkChunk` wired into
+#   `agent-loop.ts`), LIVE-proven that each forced step carries EXACTLY the next ordered chunk's
+#   directive. THIS run is the payoff: the FIRST launch that USES `work_chunks` in its own YAML
+#   (the field now EXISTS in HEAD after dogfood-083's harvest) to force a ≥5-step `chikory run`
+#   where EACH sealed checkpoint carries a DISTINCT, non-trivial diff — converting the hollow
+#   horizon into a TRUSTWORTHY per-step-reliability curve. The vehicle is a REAL open product WP.
+#
+# HOST WP — WP-214 MULTI-REPO WORKSPACES (real open plan.md §6 product WP, durable-execution
+#   pillar). Genuinely unbuilt: the schema accepts `repos: RepoSpec[]`, but the runner uses only
+#   `repos[0]` and HARD-ASSERTS `spec.repos.length !== 1` (`src/runner/activities.ts`). Making a
+#   run span N writable repos — clone all, commit a run branch in each, checkpoint every repo's
+#   HEAD, surface per-repo diffs in judge evidence — decomposes into FIVE dependency-ordered
+#   sub-goals, each an independently-FAILABLE increment producing a distinct real diff. The
+#   chunking mechanism (WP-270) is the VEHICLE seeded INTO this real WP's code — NOT scaffolding.
+#
+# Format: LOOSE (headline — goal states the OUTCOME + constraints; ACs pin "done" via OUTCOME
+#   SYMBOLS THE GOAL NAMES; module/test layout LEFT TO THE EXECUTOR, F-82/F-83; NO prescribed
+#   diff). Ladder-rung: 3.
+# Ladder-rung: 3
+# Thesis-KPI: NON-HOLLOW per-step reliability — a ≥5-step single `chikory run` where every sealed
+#   durable checkpoint carries a DISTINCT non-trivial product diff (a genuine per-step failure
+#   surface), driven by `work_chunks` (WP-270), turning dogfood-082's hollow horizon into a
+#   trustworthy compounding-error datapoint. Hosted on real WP-214 multi-repo feature code.
+#
+# F-90 APPLIED: AC-1/2 grep a NET-NEW symbol the goal NAMES (`collectWorkspaceRepos`), absent on
+#   HEAD, so a recursive grep cannot false-green on an incumbent file.
+# F-97 APPLIED: AC-3 does NOT bare-grep the symbol — it requires the net-new `collectWorkspaceRepos`
+#   to co-live with the LIVE runner driver `createRunnerWorker` in a `test/` file, so the LIVE
+#   multi-repo + per-step-distribution proof is actually enforced (the dogfood-081/083 pattern).
+#
+# LAUNCH WITH `chikory run` (a single durable run):
+#      devbox run run-dogfood       # <- `chikory run`; picks the latest spec (this one)
+
+name: dogfood-084-wp214-multirepo-nonhollow-horizon
+goal: >
+  Make a single `chikory run` span N WRITABLE repositories durably — clone ALL of a TaskSpec's
+  repos, commit each step's work on a run-private branch in EVERY writable repo, seal a durable
+  checkpoint that captures ONE commit per repo, and surface a PER-REPO diff in the judge
+  evidence — advancing the REAL open WP-214 (multi-repo workspaces) that today is blocked by the
+  runner using only `repos[0]` and hard-asserting `spec.repos.length !== 1`. Deliver it in FIVE
+  bounded, dependency-ordered sub-goals, ONE per durable step, so every sealed checkpoint carries
+  DISTINCT non-trivial product work (the non-hollow rung-3 horizon, F-100/WP-270):
+
+    * PART 1 — WORKSPACE RESOLVER (pure-ish, testable): add a net-new `collectWorkspaceRepos`
+      helper that maps a TaskSpec's `repos: RepoSpec[]` to an ordered set of named workspace
+      sub-directories (a stable, collision-free directory per repo), total over its inputs, no
+      Temporal/clock/network. Unit-test it: one repo (back-compat name), N repos (distinct
+      stable subdirs), read-only vs writable partition. Do NOT yet change the clone activity.
+
+    * PART 2 — CLONE ALL REPOS (depends on 1): drive `collectWorkspaceRepos` from the
+      workspace-setup activity (`src/runner/activities.ts`) so a run clones EVERY repo into its
+      resolved subdir (writable repos get a run-private branch `chikory/run-<id>`; read-only
+      repos are cloned but never branched/committed). REMOVE the single-repo restriction on the
+      NORMAL run path additively — a one-repo spec MUST keep its exact current workspace layout
+      and behavior (back-compat). Do NOT touch the chain handoff path's own repo assertion.
+
+    * PART 3 — COMMIT + CHECKPOINT SPAN ALL REPOS (depends on 2): make the step-commit and
+      `writeCheckpoint` paths iterate EVERY writable repo, so the sealed `Checkpoint.gitCommits`
+      map carries one entry per writable repo (keyed by a stable per-repo id), not just one. Do
+      NOT change the `Checkpoint`/`StepRecord`/`JournalEntry` SHAPE — `gitCommits` is already a
+      `Record<string,string>`; populate it for N repos. One-repo runs stay byte-identical.
+
+    * PART 4 — PER-REPO DIFF IN EVIDENCE (depends on 3): extend the judge evidence so each
+      writable repo's step diff is captured as its own artifact/section (a per-repo diff), so the
+      judge sees WHICH repo changed. Additive — a one-repo run's evidence stays equivalent to
+      today's single diff. Reuse the existing diff-artifact mechanism; do NOT reshape a frozen
+      evidence contract.
+
+    * PART 5 — LIVE PROOF (depends on 4): add a LIVE Temporal test (reuse `createRunnerWorker` /
+      `createTemporalRunner` / the scripted registry + `waitFor`, `describe.skipIf(address ===
+      null)`, `makeJudgedSpec` with a 2-writable-repo `repos` override — do NOT mock the
+      workflow) that drives ONE real `chikory run` over TWO writable repos and asserts: the run
+      reaches SUCCESS; the sealed checkpoint's `gitCommits` has an entry per repo (≥2); each
+      repo received a distinct real commit; and the per-repo diff evidence names both repos. AND
+      asserts a ONE-repo run still seals with the unchanged single-repo layout (the additive
+      guarantee). Co-locate the PART-1 `collectWorkspaceRepos` unit cases in the SAME file so it
+      references BOTH `collectWorkspaceRepos` and `createRunnerWorker` (F-97).
+
+  CONSTRAINTS: strict TypeScript, ESM `.js` relative imports, named exports only; NO new
+  dependency; the one-repo path MUST stay byte-identical to today (back-compat is a live
+  assertion, not a claim); do NOT change the SHAPE of any frozen contract (`Checkpoint`,
+  `StepRecord`, `JournalEntry`, `RepoSpec`) — `gitCommits` is populated for N repos, the per-repo
+  diff rides the existing artifact mechanism, `collectWorkspaceRepos` is a NEW helper. Do NOT
+  weaken the chain-handoff path's own one-repo assertion (out of scope). Do NOT weaken WP-123
+  crash-recovery, WP-206 suspend/resume, WP-269 step-forcing, or WP-270 chunking. If a
+  verification step reports a failing test or type error, READ the failure and fix the
+  IMPLEMENTATION — do NOT weaken or delete any assertion.
+
+repos:
+  - url: /Users/nikitazolotarev/repos/chikory
+    writable: true
+
+# NON-HOLLOW HORIZON DRIVER: this is the FIRST launch to USE `work_chunks` (WP-270, HEAD-valid
+#   after dogfood-083's harvest) — each of the 5 ordered chunks is ONE PART, so `decideWorkChunk`
+#   hands the executor EXACTLY one bounded sub-goal per durable step and completion defers until
+#   all 5 chunks are consumed AND the judge confirms the ACs. Combined with `min_durable_steps: 5`
+#   this forces ≥5 sealed checkpoints EACH carrying a distinct, non-trivial diff — the trustworthy
+#   per-step-reliability curve dogfood-082 could not produce. (Verify parse before launch:
+#   `parseTaskSpec` over this file, or `pnpm chikory run` which validates first.)
+bounded_work_unit:
+  min_durable_steps: 5
+  directive: >
+    Advance EXACTLY the ONE numbered PART named by this step's chunk — no more — then stop and let
+    the durable checkpoint seal. Do NOT front-load a later PART into an earlier step. Do NOT
+    declare the whole run complete until every PART has landed with its tests and the ACs pass.
+  work_chunks:
+    - name: part-1-workspace-resolver
+      directive: >
+        PART 1 ONLY: add the net-new pure-ish `collectWorkspaceRepos` helper mapping
+        `repos: RepoSpec[]` to ordered, collision-free named workspace subdirs (one-repo
+        back-compat name; N-repo distinct stable subdirs; writable/read-only partition), with
+        exhaustive unit tests. Do NOT change the clone activity yet.
+    - name: part-2-clone-all-repos
+      directive: >
+        PART 2 ONLY: drive `collectWorkspaceRepos` from the workspace-setup activity so a run
+        clones EVERY repo into its subdir (writable → run-private branch, read-only → no branch),
+        removing the single-repo restriction on the NORMAL run path ADDITIVELY (one-repo layout
+        byte-identical). Do NOT touch the chain handoff assertion.
+    - name: part-3-commit-checkpoint-span
+      directive: >
+        PART 3 ONLY: make step-commit + `writeCheckpoint` iterate every writable repo so
+        `Checkpoint.gitCommits` carries one entry per repo (stable per-repo id), WITHOUT changing
+        the `Checkpoint`/`StepRecord`/`JournalEntry` shape; one-repo runs stay byte-identical.
+    - name: part-4-per-repo-diff-evidence
+      directive: >
+        PART 4 ONLY: extend judge evidence so each writable repo's step diff is a distinct
+        per-repo artifact/section, additively (one-repo evidence equivalent to today), reusing the
+        existing diff-artifact mechanism — no frozen-contract reshape.
+    - name: part-5-live-proof
+      directive: >
+        PART 5 ONLY: add the LIVE Temporal test (reuse `createRunnerWorker`/`createTemporalRunner`
+        /scripted registry/`waitFor`/`describe.skipIf`, `makeJudgedSpec` 2-writable-repo override)
+        asserting a 2-repo run reaches SUCCESS with `gitCommits` spanning both repos + per-repo
+        diffs naming both, AND a one-repo run still seals unchanged. Co-reference
+        `collectWorkspaceRepos` AND `createRunnerWorker` in this file (F-97).
+
+acceptance_criteria:
+  - id: AC-1
+    description: >
+      The net-new `collectWorkspaceRepos` workspace resolver exists in the runner source — a
+      total helper mapping a TaskSpec's repos to named workspace subdirs. (OUTCOME symbol the goal
+      NAMES — `collectWorkspaceRepos` — absent on HEAD so a recursive grep cannot false-green on an
+      incumbent file, F-90. Module/test layout is the executor's, F-82/F-83.)
+    check: >
+      cd packages/sdk-ts &&
+      grep -rq 'collectWorkspaceRepos' src/runner/
+
+  - id: AC-2
+    description: >
+      The workspace-setup activity HONORS the resolver — `collectWorkspaceRepos` is called from
+      `src/runner/activities.ts` so a run clones every repo (the def+wire pattern of
+      dogfood-081/082/083).
+    check: >
+      cd packages/sdk-ts &&
+      grep -rq 'collectWorkspaceRepos' src/runner/activities.ts
+
+  - id: AC-3
+    description: >
+      A LIVE Temporal test exercises multi-repo spanning end-to-end. (F-97-SAFE: not a bare symbol
+      grep a UNIT test would false-green — it requires a `test/` file that references BOTH the
+      net-new `collectWorkspaceRepos` symbol AND the LIVE runner driver `createRunnerWorker`, so
+      the LIVE multi-repo + per-step-distribution proof is actually enforced. Both are OUTCOME
+      symbols the goal names; the test filename is the executor's, F-82.)
+    check: >
+      cd packages/sdk-ts &&
+      for f in $(grep -rl 'collectWorkspaceRepos' test/ 2>/dev/null); do
+        grep -q 'createRunnerWorker' "$f" && { echo ok; break; };
+      done | grep -q ok
+
+  - id: AC-4
+    description: >
+      The SDK stays type- and lint-clean and the FULL existing suite — including the new
+      multi-repo unit + live tests — is green, proving multi-repo is additive and nothing outside
+      it regressed (no `Checkpoint`/`StepRecord`/`JournalEntry`/`RepoSpec` shape change; the
+      one-repo path, WP-123 crash-recovery, WP-206 suspend/resume, WP-269 step-forcing, and
+      WP-270 chunking tests still pass).
+    check: cd packages/sdk-ts && pnpm exec tsc --noEmit && pnpm exec eslint . && pnpm exec vitest run
+
+budget_usd: 50
+max_steps: 30
+
+executor:
+  adapter: codex
+  family: openai
+
+judge:
+  family: openai-compat
+  cadence: 2
+  max_cost_share: 0.5
+
+routing:
+  stages:
+    plan: { provider: openai-compat, model: gpt-5.5 }
+    code: { provider: openai-compat, model: gpt-5.5 }
+    review: { provider: openai-compat, model: gpt-5.5 }
+    judge: { provider: openai-compat, model: gemini-3.1-pro-preview }

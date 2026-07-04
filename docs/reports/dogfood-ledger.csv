@@ -18,3 +18,4 @@ run,wp,mode,outcome,steps,cost_usd,spec_format,class,resumes,judge_catches,rung
 080,WP-205,run,SUCCESS,2,1.66,loose,product,0,0,1
 081,WP-269,run,SUCCESS,1,2.99,loose,product,0,0,0
 082,WP-219,run,SUCCESS,6,6.76,loose,product,1,0,3
+083,WP-270,run,SUCCESS,3,4.09,loose,product,0,0,0
