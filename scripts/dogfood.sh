@@ -37,7 +37,12 @@ fi
 # 1. Identify the spec file
 SPEC_FILE="${1:-}"
 if [ -z "$SPEC_FILE" ]; then
-  SPEC_FILE=$(ls examples/dogfood/dogfood-[0-9][0-9][0-9].yaml 2>/dev/null | sort | tail -n 1)
+  # `*` after the run number: specs may carry a descriptive suffix
+  # (dogfood-084-wp214-….yaml). The old 3-digit-exact glob silently fell back
+  # to the previous bare-named spec and re-ran closed dogfood-083
+  # (run-0a285f5b, $3.02). `sort` keeps numeric order since the prefix is
+  # zero-padded; a suffixed name sorts after its bare same-number sibling.
+  SPEC_FILE=$(ls examples/dogfood/dogfood-[0-9][0-9][0-9]*.yaml 2>/dev/null | sort | tail -n 1)
   if [ -z "$SPEC_FILE" ]; then
     echo "Error: No dogfood spec file found in examples/dogfood/" >&2
     exit 1

@@ -344,6 +344,17 @@ export async function cmdRun(
     const precheck = evaluateSpecStalenessPrecheck(spec.goal, planText);
     if (precheck.warning !== null) {
       ioPair.err(precheck.warning);
+      // Launcher-guard family (WP-261/267): refuse at zero LLM cost by
+      // default — a warn-only gate scrolls by (run-0a285f5b re-ran closed
+      // dogfood-083 for $3.02 straight past this warning). Overridable with
+      // a NON-EMPTY CHIKORY_ALLOW_STALE_SPEC, same semantics as
+      // CHIKORY_ALLOW_LAUNCH_MODE_MISMATCH.
+      if (((deps.env ?? process.env)["CHIKORY_ALLOW_STALE_SPEC"] ?? "") === "") {
+        ioPair.err(
+          "[chikory] refusing to launch: the spec targets an already-done WP. Point the spec at an open WP, or set CHIKORY_ALLOW_STALE_SPEC=1 to override.",
+        );
+        return 1;
+      }
     }
   }
   // WP-244 dogfood/test-only judge-catch seam, armed host-side so the
