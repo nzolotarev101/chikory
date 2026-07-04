@@ -10,11 +10,25 @@ import { Journal, reportFromJournal } from "../journal/journal.js";
 import { chainJournalPath, journalPath } from "../runner/paths.js";
 import type { ChainNodeHandoff, NodeOutcome, Plan } from "../types.js";
 import { deriveNodeOutcome } from "./node-spec.js";
+import type { ReplanDecision } from "./replan.js";
 import { ChainJournal } from "./store.js";
 
 export interface ChainActivityDeps {
   dataDir: string;
+  replanRemaining?: (input: ReplanRemainingInput) => Promise<ReplanRemainingResult>;
 }
+
+export interface ReplanRemainingInput {
+  chainId: string;
+  plan: Plan;
+  failedNodeId: string;
+  remainingNodeIds: string[];
+  decision: ReplanDecision;
+}
+
+export type ReplanRemainingResult =
+  | { status: "SUCCESS"; plan: Plan }
+  | { status: "HALT"; reason: string };
 
 function openChain(deps: ChainActivityDeps, chainId: string): ChainJournal {
   return new ChainJournal(chainJournalPath(deps.dataDir, chainId));
@@ -104,6 +118,37 @@ export function createChainActivities(deps: ChainActivityDeps) {
             ...(input.handoff !== undefined ? { handoff: input.handoff } : {}),
           },
         );
+      } finally {
+        journal.close();
+      }
+    },
+
+    async replanRemaining(input: ReplanRemainingInput): Promise<ReplanRemainingResult> {
+      if (deps.replanRemaining === undefined) {
+        return { status: "HALT", reason: "no chain replanner is configured" };
+      }
+      return deps.replanRemaining(input);
+    },
+
+    async recordNodeReplanned(input: {
+      chainId: string;
+      failedNodeId: string;
+      reason: string;
+      revisedPlan: Plan;
+    }): Promise<void> {
+      const journal = openChain(deps, input.chainId);
+      try {
+        journal.appendOnce(
+          "node_replanned",
+          { field: "failedNodeId", value: input.failedNodeId },
+          {
+            failedNodeId: input.failedNodeId,
+            reason: input.reason,
+            revisedPlan: input.revisedPlan,
+          },
+        );
+        journal.updatePlan(input.revisedPlan);
+        journal.setStatus("RUNNING");
       } finally {
         journal.close();
       }

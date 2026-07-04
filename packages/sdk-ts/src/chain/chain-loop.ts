@@ -11,11 +11,11 @@
  * write/read is a proxied chain activity, and child runs go through
  * `executeChild`. A crashed worker replays deterministically from history.
  *
- * S3 wiring dispatches sequentially,
- * each node runs as a fresh TaskSpec, and a `FAILED` node halts the chain
- * (`deriveChainStatus` → FAILED). ADR-007 S4 passes every predecessor as an
- * artifact-backed Git bundle plus a static note. D3 halt-and-replan,
- * structured compaction notes, and parallel ready-node fan-out remain deferred.
+ * S3 wiring dispatches sequentially and each node runs as a fresh TaskSpec.
+ * A `FAILED` node runs through the pure D3 replan decision; zero replan budget
+ * preserves the original halt-on-FAILED path. ADR-007 S4 passes every
+ * predecessor as an artifact-backed Git bundle plus a bounded structured note.
+ * Parallel ready-node fan-out remains deferred.
  */
 import { executeChild, proxyActivities, workflowInfo } from "@temporalio/workflow";
 
@@ -23,7 +23,9 @@ import type { ChainRecord, ChainStatus, Plan, RunStatus } from "../types.js";
 import { agentLoop } from "../workflow/agent-loop.js";
 import type { ChainActivities } from "./activities.js";
 import { advanceChain, deriveChainStatus } from "./advance.js";
+import { buildStructuredCompactionNote } from "./compaction-note.js";
 import { childRunId, planNodeToTaskSpec, type ChainNodeTemplate } from "./node-spec.js";
+import { decideReplan } from "./replan.js";
 import { readyNodes } from "./sequencing.js";
 
 const activities = proxyActivities<ChainActivities>({
@@ -41,12 +43,16 @@ export interface ChainLoopInput {
   plan: Plan;
   /** Shared per-chain TaskSpec surface every node run inherits. */
   template: ChainNodeTemplate;
+  /** D3 guardrail: absent/zero keeps the legacy halt-on-FAILED path. */
+  maxReplans?: number;
 }
 
 /** workflowId = chain-id (mirrors agentLoop's workflowId = run-id mapping). */
 export async function chainLoop(input: ChainLoopInput): Promise<ChainStatus> {
   const { workflowId: chainId, taskQueue } = workflowInfo();
-  const { plan, template } = input;
+  const { template } = input;
+  let plan = input.plan;
+  const maxReplans = input.maxReplans ?? 0;
 
   await activities.initChain({ chainId, plan });
 
@@ -99,11 +105,25 @@ export async function chainLoop(input: ChainLoopInput): Promise<ChainStatus> {
       const predecessor = plan.nodes.find((candidate) => candidate.id === id);
       return predecessor === undefined ? [] : [predecessor];
     });
+    const structuredNotes = predecessors.flatMap((predecessor) => {
+      const outcome = record.nodeOutcomes[predecessor.id];
+      if (outcome === undefined) return [];
+      return [
+        buildStructuredCompactionNote({
+          node: predecessor,
+          outcome,
+          handoff: record.nodeHandoffs?.[predecessor.id],
+        }),
+      ];
+    });
     const handoffNote = predecessors.length > 0
       ? [
           "## Already completed by predecessor nodes (do not redo)",
           ...predecessors.map((predecessor) => `- ${predecessor.id}: ${predecessor.goal}`),
           "The code from these nodes is ALREADY PRESENT in your workspace. Build on it.",
+          ...(structuredNotes.length > 0
+            ? ["", "## Structured predecessor compaction notes", ...structuredNotes]
+            : []),
         ].join("\n")
       : undefined;
     const childSpec = planNodeToTaskSpec(
@@ -144,6 +164,37 @@ export async function chainLoop(input: ChainLoopInput): Promise<ChainStatus> {
       node.id,
       outcome,
     );
+    if (outcome.status === "FAILED") {
+      const decision = decideReplan(record, node.id, maxReplans);
+      if (decision.action === "REPLAN") {
+        const replanned = await activities.replanRemaining({
+          chainId,
+          plan,
+          failedNodeId: node.id,
+          remainingNodeIds: decision.remainingNodeIds,
+          decision,
+        });
+        if (replanned.status === "SUCCESS") {
+          plan = replanned.plan;
+          await activities.recordNodeReplanned({
+            chainId,
+            failedNodeId: node.id,
+            reason: decision.reason,
+            revisedPlan: replanned.plan,
+          });
+          record = {
+            ...record,
+            planId: replanned.plan.id,
+            plan: replanned.plan,
+            status: "RUNNING",
+          };
+        } else {
+          reason = replanned.reason;
+        }
+      } else {
+        reason = maxReplans > 0 ? decision.reason : undefined;
+      }
+    }
     void runStatus; // terminal status is sourced from the journal via readNodeOutcome
   }
 

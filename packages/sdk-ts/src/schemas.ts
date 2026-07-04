@@ -389,6 +389,7 @@ export const JournalEntryKindSchema = z.enum([
   "plan",
   "plan_verdict",
   "node_started",
+  "node_replanned",
   "node_sealed",
 ]);
 

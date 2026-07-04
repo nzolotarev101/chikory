@@ -74,6 +74,12 @@ export { buildPlan, type BuildPlanOptions } from "./planner/assemble.js";
 export { buildPlanJudgeMessages, PLAN_JUDGE_SYSTEM_PROMPT, PLAN_VERDICT_RESPONSE_SCHEMA } from "./planner/meta-judge-prompt.js";
 export { buildPlanVerdict, type PlanJudgeReply } from "./planner/meta-judge-verdict.js";
 export { advanceChain, deriveChainStatus } from "./chain/advance.js";
+export { decideReplan, type ReplanDecision } from "./chain/replan.js";
+export {
+  buildStructuredCompactionNote,
+  DEFAULT_STRUCTURED_COMPACTION_NOTE_MAX_CHARS,
+  type StructuredCompactionNoteInput,
+} from "./chain/compaction-note.js";
 export { classifyPlanGateFailure, PLAN_GATE_INFRA_REASON_PREFIXES } from "./chain/plan-gate-failure.js";
 export { renderPlanGateFailureNotice } from "./chain/plan-gate-notice.js";
 export { renderChainTrace } from "./chain/trace.js";
@@ -86,6 +92,7 @@ export {
   type ChainEntry,
   type ChainEntryKind,
   type NodeStartedPayload,
+  type NodeReplannedPayload,
   type NodeSealedPayload,
 } from "./chain/store.js";
 export {

@@ -360,6 +360,7 @@ export type JournalEntryKind =
   | "plan"
   | "plan_verdict"
   | "node_started"
+  | "node_replanned"
   | "node_sealed";
 
 /** Persisted form specified in `docs/spec/journal-format.md` (JIF). */

@@ -4,7 +4,10 @@ import type { ChainRecord, ChainStatus, NodeOutcome } from "../types.js";
  * Derives the WP-219 chain status from sealed node outcomes per ADR-005 D3/D4.
  */
 export function deriveChainStatus(record: ChainRecord): ChainStatus {
-  const outcomes = Object.values(record.nodeOutcomes);
+  const activeNodeIds = new Set(record.plan.nodes.map((node) => node.id));
+  const outcomes = Object.entries(record.nodeOutcomes)
+    .filter(([nodeId]) => activeNodeIds.has(nodeId))
+    .map(([, outcome]) => outcome);
 
   if (outcomes.some((outcome) => outcome.verdict === "ESCALATE")) {
     return "AWAITING_PLAN_APPROVAL";

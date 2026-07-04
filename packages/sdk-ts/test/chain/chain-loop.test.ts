@@ -192,8 +192,16 @@ describe.skipIf(address === null)("chain executor (WP-219 S3-wiring)", () => {
     try {
       const childSpec = childJournal.getRun()!.task;
       expect(childSpec.chainLink?.parentRunId).toBe(parentRunId);
+      expect(childSpec.chainLink?.parentHandoffs?.map((handoff) => handoff.nodeId)).toEqual([
+        "N-1",
+      ]);
       expect(childSpec.goal).toContain("- N-1: slice one");
       expect(childSpec.goal).toContain("ALREADY PRESENT");
+      expect(childSpec.goal).toContain("## Structured predecessor compaction notes");
+      expect(childSpec.goal).toContain("node: N-1");
+      expect(childSpec.goal).toContain("outcome: SUCCESS");
+      expect(childSpec.goal).toContain("verdict: PROCEED");
+      expect(childSpec.goal).toContain("changed_paths:");
     } finally {
       childJournal.close();
     }
@@ -222,6 +230,7 @@ describe.skipIf(address === null)("chain executor (WP-219 S3-wiring)", () => {
       expect(record.nodeOutcomes["N-1"]!.status).toBe("FAILED");
       expect(chain.entries("node_started")).toHaveLength(1);
       expect(chain.entries("node_started")[0]!.payload).toMatchObject({ nodeId: "N-1" });
+      expect(chain.entries("node_replanned")).toHaveLength(0);
     } finally {
       chain.close();
     }

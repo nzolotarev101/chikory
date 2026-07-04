@@ -31,6 +31,7 @@ export type ChainEntryKind =
   | "plan_verdict"
   | "node_started"
   | "node_sealed"
+  | "node_replanned"
   | "terminal";
 
 export interface ChainEntry {
@@ -51,6 +52,13 @@ export interface NodeSealedPayload {
   nodeId: string;
   outcome: NodeOutcome;
   handoff?: ChainNodeHandoff;
+}
+
+/** `node_replanned` payload: D3 abandoned one failed node and spliced a revised plan. */
+export interface NodeReplannedPayload {
+  failedNodeId: string;
+  reason: string;
+  revisedPlan: Plan;
 }
 
 interface ChainEntryRow {
@@ -126,6 +134,10 @@ export class ChainJournal {
       .run(...(ended ? [status, new Date().toISOString()] : [status]));
   }
 
+  updatePlan(plan: Plan): void {
+    this.db.prepare("UPDATE chains SET plan_json = ?").run(JSON.stringify(plan));
+  }
+
   append(kind: ChainEntryKind, payload: unknown): ChainEntry {
     this.db.exec("BEGIN IMMEDIATE");
     try {
@@ -196,20 +208,23 @@ export class ChainJournal {
 export function chainRecordFrom(journal: ChainJournal): ChainRecord | undefined {
   const chain = journal.getChain();
   if (!chain) return undefined;
-  const plan = JSON.parse(chain.plan_json) as Plan;
+  let plan = JSON.parse(chain.plan_json) as Plan;
 
   const nodeRuns: Record<string, string> = {};
-  for (const e of journal.entries("node_started")) {
-    const p = e.payload as NodeStartedPayload;
-    nodeRuns[p.nodeId] = p.childRunId;
-  }
-
   const nodeOutcomes: Record<string, NodeOutcome> = {};
   const nodeHandoffs: Record<string, ChainNodeHandoff> = {};
-  for (const e of journal.entries("node_sealed")) {
-    const p = e.payload as NodeSealedPayload;
-    nodeOutcomes[p.nodeId] = p.outcome;
-    if (p.handoff !== undefined) nodeHandoffs[p.nodeId] = p.handoff;
+  for (const e of journal.entries()) {
+    if (e.kind === "node_started") {
+      const p = e.payload as NodeStartedPayload;
+      nodeRuns[p.nodeId] = p.childRunId;
+    } else if (e.kind === "node_sealed") {
+      const p = e.payload as NodeSealedPayload;
+      nodeOutcomes[p.nodeId] = p.outcome;
+      if (p.handoff !== undefined) nodeHandoffs[p.nodeId] = p.handoff;
+    } else if (e.kind === "node_replanned") {
+      const p = e.payload as NodeReplannedPayload;
+      plan = p.revisedPlan;
+    }
   }
 
   const verdicts = journal.entries("plan_verdict");

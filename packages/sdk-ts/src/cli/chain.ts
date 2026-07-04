@@ -207,6 +207,10 @@ function formatChainEntryLine(entry: ChainEntry): string {
       const p = entry.payload as { nodeId: string; outcome: { status: string; verdict: string } };
       return `[${entry.ts}] node ${p.nodeId} sealed ${p.outcome.status} (${p.outcome.verdict})`;
     }
+    case "node_replanned": {
+      const p = entry.payload as { failedNodeId: string; revisedPlan?: { id: string } };
+      return `[${entry.ts}] node ${p.failedNodeId} replanned → ${p.revisedPlan?.id ?? "revised plan"}`;
+    }
     case "terminal": {
       const p = entry.payload as { status: string; reason?: string };
       return `[${entry.ts}] chain ${p.status}${p.reason ? ` — ${p.reason}` : ""}`;
