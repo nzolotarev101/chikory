@@ -1,0 +1,29 @@
+# Draft brownfield task — cross-cutting refactor under a compatibility
+# constraint. Stresses: long-horizon planning (touch order matters), memory
+# (the deprecation inventory exceeds context), silent-divergence detection
+# (judge must catch behavior drift the type checker can't).
+id: brownfield-002
+class: brownfield
+status: draft
+repo:
+  url: TBD # candidate profile: codebase with a widely-used legacy internal API (e.g. callback-style module used from 30+ sites) and good test coverage
+  ref: TBD
+horizon: 6-12h
+goal: |
+  Migrate every internal consumer of the legacy API to its modern replacement
+  and delete the legacy implementation, WITHOUT changing any externally
+  observable behavior (public API surface, wire formats, CLI output). The
+  migration must land as a series of independently green commits.
+requirements:
+  - id: R1
+    description: legacy implementation deleted; no internal references remain
+    check: TBD
+  - id: R2
+    description: full test suite green at final state AND at each intermediate commit
+    check: TBD
+  - id: R3
+    description: public API surface byte-identical (generated API report / d.ts diff empty)
+    check: TBD
+metrics_notes: |
+  Checkpoint discipline (green-at-every-commit maps to Chikory step seals);
+  context-rot measurement over a 30+ site inventory.

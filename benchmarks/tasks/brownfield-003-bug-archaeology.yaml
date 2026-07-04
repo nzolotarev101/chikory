@@ -1,0 +1,29 @@
+# Draft brownfield task — reproduce-then-fix from a real issue report.
+# Stresses: diagnosis before edits (most agent failures here are confident
+# wrong fixes), terminal-state discipline (knowing when NOT to keep digging),
+# judge value (a fix that greens the repro but breaks a sibling path).
+id: brownfield-003
+class: brownfield
+status: draft
+repo:
+  url: TBD # candidate profile: OSS repo with a confirmed, non-trivial, still-open (or revert-able fixed) bug whose report includes repro steps but no root cause
+  ref: TBD # pinned BEFORE the upstream fix
+horizon: 3-6h
+goal: |
+  Starting from the issue report only, write a failing regression test that
+  reproduces the bug, then fix the root cause. The fix must not change any
+  other observable behavior; the regression test must fail on the pinned ref
+  and pass on the result.
+requirements:
+  - id: R1
+    description: new regression test fails on the base ref, passes after the fix
+    check: TBD
+  - id: R2
+    description: full pre-existing suite green
+    check: TBD
+  - id: R3
+    description: fix is root-cause (upstream maintainer fix, if one exists, touches the same mechanism — scored by harness rubric, not string match)
+    check: TBD
+metrics_notes: |
+  Cost/time distribution split between diagnosis and edit phases; false-fix
+  rate (greens R1 but fails R3) is the judge's headline catch opportunity.

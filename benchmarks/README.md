@@ -26,4 +26,7 @@ benchmarks/
 
 ## Status
 
-Not started. Begins in Stage 1 (target: publish within 90 days of SDK launch).
+Task authoring started 2026-07-04: three brownfield drafts in `tasks/`
+(format + design rules in `tasks/README.md`), doubling as long-horizon
+dogfood spec sources for the WP-265 ladder. Harness (WP-301) not started.
+Target: publish within 90 days of SDK launch.

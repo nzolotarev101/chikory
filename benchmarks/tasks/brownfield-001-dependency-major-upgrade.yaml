@@ -1,0 +1,30 @@
+# Draft brownfield task — classic maintenance horizon: a major-version
+# dependency upgrade with breaking API changes rippling through a real
+# codebase. Stresses: compounding error across many small edits, context rot
+# (the changelog + N call sites exceed one attention span), judge value
+# (type-green ≠ behavior-preserved).
+id: brownfield-001
+class: brownfield
+status: draft
+repo:
+  url: TBD # candidate profile: 10-50k LOC TypeScript app pinned one major behind on a core dep (e.g. fastify 4→5, prisma 5→6)
+  ref: TBD
+horizon: 4-8h
+goal: |
+  Upgrade the pinned core dependency to the latest major release. All existing
+  tests pass unmodified except where they assert the dependency's own changed
+  behavior; those are updated with a one-line justification each. No feature
+  regressions; no new deprecation warnings at startup.
+requirements:
+  - id: R1
+    description: dependency at target major in lockfile; install clean
+    check: TBD
+  - id: R2
+    description: full pre-existing test suite green
+    check: TBD
+  - id: R3
+    description: app boots and serves its smoke-test flows with zero deprecation warnings
+    check: TBD
+metrics_notes: |
+  Per-step reliability over 20+ edit sites; recovery rate when a mid-upgrade
+  test break forces a rollback.
