@@ -155,6 +155,11 @@ export { summarizePacing, type PacingSummary } from "./runner/pacing-summary.js"
 export { summarizeCompaction, type CompactionSummary } from "./runner/compaction-summary.js";
 export { DIGEST_SYSTEM_PROMPT, buildDigestMessages } from "./runner/compaction-prompt.js";
 export {
+  collectWorkspaceRepos,
+  type WorkspaceRepo,
+  type WorkspaceRepos,
+} from "./runner/workspace-repos.js";
+export {
   decideStepForcing,
   type StepForcingDecision,
   type StepForcingState,

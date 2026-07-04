@@ -6,7 +6,7 @@
  * is the compacted evidence itself: step summaries, not the raw transcript.
  */
 import type { AcceptanceCriterion, JudgeEvidence, Message } from "../types.js";
-import type { CheckRun } from "./evidence.js";
+import type { CheckRun, DiffSection } from "./evidence.js";
 import { MAX_CHECK_OUTPUT_CHARS } from "./evidence.js";
 import type { RubricItem } from "./rubric.js";
 
@@ -106,11 +106,32 @@ function renderHistory(history: Record<string, boolean[]>): string {
     .join("\n");
 }
 
+function renderDiffEvidence(diffText: string, diffSections: DiffSection[]): string[] {
+  if (diffSections.length === 0) {
+    return [
+      "## EVIDENCE — workspace diff since last verdict",
+      diffText.length > 0 ? `\`\`\`diff\n${diffText}\n\`\`\`` : "(empty diff — no changes)",
+    ];
+  }
+
+  return [
+    "## EVIDENCE — workspace diffs since last verdict (per writable repo)",
+    ...diffSections.flatMap((section) => [
+      "",
+      `### repo \`${section.repoName}\` (${section.relativePath})`,
+      section.diffText.length > 0
+        ? `\`\`\`diff\n${section.diffText}\n\`\`\``
+        : "(empty diff — no changes)",
+    ]),
+  ];
+}
+
 export interface JudgePromptInput {
   goal: string;
   evidence: JudgeEvidence;
   rubric: RubricItem[];
   diffText: string;
+  diffSections?: DiffSection[];
   secretScanLabels: string[];
   newDependencyLabels: string[];
   checkRuns: CheckRun[];
@@ -127,8 +148,7 @@ export function buildJudgeMessages(input: JudgePromptInput): Message[] {
     "## RUBRIC (fill `rubricResults`, one entry per id)",
     renderRubric(input.rubric),
     "",
-    "## EVIDENCE — workspace diff since last verdict",
-    input.diffText.length > 0 ? `\`\`\`diff\n${input.diffText}\n\`\`\`` : "(empty diff — no changes)",
+    ...renderDiffEvidence(input.diffText, input.diffSections ?? []),
     "",
     "## EVIDENCE — deterministic secret scan (added diff lines)",
     renderSecretScanLabels(input.secretScanLabels),

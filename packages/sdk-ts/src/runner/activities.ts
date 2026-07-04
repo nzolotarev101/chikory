@@ -44,6 +44,11 @@ import type {
 import { buildDigestMessages } from "./compaction-prompt.js";
 import { planCompaction } from "./compaction.js";
 import { artifactsDir, journalPath, runDir, sharedArtifactsDir, workspaceDir } from "./paths.js";
+import {
+  collectWorkspaceRepos,
+  workspaceRepoCheckpointId,
+  type WorkspaceRepo,
+} from "./workspace-repos.js";
 import { undeclaredWritePaths } from "../chain/write-set.js";
 
 /** observability.md: one span per checkpoint write (CONTRACTS.md §8). */
@@ -176,6 +181,28 @@ function sharedHandoffStore(deps: RunnerActivityDeps): ArtifactStore {
 /** Git tag marking the workspace state right after prepareRun (= `<runId>@base`). */
 export const BASE_TAG = "chikory-base";
 
+function workspaceRepoDir(ws: string, repo: WorkspaceRepo): string {
+  return repo.relativePath === "." ? ws : join(ws, repo.relativePath);
+}
+
+function workspaceReposReady(ws: string, repos: WorkspaceRepo[]): boolean {
+  return repos.every((repo) => existsSync(join(workspaceRepoDir(ws, repo), ".git")));
+}
+
+async function configureWorkspaceRepo(repoDir: string): Promise<void> {
+  await git(repoDir, ["config", "user.name", "chikory"]);
+  await git(repoDir, ["config", "user.email", "runner@chikory.local"]);
+}
+
+async function ensureBaseTag(repoDir: string): Promise<string> {
+  try {
+    return await git(repoDir, ["rev-parse", `${BASE_TAG}^{commit}`]);
+  } catch {
+    await git(repoDir, ["tag", BASE_TAG]);
+    return git(repoDir, ["rev-parse", `${BASE_TAG}^{commit}`]);
+  }
+}
+
 export async function resolveCheckpointCommit(input: {
   dataDir: string;
   runId: string;
@@ -235,6 +262,37 @@ function summariesSinceLastVerdict(journal: Journal, atStep: number): string[] {
     .map((p) => p.record.summary);
 }
 
+function repoDiffBasesSinceLastVerdict(
+  journal: Journal,
+  atStep: number,
+  workspaceRepos: WorkspaceRepo[],
+): Record<string, string> {
+  let lastJudgedStep = -1;
+  for (const entry of journal.entries("verdict")) {
+    const payload = entry.payload as VerdictPayload & { source?: string };
+    if (payload.source === "runner") continue;
+    if (payload.atStep < atStep) lastJudgedStep = Math.max(lastJudgedStep, payload.atStep);
+  }
+
+  const checkpoint =
+    lastJudgedStep === -1
+      ? undefined
+      : [...journal.entries("checkpoint")]
+          .reverse()
+          .map((entry) => entry.payload as Checkpoint & { stepIndex?: number })
+          .find((candidate) => candidate.stepIndex === lastJudgedStep);
+
+  const repoCount = workspaceRepos.length;
+  return Object.fromEntries(
+    workspaceRepos
+      .filter((repo) => repo.writable)
+      .map((repo) => {
+        const key = workspaceRepoCheckpointId(repo, repoCount);
+        return [repo.name, checkpoint?.gitCommits[key] ?? BASE_TAG];
+      }),
+  );
+}
+
 export type RunnerActivities = ReturnType<typeof createRunnerActivities>;
 
 export function createRunnerActivities(deps: RunnerActivityDeps) {
@@ -253,7 +311,8 @@ export function createRunnerActivities(deps: RunnerActivityDeps) {
     > {
       return withHeartbeat(async () => {
         const ws = workspaceDir(deps.dataDir, input.runId);
-        const repo = input.spec.repos[0];
+        const workspaceRepos = collectWorkspaceRepos(input.spec.repos);
+        const repo = workspaceRepos.all[0]?.repo;
         if (!repo) throw new Error("TaskSpec.repos is empty");
         const setupJournal = openJournal(deps, input.runId);
         try {
@@ -263,13 +322,12 @@ export function createRunnerActivities(deps: RunnerActivityDeps) {
         }
         const parentRunId = input.spec.chainLink?.parentRunId;
         const parentHandoffs = input.spec.chainLink?.parentHandoffs ?? [];
-        if (!existsSync(join(ws, ".git"))) {
+        if (!workspaceReposReady(ws, workspaceRepos.all)) {
           await mkdir(ws, { recursive: true });
           if (parentHandoffs.length > 0) {
             await execFileAsync("git", ["clone", repo.url, ws]);
             if (repo.ref) await git(ws, ["checkout", repo.ref]);
-            await git(ws, ["config", "user.name", "chikory"]);
-            await git(ws, ["config", "user.email", "runner@chikory.local"]);
+            await configureWorkspaceRepo(ws);
 
             for (const [index, parent] of parentHandoffs.entries()) {
               const parentRepo = parent.repos.find((candidate) => candidate.repoUrl === repo.url);
@@ -321,22 +379,30 @@ export function createRunnerActivities(deps: RunnerActivityDeps) {
             await execFileAsync("git", ["clone", "--no-tags", parentWs, ws]);
             await git(ws, ["checkout", `chikory/run-${parentRunId}`]);
           } else {
-            await execFileAsync("git", ["clone", repo.url, ws]);
-            if (repo.ref) await git(ws, ["checkout", repo.ref]);
+            for (const workspaceRepo of workspaceRepos.all) {
+              const repoDir = workspaceRepoDir(ws, workspaceRepo);
+              if (existsSync(join(repoDir, ".git"))) continue;
+              await execFileAsync("git", ["clone", workspaceRepo.repo.url, repoDir]);
+              if (workspaceRepo.repo.ref) await git(repoDir, ["checkout", workspaceRepo.repo.ref]);
+              await configureWorkspaceRepo(repoDir);
+              if (workspaceRepo.writable) {
+                await git(repoDir, ["checkout", "-b", `chikory/run-${input.runId}`]);
+              }
+            }
           }
-          await git(ws, ["checkout", "-b", `chikory/run-${input.runId}`]);
-          await git(ws, ["config", "user.name", "chikory"]);
-          await git(ws, ["config", "user.email", "runner@chikory.local"]);
+          if (parentHandoffs.length > 0 || parentRunId !== undefined) {
+            await git(ws, ["checkout", "-b", `chikory/run-${input.runId}`]);
+            await configureWorkspaceRepo(ws);
+          }
         }
         // Tag the run's base state — `<runId>@base` rollbacks resolve to it
         // (WP-132). Steps only run after prepareRun completes, so on a crashed
         // retry HEAD is still the base commit and tagging stays correct.
-        let baseCommit: string;
-        try {
-          baseCommit = await git(ws, ["rev-parse", `${BASE_TAG}^{commit}`]);
-        } catch {
-          await git(ws, ["tag", BASE_TAG]);
-          baseCommit = await git(ws, ["rev-parse", `${BASE_TAG}^{commit}`]);
+        const baseRepo = workspaceRepos.writable[0] ?? workspaceRepos.all[0];
+        if (!baseRepo) throw new Error("TaskSpec.repos is empty");
+        const baseCommit = await ensureBaseTag(workspaceRepoDir(ws, baseRepo));
+        for (const workspaceRepo of workspaceRepos.writable.slice(1)) {
+          await ensureBaseTag(workspaceRepoDir(ws, workspaceRepo));
         }
         return { status: "SUCCESS", workspaceDir: ws, baseCommit };
       });
@@ -438,6 +504,8 @@ export function createRunnerActivities(deps: RunnerActivityDeps) {
         // (an LLM call + git work); long-held writers starve status pollers.
         const reader = openJournal(deps, input.runId);
         let spec: TaskSpec;
+        let workspaceRepos: WorkspaceRepo[];
+        let repoDiffBases: Record<string, string>;
         let criteriaHistory: Record<string, boolean[]>;
         let stepSummaries: string[];
         let journaledForm: JudgePayload | undefined;
@@ -445,6 +513,8 @@ export function createRunnerActivities(deps: RunnerActivityDeps) {
           const existing = reader.findByKey("verdict", "judgeIndex", input.judgeIndex);
           if (existing) return (existing.payload as VerdictPayload).verdict;
           spec = requireSpec(reader, input.runId);
+          workspaceRepos = collectWorkspaceRepos(spec.repos).all;
+          repoDiffBases = repoDiffBasesSinceLastVerdict(reader, input.atStep, workspaceRepos);
           criteriaHistory = criteriaHistoryFromJournal(reader);
           stepSummaries = summariesSinceLastVerdict(reader, input.atStep);
           journaledForm = reader.findByKey("judge", "judgeIndex", input.judgeIndex)?.payload as
@@ -498,6 +568,8 @@ export function createRunnerActivities(deps: RunnerActivityDeps) {
             goal: spec.goal,
             criteria: input.criteria,
             sinceCommit: input.sinceCommit,
+            workspaceRepos,
+            repoDiffBases,
             criteriaHistory,
             stepSummaries,
             lastGoodCheckpointId: input.lastGoodCheckpointId,
@@ -696,15 +768,25 @@ export function createRunnerActivities(deps: RunnerActivityDeps) {
           if (existing) return existing.payload as Checkpoint;
 
           const spec = requireSpec(journal, input.runId);
-          const repoUrl = spec.repos[0]?.url ?? "unknown";
+          const workspaceRepos = collectWorkspaceRepos(spec.repos);
           const ws = workspaceDir(deps.dataDir, input.runId);
           const startTime = Date.now();
 
-          await git(ws, ["add", "-A"]);
-          // --allow-empty: a no-change step still checkpoints (DX-4 holds
-          // for every step, and resume always has a commit to anchor on).
-          await git(ws, ["commit", "--allow-empty", "-m", `chikory: step ${input.stepIndex}`]);
-          const sha = await git(ws, ["rev-parse", "HEAD"]);
+          const gitCommits: Record<string, string> = {};
+          for (const workspaceRepo of workspaceRepos.writable) {
+            const repoDir = workspaceRepoDir(ws, workspaceRepo);
+            await git(repoDir, ["add", "-A"]);
+            // --allow-empty: a no-change step still checkpoints (DX-4 holds
+            // for every step, and resume always has a commit to anchor on).
+            await git(repoDir, [
+              "commit",
+              "--allow-empty",
+              "-m",
+              `chikory: step ${input.stepIndex}`,
+            ]);
+            gitCommits[workspaceRepoCheckpointId(workspaceRepo, workspaceRepos.all.length)] =
+              await git(repoDir, ["rev-parse", "HEAD"]);
+          }
 
           const store = createLocalArtifactStore(artifactsDir(deps.dataDir, input.runId));
           const contextSnapshotRef = await store.put(JSON.stringify(input.context, null, 2), {
@@ -716,7 +798,7 @@ export function createRunnerActivities(deps: RunnerActivityDeps) {
           const checkpoint: Checkpoint = {
             id: `${input.runId}@${journalIdx}`,
             journalIdx,
-            gitCommits: { [repoUrl]: sha },
+            gitCommits,
             contextSnapshotRef,
             budgetSpentUsd: input.budgetSpentUsd,
             lastGood: input.lastGood,
@@ -734,7 +816,7 @@ export function createRunnerActivities(deps: RunnerActivityDeps) {
           const span = getTracer().startSpan(SPAN_CHECKPOINT, { startTime });
           span.setAttribute("run.id", input.runId);
           span.setAttribute("step", input.stepIndex);
-          span.setAttribute("git.commit", sha);
+          span.setAttribute("git.commit", Object.values(gitCommits)[0] ?? "");
           span.setAttribute("journal.idx", journalIdx);
           span.setAttribute("last.good", input.lastGood);
           span.setAttribute("budget.spent.usd", input.budgetSpentUsd);

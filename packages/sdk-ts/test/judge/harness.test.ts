@@ -22,7 +22,7 @@ import {
   type RunJudgePassInput,
 } from "../../src/judge/index.js";
 import { createRouter } from "../../src/router.js";
-import type { JudgeForm, ModelChoice, RoutingPolicy } from "../../src/types.js";
+import type { ArtifactStore, JudgeForm, ModelChoice, RoutingPolicy } from "../../src/types.js";
 
 const execFileAsync = promisify(execFile);
 
@@ -87,6 +87,16 @@ const allPassForm: JudgeForm = {
 async function git(dir: string, args: string[]): Promise<string> {
   const { stdout } = await execFileAsync("git", ["-C", dir, ...args]);
   return stdout;
+}
+
+async function initGitRepo(dir: string, fileName: string, content: string): Promise<string> {
+  await execFileAsync("git", ["init", "-q", dir]);
+  await git(dir, ["config", "user.email", "test@chikory.dev"]);
+  await git(dir, ["config", "user.name", "chikory-test"]);
+  await writeFile(join(dir, fileName), content);
+  await git(dir, ["add", "-A"]);
+  await git(dir, ["commit", "-q", "-m", "base"]);
+  return (await git(dir, ["rev-parse", "HEAD"])).trim();
 }
 
 let workspace: string;
@@ -157,6 +167,67 @@ describe("runJudgePass (WP-131)", () => {
     expect(sent).toContain("no_secrets_introduced");
     expect(sent).toContain("+v2");
     expect(sent).toContain("step 1: edited app.txt");
+  });
+
+  it("collects one diff artifact and prompt section per writable workspace repo", async () => {
+    fake.setHandler((_req, res) => {
+      res.setHeader("content-type", "application/json");
+      res.end(chatCompletion(JSON.stringify(allPassForm)));
+    });
+
+    const multiWorkspace = await mkdtemp(join(tmpdir(), "chikory-judge-multi-"));
+    try {
+      const apiBase = await initGitRepo(join(multiWorkspace, "service-api"), "api.txt", "api base\n");
+      const workerBase = await initGitRepo(
+        join(multiWorkspace, "service-worker"),
+        "worker.txt",
+        "worker base\n",
+      );
+      await writeFile(join(multiWorkspace, "service-api", "api.txt"), "api changed\n");
+      await writeFile(join(multiWorkspace, "service-worker", "worker.txt"), "worker changed\n");
+      const store: ArtifactStore = createMemoryArtifactStore();
+
+      const { collected } = await runJudgePass(
+        input({
+          workspaceDir: multiWorkspace,
+          store,
+          workspaceRepos: [
+            { name: "service-api", relativePath: "service-api", writable: true },
+            { name: "service-worker", relativePath: "service-worker", writable: true },
+          ],
+          repoDiffBases: {
+            "service-api": apiBase,
+            "service-worker": workerBase,
+          },
+        }),
+      );
+
+      expect(collected.evidence.diffRefs).toHaveLength(2);
+      expect(collected.evidence.diffRefs.map((ref) => ref.summary)).toEqual([
+        expect.stringContaining("workspace diff for service-api"),
+        expect.stringContaining("workspace diff for service-worker"),
+      ]);
+      await expect(
+        store.get(collected.evidence.diffRefs[0]!).then((bytes) => Buffer.from(bytes).toString()),
+      ).resolves.toContain("+api changed");
+      await expect(
+        store.get(collected.evidence.diffRefs[1]!).then((bytes) => Buffer.from(bytes).toString()),
+      ).resolves.toContain("+worker changed");
+      expect(collected.diffSections.map((section) => section.repoName)).toEqual([
+        "service-api",
+        "service-worker",
+      ]);
+
+      const wire = JSON.parse(fake.requests[0]) as { messages: Array<{ content: string }> };
+      const sent = wire.messages.map((m) => m.content).join("\n");
+      expect(sent).toContain("## EVIDENCE — workspace diffs since last verdict (per writable repo)");
+      expect(sent).toContain("### repo `service-api` (service-api)");
+      expect(sent).toContain("### repo `service-worker` (service-worker)");
+      expect(sent).toContain("+api changed");
+      expect(sent).toContain("+worker changed");
+    } finally {
+      await rm(multiWorkspace, { recursive: true, force: true });
+    }
   });
 
   it("JD-4: judge-executed check overrides the LLM's claimed pass", async () => {

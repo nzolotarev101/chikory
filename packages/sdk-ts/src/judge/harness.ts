@@ -18,7 +18,12 @@ import type {
   Router,
   TokenUsage,
 } from "../types.js";
-import { collectEvidence, type CheckRun, type CollectedEvidence } from "./evidence.js";
+import {
+  collectEvidence,
+  type CheckRun,
+  type CollectedEvidence,
+  type EvidenceWorkspaceRepo,
+} from "./evidence.js";
 import { buildJudgeMessages, JUDGE_FORM_RESPONSE_SCHEMA } from "./prompt.js";
 import { RUBRIC_TESTS_PASS, STANDING_RUBRIC, type RubricItem } from "./rubric.js";
 import { computeVerdict } from "./verdict.js";
@@ -156,6 +161,10 @@ export interface RunJudgePassInput {
   criteria: AcceptanceCriterion[];
   /** Diff base: commit of the checkpoint covering the previous verdict (or run base). */
   sinceCommit: string;
+  /** Resolved workspace repos for per-writable-repo evidence. */
+  workspaceRepos?: EvidenceWorkspaceRepo[];
+  /** Per-resolved-repo diff bases, keyed by workspace repo name. */
+  repoDiffBases?: Record<string, string>;
   /** Per-criterion pass booleans from previous verdicts, oldest first. */
   criteriaHistory: Record<string, boolean[]>;
   stepSummaries: string[];
@@ -178,6 +187,8 @@ export async function runJudgePass(input: RunJudgePassInput): Promise<JudgePassR
     store: input.store,
     criteria: input.criteria,
     sinceCommit: input.sinceCommit,
+    workspaceRepos: input.workspaceRepos,
+    repoDiffBases: input.repoDiffBases,
     criteriaHistory: input.criteriaHistory,
     stepSummaries: input.stepSummaries,
     checkTimeoutMs: input.checkTimeoutMs,
@@ -190,6 +201,7 @@ export async function runJudgePass(input: RunJudgePassInput): Promise<JudgePassR
       evidence: collected.evidence,
       rubric,
       diffText: collected.diffText,
+      diffSections: collected.diffSections,
       secretScanLabels: collected.secretScanLabels,
       newDependencyLabels: collected.newDependencyLabels,
       checkRuns: collected.checkRuns,

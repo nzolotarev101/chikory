@@ -8,6 +8,7 @@
  * judging too).
  */
 import { execFile } from "node:child_process";
+import { join } from "node:path";
 import { promisify } from "node:util";
 
 import { scrubExecutorEnv } from "../executors/env.js";
@@ -43,6 +44,8 @@ export interface CollectedEvidence {
   evidence: JudgeEvidence;
   /** Bounded diff excerpt for the prompt (full diff is in `evidence.diffRefs`). */
   diffText: string;
+  /** Bounded per-repo diff excerpts for multi-repo prompts. */
+  diffSections: DiffSection[];
   /** WP-215 deterministic secret-kind labels the judge sees alongside the diff. */
   secretScanLabels: string[];
   /** WP-215 deterministic new-dependency package names the judge sees alongside the diff. */
@@ -50,6 +53,19 @@ export interface CollectedEvidence {
   checkRuns: CheckRun[];
   /** Raw evidence size (diff + check output bytes) — span attribute (WP-134). */
   evidenceBytes: number;
+}
+
+export interface EvidenceWorkspaceRepo {
+  name: string;
+  relativePath: string;
+  writable: boolean;
+}
+
+export interface DiffSection {
+  repoName: string;
+  relativePath: string;
+  sinceCommit: string;
+  diffText: string;
 }
 
 async function git(dir: string, args: string[]): Promise<string> {
@@ -92,6 +108,10 @@ export interface CollectEvidenceInput {
   criteria: AcceptanceCriterion[];
   /** Diff base: commit of the checkpoint covering the previous verdict (or run base). */
   sinceCommit: string;
+  /** Resolved workspace repos. Absent keeps the legacy single-root evidence path. */
+  workspaceRepos?: EvidenceWorkspaceRepo[];
+  /** Per-resolved-repo diff base; keys are `EvidenceWorkspaceRepo.name`. */
+  repoDiffBases?: Record<string, string>;
   criteriaHistory: Record<string, boolean[]>;
   /** Compacted summaries of the steps since the last verdict. */
   stepSummaries: string[];
@@ -101,14 +121,47 @@ export interface CollectEvidenceInput {
 export async function collectEvidence(input: CollectEvidenceInput): Promise<CollectedEvidence> {
   // Workspace diff since the last verdict — committed step work plus whatever
   // is still uncommitted (the judge runs before the covering checkpoint).
-  await git(input.workspaceDir, ["add", "-N", "."]);
-  const diff = await git(input.workspaceDir, ["diff", input.sinceCommit]);
+  const writableRepos = input.workspaceRepos?.filter((repo) => repo.writable) ?? [];
+  const perRepoDiff =
+    writableRepos.length > 1 ||
+    (writableRepos.length === 1 && writableRepos[0]?.relativePath !== ".");
+  const sections: DiffSection[] = [];
+  if (perRepoDiff) {
+    for (const repo of writableRepos) {
+      const repoDir = repo.relativePath === "." ? input.workspaceDir : join(input.workspaceDir, repo.relativePath);
+      const sinceCommit = input.repoDiffBases?.[repo.name] ?? input.sinceCommit;
+      await git(repoDir, ["add", "-N", "."]);
+      const repoDiff = await git(repoDir, ["diff", sinceCommit]);
+      sections.push({
+        repoName: repo.name,
+        relativePath: repo.relativePath,
+        sinceCommit,
+        diffText: repoDiff,
+      });
+    }
+  } else {
+    await git(input.workspaceDir, ["add", "-N", "."]);
+    const diff = await git(input.workspaceDir, ["diff", input.sinceCommit]);
+    sections.push({
+      repoName: writableRepos[0]?.name ?? ".",
+      relativePath: writableRepos[0]?.relativePath ?? ".",
+      sinceCommit: input.sinceCommit,
+      diffText: diff,
+    });
+  }
+  const diff = sections.map((section) => section.diffText).join("\n");
   const secretScanLabels = scanDiffForSecrets(diff);
   const newDependencyLabels = scanDiffForNewDependencies(diff);
-  const diffRef = await input.store.put(diff, {
-    kind: "diff",
-    summary: `workspace diff since ${input.sinceCommit.slice(0, 12)} (${diff.length} bytes)`,
-  });
+  const diffRefs = await Promise.all(
+    sections.map((section) =>
+      input.store.put(section.diffText, {
+        kind: "diff",
+        summary: perRepoDiff
+          ? `workspace diff for ${section.repoName} since ${section.sinceCommit.slice(0, 12)} (${section.diffText.length} bytes)`
+          : `workspace diff since ${section.sinceCommit.slice(0, 12)} (${section.diffText.length} bytes)`,
+      }),
+    ),
+  );
 
   // Judge-executed acceptance checks (JD-4) — sequential: checks may share
   // workspace state (build artifacts, ports).
@@ -140,7 +193,7 @@ export async function collectEvidence(input: CollectEvidenceInput): Promise<Coll
   }
 
   const evidence: JudgeEvidence = {
-    diffRefs: [diffRef],
+    diffRefs,
     testResults,
     criteria: input.criteria,
     criteriaHistory: input.criteriaHistory,
@@ -150,6 +203,12 @@ export async function collectEvidence(input: CollectEvidenceInput): Promise<Coll
   return {
     evidence,
     diffText: bound(diff, MAX_DIFF_PROMPT_CHARS),
+    diffSections: perRepoDiff
+      ? sections.map((section) => ({
+          ...section,
+          diffText: bound(section.diffText, MAX_DIFF_PROMPT_CHARS),
+        }))
+      : [],
     secretScanLabels,
     newDependencyLabels,
     checkRuns,
