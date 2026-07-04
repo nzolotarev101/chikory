@@ -8,18 +8,18 @@ recover a run, and how to land the result as a normal PR.
 **Status (2026-07-02, bounded — update discipline: REPLACE this block, ≤15 lines;
 displaced prose moves verbatim to [`PLAN-HISTORY.md`](PLAN-HISTORY.md); per-run detail:
 `docs/reports/dogfood-NNN.md`; queue + course correction: `plan.md` §6).**
-Latest: dogfood-081 — WP-265 rung-3 **ENABLER** = WP-269 intra-run step-forcing (`run-464b7b77`,
-`docs/reports/dogfood-081.md`). 🟢 **SUCCESS · 1 step — the rung-3 blocking dependency (F-95) is now BUILT.**
-Delivered a pure total `decideStepForcing(state, policy?)` (sibling of `decideContextWindowPacing`) + an opt-in
-`boundedWorkUnit` spec-input policy that DEFERS a premature `claimsComplete` and re-enters `agent-loop.ts` with an
-increment directive until a durable-step floor is met AND the judge confirms the ACs — **contract-additive** (no
-`StepRecord`/`JournalEntry`/`Checkpoint` change), no-policy path byte-identical. A LIVE Temporal test drives ONE
-real run sealing **3 durable checkpoints under an active policy** while the no-policy path stays one-shot — the
-first mechanically-demonstrated intra-run horizon. All-green (636 passed), scope-clean (8 files), byte-IDENTICAL to
-the workspace (uncommitted — harvest pending). One-shot as the spec predicted (ENABLER build, not the proof).
-🟡 F-97 → WP-266/511 (track-B): the grep ACs didn't re-require the PART-3 LIVE test (executor over-delivered it) →
-extend the loose-AC lint; **dogfood-082 (rung-3 horizon PROOF + mid-run kill→resume ON this machinery) must pin its
-≥5-checkpoint horizon numerically.** See §7 (troubleshooting), §8 (known limitations), §1.5, §1.4, §3.
+Latest: dogfood-082 — **WP-265 RUNG-3 HORIZON PROOF REACHED** on the WP-219 chain residuals (`run-ef4824e2-a91c-4633-aac3-bb26608217c4`,
+`docs/reports/dogfood-082.md`). 🟢 **SUCCESS · 6 steps · $6.76/$50 · 57m16s.** ONE `chikory run` under
+`bounded_work_unit:{min_durable_steps:5}` sealed **6 durable checkpoints** (first intra-run horizon) AND survived a
+**LIVE mid-run `kill -9` → `chikory resume` landing between sealed steps with zero step re-execution** (~37-min replay
+gap, journal byte-identical). Delivered WP-219 D3 halt-and-replan (`decideReplan`) + S4 structured compaction-note
+handoff, additive/frozen-contract-safe (`node_replanned` = one additive journal kind), LIVE-proven; all-green in-workspace
+(655 tests in-workspace; sdk-ts 651 passed on the harvested tree), 14 files, **harvested `1d2c7e5`** (before harvest the phase-0 §3 AC re-run FALSE-FAILED because it grepped the
+un-harvested tree — the run's own judge is the trustworthy green; harvest flips AC-1/2/3 green). ℹ️ **F-100 (pre-declared,
+THE next headline → WP-270): the horizon is REAL but HOLLOW** — seal-deferral DEFERS the seal but doesn't CHUNK work, so
+step 1 front-loaded all product code ($4.96/28KB) and steps 2–6 sealed thin test-tweaks ($0.27–$0.49); per-step chunking
+is the next mechanism. 🔴 **F-99 (track-B, §7): a bare `chikory resume` silently lost `OPENAI_COMPAT_BASE_URL` → Temporal
+masked it as a ~30-min stall** — add a fail-fast resume precondition. See §7 (troubleshooting), §8 (known limitations), §1.5, §1.4, §3.
 
 Related docs: [`docs/spec/task-spec.md`](spec/task-spec.md) (schema
 reference) · [`docs/TASK-PROTOCOL.md`](TASK-PROTOCOL.md) (WP etiquette, §7 is
@@ -613,8 +613,23 @@ a first-attempt SUCCESS and produced three plan-changing findings
 | Live `--watch` shows `verdict ⚠ ESCALATE` and `run is AWAITING_APPROVAL` but no reason | **Fixed by WP-229** (dogfood-018, `run-59115f35`): `followRun` now prints `judge escalated: <reason>` immediately before the AWAITING_APPROVAL line whenever the ESCALATE verdict carries a non-empty `escalateReason`. If you still see no reason, the verdict had an empty `escalateReason` (the line is suppressed by design) — fall back to `pnpm chikory trace <run-id> --step <n>` for the full judge form, or read the `verdict` entry in `.chikory/runs/<run-id>/journal.db`. |
 | A LOOSE run sealed FAILED via the 3-consecutive-AC-fail HALT even though the delivery is complete and AC-2 (build/lint/suite) is GREEN — one AC's grep is unsatisfiable | **The AC grep is testing a substring the delivered CODE legitimately produces, or a file layout the goal delegated** (dogfood-075 **F-82**, dogfood-076 **F-83**). Two shapes: (F-82) `test -f <a-new-file>` for a path the loose goal left to the executor; (F-83) a NEGATIVE grep on a BARE WORD that also appears in comments/strings/prose — dogfood-076's `! grep -Eq 'execFile\|spawn' native.ts` matched the doc comment "…is spawned" even though the code has zero `execFile`/`spawn` calls. Either makes the AC false on correct work → it fails every pass → the budget-waste HALT guard fires (a *true* guard fire on a *false* criterion), and later steps flail against the phantom (dogfood-076 steps 3–4 burned ~37 min and broke AC-2). **Prevention (WP-266, LANDED):** run `bash scripts/dogfood-progression.sh --spec <yaml>` before launching — it ⛔s (exit 3) `test -f`/`test -e` in a loose AC and bare-word negative greps. **Authoring rule:** a loose AC's grep must anchor on an OUTCOME symbol as it appears in CODE — a call form (`grep -E '\bcreateNativeAdapter\('`), a registry key, an import — never a bare word natural language can produce, and never a new-file existence test. **The launcher now REFUSES automatically (WP-267, F-84 — `scripts/dogfood.sh` exits on the lint's exit-3 hazard; override `CHIKORY_ALLOW_LOOSE_AC_HAZARD=1`).** |
 | Codex steps run far past their `maxSeconds` cap (e.g. ~2×) before being killed, recording 0 tokens / $0 / FAILED | Codex ignores the wall-clock deadline / SIGTERM until it is SIGKILLed (dogfood-076 **F-85 → WP-268**, family of F-76/F-80): steps 3 & 4 ran 1057s (1.76×) and 1188s (1.98×) past the 600s step cap. The cap is enforced LATE (~2×). Treat a run whose wall-clock is dominated by hung dead steps as this, not real work — check per-step `dur` in the trace. Durable fix = WP-268 (escalate to SIGKILL of the executor process group at ~1× the cap). Do NOT raise `budget_usd`/`max_steps` mid-run to rescue it. |
+| A `chikory resume <run-id>` appears to hang — the journal is frozen for many minutes and nothing errors, even though the worker is up | **The resumed run lost its judge/router provider config** — `chikory resume` from a shell that did NOT export `OPENAI_COMPAT_BASE_URL` (only `dogfood.sh`'s own shell exports it) starts a judge/router activity with no base URL, and Temporal's activity-retry policy (~65 attempts over ~30 min) loops SILENTLY instead of failing loud (dogfood-082 **F-99**: a step-4 seal stalled ~37 min across the kill→resume boundary purely from this). **`OPENAI_COMPAT_BASE_URL` (and any provider env the spec's `routing` block names) is a RESUME PRECONDITION** — export it before `chikory resume`, or resume from the same shell/`dogfood.sh` context that launched the run. Diagnose a suspected stall: `echo $OPENAI_COMPAT_BASE_URL` (empty = this), and check the worker logs for repeated router-fetch failures. Durable fix (track-B, WP-206-adjacent): a fail-fast resume precondition that validates the configured provider env BEFORE entering the durable retry loop. |
 
 ## 8. Known P1 limitations (so you don't fight them)
+
+- **`bounded_work_unit` DEFERS the seal but does NOT CHUNK the executor's work**
+  (F-100 → WP-270, dogfood-082): an active `bounded_work_unit:{min_durable_steps:N}`
+  policy (WP-269) forces ONE `chikory run` to seal ≥N durable checkpoints by
+  re-entering the loop after a premature `claimsComplete` — but it does NOT make
+  codex spread its work across those N steps. In dogfood-082 codex front-loaded
+  ALL product code into step 1 ($4.96 / 28KB diff / all 5 goal PARTs) and steps
+  2–6 sealed real-but-thin test-tweak checkpoints ($0.27–$0.49). The intra-run
+  horizon is REACHED but HOLLOW: the per-step-reliability / compounding-error KPI
+  those steps are meant to measure is not yet trustworthy (5 of 6 "durable steps"
+  did trivial work that essentially cannot fail). Until WP-270 (per-step
+  work-unit chunking) lands, read a `min_durable_steps` horizon as "N seals," NOT
+  "N independent failure surfaces," and choose a host goal whose FIRST step does
+  the real product work regardless.
 
 - **No planner for `chikory run`**: every step gets the full `goal` as its
   instruction, plus the last 5 step summaries, judge feedback, and acceptance

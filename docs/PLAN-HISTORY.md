@@ -4,6 +4,16 @@
 > per-run detail lives in [`docs/reports/`](reports/). Content below was moved
 > verbatim out of the living docs on 2026-07-02 (course correction — plan.md §6).
 
+## Archived 2026-07-03 — displaced by dogfood-082
+
+Displaced from the plan.md "Last 3 runs" / "Queue" / "Top open friction" blocks
+when dogfood-082 landed (see `docs/reports/dogfood-082.md`):
+
+- **(was Last-3-runs) dogfood-079** — WP-265 rung 2 CHAIN re-host on WP-204 tiered memory (`chain-f4b08133`, 🟢 **SUCCESS · 4/4 nodes — RUNG 2 REACHED**): planner DECOMPOSED into 4 sequential judge-gated nodes (`min_nodes: 4`, WP-509 live), 13 durable checkpoints, survived a **LIVE mid-chain `kill -9` → `chikory chain resume` without re-executing the completed node** — WP-204 DELIVERED + all-green + harvested `9304c68`, **WP-204 → 🟢**.
+- **(was Queue) NEXT HEADLINE ⑤ dogfood-082** — WP-265 RUNG-3 HORIZON PROOF on the WP-219 chain residuals: one `chikory run` under `bounded_work_unit: {min_durable_steps: 5}` FORCING ≥5 sealed intra-run durable checkpoints + a deliberate LIVE operator mid-run `kill -9` → `chikory resume`. DELIVERED (`run-ef4824e2`, 6 checkpoints, kill→resume clean) — see report.
+- **(was DOGFOODING header) dogfood-081** — WP-265 rung-3 ENABLER = WP-269 intra-run step-forcing (`run-464b7b77`, `docs/reports/dogfood-081.md`). 🟢 SUCCESS · 1 step — the rung-3 blocking dependency (F-95) is now BUILT. A pure total `decideStepForcing(state, policy?)` + opt-in `boundedWorkUnit` policy that DEFERS a premature `claimsComplete` and re-enters `agent-loop.ts` until a durable-step floor is met AND the judge confirms the ACs (contract-additive, no-policy byte-identical); a LIVE Temporal test sealed 3 durable checkpoints under an active policy while no-policy stayed one-shot. One-shot as the spec predicted (ENABLER build, not the proof). 🟡 F-97 → WP-266/511.
+- **(was Top-open-friction, resolved/aged out):** ✅ F-88/F-89 → WP-509/WP-510 CLOSED + LIVE-PROVEN (dogfood-079). ✅ F-86/F-87 → WP-508 CLOSED (dogfood-079). 🟡 F-91 → WP-512 (exact-path chain writeSet needed FOUR false-fail fixes → wrong primitive for LOOSE chains). 🟡 F-92 → WP-513 (WP-257 literal floor REVISE-rejects a DECOMPOSED plan). 🟡 F-93 → WP-514 (launch-mode guard false-trips on header COMMENT prose). ℹ️ F-94 (no WP): chain horizon was inter-node; intra-run curve un-measured — now ADDRESSED by dogfood-082 (rung 3) with the F-100 hollow-horizon caveat. 🟡 F-90 → WP-511 (recursive symbol grep false-greens on HEAD). 🟡 F-85 → WP-268 (codex steps ran past the 600s cap). 🟡 F-58 harvest hygiene (WP-249). 🟡 F-79 → WP-263(b) (UNBLOCKED).
+
 ## Archived 2026-07-03 — displaced by dogfood-081
 
 Displaced from the plan.md "Last 3 runs" block and the DOGFOODING.md status block

@@ -1,0 +1,180 @@
+# Dogfood-083: WP-270 — PER-STEP WORK-UNIT CHUNKING, the rung-3 QUALITY fix dogfood-082
+#   proved is required (F-100). dogfood-082 REACHED the intra-run ≥5-durable-step horizon
+#   (6 sealed checkpoints under `bounded_work_unit:{min_durable_steps:5}`) — but HOLLOW:
+#   WP-269's step-forcing DEFERS the seal (re-enters the loop after a premature
+#   `claimsComplete`) but it does NOT CHUNK the executor's work, so codex front-loaded ALL
+#   product code into step 1 ($4.96 / 28KB / all goal PARTs) and steps 2-6 sealed thin
+#   test-tweak checkpoints ($0.27-$0.49). The per-step-reliability / compounding-error KPI
+#   those steps exist to measure (95%->5% over 60 steps -> target 99%+) is therefore NOT yet
+#   trustworthy: 5 of the 6 "durable steps" did trivial work that essentially cannot fail.
+#   This run builds the successor lever: force each forced step to advance ONE bounded,
+#   dependency-ordered sub-goal so every sealed checkpoint carries REAL distinct product work.
+#
+# CARVE-OUT DECLARATION (DOGFOODING §1.2 fallback / TASK-PROTOCOL §4): the default rung-3
+#   headline (a NON-hollow rung-3 HORIZON run — one whose ≥5 steps each do real, independently
+#   failable work) is BLOCKED: it depends on a chunking capability that does not yet exist
+#   (F-100 — WP-269 seal-deferral alone produces a hollow horizon). This WP IS that blocking
+#   dependency, the direct successor to WP-269; building it is the sanctioned next priority,
+#   after which a re-run of the rung-3 horizon on this machinery is NON-hollow.
+#
+# Format: LOOSE (headline — goal states the OUTCOME + constraints; ACs pin what "done" means
+#   via OUTCOME SYMBOLS THE GOAL NAMES; module/test layout LEFT TO THE EXECUTOR, F-82/F-83;
+#   NO prescribed diff).
+# Ladder-rung: 3
+# Thesis-KPI: PER-STEP work distribution — the mechanism that makes each forced durable step
+#   of a single `chikory run` carry a DISTINCT, non-trivial work-unit (a real per-step diff /
+#   failure surface), turning a hollow ≥N-step horizon into a trustworthy per-step-reliability
+#   / compounding-error curve.
+#
+# F-97 APPLIED FORWARD: AC-3 does NOT merely grep the net-new symbol in `test/` (which a UNIT
+#   test would false-green, the dogfood-081 lesson) — it requires the net-new decision symbol
+#   to co-live with the LIVE runner driver `createRunnerWorker` in a test file, so the LIVE
+#   per-step-distribution proof is actually enforced, not just any reference to the symbol.
+#
+# NOTE: this ENABLER run may itself one-shot the feature build (a normal delivery) — expected;
+#   the DELIVERABLE is the chunking machinery. The NON-hollow horizon PROOF comes next on it.
+#
+# LAUNCH WITH `chikory run` (a single durable run):
+#      devbox run run-dogfood       # <- `chikory run`; picks the latest spec (this one)
+
+name: dogfood-083-wp270-per-step-work-unit-chunking
+goal: >
+  Make PER-STEP WORK-UNIT CHUNKING a first-class, OPT-IN durable-loop capability so that a
+  single `chikory run` under an active bounded-work-unit policy advances ONE bounded,
+  dependency-ordered sub-goal per durable step — every sealed checkpoint carrying REAL,
+  DISTINCT product work — instead of the executor front-loading everything into step 1 and
+  the remaining forced steps sealing thin, essentially-unfailable checkpoints (F-100,
+  dogfood-082). WP-269 step-forcing already DEFERS a premature `claimsComplete` and re-enters
+  the durable loop (`decideStepForcing` -> `agent-loop.ts`); this run adds the missing half —
+  telling the executor WHICH bounded increment to do THIS step — additively, on top of it:
+
+    * PART 1 — POLICY EXTENSION: extend the existing OPT-IN bounded-work-unit spec input
+      (`bounded_work_unit` / `BoundedWorkUnitPolicy`, currently only `min_durable_steps` /
+      `minDurableSteps`) with an ADDITIVE, OPTIONAL ordered list of named work-chunks (each a
+      short directive describing one bounded, dependency-ordered sub-goal). Sync it across the
+      spec-input type, the zod schema, and the `bounded_work_unit` YAML->camel mapping, exactly
+      as `min_durable_steps` is wired today. It MUST be optional — a policy with no chunk list
+      behaves exactly as WP-269 does now. Do NOT change the shape of any existing shared
+      contract (`StepRecord`, `JournalEntry`, `Checkpoint`).
+
+    * PART 2 — PURE DECISION: add a pure, deterministic, side-effect-free `decideWorkChunk`
+      function — a sibling of the existing pure decision modules (`decideStepForcing`,
+      `decideContextWindowPacing`) — that, given the current loop state (which/how many chunks
+      have been consumed so far) and the policy's ordered chunk list, returns the NEXT
+      unconsumed chunk's directive to hand the executor THIS step, or signals "all chunks
+      consumed" so completion may proceed. Total function over its inputs: no I/O, no Temporal,
+      no clock. Unit-tested exhaustively (first step -> first chunk; mid-list -> the next
+      unconsumed chunk; all consumed -> allow completion; empty/no chunk list -> never chunk,
+      the WP-269 default is untouched).
+
+    * PART 3 — DURABLE-LOOP WIRE (depends on 1+2): call `decideWorkChunk` in the agent loop's
+      step-forcing path (`src/workflow/agent-loop.ts`) so that, under an active policy WITH a
+      chunk list, each forced step's context carries EXACTLY the next chunk's directive (not the
+      whole goal), and completion is deferred until every chunk has been handed out AND the
+      judge confirms the acceptance criteria. This MUST be additive: with NO chunk list the
+      behavior is byte-for-byte the current WP-269 step-forcing path, and with NO policy at all
+      the default one-shot path is unchanged. Reuse the WP-269 `decideStepForcing` wire and the
+      existing per-step context/`judgeFeedback` mechanism — do NOT re-implement step-forcing.
+
+    * PART 4 — LIVE PROOF (depends on 3): add a LIVE Temporal test that drives ONE real
+      `chikory run` under an active policy whose chunk list has several ordered sub-goals, and
+      asserts BOTH the horizon AND the distribution: the run seals AT LEAST one durable
+      checkpoint per chunk, AND each forced step advanced a DISTINCT chunk (each step's handed
+      directive / produced work is different — a real per-step work surface, NOT a repeated
+      no-op), reaching a SUCCESS terminal state; and asserts that the SAME goal with NO chunk
+      list still seals on the unchanged WP-269 step-forcing path (the additive guarantee).
+      Reuse the existing live-Temporal harness (`createTemporalRunner` / `createRunnerWorker`,
+      the scripted registry + `waitFor` helpers, `describe.skipIf(address === null)`) — do NOT
+      mock the workflow.
+
+  CONSTRAINTS: strict TypeScript, ESM `.js` relative imports, named exports only; NO new
+  dependency; the NO-chunk-list path MUST stay byte-identical to WP-269 step-forcing, and the
+  NO-policy path byte-identical to the default one-shot loop; do NOT change any existing
+  contract or shared type shape (`StepRecord` / `JournalEntry` / `Checkpoint`) — the chunk list
+  is an ADDITIVE OPTIONAL field on the existing `BoundedWorkUnitPolicy`, `decideWorkChunk` is a
+  NEW pure module, the loop edits are additive. Reuse `decideStepForcing` and the existing pure
+  `decide*` module pattern; do NOT re-implement step-forcing or completion detection. Do NOT
+  weaken the WP-123 crash-recovery, WP-206 suspend/resume, or WP-269 step-forcing paths. If a
+  verification step reports a failing test or type error, READ the failure and fix the
+  IMPLEMENTATION — do NOT weaken or delete any assertion.
+
+repos:
+  - url: /Users/nikitazolotarev/repos/chikory
+    writable: true
+
+# The WP-269 lever (HEAD-valid) drives THIS build run's own intra-run horizon: min_durable_steps
+#   forces ≥3 sealed checkpoints, and the directive steers one PART per increment. NOTE: the
+#   NEW `work_chunks` field this run BUILDS is deliberately NOT used in this launch block — it
+#   does not exist in HEAD's `.strict()` bounded_work_unit schema yet, so a launch that referenced
+#   it would be REJECTED at parse time (verified). The chunk-list capability is proven instead by
+#   PART 4's LIVE Temporal test, which constructs a policy WITH a chunk list IN CODE — exactly how
+#   dogfood-081 proved WP-269's policy via an in-test object, not the launch YAML.
+bounded_work_unit:
+  min_durable_steps: 3
+  directive: >
+    Advance EXACTLY the ONE numbered PART named for this increment — no more — then stop and let
+    the durable checkpoint seal. Prefer the next unstarted PART in dependency order (1 policy
+    extension -> 2 pure decideWorkChunk -> 3 loop wire -> 4 live proof). Do NOT front-load later
+    PARTs into an earlier step. Do NOT declare the whole run complete until every PART has landed
+    with its tests and the acceptance criteria pass.
+
+acceptance_criteria:
+  - id: AC-1
+    description: >
+      The pure `decideWorkChunk` decision exists in the workflow source — a side-effect-free
+      total function over loop state + the ordered chunk list. (OUTCOME symbol the goal NAMES —
+      `decideWorkChunk` — absent on HEAD so a recursive grep cannot false-green on an incumbent
+      file, F-90. Module/test layout is the executor's, F-82/F-83.)
+    check: >
+      cd packages/sdk-ts &&
+      grep -rq 'decideWorkChunk' src/workflow/
+
+  - id: AC-2
+    description: >
+      The durable agent loop HONORS the decision — `decideWorkChunk` is called from the loop's
+      step-forcing path so each forced step carries the next chunk's directive. (Same symbol,
+      scoped to the loop file, proving the wire — the def+wire pattern of dogfood-081/082.)
+    check: >
+      cd packages/sdk-ts &&
+      grep -rq 'decideWorkChunk' src/workflow/agent-loop.ts
+
+  - id: AC-3
+    description: >
+      A LIVE Temporal test exercises per-step chunking end-to-end. (F-97-SAFE, dogfood-081
+      lesson: not a bare symbol grep a UNIT test would false-green — it requires a `test/` file
+      that references BOTH the net-new `decideWorkChunk` symbol AND the LIVE runner driver
+      `createRunnerWorker`, so the LIVE per-step-distribution proof is actually enforced. Both
+      are OUTCOME symbols the goal names; the test filename is the executor's, F-82.)
+    check: >
+      cd packages/sdk-ts &&
+      for f in $(grep -rl 'decideWorkChunk' test/ 2>/dev/null); do
+        grep -q 'createRunnerWorker' "$f" && { echo ok; break; };
+      done | grep -q ok
+
+  - id: AC-4
+    description: >
+      The SDK stays type- and lint-clean and the FULL existing suite — including the new
+      chunking unit + live tests — is green, proving chunking is additive and nothing outside it
+      regressed (no contract/`StepRecord`/`Checkpoint` change; the WP-123 crash-recovery, WP-206
+      suspend/resume, and WP-269 step-forcing tests still pass, and the no-chunk-list path is the
+      unchanged WP-269 behavior).
+    check: cd packages/sdk-ts && pnpm exec tsc --noEmit && pnpm exec eslint . && pnpm exec vitest run
+
+budget_usd: 40
+max_steps: 30
+
+executor:
+  adapter: codex
+  family: openai
+
+judge:
+  family: openai-compat
+  cadence: 2
+  max_cost_share: 0.5
+
+routing:
+  stages:
+    plan: { provider: openai-compat, model: gpt-5.5 }
+    code: { provider: openai-compat, model: gpt-5.5 }
+    review: { provider: openai-compat, model: gpt-5.5 }
+    judge: { provider: openai-compat, model: gemini-3.1-pro-preview }
