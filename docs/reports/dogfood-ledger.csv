@@ -1,4 +1,4 @@
-run,wp,mode,outcome,steps,cost_usd,spec_format,class,resumes,judge_catches,rung
+run,wp,mode,outcome,steps,cost_usd,spec_format,class,resumes,judge_catches,rung,rollbacks
 064,WP-254,run,SUCCESS,1,0.0084,prescribed,product,0,0,0
 065,WP-255,run,SUCCESS,1,0.70,prescribed,product,0,0,0
 066,WP-256,chain,FAILED,3,3.76,prescribed,meta,0,0,0

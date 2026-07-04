@@ -14,12 +14,16 @@
 #
 # Data source: docs/reports/dogfood-ledger.csv — one row per terminal run,
 # appended by /dogfood-review phase 4 (columns: run,wp,mode,outcome,steps,
-# cost_usd,spec_format,class,resumes,judge_catches,rung).
+# cost_usd,spec_format,class,resumes,judge_catches,rung,rollbacks).
 #   spec_format: loose (outcome+ACs) | prescribed (diff dictated in goal)
 #   class:       product (router/executors/runner/judge/chain/memory runtime)
 #                | meta (scripts/, examples/dogfood/, launch prechecks,
 #                        spec hygiene, verifier plumbing) — DOGFOODING §1.5
 #   rung:        highest WP-265 horizon-ladder rung this run satisfied (0 = none)
+#   rollbacks:   judge ROLLBACK verdicts in the run (`chikory trace` totals) —
+#                feeds the §1.4 per-step reliability KPI. Rows before dogfood-084
+#                predate the column; they are EXCLUDED from the KPI (not read
+#                as 0 — absence of data is not evidence of reliability).
 #
 # Verdict semantics (binding on /dogfood-review phase 5 and /dogfood-assessor):
 #   ✅ PROGRESSING — the trailing-3 window beats the prior-3 window on at least
@@ -54,7 +58,8 @@ OUT=$(awk -F, '
   NR == 1 { next }
   { n += 1
     run[n]=$1; wp[n]=$2; mode[n]=$3; outcome[n]=$4; steps[n]=$5+0
-    cost[n]=$6+0; fmt[n]=$7; cls[n]=$8; res[n]=$9+0; catch[n]=$10+0; rung[n]=$11+0 }
+    cost[n]=$6+0; fmt[n]=$7; cls[n]=$8; res[n]=$9+0; catch[n]=$10+0; rung[n]=$11+0
+    roll[n] = (NF >= 12) ? $12+0 : -1 }   # -1 = row predates the rollbacks column
   END {
     if (n < 2) { printf "ℹ️  Ledger has <2 rows — no trend yet.\nFLAG:1\n"; exit }
     a0 = (n >= 3) ? n-2 : 1               # trailing-3 window start
@@ -84,8 +89,25 @@ OUT=$(awk -F, '
     printf "\n**Trailing-3 vs prior-3:** max steps %d vs %d · ladder rung %d vs %d · loose specs %d vs %d · resumes %d · harness-meta headlines %d/3\n\n",
       maxA, maxB, rungA, rungB, looseA, looseB, resA, metaA
 
+    # §1.4 per-step reliability — steps sealed without a judge ROLLBACK ÷ total
+    # steps, over runs ≥5 steps that carry rollback data. The thesis number
+    # (target 99%+): computed, not recalled, and honest about missing data.
+    relSteps=0; relRolls=0; relRuns=0
+    for (i = 1; i <= n; i++)
+      if (roll[i] >= 0 && steps[i] >= 5) { relSteps += steps[i]; relRolls += roll[i]; relRuns += 1 }
+    if (relRuns > 0)
+      printf "**Per-step reliability (§1.4):** %.1f%% (%d rollbacks over %d steps, %d runs ≥5 steps) — target 99%%+\n\n",
+        100 * (relSteps - relRolls) / relSteps, relRolls, relSteps, relRuns
+    else
+      printf "**Per-step reliability (§1.4):** unmeasured — no ≥5-step run with rollback data yet (column starts dogfood-084).\n\n"
+
     if (metaA > 1)
       printf "🔴 **CAP BUSTED (DOGFOODING §1.5):** %d harness-meta headlines in the trailing 3 (cap is ≤1). Next headline MUST be class=product.\n\n", metaA
+
+    # §1.5 ladder pace (advisory): steps/resumes can keep PROGRESSING green
+    # while the rung sits still — the second incrementalism era. Flag it.
+    if (n >= 6 && rungA > 0 && rungA <= rungB)
+      printf "⚠️  **LADDER PACE (§1.5):** the rung has not advanced across the trailing 3 headlines (still %d). Next headline should climb rung %d or the review must record why not.\n\n", rungA, rungA + 1
 
     progressing = (maxA > maxB) || (rungA > rungB) || (resA > 0) || (looseA > looseB)
     if (progressing) {

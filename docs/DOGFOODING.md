@@ -114,8 +114,9 @@ triviality and camouflaged F-32). The values are **computed, not recalled**:
 | Max horizon survived | Longest run to a clean terminal state, in executor steps AND wall-clock | ↑ toward the P2 exit gate (24h) |
 | Kill→resume count | Deliberate or genuine crash→`chikory resume` completions | ↑ (≥1 per ladder rung 2+) |
 | Judge true-positives pre-land | Real regressions the judge caught before landing (not seam-armed drills) | ↑ |
+| Judge recall (seam drills) | Drill catches ÷ drills armed, from WP-244 `debug.seedBadDiff` drills (§1.6) | stay at 100% |
 | Meta:product headline ratio | Trailing-3-run ratio of harness-meta headlines to product-WP headlines (§1.5 definition) | ≤ 1:3 |
-| Per-step reliability | Steps sealed without judge intervention ÷ total steps, over runs ≥5 steps, from journals | ↑ toward 99% |
+| Per-step reliability | Steps sealed without a judge ROLLBACK ÷ total steps, over runs ≥5 steps — computed by `dogfood-progression` from the ledger `rollbacks` column (rows from dogfood-084 on; older rows lack the column and are excluded) | ↑ toward 99% |
 | Exit-gate distance | Current ladder rung vs the P2 exit gate | rung number ↑ |
 
 ### 1.5 Friction budget — when new friction may headline a run
@@ -164,6 +165,41 @@ Rationale (course correction 2026-07-02, plan.md §6): runs 060–073 headlined
 friction fixes exclusively while the P2 exit gate went unapproached — prose
 priority rules alone failed twice (dogfood-039/041); enforcement must live in
 executable scripts and the skills that run the process, not in prose alone.
+
+**Ladder pace rule (2026-07-04 assessment): ≤3 headline runs per rung.**
+PROGRESSING can stay green on steps/resumes/looseness while the rung sits
+still — the second incrementalism era in embryo (the first one burned 73 runs
+without touching the exit gate). If the trailing-3 window's max rung does not
+beat the prior-3's, the next headline must climb the next rung, or the review
+must record an explicit one-line justification in the report (a named blocker,
+not "not ready yet"). `dogfood-progression.sh` prints a ⚠️ LADDER PACE
+advisory when this trips; the justification requirement is binding on
+`/dogfood-review` phase 5.
+
+### 1.6 Judge recall drills — measuring the wedge, not assuming it
+
+The judge is the product's differentiator, yet a healthy loop starves it of
+evidence: strong executors one-shot clean, so "judge true-positives pre-land"
+sits at an honest 0 for long stretches and the wedge rests on trust. The
+WP-244 `debug.seedBadDiff` seam (§7) exists precisely to make a catch
+deterministic — use it on a cadence, not just for one-off seam proofs:
+
+- **Trigger:** whenever the trailing **5** headline runs show 0 genuine judge
+  catches, the next suitable headline run is a **drill host**.
+- **How:** arm the seam ON a real product headline (the four
+  `CHIKORY_SEED_BAD_DIFF_*` vars on the launch; per-node via
+  `CHIKORY_SEED_BAD_DIFF_NODE_INDEX` for chains) — never a throwaway utility
+  invented to be broken (the dogfood-046/047/048 anti-pattern, phase-5 rule).
+  Seed at a mid step of the real work, single-line, compiling,
+  behaviourally wrong.
+- **Verify armed** before trusting any result — a disarmed launch greens
+  silently (F-48 checklist in §7: `task_json` must contain `seedBadDiff`;
+  a caught drill takes ≥2 steps on the seeded node).
+- **Record:** the report notes `drill: armed/caught` (or `armed/MISSED` — a
+  missed drill is a 🔴 loop-integrity finding on the judge itself); the KPI
+  is drill catches ÷ drills armed (§1.4). Drill rollbacks DO count in the
+  ledger `rollbacks` column (real judge interventions); drill catches do NOT
+  count in `judge_catches` (genuine true-positives only).
 
 ## 2. One-time setup
 
@@ -566,6 +602,15 @@ doc updates) stays human. A SUCCESS run still gets reviewed: dogfood-002 was
 a first-attempt SUCCESS and produced three plan-changing findings
 (F-8…F-10 → WP-217…WP-220).
 
+**Track-B fixes found in review go out as normal scoped PRs — never by
+re-running an already-terminal spec (F-102, dogfood-083b).** A closed spec's
+run slot belongs to the ladder; re-running it to carry a fix consumes a
+headline slot, widens scope beyond the spec's ACs (F-103), and produces a
+duplicate report. Route: hand-fix in the review sitting (TASK-PROTOCOL §4)
+or a scoped conventional-commit PR citing the F-n; the ONLY sanctioned
+re-run of a terminal spec is when the original run's own delivery is what's
+broken (a false-green, not a follow-on fix).
+
 ## 7. Troubleshooting
 
 | Symptom | Cause → fix |
@@ -614,7 +659,7 @@ a first-attempt SUCCESS and produced three plan-changing findings
 | Live `--watch` shows `verdict ⚠ ESCALATE` and `run is AWAITING_APPROVAL` but no reason | **Fixed by WP-229** (dogfood-018, `run-59115f35`): `followRun` now prints `judge escalated: <reason>` immediately before the AWAITING_APPROVAL line whenever the ESCALATE verdict carries a non-empty `escalateReason`. If you still see no reason, the verdict had an empty `escalateReason` (the line is suppressed by design) — fall back to `pnpm chikory trace <run-id> --step <n>` for the full judge form, or read the `verdict` entry in `.chikory/runs/<run-id>/journal.db`. |
 | A LOOSE run sealed FAILED via the 3-consecutive-AC-fail HALT even though the delivery is complete and AC-2 (build/lint/suite) is GREEN — one AC's grep is unsatisfiable | **The AC grep is testing a substring the delivered CODE legitimately produces, or a file layout the goal delegated** (dogfood-075 **F-82**, dogfood-076 **F-83**). Two shapes: (F-82) `test -f <a-new-file>` for a path the loose goal left to the executor; (F-83) a NEGATIVE grep on a BARE WORD that also appears in comments/strings/prose — dogfood-076's `! grep -Eq 'execFile\|spawn' native.ts` matched the doc comment "…is spawned" even though the code has zero `execFile`/`spawn` calls. Either makes the AC false on correct work → it fails every pass → the budget-waste HALT guard fires (a *true* guard fire on a *false* criterion), and later steps flail against the phantom (dogfood-076 steps 3–4 burned ~37 min and broke AC-2). **Prevention (WP-266, LANDED):** run `bash scripts/dogfood-progression.sh --spec <yaml>` before launching — it ⛔s (exit 3) `test -f`/`test -e` in a loose AC and bare-word negative greps. **Authoring rule:** a loose AC's grep must anchor on an OUTCOME symbol as it appears in CODE — a call form (`grep -E '\bcreateNativeAdapter\('`), a registry key, an import — never a bare word natural language can produce, and never a new-file existence test. **The launcher now REFUSES automatically (WP-267, F-84 — `scripts/dogfood.sh` exits on the lint's exit-3 hazard; override `CHIKORY_ALLOW_LOOSE_AC_HAZARD=1`).** |
 | Codex steps run far past their `maxSeconds` cap (e.g. ~2×) before being killed, recording 0 tokens / $0 / FAILED | Codex ignores the wall-clock deadline / SIGTERM until it is SIGKILLed (dogfood-076 **F-85 → WP-268**, family of F-76/F-80): steps 3 & 4 ran 1057s (1.76×) and 1188s (1.98×) past the 600s step cap. The cap is enforced LATE (~2×). Treat a run whose wall-clock is dominated by hung dead steps as this, not real work — check per-step `dur` in the trace. Durable fix = WP-268 (escalate to SIGKILL of the executor process group at ~1× the cap). Do NOT raise `budget_usd`/`max_steps` mid-run to rescue it. |
-| A `chikory resume <run-id>` appears to hang — the journal is frozen for many minutes and nothing errors, even though the worker is up | **The resumed run lost its judge/router provider config** — `chikory resume` from a shell that did NOT export `OPENAI_COMPAT_BASE_URL` (only `dogfood.sh`'s own shell exports it) starts a judge/router activity with no base URL, and Temporal's activity-retry policy (~65 attempts over ~30 min) loops SILENTLY instead of failing loud (dogfood-082 **F-99**: a step-4 seal stalled ~37 min across the kill→resume boundary purely from this). **`OPENAI_COMPAT_BASE_URL` (and any provider env the spec's `routing` block names) is a RESUME PRECONDITION** — export it before `chikory resume`, or resume from the same shell/`dogfood.sh` context that launched the run. Diagnose a suspected stall: `echo $OPENAI_COMPAT_BASE_URL` (empty = this), and check the worker logs for repeated router-fetch failures. Durable fix (track-B, WP-206-adjacent): a fail-fast resume precondition that validates the configured provider env BEFORE entering the durable retry loop. |
+| A `chikory resume <run-id>` appears to hang — the journal is frozen for many minutes and nothing errors, even though the worker is up | **The resumed run lost its judge/router provider config** — `chikory resume` from a shell that did NOT export `OPENAI_COMPAT_BASE_URL` (only `dogfood.sh`'s own shell exports it) starts a judge/router activity with no base URL, and Temporal's activity-retry policy (~65 attempts over ~30 min) loops SILENTLY instead of failing loud (dogfood-082 **F-99**: a step-4 seal stalled ~37 min across the kill→resume boundary purely from this). **`OPENAI_COMPAT_BASE_URL` (and any provider env the spec's `routing` block names) is a RESUME PRECONDITION** — export it before `chikory resume`, or resume from the same shell/`dogfood.sh` context that launched the run. Diagnose a suspected stall: `echo $OPENAI_COMPAT_BASE_URL` (empty = this), and check the worker logs for repeated router-fetch failures. **F-99 CLOSED 2026-07-04 (track-B PR per the §6.1 routing rule): `cmdResume` now runs `resumeProviderEnvGaps` (`src/cli/commands.ts`) — it reads the spec persisted in the run's journal, checks every routed provider's env var (`missingProviderEnv`, `src/taskspec.ts`), and refuses fast (exit 1, naming each var) BEFORE hosting a worker; fail-open when the journal is missing/unreadable so it can never block a legitimate resume. Unit-tested in `test/cli/resume-env-precheck.test.ts`.** Seeing a silent multi-minute resume stall now is a regression — file it. |
 
 ## 8. Known P1 limitations (so you don't fight them)
 
