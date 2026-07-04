@@ -143,6 +143,7 @@ export async function agentLoop(spec: TaskSpec): Promise<RunStatus> {
   const pendingTopUps: number[] = [];
   const pendingApprovals: ApproveDecision[] = [];
   const checkpoints: Checkpoint[] = [];
+  let consumedWorkChunks = 0;
 
   setHandler(cancelSignal, () => {
     cancelRequested = true;
@@ -362,7 +363,7 @@ export async function agentLoop(spec: TaskSpec): Promise<RunStatus> {
     }
 
     const activeWorkChunk = decideWorkChunk(
-      { consumedChunks: checkpoints.length },
+      { consumedChunks: consumedWorkChunks },
       spec.boundedWorkUnit,
     );
     const stepInstruction =
@@ -484,8 +485,9 @@ export async function agentLoop(spec: TaskSpec): Promise<RunStatus> {
     // Judge on cadence or a completion milestone (JD-2); each pass is one
     // activity (WP-121/131).
     const completionMilestone = isCompletionMilestone(record);
+    const workChunkMilestone = activeWorkChunk.action === "use_chunk";
     let verdict: JudgeVerdict | undefined;
-    if (stepIndex % spec.judge.cadence === 0 || completionMilestone) {
+    if (stepIndex % spec.judge.cadence === 0 || completionMilestone || workChunkMilestone) {
       verdict = await activities.judgeStep({
         runId,
         judgeIndex: judgeIndex++,
@@ -542,6 +544,7 @@ export async function agentLoop(spec: TaskSpec): Promise<RunStatus> {
       sinceCommit = Object.values(checkpoint.gitCommits)[0] ?? sinceCommit;
       if (verdict.kind === "PROCEED") {
         lastGoodCheckpointId = checkpoint.id;
+        if (activeWorkChunk.action === "use_chunk") consumedWorkChunks++;
         // Run-level SUCCESS needs PROCEED *and* every criterion passing — a
         // non-PROCEED verdict with passing criteria (e.g. a secret in the
         // diff) must never seal SUCCESS.
@@ -555,7 +558,7 @@ export async function agentLoop(spec: TaskSpec): Promise<RunStatus> {
           spec.boundedWorkUnit,
         );
         const nextWorkChunk = decideWorkChunk(
-          { consumedChunks: checkpoints.length },
+          { consumedChunks: consumedWorkChunks },
           spec.boundedWorkUnit,
         );
         if (nextWorkChunk.action === "use_chunk") {

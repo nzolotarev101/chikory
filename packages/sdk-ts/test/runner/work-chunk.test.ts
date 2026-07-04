@@ -55,6 +55,9 @@ describe("decideWorkChunk", () => {
     expect(decideWorkChunk({ consumedChunks: 3 }, policy)).toEqual({
       action: "all_chunks_consumed",
     });
+    expect(decideWorkChunk({ consumedChunks: 99 }, policy)).toEqual({
+      action: "all_chunks_consumed",
+    });
   });
 
   test("empty or absent chunk list never chunks and preserves WP-269 default behavior", () => {
@@ -244,6 +247,98 @@ describe.skipIf(address === null)("work-chunk live Temporal proof", () => {
       );
     } finally {
       noChunkJournal.close();
+    }
+  });
+
+  test("retries the same chunk after ROLLBACK instead of skipping ahead", async () => {
+    const chunks = [
+      { name: "parser", directive: "Implement only the parser increment." },
+      { name: "cli", directive: "Wire only the CLI increment." },
+    ];
+
+    const wire = await startFakeJudgeWire([
+      judgeForm({ criteria: { "AC-1": false }, rubricFails: ["no_secrets_introduced"] }),
+      judgeForm({ criteria: { "AC-1": false } }),
+      judgeForm({ criteria: { "AC-1": true } }),
+    ]);
+    cleanups.push(() => wire.close());
+    const run = await setup({
+      judgeWireUrl: wire.url,
+      scriptedConfig: { claimsCompleteSteps: [1, 2], echoJudgeFeedback: true },
+    });
+    const spec = makeJudgedSpec({
+      repoUrl: run.repoUrl,
+      goal: "Complete the scripted surface without skipping rolled-back chunks.",
+      maxSteps: 5,
+      cadence: 10,
+      boundedWorkUnit: { minDurableSteps: chunks.length, workChunks: chunks },
+    });
+
+    const handle = await run.runner.start(spec);
+    const report = await awaitTerminal(handle);
+
+    expect(report.status).toBe("SUCCESS");
+    expect(wire.hits).toBe(3);
+    expect(report.lastVerdict).toEqual({ kind: "PROCEED", atStep: 2 });
+
+    const journal = new Journal(journalPath(run.dataDir, handle.runId));
+    try {
+      const steps = journal.entries("step").map((entry) => entry.payload as StepPayload);
+      expect(steps.map((step) => step.instruction)).toEqual([
+        chunks[0]!.directive,
+        chunks[0]!.directive,
+        chunks[1]!.directive,
+      ]);
+      expect(journal.entries("checkpoint")).toHaveLength(3);
+      expect((journal.entries("terminal")[0]!.payload as { status: string }).status).toBe(
+        "SUCCESS",
+      );
+    } finally {
+      journal.close();
+    }
+  });
+
+  test("advances chunked durable steps even when the executor does not claim completion", async () => {
+    const chunks = [
+      { name: "parser", directive: "Implement only the parser increment." },
+      { name: "cli", directive: "Wire only the CLI increment." },
+    ];
+
+    const wire = await startFakeJudgeWire([judgeForm({ criteria: { "AC-1": true } })]);
+    cleanups.push(() => wire.close());
+    const run = await setup({
+      judgeWireUrl: wire.url,
+      scriptedConfig: {},
+    });
+    const spec = makeJudgedSpec({
+      repoUrl: run.repoUrl,
+      goal: "Complete the scripted surface one bounded chunk at a time.",
+      maxSteps: 4,
+      cadence: 10,
+      boundedWorkUnit: { minDurableSteps: chunks.length, workChunks: chunks },
+    });
+
+    const handle = await run.runner.start(spec);
+    const report = await awaitTerminal(handle);
+
+    expect(report.status).toBe("SUCCESS");
+    expect(report.checkpoints).toHaveLength(chunks.length);
+    expect(report.lastVerdict).toEqual({ kind: "PROCEED", atStep: chunks.length - 1 });
+    expect(wire.hits).toBe(chunks.length);
+
+    const journal = new Journal(journalPath(run.dataDir, handle.runId));
+    try {
+      const steps = journal.entries("step").map((entry) => entry.payload as StepPayload);
+      expect(steps.map((step) => step.instruction)).toEqual(
+        chunks.map((chunk) => chunk.directive),
+      );
+      expect(steps.every((step) => step.record.claimsComplete !== true)).toBe(true);
+      expect(journal.entries("checkpoint")).toHaveLength(chunks.length);
+      expect((journal.entries("terminal")[0]!.payload as { status: string }).status).toBe(
+        "SUCCESS",
+      );
+    } finally {
+      journal.close();
     }
   });
 });

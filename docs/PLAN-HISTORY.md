@@ -4,6 +4,12 @@
 > per-run detail lives in [`docs/reports/`](reports/). Content below was moved
 > verbatim out of the living docs on 2026-07-02 (course correction — plan.md §6).
 
+## Archived 2026-07-04 — displaced by dogfood-083 re-run (`run-03d161e9`, F-101 closure)
+
+Superseded when the dogfood-083 re-run closed F-101 (see `docs/reports/dogfood-083.md` ADDENDUM):
+
+- **(was Top-open-friction / Queue track-B) F-101 latent:** "🟡 F-101 → WP-270-adjacent (NEW, dogfood-083, track-B): the chunk-consumption counter keys on raw `checkpoints.length`, so a ROLLBACK/non-PROCEED chunk step advances the chunk pointer past the reverted chunk (latent — 0 rollbacks this run; self-corrected by the terminal AC gate; consistent with WP-269's floor counter) → count only PROCEED/`lastGood` checkpoints for chunk consumption." Now CLOSED: the re-run replaced `checkpoints.length` with a dedicated `consumedWorkChunks` incremented only on PROCEED + `use_chunk`, plus a `workChunkMilestone` judge-gate and a LIVE scripted-ROLLBACK regression test.
+
 ## Archived 2026-07-04 — displaced by dogfood-083
 
 Displaced from the plan.md "Last 3 runs" / "Queue" / "Top open friction" blocks

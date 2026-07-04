@@ -14,9 +14,9 @@ demanded: opt-in ordered `work_chunks` on `bounded_work_unit` + a pure `decideWo
 wired into `agent-loop.ts` step-forcing, so each forced durable step carries EXACTLY the next chunk's directive instead
 of the whole goal. Additive (no list = byte-for-byte WP-269, no policy = one-shot); frozen contracts held; no new dep;
 LIVE-proven in a real Temporal test (each step's instruction = its ordered chunk, all distinct, none = full goal, distinct
-per-step diffs; the no-chunk-list variant stays on WP-269), 658 tests green; harvest byte-IDENTICAL. 🟡 **F-101 (track-B,
-§8): the chunk counter keys on raw `checkpoints.length`** — a ROLLBACK/non-PROCEED chunk step advances the pointer past
-the reverted chunk (latent, self-corrected by the terminal AC gate) → count only PROCEED checkpoints. ℹ️ the build run
+per-step diffs; the no-chunk-list variant stays on WP-269), 658 tests green; harvest byte-IDENTICAL. ✅ **F-101 CLOSED
+(re-run `run-03d161e9`, un-harvested):** the chunk counter now uses a dedicated PROCEED-gated `consumedWorkChunks` (not raw
+`checkpoints.length`) so a rolled-back chunk is re-handed; LIVE scripted-ROLLBACK regression test, 660 tests green. ℹ️ the build run
 ITSELF front-loaded (F-100 recurred: step 1 = $3.56/20.5KB) because the new field can't be referenced in its own launch
 YAML (HEAD `.strict()` rejects it) — proven in-code. **NEXT: dogfood-084 — the NON-HOLLOW rung-3 horizon on `work_chunks`**
 (a ≥5-step run whose every sealed checkpoint carries a distinct non-trivial diff). See §7 (troubleshooting), §8 (known limitations), §1.5, §1.4, §3.
@@ -572,6 +572,7 @@ a first-attempt SUCCESS and produced three plan-changing findings
 |---|---|
 | `Invalid task spec: provider 'x' … missing env var Y` | Parse-time key validation. Export the key, or use the §3.8 routing workaround for keyless CLI runs. |
 | `Is the Temporal dev server up?` | It isn't. `devbox run temporal-dev`. |
+| A track-B robustness gap (e.g. an F-n queued "track-B, fix pending") tempts you to re-launch the already-green headline spec to fix it | Don't — a re-run of a closed spec consumes a dogfood slot the ladder queue owns and double-counts in the ledger (F-102, dogfood-083 re-run `run-03d161e9` fixed F-101 this way). Land a documented track-B fix as a NORMAL PR against the WP's real code; keep dogfood headlines for the WP-265 ladder rung. (The re-run's fix is legitimate and kept — the process, not the code, is the friction.) |
 | Steps fail instantly, `executor exited with code 1` | Read the failure: `pnpm chikory trace <run-id> --step 1`. Check the executor binary works headless in your env (`codex exec`/`claude -p` smoke test). |
 | Steps fail with a session/usage-limit message | Subscription executor ran dry (dogfood run 1). Reject the escalation, switch `executor` to the other CLI (or API-key auth), relaunch. |
 | Judge checks time out | 120 s/check cap. Bare `pnpm` not `devbox run` (§3.4); split slow suites into a focused test file per criterion. |
@@ -632,16 +633,16 @@ a first-attempt SUCCESS and produced three plan-changing findings
   bounded dependency-ordered sub-goal per step. With NO `work_chunks` the behavior
   is byte-for-byte WP-269 seal-deferral — read that as "N seals," NOT "N failure
   surfaces," and pick a host goal whose FIRST step does the real work.
-- **`work_chunks` counter advances on a ROLLBACK/non-PROCEED step** (F-101 →
-  WP-270-adjacent, dogfood-083, track-B): chunk consumption keys on raw
-  `checkpoints.length`, which increments on every sealed step including one whose
-  judge verdict was `ROLLBACK`. A rolled-back chunk step therefore advances the
-  chunk pointer past the reverted chunk rather than re-handing it. Latent (a
-  chunked run that draws a non-PROCEED verdict on a chunk step); self-corrected by
-  the terminal gate (run-level SUCCESS still requires every AC to pass, so a
-  skipped chunk's missing work fails the final judge — it cannot false-seal
-  SUCCESS). Fix pending: count only PROCEED/`lastGood` checkpoints for chunk
-  consumption.
+- **✅ `work_chunks` counter no longer skips a rolled-back chunk** (F-101 CLOSED,
+  dogfood-083 re-run `run-03d161e9`, un-harvested): chunk consumption previously
+  keyed on raw `checkpoints.length`, which increments on every sealed step
+  including one whose judge verdict was `ROLLBACK`, so a rolled-back chunk step
+  advanced the pointer past the reverted chunk. Fixed: a dedicated
+  `consumedWorkChunks` counter increments ONLY on a PROCEED verdict for a
+  `use_chunk` step, and a `workChunkMilestone` forces a judge pass on each chunk
+  step so the PROCEED-gated counter can advance. LIVE scripted-ROLLBACK
+  regression test asserts step instructions `[chunk0, chunk0, chunk1]` (the
+  reverted chunk is re-issued, not skipped); 660 tests green.
 
 - **No planner for `chikory run`**: every step gets the full `goal` as its
   instruction, plus the last 5 step summaries, judge feedback, and acceptance
