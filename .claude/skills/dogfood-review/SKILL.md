@@ -135,11 +135,12 @@ judgment is yours); each earlier hit became a WP:
    outcome, run-id, landed commit, report link.
 6. **docs/reports/dogfood-ledger.csv** — append THIS run's row (the
    progression gate's data source; mandatory, one row per terminal run):
-   `run,wp,mode,outcome,steps,cost_usd,spec_format,class,resumes,judge_catches,rung`.
+   `run,wp,mode,outcome,steps,cost_usd,spec_format,class,resumes,judge_catches,rung,rollbacks`.
    `spec_format` = `loose`/`prescribed` (what the spec actually was);
    `class` = `product`/`meta` (§1.5 definition, by the deliverable's primary
    surface); `rung` = highest WP-265 ladder rung this run satisfied (0 = none);
-   `judge_catches` = genuine true-positives only (not seam drills).
+   `judge_catches` = genuine true-positives only (not seam drills);
+   `rollbacks` = judge ROLLBACK verdicts from chikory trace totals (seam-drill rollbacks count here; drill catches still excluded from `judge_catches`; pre-084 rows lack the column).
 
 Constraints: never rewrite the `goal`/criteria of a spec that already ran;
 keep `.chikory/runs/<run-id>` (journal + artifacts are the audit trail);
