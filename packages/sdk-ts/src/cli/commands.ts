@@ -20,7 +20,12 @@ import { createTemporalRunner } from "../runner.js";
 import type { AdapterRegistry } from "../runner/activities.js";
 import { journalPath } from "../runner/paths.js";
 import { createRunnerWorker } from "../runner/worker.js";
-import { parseTaskSpec, TaskSpecValidationError } from "../taskspec.js";
+import {
+  missingProviderEnv,
+  parseTaskSpec,
+  TaskSpecValidationError,
+  type MissingProviderEnv,
+} from "../taskspec.js";
 import type { RunHandle, RunStatus, RunStatusReport, TaskSpec } from "../types.js";
 import { parseBranchTarget, type BranchTarget } from "./branch-target.js";
 import { evaluateSpecStalenessPrecheck } from "./spec-staleness-precheck.js";
@@ -63,6 +68,8 @@ export interface CliDeps {
   err?: (line: string) => void;
   /** Status/journal poll cadence for run/resume/--watch. */
   pollIntervalMs?: number;
+  /** Env override for the F-99 resume provider-env precondition (tests). */
+  env?: Record<string, string | undefined>;
 }
 
 export interface CommonFlags {
@@ -379,11 +386,57 @@ export async function cmdRun(
   }
 }
 
+/**
+ * F-99 resume precondition: a run's routed provider env (e.g.
+ * `OPENAI_COMPAT_BASE_URL` for the judge proxy) is NOT persisted with the run —
+ * resuming from a shell that never exported it starts activities that loop
+ * silently in Temporal's retry policy for ~30 min instead of failing. Validate
+ * against the spec persisted in the run's journal BEFORE hosting a worker.
+ * Fail-open: a missing/unreadable journal never blocks a legitimate resume.
+ */
+export function resumeProviderEnvGaps(
+  dataDir: string,
+  runId: string,
+  env: Record<string, string | undefined>,
+): MissingProviderEnv[] {
+  const path = journalPath(dataDir, runId);
+  if (!existsSync(path)) return [];
+  try {
+    const journal = new Journal(path);
+    try {
+      const run = journal.getRun();
+      return run ? missingProviderEnv(run.task, env) : [];
+    } finally {
+      journal.close();
+    }
+  } catch {
+    return [];
+  }
+}
+
 export async function cmdResume(
   args: { runId: string; addBudgetUsd?: number; watch: boolean } & CommonFlags,
   deps: CliDeps = {},
 ): Promise<number> {
   const ioPair = io(deps);
+  // Injected adapters/router (test seams) replace the components that consume
+  // provider env — the precondition only applies to the production wiring.
+  const seamInjected = deps.adapters !== undefined || deps.routerOptions !== undefined;
+  const gaps = seamInjected
+    ? []
+    : resumeProviderEnvGaps(args.dataDir, args.runId, deps.env ?? process.env);
+  if (gaps.length > 0) {
+    ioPair.err(
+      `chikory: cannot resume ${args.runId} — this run routes through provider(s) whose env is not set (F-99):`,
+    );
+    for (const gap of gaps) {
+      ioPair.err(`  provider '${gap.provider}' requires ${gap.envVar}`);
+    }
+    ioPair.err(
+      `export the variable(s) above (or resume from the shell that launched the run, e.g. dogfood.sh), then retry — otherwise judge/router activities retry silently for ~30 min instead of failing.`,
+    );
+    return 1;
+  }
   try {
     return await hostAndFollow(args, args.watch, deps, ioPair, (runner) =>
       runner.resume(

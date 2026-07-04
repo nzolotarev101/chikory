@@ -53,6 +53,37 @@ export function defaultPolicy(executorFamily: LLMProvider, judgeFamily?: LLMProv
   };
 }
 
+export interface MissingProviderEnv {
+  provider: LLMProvider;
+  envVar: string;
+}
+
+/**
+ * Providers a spec routes through (stages + failover + judge family) whose
+ * required env var (§9.3) is absent. Shared by parse-time validation and the
+ * F-99 resume precondition — a resume from a shell that never exported the
+ * judge/router env must fail fast, not loop silently in activity retries.
+ */
+export function missingProviderEnv(
+  spec: TaskSpec,
+  env: Record<string, string | undefined>,
+): MissingProviderEnv[] {
+  const providers = new Set<LLMProvider>();
+  for (const stage of Object.keys(spec.routing.stages) as Stage[]) {
+    providers.add(spec.routing.stages[stage].provider);
+  }
+  for (const list of Object.values(spec.routing.failover ?? {})) {
+    for (const choice of list ?? []) providers.add(choice.provider);
+  }
+  providers.add(spec.judge.family);
+  const missing: MissingProviderEnv[] = [];
+  for (const provider of providers) {
+    const envVar = PROVIDER_ENV_VARS[provider];
+    if (!env[envVar]) missing.push({ provider, envVar });
+  }
+  return missing;
+}
+
 export class TaskSpecValidationError extends Error {
   constructor(public readonly issues: string[]) {
     super(`Invalid task spec:\n${issues.map((i) => `  - ${i}`).join("\n")}`);
@@ -244,19 +275,8 @@ export function parseTaskSpec(yamlText: string, opts: ParseTaskSpecOptions = {})
   }
 
   // §9 rule 3 — every routed provider configured in env; fail fast naming the var.
-  const providers = new Set<LLMProvider>();
-  for (const stage of Object.keys(spec.routing.stages) as Stage[]) {
-    providers.add(spec.routing.stages[stage].provider);
-  }
-  for (const list of Object.values(spec.routing.failover ?? {})) {
-    for (const choice of list ?? []) providers.add(choice.provider);
-  }
-  providers.add(spec.judge.family);
-  for (const provider of providers) {
-    const envVar = PROVIDER_ENV_VARS[provider];
-    if (!env[envVar]) {
-      issues.push(`provider '${provider}' is routed but not configured: missing env var ${envVar}`);
-    }
+  for (const { provider, envVar } of missingProviderEnv(spec, env)) {
+    issues.push(`provider '${provider}' is routed but not configured: missing env var ${envVar}`);
   }
 
   if (issues.length > 0) throw new TaskSpecValidationError(issues);
