@@ -146,6 +146,10 @@ class PacingPolicy(ContractModel):
     mode: Literal["auto", "fixed"]
 
 
+class UnattendedPolicy(ContractModel):
+    escalation: Literal["await_approval", "seal_resumable_failed"]
+
+
 class NotificationPolicy(ContractModel):
     on: list[Literal["escalate", "milestone", "terminal"]]
     slack_webhook_env: str | None = None
@@ -193,6 +197,7 @@ class TaskSpec(ContractModel):
     judge: JudgePolicy
     routing: RoutingPolicy
     pacing: PacingPolicy | None = None
+    unattended: UnattendedPolicy | None = None
     notifications: NotificationPolicy | None = None
     chain_link: ChainLink | None = None
 

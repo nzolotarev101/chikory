@@ -168,6 +168,8 @@ export interface RunJudgePassInput {
   /** Per-criterion pass booleans from previous verdicts, oldest first. */
   criteriaHistory: Record<string, boolean[]>;
   stepSummaries: string[];
+  /** Current bounded work chunk directive for this judge pass, when this step used one. */
+  activeWorkChunkDirective?: string;
   lastGoodCheckpointId?: CheckpointId;
   rubric?: RubricItem[];
   checkTimeoutMs?: number;
@@ -206,6 +208,9 @@ export async function runJudgePass(input: RunJudgePassInput): Promise<JudgePassR
       newDependencyLabels: collected.newDependencyLabels,
       architectureLabels: collected.architectureLabels,
       checkRuns: collected.checkRuns,
+      ...(input.activeWorkChunkDirective !== undefined
+        ? { activeWorkChunkDirective: input.activeWorkChunkDirective }
+        : {}),
     }),
     temperature: 0,
     responseSchema: JUDGE_FORM_RESPONSE_SCHEMA,

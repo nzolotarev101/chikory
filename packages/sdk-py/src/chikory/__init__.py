@@ -40,6 +40,7 @@ from .types import (
     TerminalStatus,
     TestResultArtifact,
     TokenUsage,
+    UnattendedPolicy,
     VerdictKind,
 )
 
@@ -84,6 +85,7 @@ __all__ = [
     "TerminalStatus",
     "TestResultArtifact",
     "TokenUsage",
+    "UnattendedPolicy",
     "VerdictKind",
     "advance_chain",
     "branch_name_for_target",

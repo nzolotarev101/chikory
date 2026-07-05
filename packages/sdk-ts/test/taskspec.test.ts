@@ -79,6 +79,19 @@ bounded_work_unit:
     });
   });
 
+  it("maps optional unattended escalation policy from YAML to camel-case policy input", () => {
+    const spec = parseTaskSpec(
+      `${read("valid-minimal.yaml")}
+unattended:
+  escalation: seal_resumable_failed
+`,
+      { env },
+    );
+
+    expect(TaskSpecSchema.safeParse(spec).success).toBe(true);
+    expect(spec.unattended).toEqual({ escalation: "seal_resumable_failed" });
+  });
+
   it("applies defaults when optional fields are omitted (minimal spec)", () => {
     const spec = parseTaskSpec(read("valid-minimal.yaml"), { env });
     expect(TaskSpecSchema.safeParse(spec).success).toBe(true);

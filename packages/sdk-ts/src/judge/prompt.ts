@@ -103,6 +103,18 @@ function renderArchitectureLabels(labels: string[]): string {
   return labels.map((label) => `- ${label}`).join("\n");
 }
 
+export function renderActiveWorkChunkScope(directive?: string): string {
+  if (directive === undefined) return "";
+  return [
+    "## ACTIVE WORK CHUNK (this step's scope)",
+    directive,
+    "",
+    "Judge this pass against the active work chunk above. Later parts of the",
+    "overall goal that are absent from THIS step's diff are DEFERRED BY DESIGN",
+    "and must NOT be treated as omissions for this judge pass.",
+  ].join("\n");
+}
+
 function renderHistory(history: Record<string, boolean[]>): string {
   const entries = Object.entries(history).filter(([, h]) => h.length > 0);
   if (entries.length === 0) return "(first judge pass of this run)";
@@ -141,12 +153,15 @@ export interface JudgePromptInput {
   newDependencyLabels: string[];
   architectureLabels: string[];
   checkRuns: CheckRun[];
+  activeWorkChunkDirective?: string;
 }
 
 export function buildJudgeMessages(input: JudgePromptInput): Message[] {
+  const activeWorkChunkScope = renderActiveWorkChunkScope(input.activeWorkChunkDirective);
   const user = [
     "## GOAL the executor was given",
     input.goal,
+    ...(activeWorkChunkScope.length > 0 ? ["", activeWorkChunkScope] : []),
     "",
     "## ACCEPTANCE CRITERIA (fill `criterionResults`, one entry per id)",
     renderCriteria(input.evidence.criteria),

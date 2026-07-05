@@ -55,6 +55,7 @@ import type {
 } from "../types.js";
 import { shouldPointerize, type MemoryPointerPolicy } from "../runner/memory-pointer.js";
 import { isCompletionMilestone } from "./judge-trigger.js";
+import { decideEscalationWait } from "./escalation-wait.js";
 import { decideStepForcing } from "./step-forcing.js";
 import { decideWorkChunk } from "./work-chunk.js";
 
@@ -494,6 +495,9 @@ export async function agentLoop(spec: TaskSpec): Promise<RunStatus> {
         atStep: stepIndex - 1,
         criteria: spec.acceptanceCriteria,
         sinceCommit,
+        ...(activeWorkChunk.action === "use_chunk"
+          ? { activeWorkChunkDirective: activeWorkChunk.chunk.directive }
+          : {}),
         lastGoodCheckpointId,
       });
       spentUsd += verdict.costUsd;
@@ -577,6 +581,13 @@ export async function agentLoop(spec: TaskSpec): Promise<RunStatus> {
         judgeFeedback = verdict.rationale;
       } else if (verdict.kind === "ESCALATE") {
         judgeFeedback = verdict.rationale;
+        const escalationWait = decideEscalationWait(
+          { source: "judge", reason: verdict.escalateReason ?? verdict.rationale },
+          spec.unattended,
+        );
+        if (escalationWait.action === "seal_resumable_failed") {
+          return seal("FAILED", escalationWait.failureReason);
+        }
         status = "AWAITING_APPROVAL";
         await condition(() => pendingApprovals.length > 0 || cancelRequested);
         if (cancelRequested) return seal("CANCELLED", "cancelled while awaiting approval");
@@ -601,6 +612,13 @@ export async function agentLoop(spec: TaskSpec): Promise<RunStatus> {
         atStep: stepIndex - 1,
         reason,
       });
+      const escalationWait = decideEscalationWait(
+        { source: "runner", reason },
+        spec.unattended,
+      );
+      if (escalationWait.action === "seal_resumable_failed") {
+        return seal("FAILED", escalationWait.failureReason);
+      }
       status = "AWAITING_APPROVAL";
       await condition(() => pendingApprovals.length > 0 || cancelRequested);
       if (cancelRequested) return seal("CANCELLED", "cancelled while awaiting approval");

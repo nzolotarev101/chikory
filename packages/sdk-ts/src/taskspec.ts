@@ -152,6 +152,12 @@ const RawTaskSpecYaml = z
       .strict()
       .optional(),
     pacing: z.object({ mode: z.enum(["auto", "fixed"]) }).strict().optional(),
+    unattended: z
+      .object({
+        escalation: z.enum(["await_approval", "seal_resumable_failed"]),
+      })
+      .strict()
+      .optional(),
     bounded_work_unit: z
       .object({
         min_durable_steps: z.number().int().positive(),
@@ -229,6 +235,7 @@ export function parseTaskSpec(yamlText: string, opts: ParseTaskSpecOptions = {})
     },
     routing: raw.routing ?? defaultPolicy(raw.executor.family, raw.judge.family),
     pacing: raw.pacing,
+    unattended: raw.unattended,
     boundedWorkUnit: raw.bounded_work_unit
       ? {
           minDurableSteps: raw.bounded_work_unit.min_durable_steps,

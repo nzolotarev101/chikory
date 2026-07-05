@@ -26,6 +26,7 @@ export {
   buildJudgeMessages,
   JUDGE_FORM_RESPONSE_SCHEMA,
   JUDGE_SYSTEM_PROMPT,
+  renderActiveWorkChunkScope,
   type JudgePromptInput,
 } from "./prompt.js";
 export { RUBRIC_TESTS_PASS, STANDING_RUBRIC, type RubricItem } from "./rubric.js";

@@ -245,6 +245,24 @@ describe.skipIf(address === null)("verdict gating (WP-132)", () => {
     expect(verdictKinds(dataDir, handle.runId)).toEqual(["ESCALATE"]);
   });
 
+  test("unattended ESCALATE seals FAILED on a resumable checkpoint instead of awaiting approval", async () => {
+    const wire = await startFakeJudgeWire([
+      judgeForm({ criteria: { "AC-1": false }, concerns: ["chunk scope is ambiguous"] }),
+    ]);
+    const { dataDir, handle } = await run(wire, {
+      unattended: { escalation: "seal_resumable_failed" },
+    });
+
+    const report = await awaitTerminal(handle);
+
+    expect(report.status).toBe("FAILED");
+    expect(report.failure?.reason).toContain("unattended judge escalation");
+    expect(report.failure?.reason).toContain("chunk scope is ambiguous");
+    expect(report.checkpoints).toHaveLength(1);
+    expect(report.failure?.lastCheckpoint).toBe(report.checkpoints[0]!.id);
+    expect(verdictKinds(dataDir, handle.runId)).toEqual(["ESCALATE"]);
+  });
+
   test("JD-4 end-to-end: judge-executed check overrides a lying form; run seals SUCCESS only via PROCEED", async () => {
     // The form claims AC-1 fails, but the judge RUNS the check itself —
     // step 1 wrote step-1.txt, the check exits 0, the override flips it.

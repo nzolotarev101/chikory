@@ -43,6 +43,7 @@ import type {
   TaskSpec,
   TestResultArtifact,
   TokenUsage,
+  UnattendedPolicy,
   WorkChunk,
 } from "./types.js";
 
@@ -164,6 +165,12 @@ export const PacingPolicySchema = z
   })
   .strict();
 
+export const UnattendedPolicySchema = z
+  .object({
+    escalation: z.enum(["await_approval", "seal_resumable_failed"]),
+  })
+  .strict();
+
 export const WorkChunkSchema: z.ZodType<WorkChunk> = z
   .object({
     name: z.string().min(1),
@@ -236,6 +243,7 @@ export const TaskSpecSchema = z
     judge: JudgePolicySchema,
     routing: RoutingPolicySchema,
     pacing: PacingPolicySchema.optional(),
+    unattended: UnattendedPolicySchema.optional(),
     boundedWorkUnit: BoundedWorkUnitPolicySchema.optional(),
     notifications: NotificationPolicySchema.optional(),
     chainLink: ChainLinkSchema.optional(),
@@ -566,6 +574,7 @@ export type ContractTypeChecks = [
   AssertAccepts<AcceptanceCriterion, z.infer<typeof AcceptanceCriterionSchema>>,
   AssertAccepts<JudgePolicy, z.infer<typeof JudgePolicySchema>>,
   AssertAccepts<PacingPolicy, z.infer<typeof PacingPolicySchema>>,
+  AssertAccepts<UnattendedPolicy, z.infer<typeof UnattendedPolicySchema>>,
   AssertAccepts<NotificationPolicy, z.infer<typeof NotificationPolicySchema>>,
   AssertAccepts<StepInput, z.infer<typeof StepInputSchema>>,
   AssertAccepts<StepLimits, z.infer<typeof StepLimitsSchema>>,
@@ -603,6 +612,7 @@ export const contractSchemas = {
   AcceptanceCriterion: AcceptanceCriterionSchema,
   JudgePolicy: JudgePolicySchema,
   PacingPolicy: PacingPolicySchema,
+  UnattendedPolicy: UnattendedPolicySchema,
   NotificationPolicy: NotificationPolicySchema,
   StepInput: StepInputSchema,
   StepLimits: StepLimitsSchema,

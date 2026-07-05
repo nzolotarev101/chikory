@@ -326,4 +326,41 @@ describe.skipIf(address === null)("budget gate + terminal states (WP-124)", () =
       journal.close();
     }
   });
+
+  test("unattended loop-breaker ESCALATE seals FAILED instead of awaiting approval", async () => {
+    const { repoUrl, dataDir, runner } = await setup({ failAll: true });
+    const spec = makeSpec({
+      repoUrl,
+      maxSteps: 20,
+      judge: { family: "gemini", cadence: 50 },
+      unattended: { escalation: "seal_resumable_failed" },
+    });
+
+    const handle = await runner.start(spec);
+    const finished = await awaitStatus(
+      handle,
+      (r) => TERMINAL_STATUSES.includes(r.status),
+      "unattended escalation terminal",
+    );
+
+    expect(finished.status).toBe("FAILED");
+    expect(finished.currentStep).toBe(3);
+    expect(finished.failure?.reason).toContain("unattended runner escalation");
+    expect(finished.failure?.reason).toContain("3 consecutive steps");
+    expect(finished.failure?.lastCheckpoint).toBe(`${handle.runId}@${finished.checkpoints[2]!.journalIdx}`);
+
+    const journal = new Journal(journalPath(dataDir, handle.runId));
+    try {
+      expect(journal.entries("step")).toHaveLength(3);
+      const verdicts = journal.entries("verdict");
+      expect(verdicts).toHaveLength(1);
+      const payload = verdicts[0]!.payload as { source: string; verdict: { kind: string } };
+      expect(payload.source).toBe("runner");
+      expect(payload.verdict.kind).toBe("ESCALATE");
+      const terminal = journal.entries("terminal")[0]!.payload as { status: string };
+      expect(terminal.status).toBe("FAILED");
+    } finally {
+      journal.close();
+    }
+  });
 });

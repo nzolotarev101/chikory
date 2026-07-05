@@ -496,6 +496,8 @@ export function createRunnerActivities(deps: RunnerActivityDeps) {
       criteria: AcceptanceCriterion[];
       /** Diff base: checkpoint commit covering the previous verdict (or run base). */
       sinceCommit: string;
+      /** Current bounded work chunk directive for this judge pass, when this step used one. */
+      activeWorkChunkDirective?: string;
       /** ROLLBACK target; absent → `<runId>@base`. */
       lastGoodCheckpointId?: CheckpointId;
     }): Promise<JudgeVerdict> {
@@ -572,6 +574,9 @@ export function createRunnerActivities(deps: RunnerActivityDeps) {
             repoDiffBases,
             criteriaHistory,
             stepSummaries,
+            ...(input.activeWorkChunkDirective !== undefined
+              ? { activeWorkChunkDirective: input.activeWorkChunkDirective }
+              : {}),
             lastGoodCheckpointId: input.lastGoodCheckpointId,
           });
           verdict = pass.verdict;

@@ -40,6 +40,7 @@ from chikory.types import (
     StepRecord,
     TaskSpec,
     TokenUsage,
+    UnattendedPolicy,
 )
 from chikory.types import (
     TestResultArtifact as ContractTestResultArtifact,
@@ -76,6 +77,7 @@ MODELS: dict[str, ModelType] = {
         TaskSpec,
         ContractTestResultArtifact,
         TokenUsage,
+        UnattendedPolicy,
         PlanNode,
         Plan,
         PlanVerdict,

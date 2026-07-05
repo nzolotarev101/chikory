@@ -91,6 +91,8 @@ export interface TaskSpec {
   routing: RoutingPolicy;
   /** P2 (WP-207); absent = fixed defaults. */
   pacing?: PacingPolicy;
+  /** Opt-in unattended behavior; absent = HITL approval waits unchanged. */
+  unattended?: UnattendedPolicy;
   /** Opt-in intra-run durable checkpoint floor; absent = default one-shot behavior. */
   boundedWorkUnit?: BoundedWorkUnitPolicy;
   /** P2 (WP-208). */
@@ -171,6 +173,15 @@ export interface JudgePolicy {
 /** P2 (WP-207) — reserved; shape finalized after dogfood-001 data. */
 export interface PacingPolicy {
   mode: "auto" | "fixed";
+}
+
+export interface UnattendedPolicy {
+  /**
+   * ESCALATE handling for runs without an operator watching. Default/absent
+   * keeps the existing HITL approval wait; the opt-in value seals FAILED after
+   * the current checkpoint, which is the runner's resumable terminal state.
+   */
+  escalation: "await_approval" | "seal_resumable_failed";
 }
 
 export interface BoundedWorkUnitPolicy {

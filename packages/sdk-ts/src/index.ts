@@ -160,6 +160,11 @@ export {
   type WorkspaceRepos,
 } from "./runner/workspace-repos.js";
 export {
+  decideEscalationWait,
+  type EscalationWaitDecision,
+  type EscalationWaitState,
+} from "./workflow/escalation-wait.js";
+export {
   decideStepForcing,
   type StepForcingDecision,
   type StepForcingState,

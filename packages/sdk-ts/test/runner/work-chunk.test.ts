@@ -7,16 +7,20 @@ import { afterEach, describe, expect, inject, test } from "vitest";
 
 import {
   artifactsDir,
+  buildJudgeMessages,
   createLocalArtifactStore,
   createRunnerWorker,
   createTemporalRunner,
   decideWorkChunk,
   Journal,
   journalPath,
+  renderActiveWorkChunkScope,
   type Checkpoint,
   type ContextBundle,
+  type JudgePromptInput,
   type RunStatusReport,
   type StepPayload,
+  type VerdictPayload,
 } from "../../src/index.js";
 import type { BoundedWorkUnitPolicy } from "../../src/types.js";
 import {
@@ -123,6 +127,49 @@ describe("decideWorkChunk", () => {
   });
 });
 
+describe("renderActiveWorkChunkScope", () => {
+  function promptInput(): JudgePromptInput {
+    return {
+      goal: "Build parser, CLI, and tests.",
+      evidence: {
+        criteria: [{ id: "AC-1", description: "all work is complete" }],
+        diffRefs: [],
+        stepSummaries: [],
+        criteriaHistory: {},
+        artifacts: [],
+      },
+      rubric: [],
+      diffText: "",
+      secretScanLabels: [],
+      newDependencyLabels: [],
+      architectureLabels: [],
+      checkRuns: [],
+    };
+  }
+
+  test("omits the active chunk section when no directive is defined", () => {
+    expect(renderActiveWorkChunkScope()).toBe("");
+    expect(buildJudgeMessages(promptInput())).toEqual(
+      buildJudgeMessages({ ...promptInput(), activeWorkChunkDirective: undefined }),
+    );
+  });
+
+  test("renders the active chunk scope and deferred-by-design instruction", () => {
+    const rendered = renderActiveWorkChunkScope("Implement only the parser increment.");
+
+    expect(rendered).toContain("## ACTIVE WORK CHUNK (this step's scope)");
+    expect(rendered).toContain("Implement only the parser increment.");
+    expect(rendered).toContain("DEFERRED BY DESIGN");
+    expect(rendered).toContain("must NOT be treated as omissions");
+
+    const userMessage = buildJudgeMessages({
+      ...promptInput(),
+      activeWorkChunkDirective: "Implement only the parser increment.",
+    }).find((message) => message.role === "user");
+    expect(userMessage?.content).toContain(rendered);
+  });
+});
+
 const address = inject("temporalAddress");
 const bundlePath = inject("workflowBundlePath");
 
@@ -172,6 +219,22 @@ describe.skipIf(address === null)("work-chunk live Temporal proof", () => {
     );
   }
 
+  function judgeUserContent(requestBody: string): string {
+    const wire = JSON.parse(requestBody) as { messages: Array<{ role: string; content: string }> };
+    return wire.messages.find((message) => message.role === "user")?.content ?? "";
+  }
+
+  function verdictKinds(dataDir: string, runId: string): string[] {
+    const journal = new Journal(journalPath(dataDir, runId));
+    try {
+      return journal
+        .entries("verdict")
+        .map((entry) => (entry.payload as VerdictPayload).verdict.kind);
+    } finally {
+      journal.close();
+    }
+  }
+
   test("hands one distinct ordered chunk to each forced durable step, while no chunk list stays on WP-269", async () => {
     const fullGoal =
       "Complete the scripted product surface in three dependency-ordered increments.";
@@ -206,6 +269,11 @@ describe.skipIf(address === null)("work-chunk live Temporal proof", () => {
     expect(chunkedReport.checkpoints.length).toBeGreaterThanOrEqual(chunks.length);
     expect(chunkedReport.lastVerdict).toEqual({ kind: "PROCEED", atStep: chunks.length - 1 });
     expect(chunkedWire.hits).toBe(chunks.length);
+    expect(chunkedWire.requests).toHaveLength(chunks.length);
+    const firstJudgePrompt = judgeUserContent(chunkedWire.requests[0]!);
+    expect(firstJudgePrompt).toContain(renderActiveWorkChunkScope(chunks[0]!.directive));
+    expect(firstJudgePrompt).toContain("DEFERRED BY DESIGN");
+    expect(firstJudgePrompt).toContain("must NOT be treated as omissions");
 
     const directives = chunks.map((chunk) => chunk.directive);
     const chunkedJournal = new Journal(journalPath(chunked.dataDir, chunkedHandle.runId));
@@ -399,5 +467,127 @@ describe.skipIf(address === null)("work-chunk live Temporal proof", () => {
     } finally {
       journal.close();
     }
+  });
+
+  test("scopes early deferred chunk work to PROCEED while preserving no-active and genuine escalate paths", async () => {
+    const goal = "Ship parser and CLI support with focused regression coverage.";
+    const chunks = [
+      {
+        name: "early-parser",
+        directive:
+          "Implement only parser support now. Defer CLI wiring and regression coverage to later chunks.",
+      },
+      {
+        name: "later-cli",
+        directive: "Wire only the CLI support that consumes the parser from the previous chunk.",
+      },
+    ];
+
+    const deferredWire = await startFakeJudgeWire([
+      judgeForm({ criteria: { "AC-1": true } }),
+    ]);
+    cleanups.push(() => deferredWire.close());
+    const deferred = await setup({
+      judgeWireUrl: deferredWire.url,
+      scriptedConfig: { claimsCompleteSteps: [1, 2], echoJudgeFeedback: true },
+    });
+    const deferredSpec = makeJudgedSpec({
+      repoUrl: deferred.repoUrl,
+      goal,
+      maxSteps: 4,
+      cadence: 10,
+      boundedWorkUnit: { minDurableSteps: chunks.length, workChunks: chunks },
+    });
+
+    const deferredHandle = await deferred.runner.start(deferredSpec);
+    const deferredReport = await awaitTerminal(deferredHandle);
+
+    expect(deferredReport.status).toBe("SUCCESS");
+    expect(deferredReport.status).not.toBe("AWAITING_APPROVAL");
+    expect(deferredReport.lastVerdict).toEqual({ kind: "PROCEED", atStep: chunks.length - 1 });
+    expect(verdictKinds(deferred.dataDir, deferredHandle.runId)).toEqual(["PROCEED", "PROCEED"]);
+    expect(deferredWire.hits).toBe(chunks.length);
+    const firstDeferredPrompt = judgeUserContent(deferredWire.requests[0]!);
+    expect(firstDeferredPrompt).toContain(renderActiveWorkChunkScope(chunks[0]!.directive));
+    expect(firstDeferredPrompt).toContain("Defer CLI wiring and regression coverage");
+    expect(firstDeferredPrompt).toContain("DEFERRED BY DESIGN");
+
+    const baselineWire = await startFakeJudgeWire([
+      judgeForm({ criteria: { "AC-1": true } }),
+    ]);
+    cleanups.push(() => baselineWire.close());
+    const baseline = await setup({
+      judgeWireUrl: baselineWire.url,
+      scriptedConfig: { claimsCompleteSteps: [1] },
+    });
+    const baselineHandle = await baseline.runner.start(
+      makeJudgedSpec({
+        repoUrl: baseline.repoUrl,
+        goal,
+        maxSteps: 2,
+        cadence: 10,
+      }),
+    );
+    const baselineReport = await awaitTerminal(baselineHandle);
+
+    const noActiveWire = await startFakeJudgeWire([
+      judgeForm({ criteria: { "AC-1": true } }),
+    ]);
+    cleanups.push(() => noActiveWire.close());
+    const noActive = await setup({
+      judgeWireUrl: noActiveWire.url,
+      scriptedConfig: { claimsCompleteSteps: [1] },
+    });
+    const noActiveHandle = await noActive.runner.start(
+      makeJudgedSpec({
+        repoUrl: noActive.repoUrl,
+        goal,
+        maxSteps: 2,
+        cadence: 10,
+        boundedWorkUnit: { minDurableSteps: 1 },
+      }),
+    );
+    const noActiveReport = await awaitTerminal(noActiveHandle);
+
+    expect(baselineReport.status).toBe("SUCCESS");
+    expect(noActiveReport.status).toBe("SUCCESS");
+    expect(baselineReport.lastVerdict).toEqual(noActiveReport.lastVerdict);
+    expect(judgeUserContent(noActiveWire.requests[0]!)).toBe(
+      judgeUserContent(baselineWire.requests[0]!),
+    );
+    expect(judgeUserContent(noActiveWire.requests[0]!)).not.toContain(
+      "## ACTIVE WORK CHUNK (this step's scope)",
+    );
+
+    const escalateWire = await startFakeJudgeWire([
+      judgeForm({
+        criteria: { "AC-1": false },
+        concerns: ["real security review blocker in the parser chunk"],
+      }),
+    ]);
+    cleanups.push(() => escalateWire.close());
+    const escalate = await setup({
+      judgeWireUrl: escalateWire.url,
+      scriptedConfig: { claimsCompleteSteps: [1] },
+    });
+    const escalateHandle = await escalate.runner.start(
+      makeJudgedSpec({
+        repoUrl: escalate.repoUrl,
+        goal,
+        maxSteps: 3,
+        cadence: 10,
+        boundedWorkUnit: { minDurableSteps: chunks.length, workChunks: chunks },
+        unattended: { escalation: "seal_resumable_failed" },
+      }),
+    );
+    const escalateReport = await awaitTerminal(escalateHandle);
+
+    expect(escalateReport.status).toBe("FAILED");
+    expect(escalateReport.failure?.reason).toContain("unattended judge escalation");
+    expect(escalateReport.failure?.reason).toContain("real security review blocker");
+    expect(escalateReport.checkpoints).toHaveLength(1);
+    expect(escalateReport.failure?.lastCheckpoint).toBe(escalateReport.checkpoints[0]!.id);
+    expect(escalateReport.lastVerdict).toEqual({ kind: "ESCALATE", atStep: 0 });
+    expect(verdictKinds(escalate.dataDir, escalateHandle.runId)).toEqual(["ESCALATE"]);
   });
 });
