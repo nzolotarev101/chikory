@@ -1,0 +1,28 @@
+name: cleanup-cache
+
+on:
+  schedule:
+    - cron: '0 0 * * *' # Run daily at midnight UTC
+  workflow_dispatch:      # Enable manual triggering
+
+permissions:
+  actions: write
+
+jobs:
+  cleanup:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Delete caches older than today
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          # Retrieve all cache IDs created before the start of today in UTC
+          ids=$(gh cache list --limit 100 --json id,createdAt --jq '.[] | select(.createdAt < (now | strftime("%Y-%m-%dT00:00:00Z"))) | .id')
+          if [ -n "$ids" ]; then
+            echo "Deleting the following old caches:"
+            echo "$ids"
+            echo "$ids" | xargs -I {} gh cache delete {}
+          else
+            echo "No caches older than today found."
+          fi
