@@ -5,20 +5,21 @@ This is the complete operating manual for executing Phase 2+ work packages
 task spec for a WP (every field explained), how to launch, supervise, and
 recover a run, and how to land the result as a normal PR.
 
-**Status (2026-07-02, bounded — update discipline: REPLACE this block, ≤15 lines;
+**Status (2026-07-04, bounded — update discipline: REPLACE this block, ≤15 lines;
 displaced prose moves verbatim to [`PLAN-HISTORY.md`](PLAN-HISTORY.md); per-run detail:
 `docs/reports/dogfood-NNN.md`; queue + course correction: `plan.md` §6).**
-Latest: dogfood-083 — **WP-270 PER-STEP WORK-UNIT CHUNKING** (`run-d3879dab-c1e4-4dde-930e-27f679a75d10`,
-`docs/reports/dogfood-083.md`). 🟢 **SUCCESS · 3 steps · $4.09/$40 · 10m22s.** Built the rung-3 QUALITY lever F-100
-demanded: opt-in ordered `work_chunks` on `bounded_work_unit` + a pure `decideWorkChunk` (`src/workflow/work-chunk.ts`)
-wired into `agent-loop.ts` step-forcing, so each forced durable step carries EXACTLY the next chunk's directive instead
-of the whole goal. Additive (no list = byte-for-byte WP-269, no policy = one-shot); frozen contracts held; no new dep;
-LIVE-proven in a real Temporal test (each step's instruction = its ordered chunk, all distinct, none = full goal, distinct
-per-step diffs; the no-chunk-list variant stays on WP-269), 658 tests green; harvest byte-IDENTICAL. ✅ **F-101 CLOSED
-(re-run `run-03d161e9`, un-harvested):** the chunk counter now uses a dedicated PROCEED-gated `consumedWorkChunks` (not raw
-`checkpoints.length`) so a rolled-back chunk is re-handed; LIVE scripted-ROLLBACK regression test, 660 tests green. ℹ️ the build run
-ITSELF front-loaded (F-100 recurred: step 1 = $3.56/20.5KB) because the new field can't be referenced in its own launch
-YAML (HEAD `.strict()` rejects it) — proven in-code. ⚠️ **dogfood-084 RETIRED** — host WP-214 shipped outside the loop (`fadc124`); its 3-digit-exact launcher glob also mis-fired, re-running closed 083 as `run-0a285f5b` (083c, $3.02, F-104/F-106; glob + refuse-by-default staleness gate fixed `59c57f6`). **NEXT: dogfood-085 — NON-HOLLOW rung-3 horizon on `work_chunks`, re-hosted on WP-215 architecture rubric** (≥5-step run, every sealed checkpoint a distinct non-trivial diff). See §7 (troubleshooting), §8 (known limitations), §1.5, §1.4, §3.
+Latest: dogfood-085 — **WP-215 ARCHITECTURE RUBRIC + the NON-HOLLOW rung-3 HORIZON** (`run-17b5ef57-7064-4e35-95cc-e3edfbad7dea`,
+`docs/reports/dogfood-085.md`). 🟢 **SUCCESS · 6 steps · $4.36/$50 · 22m41s · un-harvested.** The FIRST launch to USE
+`bounded_work_unit.work_chunks` (WP-270) in its own YAML — 5 dependency-ordered sub-goals, one per durable step. Shipped the
+whole architecture-scan chain (net-new pure `scanDiffForLayeringViolations` → `collectEvidence` `architectureLabels` →
+`prompt.ts` render → NON-destructive `no_architecture_violations` standing-rubric item → LIVE proof), mirroring the shipped
+secret/dependency scans; all 4 ACs green, 699 tests, harvest byte-IDENTICAL. **WP-215 architecture side → 🟢. 5/6 non-hollow
+(big improvement on 082's front-loaded hollow horizon); per-step reliability 100% (0 rollbacks/6 steps).** 🔴 **F-107 → WP-271:**
+the judge is CHUNK-UNAWARE — at step 2 (chunk 2/5, all ACs+rubric PASS) it ESCALATEd on a "missing" PART 4 that was deferred
+BY DESIGN → the run PARKED for human approval with NO timeout (a HARD blocker for the ⑦ overnight-UNATTENDED rung — it would
+hang all night) and re-handed chunk 2 → hollow 0-byte step 3 (4.9% cost). 🟡 F-108: `consumedWorkChunks` not restored on resume (latent).
+**NEXT: dogfood-086 — WP-271, the F-107 unblock** (chunk-scoped judge adjudication + unattended-safe ESCALATE policy), the
+named prerequisite for the ⑦ overnight rung. See §7 (troubleshooting), §8 (known limitations), §1.5, §1.4, §3.
 
 Related docs: [`docs/spec/task-spec.md`](spec/task-spec.md) (schema
 reference) · [`docs/TASK-PROTOCOL.md`](TASK-PROTOCOL.md) (WP etiquette, §7 is
@@ -687,6 +688,31 @@ broken (a false-green, not a follow-on fix).
   step so the PROCEED-gated counter can advance. LIVE scripted-ROLLBACK
   regression test asserts step instructions `[chunk0, chunk0, chunk1]` (the
   reverted chunk is re-issued, not skipped); 660 tests green.
+- **⚠️ The judge is CHUNK-UNAWARE — with `work_chunks` set it may ESCALATE an
+  on-track intermediate step, and an ESCALATE PARKS the run for approval with NO
+  timeout** (🔴 F-107 → WP-271, dogfood-085 `run-17b5ef57`): the judge receives
+  the FULL `spec.goal`, never the active `work_chunk` directive that scopes the
+  executor. At step 2 of a 5-chunk run (chunk 2/5) — with all 4 ACs AND all 4
+  rubric items PASSING — the judge raised an out-of-rubric concern that "PART 4
+  was omitted" and returned ESCALATE, even though PART 4 was deferred BY DESIGN
+  to chunk 4. ESCALATE then sets `status = AWAITING_APPROVAL` and blocks on
+  `await condition(...)` (`agent-loop.ts:580`) with no timeout, so the run halted
+  mid-horizon until a human ran `chikory approve`. **Two consequences you must
+  plan for until WP-271 lands:** (1) **NEVER launch a `work_chunks` run
+  unattended** (e.g. the ⑦ overnight rung) — a single spurious escalate hangs it
+  indefinitely; keep an operator on hand to `chikory approve`. (2) A non-PROCEED
+  chunk verdict leaves `consumedWorkChunks` un-incremented, so the next step
+  re-hands the SAME chunk → if that chunk's work already landed you get a HOLLOW
+  0-byte re-verify step (dogfood-085 step 3, 4.9% of run cost). The substantive
+  adjudication (ACs + rubric) stayed correct; only the whole-goal-scoped
+  out-of-rubric concern misfired.
+- **⚠️ `consumedWorkChunks` is NOT restored on crash→resume** (🟡 F-108, latent,
+  WP-206×WP-270): the counter is a loop-local `let = 0` (`agent-loop.ts:146`)
+  that the resume-restore block (`:240-253`) does not rehydrate, so a
+  `chikory resume` of a `work_chunks` run replays from chunk 0 — already-done
+  early chunks produce empty diffs until the executor catches up (self-corrected
+  by the AC gate, but wasteful). Not exercised yet (0 resumes); avoid resuming a
+  chunked run until fixed.
 
 - **No planner for `chikory run`**: every step gets the full `goal` as its
   instruction, plus the last 5 step summaries, judge feedback, and acceptance

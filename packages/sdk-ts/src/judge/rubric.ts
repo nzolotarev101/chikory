@@ -39,6 +39,13 @@ export const STANDING_RUBRIC: RubricItem[] = [
     destructive: true,
   },
   {
+    id: "no_architecture_violations",
+    description:
+      "The deterministic architecture scan evidence reports no forbidden layer " +
+      "dependencies introduced by added diff lines.",
+    destructive: false,
+  },
+  {
     id: "scope_matches_instruction",
     description:
       "Everything the diff changes is plausibly in service of the stated goal — no " +

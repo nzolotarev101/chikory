@@ -20,6 +20,7 @@ import type {
   TestResultArtifact,
 } from "../types.js";
 import { scanDiffForNewDependencies } from "./scan-dependencies.js";
+import { scanDiffForLayeringViolations } from "./scan-layering.js";
 import { scanDiffForSecrets } from "./scan-secrets.js";
 
 const execFileAsync = promisify(execFile);
@@ -50,6 +51,8 @@ export interface CollectedEvidence {
   secretScanLabels: string[];
   /** WP-215 deterministic new-dependency package names the judge sees alongside the diff. */
   newDependencyLabels: string[];
+  /** Deterministic architecture-layer violation labels the judge sees alongside the diff. */
+  architectureLabels: string[];
   checkRuns: CheckRun[];
   /** Raw evidence size (diff + check output bytes) — span attribute (WP-134). */
   evidenceBytes: number;
@@ -152,6 +155,7 @@ export async function collectEvidence(input: CollectEvidenceInput): Promise<Coll
   const diff = sections.map((section) => section.diffText).join("\n");
   const secretScanLabels = scanDiffForSecrets(diff);
   const newDependencyLabels = scanDiffForNewDependencies(diff);
+  const architectureLabels = scanDiffForLayeringViolations(diff);
   const diffRefs = await Promise.all(
     sections.map((section) =>
       input.store.put(section.diffText, {
@@ -211,6 +215,7 @@ export async function collectEvidence(input: CollectEvidenceInput): Promise<Coll
       : [],
     secretScanLabels,
     newDependencyLabels,
+    architectureLabels,
     checkRuns,
     evidenceBytes: diff.length + checkRuns.reduce((a, r) => a + r.output.length, 0),
   };

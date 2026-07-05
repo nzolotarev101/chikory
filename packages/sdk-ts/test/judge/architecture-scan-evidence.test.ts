@@ -1,5 +1,5 @@
 import { execFile } from "node:child_process";
-import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
@@ -11,7 +11,7 @@ import { buildJudgeMessages, type JudgePromptInput } from "../../src/judge/promp
 
 const execFileAsync = promisify(execFile);
 
-const HEADER = "## EVIDENCE — deterministic new-dependency scan (added diff lines)";
+const HEADER = "## EVIDENCE — deterministic architecture scan (added diff lines)";
 
 async function git(dir: string, args: string[]): Promise<string> {
   const { stdout } = await execFileAsync("git", ["-C", dir, ...args]);
@@ -27,7 +27,7 @@ afterEach(async () => {
   }
 });
 
-function input(newDependencyLabels: string[]): JudgePromptInput {
+function input(architectureLabels: string[]): JudgePromptInput {
   return {
     goal: "",
     evidence: {
@@ -40,38 +40,35 @@ function input(newDependencyLabels: string[]): JudgePromptInput {
     rubric: [],
     diffText: "",
     secretScanLabels: [],
-    newDependencyLabels,
-    architectureLabels: [],
+    newDependencyLabels: [],
+    architectureLabels,
     checkRuns: [],
   };
 }
 
-function userContent(newDependencyLabels: string[]): string {
-  const userMessage = buildJudgeMessages(input(newDependencyLabels)).find((m) => m.role === "user");
+function userContent(architectureLabels: string[]): string {
+  const userMessage = buildJudgeMessages(input(architectureLabels)).find((m) => m.role === "user");
   expect(userMessage).toBeDefined();
   return userMessage!.content;
 }
 
-describe("new dependency scan evidence wire (WP-215)", () => {
-  it("collectEvidence populates newDependencyLabels from newly imported external packages", async () => {
-    workspace = await mkdtemp(join(tmpdir(), "chikory-dependency-evidence-"));
+describe("architecture scan evidence wire", () => {
+  it("collectEvidence populates architectureLabels from the full untruncated diff", async () => {
+    workspace = await mkdtemp(join(tmpdir(), "chikory-architecture-evidence-"));
     await execFileAsync("git", ["init", "-q", workspace]);
     await git(workspace, ["config", "user.email", "test@chikory.dev"]);
     await git(workspace, ["config", "user.name", "chikory-test"]);
-    await writeFile(join(workspace, "app.ts"), "export const value = 1;\n");
+    await writeFile(join(workspace, "README.md"), "# base\n");
     await git(workspace, ["add", "-A"]);
     await git(workspace, ["commit", "-q", "-m", "base"]);
     const baseCommit = (await git(workspace, ["rev-parse", "HEAD"])).trim();
 
+    const padding = Array.from({ length: 30_000 }, (_, i) => `line ${i}`).join("\n");
+    await writeFile(join(workspace, "README.md"), `${padding}\n`);
+    await mkdir(join(workspace, "src", "judge"), { recursive: true });
     await writeFile(
-      join(workspace, "app.ts"),
-      [
-        'import express from "express";',
-        'import { helper } from "./helper.js";',
-        'import { readFile } from "node:fs/promises";',
-        "",
-        "export const value = helper(express, readFile);",
-      ].join("\n"),
+      join(workspace, "src", "judge", "rubric.ts"),
+      'import { createRunnerWorker } from "../runner/worker.js";\n',
     );
 
     const collected = await collectEvidence({
@@ -83,21 +80,21 @@ describe("new dependency scan evidence wire (WP-215)", () => {
       stepSummaries: [],
     });
 
-    expect(collected.newDependencyLabels).toEqual(["express"]);
+    expect(collected.diffText).not.toContain("createRunnerWorker");
+    expect(collected.architectureLabels).toEqual(["judge→runner"]);
   });
 
-  it("renders deterministic new dependency labels one per line", () => {
-    const content = userContent(["axios", "zod"]);
+  it("renders deterministic architecture labels one per line", () => {
+    const content = userContent(["judge→runner", "providers→router"]);
 
     expect(content).toContain(HEADER);
-    expect(content).toContain(`${HEADER}\n- axios\n- zod`);
+    expect(content).toContain(`${HEADER}\n- judge→runner\n- providers→router`);
   });
 
-  it("renders none when deterministic new dependency labels are empty", () => {
+  it("renders none when deterministic architecture labels are empty", () => {
     const content = userContent([]);
 
     expect(content).toContain(`${HEADER}\n(none)`);
-    expect(content).not.toContain("- axios");
-    expect(content).not.toContain("- zod");
+    expect(content).not.toContain("- judge→runner");
   });
 });

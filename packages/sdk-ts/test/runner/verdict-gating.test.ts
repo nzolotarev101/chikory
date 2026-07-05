@@ -17,6 +17,7 @@ import {
   createTemporalRunner,
   Journal,
   journalPath,
+  scanDiffForLayeringViolations,
   workspaceDir,
   type RunHandle,
   type RunStatusReport,
@@ -36,6 +37,7 @@ import {
 
 const address = inject("temporalAddress");
 const bundlePath = inject("workflowBundlePath");
+const ARCHITECTURE_SCAN_HEADER = "## EVIDENCE — deterministic architecture scan (added diff lines)";
 
 describe.skipIf(address === null)("verdict gating (WP-132)", () => {
   const cleanups: Array<() => Promise<void>> = [];
@@ -87,6 +89,35 @@ describe.skipIf(address === null)("verdict gating (WP-132)", () => {
     } finally {
       journal.close();
     }
+  }
+
+  function isRecord(value: unknown): value is Record<string, unknown> {
+    return typeof value === "object" && value !== null;
+  }
+
+  function judgeUserContent(requestBody: string): string {
+    const parsed: unknown = JSON.parse(requestBody);
+    if (!isRecord(parsed) || !Array.isArray(parsed.messages)) {
+      throw new Error("fake judge request body did not include messages");
+    }
+    const userMessage = parsed.messages.find(
+      (message): message is { role: string; content: string } =>
+        isRecord(message) &&
+        message.role === "user" &&
+        typeof message.content === "string",
+    );
+    if (userMessage === undefined) {
+      throw new Error("fake judge request body did not include a user message");
+    }
+    return userMessage.content;
+  }
+
+  function architectureSection(userContent: string): string {
+    const start = userContent.indexOf(ARCHITECTURE_SCAN_HEADER);
+    expect(start).toBeGreaterThanOrEqual(0);
+    const sectionStart = start + ARCHITECTURE_SCAN_HEADER.length;
+    const nextSection = userContent.indexOf("\n## ", sectionStart);
+    return userContent.slice(sectionStart, nextSection === -1 ? undefined : nextSection).trim();
   }
 
   async function run(wire: FakeJudgeWire, specOverrides: Partial<TaskSpec> & { cadence?: number }) {
@@ -240,6 +271,51 @@ describe.skipIf(address === null)("verdict gating (WP-132)", () => {
     } finally {
       journal.close();
     }
+  });
+
+  test("architecture scan evidence reaches the live judge prompt", async () => {
+    const forbiddenImportDiff = [
+      "diff --git a/src/judge/rubric.ts b/src/judge/rubric.ts",
+      "+++ b/src/judge/rubric.ts",
+      '+import { createRunnerWorker } from "../runner/worker.js";',
+    ].join("\n");
+    const architectureLabels = scanDiffForLayeringViolations(forbiddenImportDiff);
+    expect(architectureLabels).toEqual(["judge→runner"]);
+
+    const violatingWire = await startFakeJudgeWire([judgeForm({ criteria: { "AC-1": true } })]);
+    const { handle: violatingHandle } = await run(violatingWire, {
+      maxSteps: 1,
+      debug: {
+        seedBadDiff: {
+          atStep: 0,
+          path: "src/judge/rubric.ts",
+          content: 'import { createRunnerWorker } from "../runner/worker.js";\n',
+        },
+      },
+    });
+    const violatingReport = await awaitTerminal(violatingHandle);
+
+    expect(violatingReport.status).toBe("SUCCESS");
+    expect(violatingWire.requests).toHaveLength(1);
+    expect(architectureSection(judgeUserContent(violatingWire.requests[0]!))).toBe(
+      "- judge→runner",
+    );
+
+    const cleanDiff = [
+      "diff --git a/src/judge/rubric.ts b/src/judge/rubric.ts",
+      "+++ b/src/judge/rubric.ts",
+      '+import { buildJudgeMessages } from "./prompt.js";',
+    ].join("\n");
+    const cleanArchitectureLabels = scanDiffForLayeringViolations(cleanDiff);
+    expect(cleanArchitectureLabels).toEqual([]);
+
+    const cleanWire = await startFakeJudgeWire([judgeForm({ criteria: { "AC-1": true } })]);
+    const { handle: cleanHandle } = await run(cleanWire, { maxSteps: 1 });
+    const cleanReport = await awaitTerminal(cleanHandle);
+
+    expect(cleanReport.status).toBe("SUCCESS");
+    expect(cleanWire.requests).toHaveLength(1);
+    expect(architectureSection(judgeUserContent(cleanWire.requests[0]!))).toBe("(none)");
   });
 
   // ─── WP-244 deterministic judge-catch seam (dogfood-045 F-46) ──────────────

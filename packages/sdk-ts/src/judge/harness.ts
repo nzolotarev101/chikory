@@ -204,6 +204,7 @@ export async function runJudgePass(input: RunJudgePassInput): Promise<JudgePassR
       diffSections: collected.diffSections,
       secretScanLabels: collected.secretScanLabels,
       newDependencyLabels: collected.newDependencyLabels,
+      architectureLabels: collected.architectureLabels,
       checkRuns: collected.checkRuns,
     }),
     temperature: 0,

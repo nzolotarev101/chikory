@@ -201,6 +201,8 @@ export interface FakeJudgeWire {
   url: string;
   /** Completed judge LLM calls so far. */
   hits: number;
+  /** Raw completed request bodies, including judge and digest calls. */
+  requests: string[];
   /** Completed compaction-digest LLM calls so far (WP-203 S2 wiring). */
   digestHits: number;
   close(): Promise<void>;
@@ -225,6 +227,7 @@ export async function startFakeJudgeWire(
     let body = "";
     req.on("data", (chunk: Buffer) => (body += chunk.toString()));
     req.on("end", () => {
+      wire.requests.push(body);
       const isDigest = body.includes(DIGEST_MARKER);
       const content = isDigest
         ? digestContent
@@ -245,6 +248,7 @@ export async function startFakeJudgeWire(
   const wire: FakeJudgeWire = {
     url: `http://127.0.0.1:${port}`,
     hits: 0,
+    requests: [],
     digestHits: 0,
     close: () =>
       new Promise<void>((resolve) => {

@@ -855,3 +855,13 @@ dataclasses, `chikory/pacing.py`, mirroring the TS `src/runner/pacing.ts`); the
 not-yet-ported `ChainEntry` store type). Remaining hand-design follow-ups: D3
 halt-and-replan, S4 context handoff, S5 suspend/resume, and the
 `chikory chain`/`plan` + `chikory trace <chain-id>` CLI glue.
+
+## 2026-07-04 — displaced by dogfood-085 review (bounded status-block replace)
+
+**Last-3-runs prose (dogfood-081, since rolled out of the window):** dogfood-081 — rung-3 ENABLER WP-269 intra-run step-forcing (`run-464b7b77`, 🟢 SUCCESS · 1 step): pure `decideStepForcing` + opt-in `boundedWorkUnit` defers a premature `claimsComplete` and re-enters `agent-loop.ts`. **WP-269 → 🟢.** dogfood-082 — WP-265 RUNG-3 HORIZON PROOF REACHED (`run-ef4824e2`, 🟢 SUCCESS · 6 steps, $6.76/$50, 57m16s): ONE `chikory run` under `min_durable_steps:5` sealed 6 durable checkpoints + survived a LIVE mid-run `kill -9` → `chikory resume` between sealed steps, zero re-execution; delivered WP-219 D3 replan + S4 compaction note, harvested `1d2c7e5`. 🔴 F-99 (bare resume lost `OPENAI_COMPAT_BASE_URL`); ℹ️ F-100 (horizon REAL but HOLLOW — seal-deferral without chunking). **WP-219 D3/S4 → 🟢.**
+
+**Queue prose (pre-085, ⑥ now DONE):** NEXT HEADLINE was ⑥ dogfood-085 — the NON-HOLLOW rung-3 HORIZON on host WP-215 architecture rubric; delivered 🟢 (`run-17b5ef57`, 6 steps, 5/6 non-hollow), see `docs/reports/dogfood-085.md`. Surfaced 🔴 F-107 (chunk-unaware judge ESCALATE parks the run for approval — a hard blocker for the ⑦ overnight-unattended rung) → new WP-271.
+
+## 2026-07-04 — displaced DOGFOODING.md header block (dogfood-083, replaced by dogfood-085)
+
+Latest: dogfood-083 — **WP-270 PER-STEP WORK-UNIT CHUNKING** (`run-d3879dab`, `docs/reports/dogfood-083.md`). 🟢 SUCCESS · 3 steps · $4.09/$40 · 10m22s. Built the rung-3 QUALITY lever F-100 demanded: opt-in ordered `work_chunks` on `bounded_work_unit` + a pure `decideWorkChunk` (`src/workflow/work-chunk.ts`) wired into `agent-loop.ts` step-forcing. Additive; frozen contracts held; no new dep; LIVE-proven, 658 tests green; harvest byte-IDENTICAL. ✅ F-101 CLOSED (re-run `run-03d161e9`): PROCEED-gated `consumedWorkChunks` counter, LIVE scripted-ROLLBACK regression, 660 tests green. ⚠️ dogfood-084 RETIRED — host WP-214 shipped outside the loop (`fadc124`); glob mis-fire re-ran closed 083 as `run-0a285f5b` (083c, F-104/F-106; fixed `59c57f6`).

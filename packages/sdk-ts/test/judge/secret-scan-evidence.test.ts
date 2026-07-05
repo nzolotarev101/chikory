@@ -20,6 +20,7 @@ function input(secretScanLabels: string[]): JudgePromptInput {
     diffText: "",
     secretScanLabels,
     newDependencyLabels: [],
+    architectureLabels: [],
     checkRuns: [],
   };
 }

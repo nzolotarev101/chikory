@@ -47,3 +47,4 @@ export {
   type PairwiseTally,
 } from "./scoring.js";
 export { scanDiffForNewDependencies } from "./scan-dependencies.js";
+export { scanDiffForLayeringViolations } from "./scan-layering.js";

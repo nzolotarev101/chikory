@@ -1,0 +1,215 @@
+# Dogfood-086: WP-271 — CHUNK-SCOPED JUDGE ADJUDICATION + UNATTENDED-SAFE ESCALATE.
+#   dogfood-085 (run-17b5ef57) reached the NON-HOLLOW rung-3 horizon (5/6 non-hollow, 100%
+#   per-step reliability) on WP-215's architecture rubric, driven by WP-270 `work_chunks`. But it
+#   exposed 🔴 F-107: the judge is CHUNK-UNAWARE. `runJudgePass` receives the FULL `spec.goal`
+#   (all N parts) but NEVER the active `work_chunk` directive that scopes the EXECUTOR. At step 2
+#   (chunk 2/5, `part-2-evidence-wire`) ALL 4 ACs AND ALL 4 rubric items PASSED, yet the judge
+#   returned ESCALATE with the out-of-rubric concern "the executor completely omitted PART 4" — a
+#   PART deferred BY DESIGN to chunk 4. ESCALATE then set `status = AWAITING_APPROVAL` and blocked
+#   on `await condition(() => pendingApprovals.length > 0 || cancelRequested)` (`agent-loop.ts:580`)
+#   with NO timeout, PARKING the run until a human ran `chikory approve` — and, being a non-PROCEED
+#   verdict, left `consumedWorkChunks` un-incremented so step 3 re-handed chunk 2 → a HOLLOW 0-byte
+#   step (4.9% of run cost).
+#
+# WHY THIS IS THE NEXT HEADLINE (⛔ STALLED ⇒ ladder rung binding; ⑦ overnight is BLOCKED by F-107).
+#   The progression gate is ⛔ STALLED (rung 3 vs 3, max-steps 6 vs 6). Binding: the next headline
+#   IS the current WP-265 ladder rung. The §6 queue's next rung is ⑦ an OVERNIGHT UNATTENDED run —
+#   but an untimed ESCALATE park (F-107 harm #1) makes that rung UNRUNNABLE: a single spurious
+#   escalate would hang the run all night (the F-78-class "nobody watching" hang). This is exactly
+#   the DOGFOODING §1.2 FALLBACK CARVE-OUT: the ladder rung is blocked by harness the dogfood
+#   mechanism itself depends on. When the carve-out fires, the named blocker becomes the priority —
+#   so WP-271 (the F-107 unblock) is the ⑦-prerequisite headline.
+#
+# HOST WP — WP-271 (real open plan.md §6 product WP, judge JD-3/JD-4 judge-trust pillar). Feature
+#   code on `src/judge/*` + `src/workflow/agent-loop.ts` — NOT scaffolding. Decomposes into FOUR
+#   dependency-ordered sub-goals, each independently failable, producing a distinct real diff. The
+#   WP-270 chunking mechanism is the VEHICLE seeded into this real judge code (§1.2), and this run
+#   is ALSO the next non-hollow-horizon datapoint.
+#
+# Format: LOOSE (headline — goal states the OUTCOME + constraints; ACs pin "done" via OUTCOME
+#   SYMBOLS THE GOAL NAMES; module/test layout LEFT TO THE EXECUTOR, F-82/F-83; NO prescribed diff).
+# Ladder-rung: 3
+# Thesis-KPI: judge TRUST under chunked horizons — a structurally-diverse judge must not spuriously
+#   ESCALATE (and thereby PARK) an on-track intermediate chunked step, and an unattended run must
+#   not be able to hang forever on a judge park. Removing the F-107 false-positive + the untimed
+#   park is the ⑦ overnight-unattended rung's hard prerequisite. Hosted on real WP-271 judge code.
+#
+# F-90 APPLIED: AC-1/2 grep a NET-NEW symbol the goal NAMES (`renderActiveWorkChunkScope`), absent
+#   on HEAD, so a recursive grep cannot false-green on an incumbent file.
+# F-97 APPLIED: AC-3 does NOT bare-grep the symbol — it requires the net-new
+#   `renderActiveWorkChunkScope` to co-live with the LIVE runner driver `createRunnerWorker` in a
+#   `test/` file, so the LIVE no-spurious-escalate proof is actually enforced (the 081/083/085 pattern).
+#
+# ⚠️ OPERATOR NOTE — THIS RUN MUST BE ATTENDED. It launches WITH `work_chunks`, so it exercises the
+#   CURRENT (still-unfixed) chunk-unaware judge: an intermediate step MAY draw a spurious ESCALATE
+#   and PARK for approval (the workspace clones HEAD, so the fix this run BUILDS only takes effect on
+#   the NEXT run). Keep an operator on hand to `chikory approve <run-id>` any on-track escalate. Do
+#   NOT launch this unattended.
+#
+# LAUNCH WITH `chikory run` (a single durable run):
+#      devbox run run-dogfood       # <- `chikory run`; picks the latest spec (this one)
+
+name: dogfood-086-wp271-chunk-scoped-judge
+goal: >
+  Make the Agent-as-a-Judge CHUNK-AWARE and make an ESCALATE UNATTENDED-SAFE, so a `work_chunks`
+  run is never spuriously parked for a later PART that is deferred BY DESIGN, and an unattended run
+  can never hang forever on a judge approval-park (WP-271, closing 🔴 F-107). Today `runJudgePass`
+  (`src/judge/harness.ts`) receives only the full `spec.goal` and the loop's ESCALATE path blocks on
+  an untimed `await condition(...)` (`src/workflow/agent-loop.ts`). Deliver it in FOUR bounded,
+  dependency-ordered sub-goals, ONE per durable step, so every sealed checkpoint carries DISTINCT
+  non-trivial product work (the non-hollow rung-3 horizon, F-100/WP-270):
+
+    * PART 1 — THREAD THE ACTIVE CHUNK TO THE JUDGE (additive): add an additive OPTIONAL
+      `activeWorkChunkDirective?: string` to the judge-pass input in `src/judge/harness.ts` and pass
+      it from the durable loop's judge invocation in `src/workflow/agent-loop.ts` — set it to the
+      active chunk's directive when `decideWorkChunk` returned `use_chunk` for THIS step, and leave
+      it `undefined` otherwise. Purely additive: when it is `undefined` the judge input is unchanged.
+      Do NOT reshape any frozen contract (`StepRecord`/`JournalEntry`/`Checkpoint`/`RubricItem`).
+
+    * PART 2 — RENDER + SCOPE THE JUDGE PROMPT (depends on 1): add a net-new pure
+      `renderActiveWorkChunkScope(directive?: string): string` in `src/judge/prompt.ts` (a sibling of
+      the existing evidence renderers) and thread it into `buildJudgeMessages`, so when a chunk is
+      active the judge prompt carries a `## ACTIVE WORK CHUNK (this step's scope)` section stating
+      that later parts of the overall goal absent from THIS step's diff are DEFERRED BY DESIGN to
+      later chunks and MUST NOT be treated as omissions/regressions — the judge adjudicates the
+      ACs + rubric for THIS step against the CURRENT chunk, not the whole goal. When the directive is
+      `undefined` the rendered prompt is BYTE-EQUIVALENT to today (the additive guarantee). The LLM
+      still adjudicates the verdict; the ACs/rubric are unchanged.
+
+    * PART 3 — UNATTENDED-SAFE ESCALATE POLICY (depends on nothing in 1/2 — the durable half): add a
+      pure, side-effect-free total decision `decideEscalationWait(state, policy?)` in a `src/workflow/`
+      module (a sibling of `decideStepForcing`, no I/O/Temporal/clock) that, under an OPT-IN
+      unattended policy, returns whether an ESCALATE should BLOCK for a human approval (today's
+      default) or instead SEAL A RESUMABLE terminal state (so an unattended run parks durably instead
+      of hanging forever). Wire it additively into the `agent-loop.ts` ESCALATE path so the default
+      (no policy) behavior is BYTE-IDENTICAL to today's untimed approval wait, and an active policy
+      makes an escalate resolvable without a live operator. Unit-test the pure decision exhaustively.
+
+    * PART 4 — LIVE PROOF (depends on 1–3): add a LIVE Temporal test (reuse `createRunnerWorker` /
+      `createTemporalRunner` / the scripted registry + `waitFor` helpers, `describe.skipIf(address
+      === null)`, `makeJudgedSpec` — do NOT mock the workflow) that drives a real `chikory run` under
+      a multi-chunk `bounded_work_unit.work_chunks` policy where an EARLY chunk step legitimately
+      leaves a LATER chunk's work undone, and asserts: the judge PROCEEDs that intermediate step (it
+      does NOT ESCALATE / the run does NOT enter `AWAITING_APPROVAL` for the deferred part) and the
+      run reaches SUCCESS. AND asserts the additive guarantee: with NO active chunk the judge prompt
+      is byte-equivalent (a `renderActiveWorkChunkScope(undefined)` returns empty / the no-chunk run
+      seals exactly as today). AND asserts PART 3: under the opt-in unattended policy a GENUINE
+      ESCALATE seals a RESUMABLE state rather than blocking forever. Co-reference BOTH
+      `renderActiveWorkChunkScope` AND `createRunnerWorker` in this SAME file (F-97).
+
+  CONSTRAINTS: strict TypeScript, ESM `.js` relative imports, named exports only; NO new dependency;
+  a run with NO active `work_chunk` (and no unattended policy) MUST leave judge + loop behavior
+  BYTE-EQUIVALENT to today (additivity is a live assertion, not a claim); do NOT change the SHAPE of
+  any frozen contract (`StepRecord`, `JournalEntry`, `Checkpoint`, `RubricItem`) — `activeWorkChunkDirective`
+  is an ADDITIVE OPTIONAL field, `renderActiveWorkChunkScope` + `decideEscalationWait` are NEW pure
+  symbols, the unattended policy is an ADDITIVE OPTIONAL spec-input/config. Do NOT weaken the WP-123
+  crash-recovery, WP-206 suspend/resume, WP-269 step-forcing, or WP-270 chunking paths, and do NOT
+  alter the deterministic secret/dependency/architecture scan evidence. If a verification step reports
+  a failing test or type error, READ the failure and fix the IMPLEMENTATION — do NOT weaken or delete
+  any assertion.
+
+repos:
+  - url: /Users/nikitazolotarev/repos/chikory
+    writable: true
+
+# NON-HOLLOW HORIZON DRIVER: 4 ordered chunks, ONE PART each, so `decideWorkChunk` hands the executor
+#   EXACTLY one bounded sub-goal per durable step and completion defers until all 4 chunks are consumed
+#   AND the judge confirms the ACs. Combined with `min_durable_steps: 4` this forces ≥4 sealed
+#   checkpoints EACH carrying a distinct, non-trivial diff. (Verify parse before launch: `parseTaskSpec`
+#   over this file, or `pnpm chikory run` which validates first.) ATTENDED run — see the operator note.
+bounded_work_unit:
+  min_durable_steps: 4
+  directive: >
+    Advance EXACTLY the ONE numbered PART named by this step's chunk — no more — then stop and let the
+    durable checkpoint seal. Do NOT front-load a later PART into an earlier step. Do NOT declare the
+    whole run complete until every PART has landed with its tests and the ACs pass.
+  work_chunks:
+    - name: part-1-thread-active-chunk
+      directive: >
+        PART 1 ONLY: add an additive OPTIONAL `activeWorkChunkDirective?: string` to the judge-pass
+        input in `src/judge/harness.ts` and pass it from the judge invocation in
+        `src/workflow/agent-loop.ts` (the active chunk's directive when this step used a chunk, else
+        `undefined`). Purely additive — `undefined` leaves the judge input unchanged. No frozen-contract
+        reshape.
+    - name: part-2-render-scope-prompt
+      directive: >
+        PART 2 ONLY: add a net-new pure `renderActiveWorkChunkScope(directive?: string): string` in
+        `src/judge/prompt.ts` and thread it into `buildJudgeMessages`, so an active chunk adds a
+        `## ACTIVE WORK CHUNK (this step's scope)` section telling the judge that later goal parts
+        absent from THIS step's diff are DEFERRED BY DESIGN and must NOT be treated as omissions.
+        `undefined` → byte-equivalent to today's prompt.
+    - name: part-3-unattended-escalate-policy
+      directive: >
+        PART 3 ONLY: add a pure total `decideEscalationWait(state, policy?)` in `src/workflow/` (sibling
+        of `decideStepForcing`, no I/O/clock) that, under an opt-in unattended policy, makes an ESCALATE
+        seal a RESUMABLE state instead of blocking forever; wire it additively into the `agent-loop.ts`
+        ESCALATE path so the default (no policy) is byte-identical. Exhaustive unit tests.
+    - name: part-4-live-proof
+      directive: >
+        PART 4 ONLY: add the LIVE Temporal test (reuse `createRunnerWorker`/`createTemporalRunner`
+        /scripted registry/`waitFor`/`describe.skipIf`, `makeJudgedSpec`) asserting a multi-chunk run
+        whose EARLY step defers a LATER chunk's work is PROCEEDed by the judge (no spurious ESCALATE /
+        no `AWAITING_APPROVAL`) and reaches SUCCESS; the no-active-chunk path is byte-equivalent; and a
+        GENUINE escalate under the unattended policy seals a resumable state. Co-reference
+        `renderActiveWorkChunkScope` AND `createRunnerWorker` in this file (F-97).
+
+acceptance_criteria:
+  - id: AC-1
+    description: >
+      The net-new pure `renderActiveWorkChunkScope` judge-prompt scope renderer exists in the judge
+      source — a side-effect-free total function over an optional chunk directive. (OUTCOME symbol the
+      goal NAMES — `renderActiveWorkChunkScope` — absent on HEAD so a recursive grep cannot false-green
+      on an incumbent file, F-90. Module/test layout is the executor's, F-82/F-83.)
+    check: >
+      cd packages/sdk-ts &&
+      grep -rq 'renderActiveWorkChunkScope' src/judge/
+
+  - id: AC-2
+    description: >
+      The inner-loop judge HONORS the active chunk — `renderActiveWorkChunkScope` is threaded into the
+      judge message builder in `src/judge/prompt.ts` so every chunked judge pass can carry the
+      current-chunk scope (the def+wire pattern of the landed secret/dependency/architecture scans).
+    check: >
+      cd packages/sdk-ts &&
+      grep -rq 'renderActiveWorkChunkScope' src/judge/prompt.ts
+
+  - id: AC-3
+    description: >
+      A LIVE Temporal test exercises the chunk-scoped judge end-to-end. (F-97-SAFE: not a bare symbol
+      grep a UNIT test would false-green — it requires a `test/` file that references BOTH the net-new
+      `renderActiveWorkChunkScope` symbol AND the LIVE runner driver `createRunnerWorker`, so the LIVE
+      no-spurious-escalate proof is actually enforced. Both are OUTCOME symbols the goal names; the test
+      filename is the executor's, F-82.)
+    check: >
+      cd packages/sdk-ts &&
+      for f in $(grep -rl 'renderActiveWorkChunkScope' test/ 2>/dev/null); do
+        grep -q 'createRunnerWorker' "$f" && { echo ok; break; };
+      done | grep -q ok
+
+  - id: AC-4
+    description: >
+      The SDK stays type- and lint-clean and the FULL existing suite — including the new chunk-scope
+      unit + live tests — is green, proving the change is additive and nothing outside it regressed (no
+      `StepRecord`/`JournalEntry`/`Checkpoint`/`RubricItem` shape change; the WP-123 crash-recovery,
+      WP-206 suspend/resume, WP-269 step-forcing, and WP-270 chunking tests still pass, and a
+      no-active-chunk run leaves judge + loop behavior unchanged).
+    check: cd packages/sdk-ts && pnpm exec tsc --noEmit && pnpm exec eslint . && pnpm exec vitest run
+
+budget_usd: 50
+max_steps: 30
+
+executor:
+  adapter: codex
+  family: openai
+
+judge:
+  family: openai-compat
+  cadence: 2
+  max_cost_share: 0.5
+
+routing:
+  stages:
+    plan: { provider: openai-compat, model: gpt-5.5 }
+    code: { provider: openai-compat, model: gpt-5.5 }
+    review: { provider: openai-compat, model: gpt-5.5 }
+    judge: { provider: openai-compat, model: gemini-3.1-pro-preview }
