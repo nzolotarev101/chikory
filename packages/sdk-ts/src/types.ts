@@ -93,6 +93,8 @@ export interface TaskSpec {
   pacing?: PacingPolicy;
   /** Opt-in unattended behavior; absent = HITL approval waits unchanged. */
   unattended?: UnattendedPolicy;
+  /** Opt-in durable time-paced re-entry; absent = no soak delay. */
+  soak?: SoakPolicy;
   /** Opt-in intra-run durable checkpoint floor; absent = default one-shot behavior. */
   boundedWorkUnit?: BoundedWorkUnitPolicy;
   /** P2 (WP-208). */
@@ -182,6 +184,15 @@ export interface UnattendedPolicy {
    * the current checkpoint, which is the runner's resumable terminal state.
    */
   escalation: "await_approval" | "seal_resumable_failed";
+}
+
+export interface SoakPolicy {
+  /** Durable sleep inserted before the next step when the soak remains in bounds. */
+  sleepMs: number;
+  /** Maximum number of soak sleeps allowed for the run. */
+  maxReentries: number;
+  /** Optional total wall-clock soak cap for the run. */
+  maxTotalSleepMs?: number;
 }
 
 export interface BoundedWorkUnitPolicy {

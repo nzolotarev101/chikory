@@ -217,6 +217,37 @@ describe("renderTrace (WP-142)", () => {
     expect(text).toContain("failed: judge HALT: gave up (last checkpoint run-x@4)");
   });
 
+  test("no-soak run keeps the totals sub-line byte-equivalent", () => {
+    expect(text.split("\n")).toContain(
+      "        injections 1 · checkpoints 1 · feedback frequency 1/2 steps",
+    );
+    expect(text).not.toContain("re-entries");
+    expect(text).not.toContain("soak-slept");
+  });
+
+  test("reports soak re-entry counters only when soak control events exist", () => {
+    const entriesWithSoak: JournalEntry[] = [
+      ...entries,
+      entry(9, "control_event", {
+        controlEventIndex: 0,
+        event: "resume",
+        source: "soak",
+        atStep: 1,
+        details: { sleepMs: 1500, completedReentries: 1, totalSleptMs: 1500 },
+      }),
+      entry(10, "control_event", {
+        controlEventIndex: 1,
+        event: "resume",
+        source: "soak",
+        atStep: 2,
+        details: { sleepMs: 1500, completedReentries: 2, totalSleptMs: 3000 },
+      }),
+    ];
+
+    expect(renderTrace(run, entriesWithSoak, totals)).toContain("re-entries 2 · soak-slept 3s");
+    expect(renderTrace(run, entries, totals)).not.toContain("soak-slept");
+  });
+
   test("reports memory counters only when recall or eviction occurred", () => {
     const withMemory = renderTrace(run, entries, {
       ...totals,

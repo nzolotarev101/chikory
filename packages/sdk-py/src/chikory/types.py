@@ -150,6 +150,12 @@ class UnattendedPolicy(ContractModel):
     escalation: Literal["await_approval", "seal_resumable_failed"]
 
 
+class SoakPolicy(ContractModel):
+    sleep_ms: int = Field(gt=0)
+    max_reentries: int = Field(gt=0)
+    max_total_sleep_ms: int | None = Field(default=None, gt=0)
+
+
 class NotificationPolicy(ContractModel):
     on: list[Literal["escalate", "milestone", "terminal"]]
     slack_webhook_env: str | None = None
@@ -198,6 +204,7 @@ class TaskSpec(ContractModel):
     routing: RoutingPolicy
     pacing: PacingPolicy | None = None
     unattended: UnattendedPolicy | None = None
+    soak: SoakPolicy | None = None
     notifications: NotificationPolicy | None = None
     chain_link: ChainLink | None = None
 

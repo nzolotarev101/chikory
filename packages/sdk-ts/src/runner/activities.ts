@@ -125,6 +125,11 @@ export interface RestoredWorkflowState {
   judgeFeedback?: string;
   checkpoints: Checkpoint[];
   memoryCounters: MemoryCounters;
+  soakState: {
+    completedReentries: number;
+    totalSleptMs: number;
+  };
+  consumedWorkChunks: number;
   sinceCommit?: string;
 }
 
@@ -741,10 +746,49 @@ export function createRunnerActivities(deps: RunnerActivityDeps) {
           steps.length === 0 ? 0 : Math.max(...steps.map((step) => step.stepIndex)) + 1;
         const stepCosts = steps.map((step) => step.record.costUsd);
         const stepTokens = steps.map((step) => step.record.tokens.input + step.record.tokens.output);
+        const workChunks = journal.getRun()?.task.boundedWorkUnit?.workChunks ?? [];
+        const stepsByIndex = new Map(steps.map((step) => [step.stepIndex, step]));
+        let restoredConsumedWorkChunks = 0;
+        if (workChunks.length > 0) {
+          for (const verdictPayload of verdictEntries) {
+            if (verdictPayload.verdict.kind !== "PROCEED") continue;
+            const expectedChunk = workChunks[restoredConsumedWorkChunks];
+            if (expectedChunk === undefined) break;
+            const coveredStep = stepsByIndex.get(verdictPayload.atStep);
+            if (coveredStep?.instruction === expectedChunk.directive) {
+              restoredConsumedWorkChunks += 1;
+            }
+          }
+        }
         const latestCheckpointPayload = checkpoints[checkpoints.length - 1] as
           | (Checkpoint & { memoryCounters?: Partial<MemoryCounters> })
           | undefined;
         const restoredMemoryCounters = latestCheckpointPayload?.memoryCounters;
+        const restoredSoakState = journal
+          .entries("control_event")
+          .map((entry) => entry.payload as {
+            event?: unknown;
+            source?: unknown;
+            details?: { completedReentries?: unknown; totalSleptMs?: unknown };
+          })
+          .filter((payload) => payload.event === "resume" && payload.source === "soak")
+          .reduce(
+            (state, payload) => {
+              const completedReentries = payload.details?.completedReentries;
+              const totalSleptMs = payload.details?.totalSleptMs;
+              return {
+                completedReentries:
+                  typeof completedReentries === "number"
+                    ? Math.max(state.completedReentries, completedReentries)
+                    : state.completedReentries,
+                totalSleptMs:
+                  typeof totalSleptMs === "number"
+                    ? Math.max(state.totalSleptMs, totalSleptMs)
+                    : state.totalSleptMs,
+              };
+            },
+            { completedReentries: 0, totalSleptMs: 0 },
+          );
         const lastStep = steps[steps.length - 1];
         const consecutiveFailures = [...steps]
           .reverse()
@@ -786,6 +830,8 @@ export function createRunnerActivities(deps: RunnerActivityDeps) {
             recalls: restoredMemoryCounters?.recalls ?? 0,
             evicted: restoredMemoryCounters?.evicted ?? 0,
           },
+          soakState: restoredSoakState,
+          consumedWorkChunks: restoredConsumedWorkChunks,
           sinceCommit,
         };
       } finally {
@@ -1020,12 +1066,14 @@ export function createRunnerActivities(deps: RunnerActivityDeps) {
       }
     },
 
-    /** Operator HITL suspend/resume audit trail (WP-206). */
+    /** Operator HITL suspend/resume and durable re-entry audit trail (WP-206). */
     async recordControlEvent(input: {
       runId: string;
       controlEventIndex: number;
       event: "suspend" | "resume";
       atStep: number;
+      source?: "operator" | "soak";
+      details?: Record<string, number>;
     }): Promise<void> {
       const journal = openJournal(deps, input.runId);
       try {
@@ -1036,8 +1084,9 @@ export function createRunnerActivities(deps: RunnerActivityDeps) {
             payload: {
               controlEventIndex: input.controlEventIndex,
               event: input.event,
-              source: "operator",
+              source: input.source ?? "operator",
               atStep: input.atStep,
+              ...(input.details !== undefined ? { details: input.details } : {}),
             },
             costDeltaUsd: 0,
             artifactRefs: [],

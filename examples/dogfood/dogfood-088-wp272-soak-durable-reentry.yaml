@@ -189,13 +189,16 @@ acceptance_criteria:
 
   - id: AC-2
     description: >
-      The durable loop HONORS time-paced re-entry — `decideSoakDelay` and the net-new `SoakPolicy` spec field are both
-      threaded into `src/workflow/agent-loop.ts` (the def+wire pattern of the landed `unattended`/`decideEscalationWait`
-      wiring), so an opt-in long unattended run durably suspends and re-enters across real wall-clock time.
+      The durable loop HONORS time-paced re-entry — the net-new `decideSoakDelay` is threaded into
+      `src/workflow/agent-loop.ts` AND it consumes the opt-in `spec.soak` policy field (the def+wire pattern of the
+      landed `unattended`/`decideEscalationWait` wiring), so an opt-in long unattended run durably suspends and re-enters
+      across real wall-clock time. (F-114-SAFE: keyed on the WIRING symbols a correct ADDITIVE wire actually emits —
+      `decideSoakDelay` (net-new, F-90-safe) + `spec.soak` (the consumed field) — NOT on the `SoakPolicy` TYPE-NAME
+      token, which a correct `decideSoakDelay(spec.soak)` call never has to write.)
     check: >
       cd packages/sdk-ts &&
       grep -rq 'decideSoakDelay' src/workflow/agent-loop.ts &&
-      grep -rq 'SoakPolicy' src/workflow/agent-loop.ts
+      grep -rq 'spec\.soak' src/workflow/agent-loop.ts
 
   - id: AC-3
     description: >

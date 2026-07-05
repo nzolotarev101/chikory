@@ -158,6 +158,14 @@ const RawTaskSpecYaml = z
       })
       .strict()
       .optional(),
+    soak: z
+      .object({
+        sleep_ms: z.number().int().positive(),
+        max_reentries: z.number().int().positive(),
+        max_total_sleep_ms: z.number().int().positive().optional(),
+      })
+      .strict()
+      .optional(),
     bounded_work_unit: z
       .object({
         min_durable_steps: z.number().int().positive(),
@@ -236,6 +244,13 @@ export function parseTaskSpec(yamlText: string, opts: ParseTaskSpecOptions = {})
     routing: raw.routing ?? defaultPolicy(raw.executor.family, raw.judge.family),
     pacing: raw.pacing,
     unattended: raw.unattended,
+    soak: raw.soak
+      ? {
+          sleepMs: raw.soak.sleep_ms,
+          maxReentries: raw.soak.max_reentries,
+          maxTotalSleepMs: raw.soak.max_total_sleep_ms,
+        }
+      : undefined,
     boundedWorkUnit: raw.bounded_work_unit
       ? {
           minDurableSteps: raw.bounded_work_unit.min_durable_steps,

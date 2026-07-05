@@ -166,6 +166,12 @@ export {
   type EscalationWaitState,
 } from "./workflow/escalation-wait.js";
 export {
+  decideSoakDelay,
+  type SoakDelayDecision,
+  type SoakPolicy,
+  type SoakState,
+} from "./workflow/soak.js";
+export {
   decideStepForcing,
   type StepForcingDecision,
   type StepForcingState,

@@ -1,0 +1,5 @@
+{
+  "maxReentries": 3,
+  "maxTotalSleepMs": 1000,
+  "sleepMs": 250
+}

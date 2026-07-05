@@ -8,19 +8,17 @@ recover a run, and how to land the result as a normal PR.
 **Status (2026-07-05, bounded — update discipline: REPLACE this block, ≤15 lines;
 displaced prose moves verbatim to [`PLAN-HISTORY.md`](PLAN-HISTORY.md); per-run detail:
 `docs/reports/dogfood-NNN.md`; queue + course correction: `plan.md` §6).**
-Latest: dogfood-087 — **WP-202 LIVE MEMORY RECALL + PRINCIPLED EVICTION, run GENUINELY UNATTENDED** (`run-8b8b81f7-991b-43c6-bf8f-0dbc48c6d6f7`,
-`docs/reports/dogfood-087.md`). 🟢 **SUCCESS · 6 steps · $8.03/$80 · 27m12s · un-harvested.** Six additive durable steps under
-`unattended:{escalation:seal_resumable_failed}`: net-new pure `resolveMemoryRecallRequest` + `decideMemoryEviction`; the loop now resolves an
-executor `[memory recall <id>]` marker → fetches the fuller excerpt via EXISTING `recallPointerExcerpt` → carries it into the NEXT context, and
-bounds `carriedRefs` with a digest-protecting eviction; + `memory recalls N · evicted M` trace telemetry (counters on the journal PAYLOAD, not the
-frozen `Checkpoint` type). LIVE Temporal proof: 8-chunk unattended run recalls a pointerized early output, stays bounded, SUCCEEDs with NO approval;
-no-recall/no-policy run byte-EQUIVALENT (asserted). **6/6 NON-HOLLOW, 100% per-step reliability, 0 escalations, 731 tests, byte-IDENTICAL. WP-202 →
-🟢.** Also LIVE-validated the F-112 fix (WP-273): the first attempt (`run-a94253fd`) died step 3/6 on the chunk-unaware Rule-3 HALT; the re-run sailed
-the same AC-fail-by-design chunks to SUCCESS. ℹ️ F-113 (eviction gated off `spec.unattended` — track-B). 🟡 F-108/F-110 open.
-**NEXT: dogfood-088 — WP-272 SOAK / IDLE-SURVIVAL MECHANISM** (⛔ STALLED ⇒ next headline IS the current ladder rung's blocker; ⑦ WALL-CLOCK axis,
-F-111). Run wall-clock ≈ real sub-goals × ~4 min/step (087 = 6 steps/27m), so no chunk count reaches hours; the ~8h overnight rung is BLOCKED until a
-durable heartbeat / scheduled-re-entry loop / long inter-checkpoint work lands (the WP-269-for-rung-3 analog). HAND-DESIGN it (TASK-PROTOCOL §4), then
-dogfood the slices. See §7, §8, §1.5, §1.4, §3.
+Latest: dogfood-088 — **WP-272 SOAK / TIME-PACED DURABLE RE-ENTRY (the ⑦ rung's WALL-CLOCK unblock)** (`run-eeb0d5d7-9334-47f4-b9ba-c9cb114f14a9`,
+`docs/reports/dogfood-088.md`). 🟡🟢 **FAILED-then-HAND-LANDED · 6 steps · $9.10/$80 · 28m28s · hand-harvested.** The mechanism is BUILT + LIVE-PROVEN:
+net-new pure `decideSoakDelay` + `SoakPolicy`; the loop's `soakBeforeNextStep()` runs it under opt-in `spec.soak` → `status="SUSPENDED"` → a durable
+`sleep(sleepMs)` **Temporal timer** (replay-safe, NOT a busy-wait) → additive `control_event` `source:"soak"`; + `re-entries N · soak-slept <duration>`
+telemetry; resume rehydrates `soakState` (+ incidentally `consumedWorkChunks`, the F-108 surface); additive `soak` contract w/ Python parity. LIVE proof
+(`soak-live.test.ts`): a compressed-soak run durably sleeps between chunks (`>=950ms`), renders `re-entries 1 · soak-slept 1s`, SUCCEEDs unattended; no-soak
+byte-equivalent. **WP-272 → 🟢; ⑦ wall-clock axis UNBLOCKED. 744 TS + 52 py green.** ⚠️ **The autonomous run false-FAILed** — a mis-specified AC-2
+(🔴 F-114 type-name AC, MINE) tripped the WP-273 chunk-aware Rule-3 HALT at the final chunk (WP-273 worked correctly); delivery hand-harvested + hand-fixed
+(🟡 F-115 wall-clock-flake in the no-soak test). Rung did NOT autonomously climb — landed by hand. 🟡 F-108/F-110/F-113 open.
+**NEXT: dogfood-089 — the ⑦ ACTUAL long-horizon overnight SOAK run ON the WP-272 mechanism** (a real `soak`-policy `chikory run` paced over hours to
+surface proxy-token expiry / worker uptime / F-78 hangs — the first genuine rung-4 CLIMB, now that the mechanism exists). See §7, §8, §1.5, §1.4, §3.
 
 Related docs: [`docs/spec/task-spec.md`](spec/task-spec.md) (schema
 reference) · [`docs/TASK-PROTOCOL.md`](TASK-PROTOCOL.md) (WP etiquette, §7 is

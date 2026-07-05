@@ -37,6 +37,7 @@ import type {
   RouterError,
   RoutingPolicy,
   RunStatusReport,
+  SoakPolicy,
   StepInput,
   StepLimits,
   StepRecord,
@@ -171,6 +172,14 @@ export const UnattendedPolicySchema = z
   })
   .strict();
 
+export const SoakPolicySchema = z
+  .object({
+    sleepMs: z.number().int().positive(),
+    maxReentries: z.number().int().positive(),
+    maxTotalSleepMs: z.number().int().positive().optional(),
+  })
+  .strict();
+
 export const WorkChunkSchema: z.ZodType<WorkChunk> = z
   .object({
     name: z.string().min(1),
@@ -244,6 +253,7 @@ export const TaskSpecSchema = z
     routing: RoutingPolicySchema,
     pacing: PacingPolicySchema.optional(),
     unattended: UnattendedPolicySchema.optional(),
+    soak: SoakPolicySchema.optional(),
     boundedWorkUnit: BoundedWorkUnitPolicySchema.optional(),
     notifications: NotificationPolicySchema.optional(),
     chainLink: ChainLinkSchema.optional(),
@@ -575,6 +585,7 @@ export type ContractTypeChecks = [
   AssertAccepts<JudgePolicy, z.infer<typeof JudgePolicySchema>>,
   AssertAccepts<PacingPolicy, z.infer<typeof PacingPolicySchema>>,
   AssertAccepts<UnattendedPolicy, z.infer<typeof UnattendedPolicySchema>>,
+  AssertAccepts<SoakPolicy, z.infer<typeof SoakPolicySchema>>,
   AssertAccepts<NotificationPolicy, z.infer<typeof NotificationPolicySchema>>,
   AssertAccepts<StepInput, z.infer<typeof StepInputSchema>>,
   AssertAccepts<StepLimits, z.infer<typeof StepLimitsSchema>>,
@@ -613,6 +624,7 @@ export const contractSchemas = {
   JudgePolicy: JudgePolicySchema,
   PacingPolicy: PacingPolicySchema,
   UnattendedPolicy: UnattendedPolicySchema,
+  SoakPolicy: SoakPolicySchema,
   NotificationPolicy: NotificationPolicySchema,
   StepInput: StepInputSchema,
   StepLimits: StepLimitsSchema,

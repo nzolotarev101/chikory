@@ -13,6 +13,7 @@ import {
   defineSignal,
   proxyActivities,
   setHandler,
+  sleep,
   workflowInfo,
 } from "@temporalio/workflow";
 
@@ -64,6 +65,7 @@ import {
 } from "../runner/memory-pointer.js";
 import { isCompletionMilestone } from "./judge-trigger.js";
 import { decideEscalationWait } from "./escalation-wait.js";
+import { decideSoakDelay } from "./soak.js";
 import { decideStepForcing } from "./step-forcing.js";
 import { decideWorkChunk } from "./work-chunk.js";
 
@@ -161,6 +163,8 @@ export async function agentLoop(spec: TaskSpec): Promise<RunStatus> {
   let pacingEventIndex = 0;
   let escalationIndex = 0;
   let controlEventIndex = 0;
+  let soakReentries = 0;
+  let soakSleptMs = 0;
   let consecutiveFailures = 0;
   let parkInjected = false;
   let badDiffInjected = false;
@@ -268,6 +272,35 @@ export async function agentLoop(spec: TaskSpec): Promise<RunStatus> {
     return undefined;
   }
 
+  async function soakBeforeNextStep(): Promise<RunStatus | undefined> {
+    if (stepIndex >= maxSteps) return undefined;
+    const soakDelay = decideSoakDelay(
+      { completedReentries: soakReentries, totalSleptMs: soakSleptMs },
+      spec.soak,
+    );
+    if (soakDelay === null) return undefined;
+
+    status = "SUSPENDED";
+    await sleep(soakDelay.sleepMs);
+    soakReentries += 1;
+    soakSleptMs += soakDelay.sleepMs;
+    await activities.recordControlEvent({
+      runId,
+      controlEventIndex: controlEventIndex++,
+      event: "resume",
+      atStep: stepIndex,
+      source: "soak",
+      details: {
+        sleepMs: soakDelay.sleepMs,
+        completedReentries: soakReentries,
+        totalSleptMs: soakSleptMs,
+      },
+    });
+    if (cancelRequested) return seal("CANCELLED", "cancelled during soak delay");
+    status = "RUNNING";
+    return undefined;
+  }
+
   const prepared = await activities.prepareRun({ runId, spec });
   if (prepared.status === "FAILED") return seal("FAILED", prepared.reason);
   const { baseCommit } = prepared;
@@ -297,6 +330,9 @@ export async function agentLoop(spec: TaskSpec): Promise<RunStatus> {
   checkpoints.push(...restored.checkpoints);
   memoryRecalls = restored.memoryCounters.recalls;
   memoryEvictions = restored.memoryCounters.evicted;
+  soakReentries = restored.soakState.completedReentries;
+  soakSleptMs = restored.soakState.totalSleptMs;
+  consumedWorkChunks = restored.consumedWorkChunks;
   sinceCommit = restored.sinceCommit ?? baseCommit;
 
   for (;;) {
@@ -639,10 +675,14 @@ export async function agentLoop(spec: TaskSpec): Promise<RunStatus> {
         );
         if (nextWorkChunk.action === "use_chunk") {
           judgeFeedback = nextWorkChunk.chunk.directive;
+          const soakTerminal = await soakBeforeNextStep();
+          if (soakTerminal !== undefined) return soakTerminal;
           continue;
         }
         if (stepForcing.deferCompletionMilestone) {
           judgeFeedback = stepForcing.incrementDirective;
+          const soakTerminal = await soakBeforeNextStep();
+          if (soakTerminal !== undefined) return soakTerminal;
           continue;
         }
         if (acceptanceCriteriaMet) return seal("SUCCESS");
@@ -738,5 +778,8 @@ export async function agentLoop(spec: TaskSpec): Promise<RunStatus> {
       });
       status = "RUNNING";
     }
+
+    const soakTerminal = await soakBeforeNextStep();
+    if (soakTerminal !== undefined) return soakTerminal;
   }
 }

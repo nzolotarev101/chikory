@@ -38,6 +38,17 @@ interface TerminalPayload {
   lastCheckpoint?: string;
 }
 
+interface ControlEventPayload {
+  event?: string;
+  source?: string;
+  details?: Record<string, number>;
+}
+
+interface SoakTraceSummary {
+  reentries: number;
+  sleptMs: number;
+}
+
 const SUMMARY_WIDTH = 36;
 const RULE_WIDTH = 79;
 
@@ -128,6 +139,35 @@ function isUnpricedStep(record: StepPayload["record"]): boolean {
   );
 }
 
+function summarizeSoakTrace(entries: JournalEntry[]): SoakTraceSummary {
+  let reentries = 0;
+  let sleptMs = 0;
+
+  for (const entry of entries) {
+    if (entry.kind !== "control_event") continue;
+    const payload = entry.payload as ControlEventPayload;
+    if (payload.source !== "soak" || payload.event !== "resume") continue;
+
+    const completedReentries = payload.details?.["completedReentries"];
+    const totalSleptMs = payload.details?.["totalSleptMs"];
+    const sleepMs = payload.details?.["sleepMs"];
+
+    if (typeof completedReentries === "number") {
+      reentries = Math.max(reentries, completedReentries);
+    } else {
+      reentries += 1;
+    }
+
+    if (typeof totalSleptMs === "number") {
+      sleptMs = Math.max(sleptMs, totalSleptMs);
+    } else if (typeof sleepMs === "number") {
+      sleptMs += sleepMs;
+    }
+  }
+
+  return { reentries, sleptMs };
+}
+
 /** The `chikory trace <run-id>` body (cli.md WP-142 format). */
 export function renderTrace(run: RunRow, entries: JournalEntry[], totals: RunTotals): string {
   const lines: string[] = [];
@@ -173,6 +213,7 @@ export function renderTrace(run: RunRow, entries: JournalEntry[], totals: RunTot
   const pacingEvents = entries.filter((e) => e.kind === "pacing").length;
   const pacing = summarizePacing(entries);
   const compaction = summarizeCompaction(entries);
+  const soak = summarizeSoakTrace(entries);
   const issuesFound = entries.reduce((count, entry) => {
     if (entry.kind !== "judge") return count;
     const { form } = entry.payload as JudgePayload;
@@ -220,8 +261,12 @@ export function renderTrace(run: RunRow, entries: JournalEntry[], totals: RunTot
     memoryRecalls > 0 || memoryEvictions > 0
       ? ` · memory recalls ${memoryRecalls} · evicted ${memoryEvictions}`
       : "";
+  const soakSummary =
+    soak.reentries > 0 || soak.sleptMs > 0
+      ? ` · re-entries ${soak.reentries} · soak-slept ${formatDuration(soak.sleptMs)}`
+      : "";
   lines.push(
-    `        injections ${injections} · checkpoints ${checkpoints}${seamSummary}${pacingSummary}${compactionSummary}${memorySummary}${feedback}`,
+    `        injections ${injections} · checkpoints ${checkpoints}${seamSummary}${pacingSummary}${compactionSummary}${memorySummary}${soakSummary}${feedback}`,
   );
   lines.push(
     `        issues found ${issuesFound} · changes made ${changesMade} ` +

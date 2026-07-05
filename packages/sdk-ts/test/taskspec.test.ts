@@ -92,6 +92,21 @@ unattended:
     expect(spec.unattended).toEqual({ escalation: "seal_resumable_failed" });
   });
 
+  it("maps optional soak policy from YAML to camel-case policy input", () => {
+    const spec = parseTaskSpec(
+      `${read("valid-minimal.yaml")}
+soak:
+  sleep_ms: 250
+  max_reentries: 3
+  max_total_sleep_ms: 1000
+`,
+      { env },
+    );
+
+    expect(TaskSpecSchema.safeParse(spec).success).toBe(true);
+    expect(spec.soak).toEqual({ sleepMs: 250, maxReentries: 3, maxTotalSleepMs: 1000 });
+  });
+
   it("applies defaults when optional fields are omitted (minimal spec)", () => {
     const spec = parseTaskSpec(read("valid-minimal.yaml"), { env });
     expect(TaskSpecSchema.safeParse(spec).success).toBe(true);
