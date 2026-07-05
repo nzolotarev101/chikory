@@ -17,7 +17,7 @@ secret/dependency scans; all 4 ACs green, 699 tests, harvest byte-IDENTICAL. **W
 (big improvement on 082's front-loaded hollow horizon); per-step reliability 100% (0 rollbacks/6 steps).** 🔴 **F-107 → WP-271:**
 the judge is CHUNK-UNAWARE — at step 2 (chunk 2/5, all ACs+rubric PASS) it ESCALATEd on a "missing" PART 4 that was deferred
 BY DESIGN → the run PARKED for human approval with NO timeout (a HARD blocker for the ⑦ overnight-UNATTENDED rung — it would
-hang all night) and re-handed chunk 2 → hollow 0-byte step 3 (4.9% cost). 🟡 F-108: `consumedWorkChunks` not restored on resume (latent).
+hang all night) and re-handed chunk 2 → hollow 0-byte step 3 (4.9% cost). 🟡 F-108: `consumedWorkChunks` not restored on resume (latent). 🟡 F-109: test-concurrency OOM (parallel Vitest workers and Temporal servers crash the machine).
 **NEXT: dogfood-086 — WP-271, the F-107 unblock** (chunk-scoped judge adjudication + unattended-safe ESCALATE policy), the
 named prerequisite for the ⑦ overnight rung. See §7 (troubleshooting), §8 (known limitations), §1.5, §1.4, §3.
 
@@ -627,6 +627,7 @@ broken (a false-green, not a follow-on fix).
 | `chikory land` succeeded but the landed feature is invisible / verification not run | Pass `--verify` (since WP-224, dogfood-008): it reruns `devbox run build/lint/typecheck/test` against the fresh commit and exits 1 on the first red check (commit kept for inspection). Bare `land` (no flag) still only applies + commits — run the four commands by hand. The stray `Switched to a new branch …` lines are gone (F-18 fixed): git stderr is now captured and only surfaced inside `land failed: …` on real errors. |
 | `pnpm chikory: command not found` | Bin link lost: `rm node_modules/.pnpm-workspace-state-v1.json && devbox run -- pnpm install`. |
 | Parallel `devbox run` commands fail with `.devbox/gen/scripts/.cmd.sh: No such file or directory` | Devbox 0.17.0 concurrent-startup race (dogfood-016 **F-22**). Run every Devbox command sequentially; do not parallelize test/typecheck/lint invocations. |
+| Parallel test execution (vitest/pytest/Temporal workers) triggers too many parallel processes and the machine runs out of memory/crashes | Concurrency/parallelism OOM (🟡 **F-109**). Limit Vitest worker pool (`maxWorkers: 1`) and disable file parallelism (`fileParallelism: false`) in `packages/sdk-ts/vitest.config.ts`. |
 | `dogfood-verify` shows Vitest `undefined` failures although the same tests pass directly | Do not prefix `devbox run` with an env assignment under Devbox 0.17.0 (dogfood-016 **F-24**). For an explicit run use `devbox run -- bash scripts/dogfood-verify.sh <run-id>`; for the newest run use `devbox run dogfood-verify`. |
 | Proxy run dies with router FAILED on judge pass | Shim not running / wrong port — restart `cli-judge-proxy.mjs` and check `OPENAI_COMPAT_BASE_URL`. |
 | `chikory chain` prints `plan meta-judge gate stopped the chain: plan meta-judge LLM call failed after 5 attempts: transport error: fetch failed` and exits — no `.chikory/chains/` dir is created | The judge-stage LLM call (the plan meta-judge) couldn't reach the shim; the router retried 5× then gave up, the harness folded it to an ESCALATE-as-value, and the chain fail-closed (dogfood-041 attempt 2, **F-33**). **This is an infra error, NOT a plan rejection** — the message reads like the plan was rejected, but the judge was simply unreachable. Root cause is almost always the proxy (**F-34**, see next row). Note the decompose+gate run **host-side before any durable state exists**, so this leaves no `ChainJournal` and nothing to resume — you must fix the shim and re-launch from scratch. Until WP-233 lands, a flaky shim makes the chain un-launchable with no trail. |
@@ -713,6 +714,11 @@ broken (a false-green, not a follow-on fix).
   early chunks produce empty diffs until the executor catches up (self-corrected
   by the AC gate, but wasteful). Not exercised yet (0 resumes); avoid resuming a
   chunked run until fixed.
+- **⚠️ Parallel test execution causes memory exhaustion and crashes** (🟡 F-109, track-B):
+  running full test suites concurrently via `pnpm -r test` or `vitest run` spawns 
+  multiple worker processes/threads, each launching Temporal dev servers and child 
+  agent processes. This parallel process tree consumes all system memory and crashes.
+  Fix: restrict worker pool and disable file parallelism in `vitest.config.ts`.
 
 - **No planner for `chikory run`**: every step gets the full `goal` as its
   instruction, plus the last 5 step summaries, judge feedback, and acceptance
