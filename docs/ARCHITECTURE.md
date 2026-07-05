@@ -101,7 +101,7 @@ chikory inject <run-id> … → journaled correction, enters context at next ste
 | Control plane | [components/control-plane.md](components/control-plane.md) | Hosted services, API, data model, auth, billing, ops | P4 |
 | Vertical agent | [components/vertical-agent.md](components/vertical-agent.md) | Vertical packs, playbooks, steward, SLO reporting | P5 |
 
-Cross-cutting specs: [spec/CONTRACTS.md](spec/CONTRACTS.md) (frozen interfaces) · [spec/task-spec.md](spec/task-spec.md) (task.yaml) · [spec/journal-format.md](spec/journal-format.md) (JIF) · [SECURITY.md](SECURITY.md) (threat model) · [GLOSSARY.md](GLOSSARY.md).
+Cross-cutting specs: [spec/CONTRACTS.md](spec/CONTRACTS.md) (frozen interfaces) · [spec/task-spec.md](spec/task-spec.md) (task.yaml) · [spec/journal-format.md](spec/journal-format.md) (JIF) · [SECURITY.md](SECURITY.md) (threat model) · [GLOSSARY.md](GLOSSARY.md) (terms + ID families) · [COMMS.md](COMMS.md) (communication standard).
 
 ## 5. Architectural rules
 

@@ -100,6 +100,9 @@ The caller (`dogfood-review` phase-5) MUST honor a `⛔ VETO`.
 
 ## Output
 
+Follow the binding communication standard in
+[`docs/COMMS.md`](../../../docs/COMMS.md): plain lead first, gloss every ID on
+first use (`WP-271 (chunk-scoped judge)`, not bare `WP-271`), structure over prose.
 End your analysis with a structured summary formatted for readability. To ensure it is simple to read, visually clear, and detailed while conserving full context, adhere strictly to these rules:
 
 1. **Vibe Check (Simplified Summary First)**: Begin with a 1–2 sentence high-level, jargon-free summary classifying the planned run. Clearly state the target Work Package (WP) and what the task aims to achieve in plain English.

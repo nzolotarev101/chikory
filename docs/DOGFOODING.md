@@ -26,7 +26,8 @@ soak/idle-survival mechanism (WP-272) first, as rung 3 needed step-forcing (WP-2
 Related docs: [`docs/spec/task-spec.md`](spec/task-spec.md) (schema
 reference) · [`docs/TASK-PROTOCOL.md`](TASK-PROTOCOL.md) (WP etiquette, §7 is
 dogfood-specific) · [`docs/components/cli.md`](components/cli.md) (command
-reference).
+reference) · [`docs/COMMS.md`](COMMS.md) (communication standard — binding for
+reports, friction items, spec headers, status blocks).
 
 ---
 

@@ -30,3 +30,30 @@ Canonical meanings. Docs and code comments use these terms exactly.
 | **Vertical pack** | Stage-3 layer: blueprint + criteria library + rubrics + playbooks + SLOs for one app class. Data, not new runtime. |
 | **Steward** | Stage-3 recurring maintenance schedule for a deployed app (upgrades, CVE patches, bug-fix runs). |
 | **Stop signal** | Month-6 test: beat OpenHands on 50-task DevAI-extended subset or revisit the thesis. |
+
+## ID families
+
+Coined identifiers used across `plan.md`, reports, and specs. Per
+[`COMMS.md`](COMMS.md) Rule 1, gloss each on first use in any artifact.
+
+| ID | Family | Meaning |
+|---|---|---|
+| `WP-n` | Work package | One PR-sized planned unit in `plan.md` with acceptance criteria + verification command. |
+| `F-n` | Friction | A problem a dogfood run surfaced. Global, sequential numbering across all runs. |
+| `rung-N` | Horizon-ladder rung | Run difficulty tier (WP-265 ladder); higher = longer/harder horizon. `0` = off-ladder. |
+| `§n` | plan.md section | A numbered section of `plan.md` (e.g. `§6` = the work queue). |
+| `RT-n` | Requirement — routing | LLM-routing requirement in `REQUIREMENTS.md`. |
+| `DX-n` | Requirement — durability | Durable-execution requirement. |
+| `JD-n` | Requirement — judge | Agent-as-a-Judge requirement (judge-trust pillar). |
+| `CM-n` | Requirement — memory | Context/memory requirement. |
+| `CG-n` | Requirement — cost | Cost/budget requirement. |
+| `dogfood-NNN` | Dogfood run | A self-hosting run (Chikory building Chikory); paired spec + report. |
+| `run-<id>` | Run id | A single durable workflow execution's identifier. |
+
+## Status words
+
+| Term | Meaning |
+|---|---|
+| **Harvest** | Land a completed run's diff as a normal PR. `un-harvested` = run succeeded, diff not yet landed. |
+| **Hollow / non-hollow** | A step that did trivial/no real work (hollow) vs. a distinct non-trivial diff (non-hollow). |
+| **Prescribed / loose spec** | `prescribed` goal dictates exact files/symbols/diff; `loose` goal states outcome + constraints, layout left to the executor. |

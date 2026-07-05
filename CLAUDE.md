@@ -73,10 +73,17 @@ All project tasks (build, lint, test, run, Temporal, scripts) run **inside devbo
 
 ## Communication Guidelines
 
-To make updates, plans, and summaries easy to read while retaining full context:
-- **Lead with a high-level summary**: Explain the outcome or state in plain, simplified human terms first, using clear explanations of any complex domain concepts (like Context Rot, Compounding Errors, OTel spans, or Temporal workflow states).
-- **Conserve all context**: Always output exact identifiers such as Run IDs, commit SHAs, file names, line numbers, execution costs in USD, token statistics, and test exit statuses.
-- **Structure outputs visually**: Avoid large blocks of dense text. Always use bullet points, tables for comparing metrics or runs, and visual flags (e.g., `🟢`, `🟡`, `🔴`, `⚠️`, `ℹ️`) to format your response.
+**`docs/COMMS.md` is the binding communication standard** for every human-facing
+artifact an agent writes — living docs, reports, spec preambles, and in-session
+chat. `docs/GLOSSARY.md` is the single source of truth for every ID and term. The
+four rules, in short:
+
+1. **Gloss every ID on first use** (the anti-jargon rule): a coined ID/acronym gets a ≤6-word plain gloss in parens the first time it appears in each artifact — `WP-271 (chunk-scoped judge)`, not bare `WP-271`. Families: `WP-n`, `F-n`, `rung-N`, `§n`, `RT/DX/JD/CM/CG-n`, `dogfood-NNN`, `run-<id>`.
+2. **Plain lead**: open with 1–2 jargon-free sentences on the outcome/state in human terms.
+3. **Structure over prose**: bullets/tables, no paragraph over ~4 lines, bounded status blocks. Conserve all exact identifiers (run-ids, SHAs, `file:line`, USD, tokens, exit status).
+4. **Glossary is canonical**: register a new ID family in `docs/GLOSSARY.md` before first use.
+
+See `docs/COMMS.md` for the fixed per-surface templates and the "before you post" self-check.
 
 ## Do not
 
