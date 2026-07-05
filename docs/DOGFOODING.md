@@ -9,19 +9,19 @@ recover a run, and how to land the result as a normal PR.
 displaced prose moves verbatim to [`PLAN-HISTORY.md`](PLAN-HISTORY.md); per-run detail:
 `docs/reports/dogfood-NNN.md`; queue + course correction: `plan.md` §6).**
 Latest: dogfood-086 — **WP-271 CHUNK-SCOPED JUDGE + UNATTENDED-SAFE ESCALATE** (`run-88235198-2aea-4e29-a8b9-5fb9ab78930d`,
-`docs/reports/dogfood-086.md`). 🟢 **SUCCESS · 4 steps · $5.72/$50 · 20m30s · un-harvested.** The F-107 unblock, delivered in
-4 dependency-ordered durable steps, all additive: PART 1 optional `activeWorkChunkDirective?` on the judge-pass input; PART 2
-net-new pure `renderActiveWorkChunkScope` threaded into `buildJudgeMessages` so an intermediate chunked step is judged against
-the CURRENT chunk (later goal parts absent from THIS diff are DEFERRED BY DESIGN, not omissions); PART 3 pure `decideEscalationWait`
-+ additive `UnattendedPolicy` wired into both agent-loop ESCALATE paths so an opt-in `escalation:"seal_resumable_failed"` seals a
-resumable terminal instead of an untimed hang (default = byte-identical); PART 4 LIVE Temporal proof (deferred early chunk →
-PROCEED → SUCCESS; no-active-chunk prompt byte-equal; genuine escalate seals resumable). **4/4 NON-HOLLOW, 100% per-step
-reliability, 0 escalations, cross-language contract parity (TS+Python+shared fixture), 713 tests, harvest byte-IDENTICAL. WP-271
-→ 🟢; F-107 CLOSED — the ⑦ overnight-unattended rung is UNBLOCKED.** F-107 confirmed NON-DETERMINISTIC (086 drew 0 spurious
-escalates on the same unfixed judge that escalated in 085). 🟡 F-110 (escalate seals `FAILED`, conflates park w/ failure — track-B).
-🟡 F-108 (`consumedWorkChunks` not restored on resume). 🟡 F-109 (test-concurrency OOM).
-**NEXT: dogfood-087 — the ⑦ OVERNIGHT-UNATTENDED rung (rung 4)**, the first multi-hour unattended `chikory run` using
-`unattended:{escalation:seal_resumable_failed}` over a many-chunk horizon on a real open product WP. See §7, §8, §1.5, §1.4, §3.
+`docs/reports/dogfood-086.md`). 🟢 **SUCCESS · 4 steps · $5.72/$50 · 20m30s · un-harvested.** The F-107 unblock in 4 additive
+durable steps: net-new pure `renderActiveWorkChunkScope` threaded into `buildJudgeMessages` (an intermediate chunked step is
+judged against the CURRENT chunk — later goal parts absent from THIS diff are DEFERRED BY DESIGN, not omissions) + pure
+`decideEscalationWait`/`UnattendedPolicy` wired into both ESCALATE paths so an opt-in `escalation:"seal_resumable_failed"` seals a
+resumable terminal instead of an untimed hang (default byte-identical); LIVE Temporal proof. **4/4 NON-HOLLOW, 100% per-step
+reliability, 0 escalations, cross-language parity (TS+Python+fixture), 713 tests, byte-IDENTICAL. WP-271 → 🟢; F-107 CLOSED**
+(confirmed NON-DETERMINISTIC — 086 drew 0 spurious escalates on the same unfixed judge that escalated in 085). 🟡 F-110 (escalate
+seals `FAILED`, conflates park w/ failure). 🟡 F-108 (`consumedWorkChunks` not restored on resume). 🟡 F-109 (test-concurrency OOM).
+**NEXT: dogfood-087 — the ⑦ rung's UNATTENDED-AUTONOMY prerequisite** (Ladder-rung 3, NOT a rung climb — §1.5 why-not
+recorded): the first GENUINELY OPERATOR-FREE `chikory run` (`unattended:{escalation:seal_resumable_failed}`, WP-271),
+hosting real WP-202 memory work (~6 chunks/~30 min). **🔴 F-111 → WP-272: the ⑦ rung's ~8h WALL-CLOCK axis is BLOCKED** —
+run wall-clock ≈ real sub-goals × ~4 min/step (F-95), so no chunk count reaches hours; the literal overnight rung needs a
+soak/idle-survival mechanism (WP-272) first, as rung 3 needed step-forcing (WP-269). See §7, §8, §1.5, §1.4, §3.
 
 Related docs: [`docs/spec/task-spec.md`](spec/task-spec.md) (schema
 reference) · [`docs/TASK-PROTOCOL.md`](TASK-PROTOCOL.md) (WP etiquette, §7 is

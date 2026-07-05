@@ -1,32 +1,41 @@
-# Dogfood-087: WP-202 — LIVE MEMORY RECALL + BOUNDED POINTER STORE, hosting the ⑦ OVERNIGHT-UNATTENDED rung (ladder rung 4).
+# Dogfood-087: WP-202 — LIVE MEMORY RECALL + BOUNDED POINTER STORE, proving the ⑦ rung's UNATTENDED-AUTONOMY axis.
 #   dogfood-086 (run-88235198) closed 🔴 F-107 (WP-271): the judge is now CHUNK-AWARE and an ESCALATE is
 #   UNATTENDED-SAFE (`decideEscalationWait` + `unattended:{escalation:seal_resumable_failed}` seals a resumable
-#   terminal instead of an untimed approval hang). That was the NAMED BLOCKER for the ⑦ overnight-unattended rung.
-#   With it landed, an unattended `work_chunks` run can finally run without an operator on hand.
+#   terminal instead of an untimed approval hang). That removed the APPROVAL-HANG blocker for an operator-free run.
 #
-# WHY THIS IS THE NEXT HEADLINE (⛔ STALLED ⇒ ladder rung binding; rung stuck at 3 for 085/086).
-#   `scripts/dogfood-progression.sh` is ⛔ STALLED (ladder rung 3 vs 3 across the trailing-3 headlines) and the
-#   §1.5 ladder-pace rule requires the next headline to CLIMB the next rung. The next rung is ⑦ OVERNIGHT-UNATTENDED
-#   (rung 4) — the first multi-hour `chikory run` with NO operator, relying on the WP-271 unattended policy under real
-#   test. This run climbs the horizon axis (steps + wall-clock) AND the resume/autonomy axis (genuinely unattended).
+# ⚠️ HONEST SCOPING — THIS IS NOT AN ~8h WALL-CLOCK RUN. The ⑦ rung has TWO axes: (a) UNATTENDED AUTONOMY (survives
+#   with NO operator on hand) and (b) WALL-CLOCK ENDURANCE (~8h — surfaces proxy-token expiry, worker uptime, F-78
+#   hangs over hours). 6 non-hollow chunks × ~4-5 min/step ≈ ~30 min (cf. 086 = 4 steps/20m), so this run does NOT
+#   move the wall-clock axis — codex journals ~1 durable step per clean session and horizon is bounded by real
+#   decomposable work × ~4 min, not by chunk count (F-95). 🔴 **F-111 → WP-272:** the wall-clock axis has NO
+#   soak/idle-survival MECHANISM yet (heartbeat / scheduled re-entry / genuinely long inter-checkpoint work), the way
+#   rung 3 needed step-forcing (WP-269) before it was reachable — so the literal ~8h rung is BLOCKED until WP-272 lands.
+#   THIS run deliberately proves only axis (a): the WP-271 unattended policy holding live on a real multi-chunk run.
+#
+# WHY THIS IS THE NEXT HEADLINE (⛔ STALLED ⇒ ladder rung binding; the rung is BLOCKED ⇒ §1.2 fallback carve-out).
+#   `scripts/dogfood-progression.sh` is ⛔ STALLED (ladder rung 3 vs 3). The current ladder rung (⑦ overnight) is
+#   BLOCKED on its wall-clock axis by the missing soak mechanism (F-111 → WP-272) — the SAME §1.2 fallback carve-out
+#   that made 086 (WP-271) the ⑦-prerequisite fires again: when the rung is blocked by harness the dogfood mechanism
+#   depends on, the named prerequisite becomes the headline. 087 is the UNATTENDED-AUTONOMY prerequisite (proves the
+#   policy live), and it does NOT self-declare a rung climb — the review records WHY the rung did not advance
+#   (DOGFOODING §1.5: "climb the rung OR record why not"), and queues WP-272 as the wall-clock unblock.
 #
 # HOST WP — WP-202 Memory Pointer store (real open plan.md §6 product WP, a CLAUDE.md first-class thesis pillar:
 #   "store large tool outputs externally, pass short refs into context"). The write side (`shouldPointerize` +
 #   interception → `ContextBundle.memoryRefs`) and the PURE recall helpers (`parsePointerReference`,
 #   `recallPointerExcerpt`) are landed — BUT `recallPointerExcerpt` is NEVER wired into the loop (only re-exported +
 #   unit-tested), so the executor cannot ACTIVELY pull a pointer's fuller content mid-run; and `carriedRefs` is bounded
-#   only by a crude `CARRIED_REFS_WINDOW` tail slice, not a principled eviction — so over a LONG horizon the carried set
-#   is either unbounded-by-recency or arbitrarily truncated. This run makes memory recall a LIVE loop capability and
-#   bounds the store principledly — exactly the mechanism a long unattended horizon needs. The WP-271 unattended policy
-#   is the VEHICLE seeded into this real WP-202 code (§1.2), and this run is also the next long-horizon datapoint.
+#   only by a crude `CARRIED_REFS_WINDOW` tail slice, not a principled eviction. This run makes memory recall a LIVE loop
+#   capability and bounds the store principledly — the memory mechanism a long horizon needs — and runs it GENUINELY
+#   UNATTENDED. The WP-271 unattended policy is the VEHICLE seeded into this real WP-202 code (§1.2).
 #
 # Format: LOOSE (headline — goal states the OUTCOME + constraints; ACs pin "done" via OUTCOME SYMBOLS THE GOAL NAMES;
 #   module/test layout LEFT TO THE EXECUTOR, F-82/F-83; NO prescribed diff).
-# Ladder-rung: 4
-# Thesis-KPI: max horizon survived (steps + wall-clock) under a GENUINELY UNATTENDED run — no operator on hand — proving
-#   the WP-271 `unattended:{escalation:seal_resumable_failed}` policy keeps a long chunked run from hanging, while the
-#   memory store stays bounded and the executor can recall externalized context on demand (the Memory Pointer Pattern
-#   under long-horizon load). Hosted on real WP-202 memory-store code.
+# Ladder-rung: 3
+# Thesis-KPI: UNATTENDED AUTONOMY — a real multi-chunk `chikory run` reaches SUCCESS with NO operator on hand (never
+#   blocks on `AWAITING_APPROVAL`), proving the WP-271 `unattended:{escalation:seal_resumable_failed}` policy live under
+#   load, while the memory store stays bounded and the executor recalls externalized context on demand (Memory Pointer
+#   Pattern). Does NOT move the wall-clock/max-horizon axis (that is gated on F-111 → WP-272). Hosted on real WP-202 code.
 #
 # F-90 APPLIED: AC-1/2 grep NET-NEW symbols the goal NAMES (`resolveMemoryRecallRequest`, `decideMemoryEviction`),
 #   both ABSENT on HEAD, so a recursive grep cannot false-green on an incumbent file.
@@ -36,7 +45,7 @@
 # ✅ UNATTENDED — THIS RUN NEEDS NO OPERATOR. It launches WITH `unattended:{escalation:seal_resumable_failed}` (WP-271),
 #   so a genuine ESCALATE seals a RESUMABLE `FAILED` terminal instead of an untimed approval hang, and the chunk-scoped
 #   judge (WP-271) will not spuriously ESCALATE an on-track intermediate chunked step. You may launch and walk away.
-#   ⚠️ If the run seals FAILED overnight, grep `failure.reason` for the `unattended … escalation` prefix to tell a
+#   ⚠️ If the run seals FAILED while unattended, grep `failure.reason` for the `unattended … escalation` prefix to tell a
 #   policy-park (resume-and-approve) from a genuine defect (F-110).
 #
 # ⚠️ HARD PREREQUISITE — COMMIT WP-271 FIRST. The workspace clones HEAD, and this spec's `unattended:` block only parses
@@ -46,7 +55,7 @@
 # LAUNCH WITH `chikory run` (a single durable run):
 #      devbox run run-dogfood       # <- `chikory run`; picks the latest spec (this one)
 
-name: dogfood-087-wp202-live-memory-recall-overnight
+name: dogfood-087-wp202-live-memory-recall-unattended
 goal: >
   Make the Memory Pointer store a LIVE long-horizon capability: the executor can ACTIVELY RECALL an externalized
   pointer's fuller content mid-run, and the carried-pointer set stays PRINCIPLEDLY BOUNDED as a run accumulates many
@@ -55,8 +64,8 @@ goal: >
   helpers are pure and landed (`parsePointerReference`, `recallPointerExcerpt`, `src/runner/memory-pointer.ts`) — but
   `recallPointerExcerpt` is NEVER invoked by the loop, and `carriedRefs` is bounded only by a crude
   `CARRIED_REFS_WINDOW` tail slice. Deliver it in SIX bounded, dependency-ordered sub-goals, ONE per durable step, so
-  every sealed checkpoint carries DISTINCT non-trivial product work over a long horizon (the rung-4 non-hollow horizon,
-  F-100/WP-270):
+  every sealed checkpoint carries DISTINCT non-trivial product work (the non-hollow horizon, F-100/WP-270), run
+  GENUINELY UNATTENDED:
 
     * PART 1 — PURE RECALL-REQUEST PARSER (additive): add a net-new pure, side-effect-free total
       `resolveMemoryRecallRequest(executorText: string, refs: ArtifactRef[]): ArtifactRef | null` in
@@ -116,7 +125,7 @@ repos:
 # LONG-HORIZON DRIVER: 6 ordered chunks, ONE PART each, so `decideWorkChunk` hands the executor EXACTLY one bounded
 #   sub-goal per durable step and completion defers until all 6 chunks are consumed AND the judge confirms the ACs.
 #   Combined with `min_durable_steps: 6` this forces ≥6 sealed checkpoints EACH carrying a distinct, non-trivial diff —
-#   the rung-4 non-hollow horizon, run GENUINELY UNATTENDED via the WP-271 policy below. (Verify parse before launch:
+#   the non-hollow horizon, run GENUINELY UNATTENDED via the WP-271 policy below. (Verify parse before launch:
 #   `parseTaskSpec` over this file, or `pnpm chikory run` which validates first.)
 bounded_work_unit:
   min_durable_steps: 6
