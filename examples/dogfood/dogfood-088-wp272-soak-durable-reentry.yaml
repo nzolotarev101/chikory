@@ -1,0 +1,245 @@
+# Dogfood-088: WP-272 — SOAK / IDLE-SURVIVAL MECHANISM via TIME-PACED DURABLE RE-ENTRY. The ⑦ overnight rung's
+#   WALL-CLOCK unblock (F-111). dogfood-087 (run-8b8b81f7) LIVE-proved the ⑦ rung's UNATTENDED-AUTONOMY axis on real
+#   WP-202 memory code; this run builds the OTHER axis — a durable mechanism that produces honest WALL-CLOCK ENDURANCE.
+#
+# WHY THIS IS THE NEXT HEADLINE (⛔ STALLED ⇒ ladder rung binding).
+#   `scripts/dogfood-progression.sh` is ⛔ STALLED (ladder rung 3 vs 3 across 085/086/087). BINDING: the next headline
+#   IS the current WP-265 ladder rung's remaining blocker. The ⑦ rung has two axes — (a) UNATTENDED AUTONOMY (proven by
+#   087) and (b) ~8h WALL-CLOCK ENDURANCE. Axis (b) has NO mechanism: run wall-clock ≈ real decomposable sub-goals ×
+#   ~4-5 min/step (087 = 6 steps/27m), so NO chunk count reaches hours (F-95). The literal ~8h overnight rung is BLOCKED
+#   until a soak/idle-survival mechanism lands — the SAME way rung 3 was blocked until step-forcing (WP-269). WP-272 IS
+#   that mechanism and IS a real open plan.md §6 product WP (durable-execution pillar), so this is the ladder rung
+#   itself, NOT a §1.2 fallback carve-out.
+#
+# DESIGN DIRECTION (hand-chosen 2026-07-05, TASK-PROTOCOL §4): TIME-PACED DURABLE RE-ENTRY — the run durably SUSPENDS
+#   between steps and a durable Temporal timer (`sleep` from `@temporalio/workflow`, replay-safe, memoized in event
+#   history) re-enters it after a real wall-clock delay, so a multi-session run is PACED over hours. This reuses the
+#   landed durable-park substrate (WP-250 window-park / budget-SUSPENDED `condition` / operator-park), surfaces
+#   proxy-token expiry + worker-uptime + resume-correctness across REAL time, and stays deterministically testable with
+#   a COMPRESSED delay in the live test. (Rejected: a heartbeat loop does no real work between beats — hollow-horizon;
+#   long inter-checkpoint work is hard to bound/test and skips the re-entry seam.)
+#
+# ⚠️ HONEST SCOPING — THIS RUN DOES NOT ITSELF RUN ~8h. It BUILDS + LIVE-PROVES the durable re-entry MECHANISM under a
+#   COMPRESSED soak policy (small ms), asserting the durable timer fires and the run re-enters and resumes to SUCCESS.
+#   The literal ~8h overnight execution ON this mechanism is the immediate follow-on (dogfood-089). This run is the
+#   rung-⑦ wall-clock ENABLER — the exact analog of WP-269 (which had to force the intra-run step loop before rung 3
+#   was reachable). Ladder-rung 4 is claimed as the wall-clock-mechanism rung; the review of THIS run adjudicates the
+#   climb (DOGFOODING §1.5: "climb the rung OR record why not").
+#
+# HOST WP — WP-272 (real open plan.md §6 product WP, durable-execution pillar). NEW feature code on the durable
+#   substrate: a pure soak-delay decision + an additive `soak` spec-input contract + a durable-timer wire into the
+#   agent loop + telemetry + a crash-during-soak resume proof. The WP-271 unattended policy is REUSED (not rebuilt) so
+#   the run is operator-free while it soaks.
+#
+# Format: LOOSE (headline — goal states the OUTCOME + constraints; ACs pin "done" via OUTCOME SYMBOLS THE GOAL NAMES;
+#   module/test layout LEFT TO THE EXECUTOR, F-82/F-83; NO prescribed diff).
+# Ladder-rung: 4
+# Thesis-KPI: WALL-CLOCK ENDURANCE — a durable `chikory run` genuinely SUSPENDS and RE-ENTERS across real wall-clock
+#   time under a durable Temporal timer (not a busy-wait, not a human resume), resuming to SUCCESS, with the soak
+#   activity auditable in the trace — the soak/idle-survival mechanism the ~8h overnight rung needs. Proven under a
+#   COMPRESSED delay in-test; does NOT itself run 8h (that is dogfood-089 on this mechanism). Hosted on real WP-272 code.
+#
+# F-90 APPLIED: AC-1/2 grep NET-NEW symbols the goal NAMES (`decideSoakDelay`, `SoakPolicy`), both ABSENT on HEAD, so a
+#   recursive grep cannot false-green on an incumbent file.
+# F-97 APPLIED: AC-3 does NOT bare-grep the symbol — it requires the net-new `decideSoakDelay` to co-live with the LIVE
+#   runner driver `createRunnerWorker` in a `test/` file, so the LIVE durable-re-entry proof is actually enforced.
+#
+# ✅ UNATTENDED — THIS RUN NEEDS NO OPERATOR. It launches WITH `unattended:{escalation:seal_resumable_failed}` (WP-271),
+#   so a genuine ESCALATE seals a RESUMABLE FAILED terminal instead of an untimed approval hang, and the chunk-scoped
+#   judge (WP-271) + chunk-aware deterministic rules (WP-273) will not spuriously halt/escalate an on-track intermediate
+#   chunked step. You may launch and walk away.
+#   ⚠️ If the run seals FAILED while unattended, grep `failure.reason` for the `unattended … escalation` prefix to tell a
+#   policy-park (resume-and-approve) from a genuine defect (F-110).
+#
+# ⚠️ HARD PREREQUISITE — COMMIT dogfood-087's WP-202 DELIVERY FIRST. The workspace clones HEAD. dogfood-087's delivery
+#   (WP-202 live recall + eviction) AND the F-112/WP-273 harness fix are on the working tree UN-HARVESTED — commit ALL
+#   of it before launching, or this run clones a HEAD without the WP-273 chunk-aware verdict rules and can re-hit F-112.
+#
+# LAUNCH WITH `chikory run` (a single durable run):
+#      devbox run run-dogfood       # <- `chikory run`; picks the latest spec (this one)
+
+name: dogfood-088-wp272-soak-durable-reentry
+goal: >
+  Make a durable `chikory run` able to produce HONEST WALL-CLOCK ENDURANCE: under an opt-in soak policy the loop durably
+  SUSPENDS between steps and a durable Temporal timer RE-ENTERS it after a real wall-clock delay, so a run is paced over
+  a long horizon across sessions (WP-272, the ⑦ overnight rung's wall-clock unblock, F-111). Today the loop has no
+  idle/soak mechanism — wall-clock is bounded by real decomposable work × ~4-5 min/step, so no chunk count reaches
+  hours. Reuse the landed durable-park substrate (the budget-SUSPENDED `await condition(...)` pattern and the
+  `spec.debug?.parkBeforeStep` seam in `src/workflow/agent-loop.ts`) and the durable `@temporalio/workflow` timer
+  (`sleep`), NOT a busy-wait or a human resume. Deliver it in SIX bounded, dependency-ordered sub-goals, ONE per durable
+  step, so every sealed checkpoint carries DISTINCT non-trivial product work (the non-hollow horizon, F-100/WP-270), run
+  GENUINELY UNATTENDED:
+
+    * PART 1 — PURE SOAK-DELAY DECISION (additive): add a net-new pure, side-effect-free total
+      `decideSoakDelay(state, policy?): { sleepMs: number } | null` in a NEW `src/workflow/soak.ts` (a sibling of
+      `escalation-wait.ts` / `step-forcing.ts`, NO I/O, NO clock, NO `Date.now`) that, under an opt-in policy, returns
+      the durable sleep to insert before the next durable step (paced re-entry), or `null` when there is no policy or the
+      soak budget/bound is exhausted. Add the local `SoakPolicy` type (define its shape — e.g. an inter-re-entry delay
+      and a max re-entry count / total soak bound). Pure; exhaustively unit-tested (no-policy null, first re-entry,
+      bound-exhausted null, input-immutability). Re-export from the barrel.
+
+    * PART 2 — ADDITIVE `soak` SPEC-INPUT CONTRACT (parallels the WP-271 `unattended` field): thread `SoakPolicy` through
+      the TaskSpec contract exactly as `UnattendedPolicy` was — TS `src/types.ts` (`TaskSpec.soak?` + the `SoakPolicy`
+      interface) + zod `SoakPolicySchema` in `src/schemas.ts` (registered in `ContractTypeChecks` + `contractSchemas`) +
+      raw-YAML `soak` parse in `src/taskspec.ts` + Python pydantic parity (`packages/sdk-py/src/chikory/types.py` +
+      `__init__.py` export + the `test_contracts.py` registry) + a shared `fixtures/contracts/SoakPolicy.valid.json`.
+      ADDITIVE OPTIONAL — absent `soak` leaves the spec byte-equivalent to today.
+
+    * PART 3 — WIRE DURABLE RE-ENTRY INTO THE LOOP (depends on 1/2): import `sleep` from `@temporalio/workflow` and,
+      under the opt-in `soak` policy, insert the `decideSoakDelay`-decided durable `sleep(sleepMs)` BETWEEN durable steps
+      so the run genuinely spends real wall-clock time DURABLY suspended and re-enters deterministically (a Temporal
+      timer is replay-safe / memoized in event history — the determinism rule at the top of `agent-loop.ts` holds). Set
+      `status = "SUSPENDED"` across the sleep so the durable park is observable. Journal the re-entry as an ADDITIVE
+      optional (reuse an existing entry kind or an additive optional field — NO new REQUIRED journal-field shape). The
+      DEFAULT path (no `soak` policy) inserts NO timer and leaves the loop BYTE-EQUIVALENT to today.
+
+    * PART 4 — SOAK TELEMETRY (depends on 3): surface wall-clock endurance in the durable trace — an additive
+      `re-entries N · soak-slept <duration>` (or equivalent) segment in the `chikory trace` totals sub-line, fed by
+      counters the loop increments per durable re-entry, so an OVERNIGHT run's soak activity is auditable after the fact.
+      Additive; a run with no soak renders BYTE-EQUIVALENT to today.
+
+    * PART 5 — CRASH-DURING-SOAK RESUME PROOF (depends on 3): the durable-execution seam. Ensure the soak counters/state
+      restore on resume (the `RestoredWorkflowState` path in `runner/activities.ts`, as dogfood-087 did for
+      `memoryCounters`), so a worker crash mid-soak re-enters the DURABLE TIMER and the correct step — NOT chunk 0.
+      Add a test that drives a run into a soak, and asserts the soak state/counters survive a restore (do NOT weaken the
+      WP-206 suspend/resume or WP-123 crash-recovery assertions).
+
+    * PART 6 — LIVE PROOF (depends on 1–5): add a LIVE Temporal test (reuse `createRunnerWorker` / `createTemporalRunner`
+      / the scripted registry + `waitFor` helpers, `describe.skipIf(address === null)`, `makeJudgedSpec` — do NOT mock the
+      workflow) that drives a real multi-chunk `chikory run` UNDER a COMPRESSED `soak` policy where the loop durably
+      SLEEPS between steps: assert the durable re-entry actually occurred (the soak counter advanced AND the run reached
+      SUCCESS after the timer(s) fired — measurable elapsed wall-clock OR the journaled re-entry events), the run stayed
+      UNATTENDED (never blocked on `AWAITING_APPROVAL`), and the soak telemetry rendered. AND assert the additive
+      guarantee: a run with NO `soak` policy inserts NO timer and assembles context BYTE-EQUIVALENT to today. Co-reference
+      BOTH `decideSoakDelay` AND `createRunnerWorker` in this SAME file (F-97).
+
+  CONSTRAINTS: strict TypeScript, ESM `.js` relative imports, named exports only; NO new dependency (`sleep` is already
+  exported by the pinned `@temporalio/workflow`); a run that sets NO `soak` policy MUST leave loop control-flow +
+  trace output BYTE-EQUIVALENT to today (no timer inserted — additivity is a live assertion, not a claim); do NOT change
+  the SHAPE of any frozen contract (`StepRecord`, `JournalEntry`, `Checkpoint`, `ContextBundle`, `ArtifactRef`,
+  `RunStatus`) — `decideSoakDelay` is a NEW pure symbol, `SoakPolicy` is a NEW additive-OPTIONAL spec field, the soak
+  telemetry + journal entry are ADDITIVE OPTIONAL. The durable sleep MUST be a Temporal timer (replay-safe), NEVER a
+  host `setTimeout`/`Date.now` busy-wait (it would break workflow determinism). Do NOT weaken the WP-123 crash-recovery,
+  WP-206 suspend/resume, WP-250 window-park, WP-269 step-forcing, WP-270 chunking, WP-271 unattended-escalate,
+  WP-273 chunk-aware verdict rules, or the WP-202 memory-recall paths. If a verification step reports a failing test or
+  type error, READ the failure and fix the IMPLEMENTATION — do NOT weaken or delete any assertion.
+
+repos:
+  - url: /Users/nikitazolotarev/repos/chikory
+    writable: true
+
+# LONG-HORIZON DRIVER: 6 ordered chunks, ONE PART each, so `decideWorkChunk` hands the executor EXACTLY one bounded
+#   sub-goal per durable step and completion defers until all 6 chunks are consumed AND the judge confirms the ACs.
+#   Combined with `min_durable_steps: 6` this forces ≥6 sealed checkpoints EACH carrying a distinct, non-trivial diff —
+#   the non-hollow horizon, run GENUINELY UNATTENDED via the WP-271 policy below. (Verify parse before launch:
+#   `parseTaskSpec` over this file, or `pnpm chikory run` which validates first.)
+bounded_work_unit:
+  min_durable_steps: 6
+  directive: >
+    Advance EXACTLY the ONE numbered PART named by this step's chunk — no more — then stop and let the durable checkpoint
+    seal. Do NOT front-load a later PART into an earlier step. Do NOT declare the whole run complete until every PART has
+    landed with its tests and the ACs pass.
+  work_chunks:
+    - name: part-1-pure-soak-decision
+      directive: >
+        PART 1 ONLY: add a net-new pure `decideSoakDelay(state, policy?): { sleepMs: number } | null` + the local
+        `SoakPolicy` type in a NEW `src/workflow/soak.ts` (sibling of `escalation-wait.ts`), NO I/O / clock / Date.now;
+        opt-in policy → the durable sleep before the next step, else `null`; re-export from the barrel; exhaustive unit
+        tests (no-policy null, first re-entry, bound-exhausted null, input-immutability).
+    - name: part-2-soak-spec-contract
+      directive: >
+        PART 2 ONLY: thread `SoakPolicy` through the TaskSpec contract exactly as `UnattendedPolicy` — TS `src/types.ts`
+        `TaskSpec.soak?` + zod `SoakPolicySchema` (`src/schemas.ts`, in `ContractTypeChecks` + `contractSchemas`) +
+        raw-YAML `soak` (`src/taskspec.ts`) + Python pydantic parity + `__init__.py` export + `test_contracts.py`
+        registry + shared `fixtures/contracts/SoakPolicy.valid.json`. Additive optional; absent `soak` = byte-equivalent.
+    - name: part-3-wire-durable-reentry
+      directive: >
+        PART 3 ONLY: import `sleep` from `@temporalio/workflow`; under the opt-in `soak` policy insert the
+        `decideSoakDelay`-decided durable `sleep(sleepMs)` between durable steps (`status = "SUSPENDED"` across it),
+        journal the re-entry additively (no new REQUIRED field). No `soak` policy → NO timer, control-flow
+        BYTE-EQUIVALENT. The sleep MUST be a Temporal timer, never a host busy-wait.
+    - name: part-4-soak-telemetry
+      directive: >
+        PART 4 ONLY: add an additive `re-entries N · soak-slept <duration>` segment to the `chikory trace` totals
+        sub-line, fed by loop counters; a run with no soak renders byte-equivalent. No new REQUIRED journal field shape.
+    - name: part-5-crash-during-soak-resume
+      directive: >
+        PART 5 ONLY: restore the soak counters/state on resume (the `RestoredWorkflowState` path in
+        `runner/activities.ts`, as dogfood-087 did for `memoryCounters`) so a crash mid-soak re-enters the durable timer
+        + correct step, not chunk 0; add a test asserting the soak state survives a restore. Do NOT weaken WP-206/WP-123.
+    - name: part-6-live-proof
+      directive: >
+        PART 6 ONLY: add the LIVE Temporal test (reuse `createRunnerWorker`/`createTemporalRunner`/scripted
+        registry/`waitFor`/`describe.skipIf`, `makeJudgedSpec`) driving a multi-chunk run under a COMPRESSED `soak`
+        policy where the loop durably sleeps between steps: assert the durable re-entry occurred (soak counter advanced +
+        SUCCESS after the timer fired), the run stayed unattended (never `AWAITING_APPROVAL`), and the telemetry
+        rendered; plus the no-soak byte-equivalent (no-timer) path. Co-reference `decideSoakDelay` AND `createRunnerWorker`
+        in this file (F-97).
+
+acceptance_criteria:
+  - id: AC-1
+    description: >
+      The net-new pure `decideSoakDelay` soak-delay decision exists in a workflow source — a side-effect-free total
+      function returning the durable sleep before the next step, or null. (OUTCOME symbol the goal NAMES — `decideSoakDelay`
+      — absent on HEAD so a recursive grep cannot false-green on an incumbent file, F-90. Module/test layout is the
+      executor's, F-82/F-83.)
+    check: >
+      cd packages/sdk-ts &&
+      grep -rq 'decideSoakDelay' src/workflow/
+
+  - id: AC-2
+    description: >
+      The durable loop HONORS time-paced re-entry — `decideSoakDelay` and the net-new `SoakPolicy` spec field are both
+      threaded into `src/workflow/agent-loop.ts` (the def+wire pattern of the landed `unattended`/`decideEscalationWait`
+      wiring), so an opt-in long unattended run durably suspends and re-enters across real wall-clock time.
+    check: >
+      cd packages/sdk-ts &&
+      grep -rq 'decideSoakDelay' src/workflow/agent-loop.ts &&
+      grep -rq 'SoakPolicy' src/workflow/agent-loop.ts
+
+  - id: AC-3
+    description: >
+      A LIVE Temporal test exercises durable time-paced re-entry end-to-end. (F-97-SAFE: not a bare symbol grep a UNIT
+      test would false-green — it requires a `test/` file that references BOTH the net-new `decideSoakDelay` symbol AND
+      the LIVE runner driver `createRunnerWorker`, so the durable soak + unattended no-hang proof is actually enforced.
+      Both are OUTCOME symbols the goal names; the test filename is the executor's.)
+    check: >
+      cd packages/sdk-ts &&
+      for f in $(grep -rl 'decideSoakDelay' test/ 2>/dev/null); do
+        grep -q 'createRunnerWorker' "$f" && { echo ok; break; };
+      done | grep -q ok
+
+  - id: AC-4
+    description: >
+      The SDK stays type- and lint-clean and the FULL existing suite — including the new soak unit, resume, and live
+      tests — is green, proving the change is additive and nothing outside it regressed (no
+      `StepRecord`/`JournalEntry`/`Checkpoint`/`ContextBundle`/`ArtifactRef`/`RunStatus` shape change; the WP-123
+      crash-recovery, WP-206 suspend/resume, WP-250 window-park, WP-269 step-forcing, WP-270 chunking, WP-271
+      unattended-escalate, WP-273 chunk-aware verdict, and WP-202 memory tests still pass, and a no-soak run leaves loop
+      control-flow + trace output unchanged).
+    check: cd packages/sdk-ts && pnpm exec tsc --noEmit && pnpm exec eslint . && pnpm exec vitest run
+
+budget_usd: 80
+max_steps: 40
+
+# UNATTENDED (WP-271): a genuine ESCALATE seals a RESUMABLE FAILED terminal instead of an untimed approval hang, so this
+#   run needs NO operator; the chunk-scoped judge (WP-271) + chunk-aware deterministic rules (WP-273) will not spuriously
+#   halt/escalate an on-track intermediate chunked step. Requires WP-271 committed to HEAD (see the prerequisite note).
+unattended:
+  escalation: seal_resumable_failed
+
+executor:
+  adapter: codex
+  family: openai
+
+judge:
+  family: openai-compat
+  cadence: 2
+  max_cost_share: 0.5
+
+routing:
+  stages:
+    plan: { provider: openai-compat, model: gpt-5.5 }
+    code: { provider: openai-compat, model: gpt-5.5 }
+    review: { provider: openai-compat, model: gpt-5.5 }
+    judge: { provider: openai-compat, model: gemini-3.1-pro-preview }

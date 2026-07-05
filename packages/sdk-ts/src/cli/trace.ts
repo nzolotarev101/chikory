@@ -214,8 +214,14 @@ export function renderTrace(run: RunRow, entries: JournalEntry[], totals: RunTot
     compaction.folds > 0
       ? ` · compactions ${compaction.folds} (pacing ${compaction.pacingFolds})`
       : "";
+  const memoryRecalls = totals.memoryRecalls ?? 0;
+  const memoryEvictions = totals.memoryEvictions ?? 0;
+  const memorySummary =
+    memoryRecalls > 0 || memoryEvictions > 0
+      ? ` · memory recalls ${memoryRecalls} · evicted ${memoryEvictions}`
+      : "";
   lines.push(
-    `        injections ${injections} · checkpoints ${checkpoints}${seamSummary}${pacingSummary}${compactionSummary}${feedback}`,
+    `        injections ${injections} · checkpoints ${checkpoints}${seamSummary}${pacingSummary}${compactionSummary}${memorySummary}${feedback}`,
   );
   lines.push(
     `        issues found ${issuesFound} · changes made ${changesMade} ` +

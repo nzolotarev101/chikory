@@ -59,6 +59,8 @@ export interface ScriptedConfig {
   claimsCompleteSteps?: number[];
   /** Pad each attempt's transcript to this many bytes (WP-202 pointerize gate). */
   transcriptBytes?: number;
+  /** 1-based attempt numbers that request the first carried memory ref. */
+  recallFirstMemoryRefSteps?: number[];
 }
 
 const SCRIPTED_DEFAULTS: ScriptedConfig = {
@@ -138,6 +140,9 @@ export function createScriptedAdapter(ctx: { store: ArtifactStore }): ExecutorAd
         transcriptRef,
         summary: [
           fail ? `scripted attempt ${attempt}: failed` : `scripted attempt ${attempt}: ok`,
+          ...(cfg.recallFirstMemoryRefSteps?.includes(attempt) && input.context.memoryRefs[0]
+            ? [`\n[memory recall ${input.context.memoryRefs[0].id.slice(0, 12)}]`]
+            : []),
           ...(cfg.echoJudgeFeedback && input.context.judgeFeedback
             ? [`judge feedback: ${input.context.judgeFeedback}`]
             : []),

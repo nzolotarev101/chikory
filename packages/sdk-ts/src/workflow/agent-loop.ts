@@ -53,7 +53,15 @@ import type {
   StepLimits,
   TaskSpec,
 } from "../types.js";
-import { shouldPointerize, type MemoryPointerPolicy } from "../runner/memory-pointer.js";
+import {
+  decideMemoryEviction,
+  formatPointerReference,
+  recallPointerExcerpt,
+  resolveMemoryRecallRequest,
+  shouldPointerize,
+  type MemoryEvictionPolicy,
+  type MemoryPointerPolicy,
+} from "../runner/memory-pointer.js";
 import { isCompletionMilestone } from "./judge-trigger.js";
 import { decideEscalationWait } from "./escalation-wait.js";
 import { decideStepForcing } from "./step-forcing.js";
@@ -74,6 +82,7 @@ const DEFAULT_CONTEXT_WINDOW_TOKENS = 200_000;
 const DEFAULT_PACING_POLICY: ContextWindowPacingPolicy = { compactAtFraction: 0.8 };
 /** How many recent artifact pointers ride along in context (bound growth). */
 export const CARRIED_REFS_WINDOW = 6;
+const UNATTENDED_MEMORY_EVICTION_POLICY: MemoryEvictionPolicy = { maxRefs: CARRIED_REFS_WINDOW };
 
 const activities = proxyActivities<RunnerActivities>({
   // Must exceed StepLimits.maxSeconds — the adapter owns the step bound.
@@ -105,6 +114,35 @@ function allCriteriaPass(verdict: JudgeVerdict | undefined): boolean {
     verdict.form.criterionResults.length > 0 &&
     verdict.form.criterionResults.every((r) => r.pass)
   );
+}
+
+function projectMemoryRefs(
+  refs: ArtifactRef[],
+  policy: MemoryEvictionPolicy | undefined,
+): ArtifactRef[] {
+  if (policy === undefined) return refs.slice(-CARRIED_REFS_WINDOW);
+  const keptNonDigestRefs = new Set(
+    decideMemoryEviction(
+      refs.filter((ref) => ref.kind !== "context_snapshot"),
+      policy,
+    ).keep,
+  );
+  return refs.filter((ref) => ref.kind === "context_snapshot" || keptNonDigestRefs.has(ref));
+}
+
+function applyMemoryEviction(
+  refs: ArtifactRef[],
+  policy: MemoryEvictionPolicy | undefined,
+): number {
+  if (policy === undefined) return 0;
+
+  const digestRefs = refs.filter((ref) => ref.kind === "context_snapshot");
+  const nonDigestRefs = refs.filter((ref) => ref.kind !== "context_snapshot");
+  const eviction = decideMemoryEviction(nonDigestRefs, policy);
+
+  refs.length = 0;
+  refs.push(...eviction.keep, ...digestRefs);
+  return eviction.evicted.length;
 }
 
 /** workflowId = run-id (durable-runner.md Temporal mapping). */
@@ -140,6 +178,9 @@ export async function agentLoop(spec: TaskSpec): Promise<RunStatus> {
   // outputs and the latest compaction digest, surfaced into each step's
   // context so externalized material is recoverable without rotting context.
   const carriedRefs: ArtifactRef[] = [];
+  let pendingMemoryRecallNote: string | undefined;
+  let memoryRecalls = 0;
+  let memoryEvictions = 0;
   const pendingInjections: string[] = [];
   const pendingTopUps: number[] = [];
   const pendingApprovals: ApproveDecision[] = [];
@@ -175,6 +216,8 @@ export async function agentLoop(spec: TaskSpec): Promise<RunStatus> {
   }));
 
   const maxSteps = spec.maxSteps ?? 100;
+  const memoryEvictionPolicy =
+    spec.unattended === undefined ? undefined : UNATTENDED_MEMORY_EVICTION_POLICY;
 
   async function seal(
     terminal: "SUCCESS" | "FAILED" | "CANCELLED",
@@ -195,6 +238,7 @@ export async function agentLoop(spec: TaskSpec): Promise<RunStatus> {
       status: terminal,
       reason,
       lastCheckpoint,
+      memoryCounters: { recalls: memoryRecalls, evicted: memoryEvictions },
       ...(handoff !== undefined ? { handoff } : {}),
     });
     status = terminal;
@@ -251,6 +295,8 @@ export async function agentLoop(spec: TaskSpec): Promise<RunStatus> {
   }
   if (restored.judgeFeedback !== undefined) judgeFeedback = restored.judgeFeedback;
   checkpoints.push(...restored.checkpoints);
+  memoryRecalls = restored.memoryCounters.recalls;
+  memoryEvictions = restored.memoryCounters.evicted;
   sinceCommit = restored.sinceCommit ?? baseCommit;
 
   for (;;) {
@@ -370,15 +416,20 @@ export async function agentLoop(spec: TaskSpec): Promise<RunStatus> {
     const stepInstruction =
       activeWorkChunk.action === "use_chunk" ? activeWorkChunk.chunk.directive : spec.goal;
 
+    const memoryRecallNote = pendingMemoryRecallNote;
+    pendingMemoryRecallNote = undefined;
     const context: ContextBundle = {
       goal: stepInstruction,
       acceptanceCriteria: spec.acceptanceCriteria,
       planItem: stepInstruction,
-      notes: {},
+      notes:
+        memoryRecallNote === undefined
+          ? {}
+          : { "memory.recall": memoryRecallNote },
       recentSteps: recentSummaries.slice(-RECENT_STEPS_WINDOW),
       judgeFeedback,
       injections,
-      memoryRefs: carriedRefs.slice(-CARRIED_REFS_WINDOW),
+      memoryRefs: projectMemoryRefs(carriedRefs, memoryEvictionPolicy),
     };
 
     const record = await activities.executeStep({
@@ -482,6 +533,19 @@ export async function agentLoop(spec: TaskSpec): Promise<RunStatus> {
     for (const ref of [record.transcriptRef, record.diffRef]) {
       if (shouldPointerize(ref.bytes, DEFAULT_MEMORY_POLICY)) carriedRefs.push(ref);
     }
+    const requestedRecall = resolveMemoryRecallRequest(record.summary, carriedRefs);
+    if (requestedRecall !== null) {
+      const recalledExcerpt = await recallPointerExcerpt(
+        formatPointerReference(requestedRecall),
+        (idPrefix, bytes) =>
+          activities.recallArtifactExcerpt({ runId, idPrefix, bytes }),
+      );
+      if (recalledExcerpt !== null) {
+        memoryRecalls += 1;
+        pendingMemoryRecallNote = `${formatPointerReference(requestedRecall)}\n\n${recalledExcerpt}`;
+      }
+    }
+    memoryEvictions += applyMemoryEviction(carriedRefs, memoryEvictionPolicy);
 
     // Judge on cadence or a completion milestone (JD-2); each pass is one
     // activity (WP-121/131).
@@ -526,6 +590,7 @@ export async function agentLoop(spec: TaskSpec): Promise<RunStatus> {
       context,
       budgetSpentUsd: spentUsd,
       lastGood: verdict?.kind === "PROCEED",
+      memoryCounters: { recalls: memoryRecalls, evicted: memoryEvictions },
     });
     checkpoints.push(checkpoint);
 
@@ -545,6 +610,7 @@ export async function agentLoop(spec: TaskSpec): Promise<RunStatus> {
       const kept = carriedRefs.filter((r) => r.kind !== "context_snapshot");
       carriedRefs.length = 0;
       carriedRefs.push(...kept, compaction.digestRef);
+      memoryEvictions += applyMemoryEviction(carriedRefs, memoryEvictionPolicy);
     }
 
     // Verdict gating (WP-132). PROCEED advances the diff base and the

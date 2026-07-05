@@ -298,12 +298,30 @@ export interface RunTotals {
   judgePasses: number;
   rollbacks: number;
   escalations: number;
+  memoryRecalls?: number;
+  memoryEvictions?: number;
   costUsd: number;
   /** Judge spend, absolute (Σ `judge` entry cost deltas). */
   judgeCostUsd: number;
   /** Judge spend as a fraction of run spend (JD-7 cost transparency). */
   judgeCostShare: number;
   tokens: TokenUsage;
+}
+
+function memoryCountersFromPayload(payload: unknown): { recalls: number; evicted: number } {
+  if (typeof payload !== "object" || payload === null) {
+    return { recalls: 0, evicted: 0 };
+  }
+  const counters = (payload as { memoryCounters?: unknown }).memoryCounters;
+  if (typeof counters !== "object" || counters === null) {
+    return { recalls: 0, evicted: 0 };
+  }
+  const recalls = (counters as { recalls?: unknown }).recalls;
+  const evicted = (counters as { evicted?: unknown }).evicted;
+  return {
+    recalls: typeof recalls === "number" ? recalls : 0,
+    evicted: typeof evicted === "number" ? evicted : 0,
+  };
 }
 
 /** Aggregates derived purely from journal entries (WP-134, OB-6). */
@@ -319,11 +337,18 @@ export function runTotals(journal: Journal): RunTotals {
   }
   const costUsd = journal.totalCostUsd();
   const judgeCostUsd = judgeEntries.reduce((sum, e) => sum + e.costDeltaUsd, 0);
+  const counterEntries = [...journal.entries("checkpoint"), ...journal.entries("terminal")];
+  const memoryCounters =
+    counterEntries.length === 0
+      ? { recalls: 0, evicted: 0 }
+      : memoryCountersFromPayload(counterEntries[counterEntries.length - 1]!.payload);
   return {
     steps: journal.entries("step").length,
     judgePasses: judgeEntries.length,
     rollbacks: verdictKinds.filter((k) => k === "ROLLBACK").length,
     escalations: verdictKinds.filter((k) => k === "ESCALATE").length,
+    memoryRecalls: memoryCounters.recalls,
+    memoryEvictions: memoryCounters.evicted,
     costUsd,
     judgeCostUsd,
     judgeCostShare: costUsd > 0 ? judgeCostUsd / costUsd : 0,

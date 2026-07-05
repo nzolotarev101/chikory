@@ -9,7 +9,7 @@
  */
 import { execFile } from "node:child_process";
 import { existsSync } from "node:fs";
-import { mkdir, readFile, unlink, writeFile } from "node:fs/promises";
+import { mkdir, readFile, readdir, unlink, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { promisify } from "node:util";
 
@@ -99,6 +99,11 @@ export interface VerdictPayload {
   verdict: JudgeVerdict;
 }
 
+export interface MemoryCounters {
+  recalls: number;
+  evicted: number;
+}
+
 export interface RestoredWorkflowState {
   stepIndex: number;
   spentUsd: number;
@@ -119,6 +124,7 @@ export interface RestoredWorkflowState {
   lastGoodCheckpointId?: string;
   judgeFeedback?: string;
   checkpoints: Checkpoint[];
+  memoryCounters: MemoryCounters;
   sinceCommit?: string;
 }
 
@@ -480,6 +486,33 @@ export function createRunnerActivities(deps: RunnerActivityDeps) {
       });
     },
 
+    async recallArtifactExcerpt(input: {
+      runId: string;
+      idPrefix: string;
+      bytes: number;
+    }): Promise<string> {
+      return withHeartbeat(async () => {
+        const dir = artifactsDir(deps.dataDir, input.runId);
+        const matches = (await readdir(dir)).filter((name) => name.startsWith(input.idPrefix));
+        if (matches.length === 0) {
+          throw new Error(`artifact not found for memory recall: ${input.idPrefix}`);
+        }
+        if (matches.length > 1) {
+          throw new Error(`ambiguous artifact prefix for memory recall: ${input.idPrefix}`);
+        }
+        const store = createLocalArtifactStore(dir);
+        return await store.excerpt(
+          {
+            id: matches[0]!,
+            kind: "tool_output",
+            bytes: input.bytes,
+            summary: "memory recall excerpt",
+          },
+          {},
+        );
+      });
+    },
+
     /**
      * One judge pass = one activity (WP-131/132): evidence → form → verdict
      * via the judge harness, journaled as a `judge` entry (form + cost) and a
@@ -708,6 +741,10 @@ export function createRunnerActivities(deps: RunnerActivityDeps) {
           steps.length === 0 ? 0 : Math.max(...steps.map((step) => step.stepIndex)) + 1;
         const stepCosts = steps.map((step) => step.record.costUsd);
         const stepTokens = steps.map((step) => step.record.tokens.input + step.record.tokens.output);
+        const latestCheckpointPayload = checkpoints[checkpoints.length - 1] as
+          | (Checkpoint & { memoryCounters?: Partial<MemoryCounters> })
+          | undefined;
+        const restoredMemoryCounters = latestCheckpointPayload?.memoryCounters;
         const lastStep = steps[steps.length - 1];
         const consecutiveFailures = [...steps]
           .reverse()
@@ -745,6 +782,10 @@ export function createRunnerActivities(deps: RunnerActivityDeps) {
             ? { judgeFeedback: lastVerdictPayload.verdict.rationale }
             : {}),
           checkpoints,
+          memoryCounters: {
+            recalls: restoredMemoryCounters?.recalls ?? 0,
+            evicted: restoredMemoryCounters?.evicted ?? 0,
+          },
           sinceCommit,
         };
       } finally {
@@ -768,6 +809,7 @@ export function createRunnerActivities(deps: RunnerActivityDeps) {
       context: ContextBundle;
       budgetSpentUsd: number;
       lastGood: boolean;
+      memoryCounters?: MemoryCounters;
     }): Promise<Checkpoint> {
       return withHeartbeat(async () => {
         const journal = openJournal(deps, input.runId);
@@ -815,7 +857,14 @@ export function createRunnerActivities(deps: RunnerActivityDeps) {
             { field: "stepIndex", value: input.stepIndex },
             {
               kind: "checkpoint",
-              payload: { ...checkpoint, stepIndex: input.stepIndex },
+              payload: {
+                ...checkpoint,
+                stepIndex: input.stepIndex,
+                ...(input.memoryCounters !== undefined &&
+                (input.memoryCounters.recalls > 0 || input.memoryCounters.evicted > 0)
+                  ? { memoryCounters: input.memoryCounters }
+                  : {}),
+              },
               costDeltaUsd: 0,
               artifactRefs: [contextSnapshotRef],
             },
@@ -1271,6 +1320,7 @@ export function createRunnerActivities(deps: RunnerActivityDeps) {
       status: "SUCCESS" | "FAILED" | "CANCELLED";
       reason?: string;
       lastCheckpoint?: string;
+      memoryCounters?: MemoryCounters;
       handoff?: ChainNodeHandoff;
     }): Promise<void> {
       const journal = openJournal(deps, input.runId);
@@ -1282,6 +1332,10 @@ export function createRunnerActivities(deps: RunnerActivityDeps) {
               status: input.status,
               reason: input.reason,
               lastCheckpoint: input.lastCheckpoint,
+              ...(input.memoryCounters !== undefined &&
+              (input.memoryCounters.recalls > 0 || input.memoryCounters.evicted > 0)
+                ? { memoryCounters: input.memoryCounters }
+                : {}),
               ...(input.handoff !== undefined ? { handoff: input.handoff } : {}),
             },
             costDeltaUsd: 0,

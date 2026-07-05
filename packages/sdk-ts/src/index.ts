@@ -129,6 +129,7 @@ export {
   shouldPointerize,
   formatPointerReference,
   parsePointerReference,
+  resolveMemoryRecallRequest,
   recallPointerExcerpt,
   type MemoryPointerPolicy,
   type ParsedPointerReference,

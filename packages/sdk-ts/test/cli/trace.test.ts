@@ -213,7 +213,21 @@ describe("renderTrace (WP-142)", () => {
   test("totals footer + terminal failure line", () => {
     expect(text).toContain("totals: decisions 3 · judge passes 2 ($0.10, 13.7%) · rollbacks 1 · escalations 0");
     expect(text).toContain("injections 1 · checkpoints 1");
+    expect(text).not.toContain("memory recalls");
     expect(text).toContain("failed: judge HALT: gave up (last checkpoint run-x@4)");
+  });
+
+  test("reports memory counters only when recall or eviction occurred", () => {
+    const withMemory = renderTrace(run, entries, {
+      ...totals,
+      memoryRecalls: 2,
+      memoryEvictions: 5,
+    });
+
+    expect(withMemory).toContain("memory recalls 2 · evicted 5");
+    expect(renderTrace(run, entries, { ...totals, memoryRecalls: 0, memoryEvictions: 0 })).not.toContain(
+      "memory recalls",
+    );
   });
 
   test("reports seam fire count only when seam entries exist", () => {
