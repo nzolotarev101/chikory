@@ -17,12 +17,18 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GH_REPO: ${{ github.repository }}
         run: |
-          # Retrieve all cache IDs created before the start of today in UTC
-          ids=$(gh cache list --limit 100 --json id,createdAt --jq '.[] | select(.createdAt < (now | strftime("%Y-%m-%dT00:00:00Z"))) | .id')
-          if [ -n "$ids" ]; then
-            echo "Deleting the following old caches:"
-            echo "$ids"
-            echo "$ids" | xargs -I {} gh cache delete {}
-          else
-            echo "No caches older than today found."
-          fi
+          while true; do
+            # Retrieve oldest cache IDs created before today in UTC (up to 1000 at a time)
+            ids=$(gh cache list --limit 1000 --sort created_at --order asc --json id,createdAt --jq '.[] | select(.createdAt < (now | strftime("%Y-%m-%dT00:00:00Z"))) | .id')
+            if [ -z "$ids" ]; then
+              echo "No more caches older than today found."
+              break
+            fi
+            
+            count=$(echo "$ids" | wc -l | tr -d ' ')
+            echo "Deleting $count old caches in parallel..."
+            echo "$ids" | xargs -P 16 -n 1 gh cache delete
+            
+            # Give a small pause to avoid rate limiting
+            sleep 1
+          done
