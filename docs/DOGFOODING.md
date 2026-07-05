@@ -8,18 +8,20 @@ recover a run, and how to land the result as a normal PR.
 **Status (2026-07-04, bounded — update discipline: REPLACE this block, ≤15 lines;
 displaced prose moves verbatim to [`PLAN-HISTORY.md`](PLAN-HISTORY.md); per-run detail:
 `docs/reports/dogfood-NNN.md`; queue + course correction: `plan.md` §6).**
-Latest: dogfood-085 — **WP-215 ARCHITECTURE RUBRIC + the NON-HOLLOW rung-3 HORIZON** (`run-17b5ef57-7064-4e35-95cc-e3edfbad7dea`,
-`docs/reports/dogfood-085.md`). 🟢 **SUCCESS · 6 steps · $4.36/$50 · 22m41s · un-harvested.** The FIRST launch to USE
-`bounded_work_unit.work_chunks` (WP-270) in its own YAML — 5 dependency-ordered sub-goals, one per durable step. Shipped the
-whole architecture-scan chain (net-new pure `scanDiffForLayeringViolations` → `collectEvidence` `architectureLabels` →
-`prompt.ts` render → NON-destructive `no_architecture_violations` standing-rubric item → LIVE proof), mirroring the shipped
-secret/dependency scans; all 4 ACs green, 699 tests, harvest byte-IDENTICAL. **WP-215 architecture side → 🟢. 5/6 non-hollow
-(big improvement on 082's front-loaded hollow horizon); per-step reliability 100% (0 rollbacks/6 steps).** 🔴 **F-107 → WP-271:**
-the judge is CHUNK-UNAWARE — at step 2 (chunk 2/5, all ACs+rubric PASS) it ESCALATEd on a "missing" PART 4 that was deferred
-BY DESIGN → the run PARKED for human approval with NO timeout (a HARD blocker for the ⑦ overnight-UNATTENDED rung — it would
-hang all night) and re-handed chunk 2 → hollow 0-byte step 3 (4.9% cost). 🟡 F-108: `consumedWorkChunks` not restored on resume (latent). 🟡 F-109: test-concurrency OOM (parallel Vitest workers and Temporal servers crash the machine).
-**NEXT: dogfood-086 — WP-271, the F-107 unblock** (chunk-scoped judge adjudication + unattended-safe ESCALATE policy), the
-named prerequisite for the ⑦ overnight rung. See §7 (troubleshooting), §8 (known limitations), §1.5, §1.4, §3.
+Latest: dogfood-086 — **WP-271 CHUNK-SCOPED JUDGE + UNATTENDED-SAFE ESCALATE** (`run-88235198-2aea-4e29-a8b9-5fb9ab78930d`,
+`docs/reports/dogfood-086.md`). 🟢 **SUCCESS · 4 steps · $5.72/$50 · 20m30s · un-harvested.** The F-107 unblock, delivered in
+4 dependency-ordered durable steps, all additive: PART 1 optional `activeWorkChunkDirective?` on the judge-pass input; PART 2
+net-new pure `renderActiveWorkChunkScope` threaded into `buildJudgeMessages` so an intermediate chunked step is judged against
+the CURRENT chunk (later goal parts absent from THIS diff are DEFERRED BY DESIGN, not omissions); PART 3 pure `decideEscalationWait`
++ additive `UnattendedPolicy` wired into both agent-loop ESCALATE paths so an opt-in `escalation:"seal_resumable_failed"` seals a
+resumable terminal instead of an untimed hang (default = byte-identical); PART 4 LIVE Temporal proof (deferred early chunk →
+PROCEED → SUCCESS; no-active-chunk prompt byte-equal; genuine escalate seals resumable). **4/4 NON-HOLLOW, 100% per-step
+reliability, 0 escalations, cross-language contract parity (TS+Python+shared fixture), 713 tests, harvest byte-IDENTICAL. WP-271
+→ 🟢; F-107 CLOSED — the ⑦ overnight-unattended rung is UNBLOCKED.** F-107 confirmed NON-DETERMINISTIC (086 drew 0 spurious
+escalates on the same unfixed judge that escalated in 085). 🟡 F-110 (escalate seals `FAILED`, conflates park w/ failure — track-B).
+🟡 F-108 (`consumedWorkChunks` not restored on resume). 🟡 F-109 (test-concurrency OOM).
+**NEXT: dogfood-087 — the ⑦ OVERNIGHT-UNATTENDED rung (rung 4)**, the first multi-hour unattended `chikory run` using
+`unattended:{escalation:seal_resumable_failed}` over a many-chunk horizon on a real open product WP. See §7, §8, §1.5, §1.4, §3.
 
 Related docs: [`docs/spec/task-spec.md`](spec/task-spec.md) (schema
 reference) · [`docs/TASK-PROTOCOL.md`](TASK-PROTOCOL.md) (WP etiquette, §7 is
@@ -689,24 +691,33 @@ broken (a false-green, not a follow-on fix).
   step so the PROCEED-gated counter can advance. LIVE scripted-ROLLBACK
   regression test asserts step instructions `[chunk0, chunk0, chunk1]` (the
   reverted chunk is re-issued, not skipped); 660 tests green.
-- **⚠️ The judge is CHUNK-UNAWARE — with `work_chunks` set it may ESCALATE an
-  on-track intermediate step, and an ESCALATE PARKS the run for approval with NO
-  timeout** (🔴 F-107 → WP-271, dogfood-085 `run-17b5ef57`): the judge receives
-  the FULL `spec.goal`, never the active `work_chunk` directive that scopes the
-  executor. At step 2 of a 5-chunk run (chunk 2/5) — with all 4 ACs AND all 4
-  rubric items PASSING — the judge raised an out-of-rubric concern that "PART 4
-  was omitted" and returned ESCALATE, even though PART 4 was deferred BY DESIGN
-  to chunk 4. ESCALATE then sets `status = AWAITING_APPROVAL` and blocks on
-  `await condition(...)` (`agent-loop.ts:580`) with no timeout, so the run halted
-  mid-horizon until a human ran `chikory approve`. **Two consequences you must
-  plan for until WP-271 lands:** (1) **NEVER launch a `work_chunks` run
-  unattended** (e.g. the ⑦ overnight rung) — a single spurious escalate hangs it
-  indefinitely; keep an operator on hand to `chikory approve`. (2) A non-PROCEED
-  chunk verdict leaves `consumedWorkChunks` un-incremented, so the next step
-  re-hands the SAME chunk → if that chunk's work already landed you get a HOLLOW
-  0-byte re-verify step (dogfood-085 step 3, 4.9% of run cost). The substantive
-  adjudication (ACs + rubric) stayed correct; only the whole-goal-scoped
-  out-of-rubric concern misfired.
+- **✅ The judge is now CHUNK-AWARE and ESCALATE is UNATTENDED-SAFE** (F-107 →
+  WP-271 CLOSED, dogfood-086 `run-88235198`; history: dogfood-085 `run-17b5ef57`).
+  **What was broken:** the judge received the FULL `spec.goal`, never the active
+  `work_chunk` directive — at step 2 of a 5-chunk run (all 4 ACs + 4 rubric items
+  PASSING) it raised an out-of-rubric "PART 4 was omitted" concern and ESCALATEd,
+  even though PART 4 was deferred BY DESIGN to chunk 4; ESCALATE then blocked on an
+  untimed `await condition(...)` (`agent-loop.ts:580`), parking the run until a
+  human ran `chikory approve`. **What WP-271 fixed:** the loop now passes the active
+  chunk directive into the judge prompt via `renderActiveWorkChunkScope` (a
+  `## ACTIVE WORK CHUNK` section telling the judge deferred later parts are NOT
+  omissions), so an on-track intermediate chunked step is adjudicated against the
+  CURRENT chunk; and `decideEscalationWait` + an opt-in
+  `unattended:{escalation:"seal_resumable_failed"}` policy make an ESCALATE seal a
+  resumable terminal instead of hanging forever (default = the old approval wait,
+  byte-identical). **You may now launch a `work_chunks` run unattended (the ⑦
+  overnight rung) IF you set `unattended:{escalation:"seal_resumable_failed"}`** —
+  without it, a genuine escalate still parks on an untimed approval wait and hangs.
+  ⚠️ **F-110 gotcha for the overnight rung:** the unattended escalate seals
+  `status = FAILED`, indistinguishable from a genuine failure EXCEPT by the
+  `failure.reason` prefix `unattended {judge|runner} escalation — …`. When you wake
+  to a FAILED overnight run, grep the reason for that prefix to tell a policy-park
+  (resume-and-approve) from a real defect (investigate). Note F-107 is
+  NON-DETERMINISTIC (086 drew 0 spurious escalates on the same pre-fix judge that
+  escalated in 085), so an unset unattended policy can get lucky — don't rely on it.
+  Residual (F-108, still open): a non-PROCEED chunk verdict leaves
+  `consumedWorkChunks` un-incremented and it is NOT restored on resume, so a resumed
+  chunked run replays from chunk 0.
 - **⚠️ `consumedWorkChunks` is NOT restored on crash→resume** (🟡 F-108, latent,
   WP-206×WP-270): the counter is a loop-local `let = 0` (`agent-loop.ts:146`)
   that the resume-restore block (`:240-253`) does not rehydrate, so a

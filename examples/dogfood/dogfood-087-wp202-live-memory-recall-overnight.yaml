@@ -1,0 +1,228 @@
+# Dogfood-087: WP-202 — LIVE MEMORY RECALL + BOUNDED POINTER STORE, hosting the ⑦ OVERNIGHT-UNATTENDED rung (ladder rung 4).
+#   dogfood-086 (run-88235198) closed 🔴 F-107 (WP-271): the judge is now CHUNK-AWARE and an ESCALATE is
+#   UNATTENDED-SAFE (`decideEscalationWait` + `unattended:{escalation:seal_resumable_failed}` seals a resumable
+#   terminal instead of an untimed approval hang). That was the NAMED BLOCKER for the ⑦ overnight-unattended rung.
+#   With it landed, an unattended `work_chunks` run can finally run without an operator on hand.
+#
+# WHY THIS IS THE NEXT HEADLINE (⛔ STALLED ⇒ ladder rung binding; rung stuck at 3 for 085/086).
+#   `scripts/dogfood-progression.sh` is ⛔ STALLED (ladder rung 3 vs 3 across the trailing-3 headlines) and the
+#   §1.5 ladder-pace rule requires the next headline to CLIMB the next rung. The next rung is ⑦ OVERNIGHT-UNATTENDED
+#   (rung 4) — the first multi-hour `chikory run` with NO operator, relying on the WP-271 unattended policy under real
+#   test. This run climbs the horizon axis (steps + wall-clock) AND the resume/autonomy axis (genuinely unattended).
+#
+# HOST WP — WP-202 Memory Pointer store (real open plan.md §6 product WP, a CLAUDE.md first-class thesis pillar:
+#   "store large tool outputs externally, pass short refs into context"). The write side (`shouldPointerize` +
+#   interception → `ContextBundle.memoryRefs`) and the PURE recall helpers (`parsePointerReference`,
+#   `recallPointerExcerpt`) are landed — BUT `recallPointerExcerpt` is NEVER wired into the loop (only re-exported +
+#   unit-tested), so the executor cannot ACTIVELY pull a pointer's fuller content mid-run; and `carriedRefs` is bounded
+#   only by a crude `CARRIED_REFS_WINDOW` tail slice, not a principled eviction — so over a LONG horizon the carried set
+#   is either unbounded-by-recency or arbitrarily truncated. This run makes memory recall a LIVE loop capability and
+#   bounds the store principledly — exactly the mechanism a long unattended horizon needs. The WP-271 unattended policy
+#   is the VEHICLE seeded into this real WP-202 code (§1.2), and this run is also the next long-horizon datapoint.
+#
+# Format: LOOSE (headline — goal states the OUTCOME + constraints; ACs pin "done" via OUTCOME SYMBOLS THE GOAL NAMES;
+#   module/test layout LEFT TO THE EXECUTOR, F-82/F-83; NO prescribed diff).
+# Ladder-rung: 4
+# Thesis-KPI: max horizon survived (steps + wall-clock) under a GENUINELY UNATTENDED run — no operator on hand — proving
+#   the WP-271 `unattended:{escalation:seal_resumable_failed}` policy keeps a long chunked run from hanging, while the
+#   memory store stays bounded and the executor can recall externalized context on demand (the Memory Pointer Pattern
+#   under long-horizon load). Hosted on real WP-202 memory-store code.
+#
+# F-90 APPLIED: AC-1/2 grep NET-NEW symbols the goal NAMES (`resolveMemoryRecallRequest`, `decideMemoryEviction`),
+#   both ABSENT on HEAD, so a recursive grep cannot false-green on an incumbent file.
+# F-97 APPLIED: AC-3 does NOT bare-grep the symbol — it requires the net-new `resolveMemoryRecallRequest` to co-live
+#   with the LIVE runner driver `createRunnerWorker` in a `test/` file, so the LIVE recall proof is actually enforced.
+#
+# ✅ UNATTENDED — THIS RUN NEEDS NO OPERATOR. It launches WITH `unattended:{escalation:seal_resumable_failed}` (WP-271),
+#   so a genuine ESCALATE seals a RESUMABLE `FAILED` terminal instead of an untimed approval hang, and the chunk-scoped
+#   judge (WP-271) will not spuriously ESCALATE an on-track intermediate chunked step. You may launch and walk away.
+#   ⚠️ If the run seals FAILED overnight, grep `failure.reason` for the `unattended … escalation` prefix to tell a
+#   policy-park (resume-and-approve) from a genuine defect (F-110).
+#
+# ⚠️ HARD PREREQUISITE — COMMIT WP-271 FIRST. The workspace clones HEAD, and this spec's `unattended:` block only parses
+#   because WP-271 added it to `parseTaskSpec`/the schema. dogfood-086's delivery (WP-271) is on the working tree
+#   UN-HARVESTED — commit ALL of it before launching, or `parseTaskSpec` rejects the `unattended` field.
+#
+# LAUNCH WITH `chikory run` (a single durable run):
+#      devbox run run-dogfood       # <- `chikory run`; picks the latest spec (this one)
+
+name: dogfood-087-wp202-live-memory-recall-overnight
+goal: >
+  Make the Memory Pointer store a LIVE long-horizon capability: the executor can ACTIVELY RECALL an externalized
+  pointer's fuller content mid-run, and the carried-pointer set stays PRINCIPLEDLY BOUNDED as a run accumulates many
+  pointers over a long unattended horizon (WP-202, the CLAUDE.md Memory Pointer Pattern under load). Today the write side
+  is wired (`shouldPointerize` → `carriedRefs` → `ContextBundle.memoryRefs`, `src/workflow/agent-loop.ts`) and the recall
+  helpers are pure and landed (`parsePointerReference`, `recallPointerExcerpt`, `src/runner/memory-pointer.ts`) — but
+  `recallPointerExcerpt` is NEVER invoked by the loop, and `carriedRefs` is bounded only by a crude
+  `CARRIED_REFS_WINDOW` tail slice. Deliver it in SIX bounded, dependency-ordered sub-goals, ONE per durable step, so
+  every sealed checkpoint carries DISTINCT non-trivial product work over a long horizon (the rung-4 non-hollow horizon,
+  F-100/WP-270):
+
+    * PART 1 — PURE RECALL-REQUEST PARSER (additive): add a net-new pure, side-effect-free total
+      `resolveMemoryRecallRequest(executorText: string, refs: ArtifactRef[]): ArtifactRef | null` in
+      `src/runner/memory-pointer.ts` (a sibling of `parsePointerReference`) that scans an executor step's output text for
+      a recall marker naming a carried pointer id (define the marker syntax; a pointer id is the `ArtifactRef` id
+      surfaced by `formatPointerReference`) and returns the matching `ArtifactRef`, or `null` when there is no
+      well-formed request or no carried ref matches. Pure, no I/O; exhaustively unit-tested (match, no-marker,
+      unknown-id, malformed). Re-export from the barrel.
+
+    * PART 2 — PURE EVICTION DECISION (additive): add a net-new pure total
+      `decideMemoryEviction(refs: ArtifactRef[], policy?: MemoryEvictionPolicy): { keep: ArtifactRef[]; evicted: ArtifactRef[] }`
+      in `src/runner/memory-pointer.ts` that, under an opt-in bound (max carried count and/or max total bytes),
+      keeps the most-recently-carried refs and evicts the coldest (oldest-first) so the carried set stays bounded over a
+      long horizon; with NO policy it is a total no-op (keep = input, evicted = []). Add the local `MemoryEvictionPolicy`
+      type. Pure, no I/O, no `types.ts`/frozen-contract change; exhaustively unit-tested (under-bound no-op, over-bound
+      evicts oldest, tie/empty/no-policy, input-immutability).
+
+    * PART 3 — WIRE LIVE RECALL INTO THE LOOP (depends on 1): use `resolveMemoryRecallRequest` in the durable loop
+      (`src/workflow/agent-loop.ts`) so that when a step's executor output requests a recall of a carried pointer, the
+      loop resolves it to the `ArtifactRef` and fetches its fuller excerpt via the EXISTING `recallPointerExcerpt`
+      (against the run's artifact store excerpt fn) and carries that expanded excerpt into the NEXT step's context —
+      additively, so a step that makes NO recall request leaves the loop's context assembly BYTE-EQUIVALENT to today.
+
+    * PART 4 — WIRE PRINCIPLED EVICTION INTO THE LOOP (depends on 2): replace the crude `carriedRefs.slice(-CARRIED_REFS_WINDOW)`
+      bound with `decideMemoryEviction` under an opt-in policy, so the carried set is bounded by the principled decision;
+      the DEFAULT (no policy / small horizon) path stays BYTE-EQUIVALENT to today's behavior. Additive; do NOT weaken the
+      compaction `digestRef` retention (`agent-loop.ts:539-541`) or the `context_snapshot` handling.
+
+    * PART 5 — MEMORY TELEMETRY (depends on 3/4): surface long-horizon memory activity in the durable trace — an additive
+      `memory recalls N · evicted M` (or equivalent) segment in the `chikory trace` totals sub-line, fed by counters the
+      loop increments when a recall is served / a pointer is evicted, so an OVERNIGHT run's pointer activity is auditable
+      after the fact. Additive; a run with no recall/eviction renders byte-equivalent to today (no new required journal
+      field shape; reuse an existing entry kind or an additive optional).
+
+    * PART 6 — LIVE PROOF (depends on 1–5): add a LIVE Temporal test (reuse `createRunnerWorker` / `createTemporalRunner`
+      / the scripted registry + `waitFor` helpers, `describe.skipIf(address === null)`, `makeJudgedSpec` — do NOT mock the
+      workflow) that drives a real multi-chunk `chikory run` UNDER `unattended:{escalation:seal_resumable_failed}` where an
+      early step produces a large tool output that gets pointerized, a LATER step RECALLS it (asserts the expanded excerpt
+      reaches the later context), the carried set stays bounded across the horizon, and the run reaches SUCCESS with NO
+      operator approval (it never blocks on `AWAITING_APPROVAL`). AND assert the additive guarantee: a run that makes no
+      recall request and sets no eviction policy assembles context BYTE-EQUIVALENT to today. Co-reference BOTH
+      `resolveMemoryRecallRequest` AND `createRunnerWorker` in this SAME file (F-97).
+
+  CONSTRAINTS: strict TypeScript, ESM `.js` relative imports, named exports only; NO new dependency; a run that makes NO
+  recall request and sets NO eviction policy MUST leave loop context-assembly + trace output BYTE-EQUIVALENT to today
+  (additivity is a live assertion, not a claim); do NOT change the SHAPE of any frozen contract (`StepRecord`,
+  `JournalEntry`, `Checkpoint`, `ContextBundle`, `ArtifactRef`) — `resolveMemoryRecallRequest`/`decideMemoryEviction`
+  are NEW pure symbols, `MemoryEvictionPolicy` is a NEW local type, the eviction policy + telemetry are ADDITIVE OPTIONAL.
+  Do NOT weaken the WP-123 crash-recovery, WP-206 suspend/resume, WP-269 step-forcing, WP-270 chunking, WP-271
+  chunk-scoped-judge/unattended-escalate, or the WP-203 compaction `digestRef` paths. If a verification step reports a
+  failing test or type error, READ the failure and fix the IMPLEMENTATION — do NOT weaken or delete any assertion.
+
+repos:
+  - url: /Users/nikitazolotarev/repos/chikory
+    writable: true
+
+# LONG-HORIZON DRIVER: 6 ordered chunks, ONE PART each, so `decideWorkChunk` hands the executor EXACTLY one bounded
+#   sub-goal per durable step and completion defers until all 6 chunks are consumed AND the judge confirms the ACs.
+#   Combined with `min_durable_steps: 6` this forces ≥6 sealed checkpoints EACH carrying a distinct, non-trivial diff —
+#   the rung-4 non-hollow horizon, run GENUINELY UNATTENDED via the WP-271 policy below. (Verify parse before launch:
+#   `parseTaskSpec` over this file, or `pnpm chikory run` which validates first.)
+bounded_work_unit:
+  min_durable_steps: 6
+  directive: >
+    Advance EXACTLY the ONE numbered PART named by this step's chunk — no more — then stop and let the durable checkpoint
+    seal. Do NOT front-load a later PART into an earlier step. Do NOT declare the whole run complete until every PART has
+    landed with its tests and the ACs pass.
+  work_chunks:
+    - name: part-1-recall-request-parser
+      directive: >
+        PART 1 ONLY: add a net-new pure `resolveMemoryRecallRequest(executorText, refs): ArtifactRef | null` in
+        `src/runner/memory-pointer.ts` (sibling of `parsePointerReference`) that detects an executor recall marker naming
+        a carried pointer id and returns the matching `ArtifactRef`, else `null`. Pure, no I/O; re-export from the barrel;
+        exhaustive unit tests (match, no-marker, unknown-id, malformed).
+    - name: part-2-eviction-decision
+      directive: >
+        PART 2 ONLY: add a net-new pure `decideMemoryEviction(refs, policy?): { keep; evicted }` + the local
+        `MemoryEvictionPolicy` type in `src/runner/memory-pointer.ts` that keeps the most-recent refs and evicts the
+        coldest under an opt-in max-count/max-bytes bound; NO policy = total no-op. Pure, no `types.ts` change; exhaustive
+        unit tests (no-op, over-bound evicts oldest, tie/empty, input-immutability).
+    - name: part-3-wire-live-recall
+      directive: >
+        PART 3 ONLY: wire `resolveMemoryRecallRequest` into `src/workflow/agent-loop.ts` so a step's recall request
+        fetches the pointer's fuller excerpt via the EXISTING `recallPointerExcerpt` (against the run's artifact excerpt
+        fn) and carries it into the NEXT context. No recall request → context assembly BYTE-EQUIVALENT to today.
+    - name: part-4-wire-eviction
+      directive: >
+        PART 4 ONLY: replace the crude `carriedRefs.slice(-CARRIED_REFS_WINDOW)` bound with `decideMemoryEviction` under
+        an opt-in policy; DEFAULT / small-horizon path stays BYTE-EQUIVALENT. Do NOT weaken the compaction `digestRef`
+        retention or `context_snapshot` handling.
+    - name: part-5-memory-telemetry
+      directive: >
+        PART 5 ONLY: add an additive `memory recalls N · evicted M` segment to the `chikory trace` totals sub-line, fed by
+        loop counters; a run with no recall/eviction renders byte-equivalent. No new REQUIRED journal field shape.
+    - name: part-6-live-proof
+      directive: >
+        PART 6 ONLY: add the LIVE Temporal test (reuse `createRunnerWorker`/`createTemporalRunner`/scripted
+        registry/`waitFor`/`describe.skipIf`, `makeJudgedSpec`) driving a multi-chunk run UNDER
+        `unattended:{escalation:seal_resumable_failed}` where an early large output is pointerized, a later step RECALLS
+        it (expanded excerpt reaches the later context), the carried set stays bounded, and the run reaches SUCCESS with
+        NO operator approval; plus the no-recall/no-policy byte-equivalent path. Co-reference `resolveMemoryRecallRequest`
+        AND `createRunnerWorker` in this file (F-97).
+
+acceptance_criteria:
+  - id: AC-1
+    description: >
+      The net-new pure `resolveMemoryRecallRequest` recall-request parser exists in the memory-pointer source — a
+      side-effect-free total function over an executor text + carried refs. (OUTCOME symbol the goal NAMES —
+      `resolveMemoryRecallRequest` — absent on HEAD so a recursive grep cannot false-green on an incumbent file, F-90.
+      Module/test layout is the executor's, F-82/F-83.)
+    check: >
+      cd packages/sdk-ts &&
+      grep -rq 'resolveMemoryRecallRequest' src/runner/memory-pointer.ts
+
+  - id: AC-2
+    description: >
+      The durable loop HONORS live recall AND principled eviction — `resolveMemoryRecallRequest` and the net-new
+      `decideMemoryEviction` are both threaded into `src/workflow/agent-loop.ts` (the def+wire pattern of the landed
+      pointerize interception), so a long unattended run can recall externalized context and stay bounded.
+    check: >
+      cd packages/sdk-ts &&
+      grep -rq 'resolveMemoryRecallRequest' src/workflow/agent-loop.ts &&
+      grep -rq 'decideMemoryEviction' src/workflow/agent-loop.ts
+
+  - id: AC-3
+    description: >
+      A LIVE Temporal test exercises live memory recall end-to-end under the unattended policy. (F-97-SAFE: not a bare
+      symbol grep a UNIT test would false-green — it requires a `test/` file that references BOTH the net-new
+      `resolveMemoryRecallRequest` symbol AND the LIVE runner driver `createRunnerWorker`, so the LIVE recall + unattended
+      no-hang proof is actually enforced. Both are OUTCOME symbols the goal names; the test filename is the executor's.)
+    check: >
+      cd packages/sdk-ts &&
+      for f in $(grep -rl 'resolveMemoryRecallRequest' test/ 2>/dev/null); do
+        grep -q 'createRunnerWorker' "$f" && { echo ok; break; };
+      done | grep -q ok
+
+  - id: AC-4
+    description: >
+      The SDK stays type- and lint-clean and the FULL existing suite — including the new recall + eviction unit and live
+      tests — is green, proving the change is additive and nothing outside it regressed (no `StepRecord`/`JournalEntry`/
+      `Checkpoint`/`ContextBundle`/`ArtifactRef` shape change; the WP-123 crash-recovery, WP-206 suspend/resume, WP-269
+      step-forcing, WP-270 chunking, WP-271 chunk-scoped-judge/unattended-escalate, and WP-203 compaction tests still
+      pass, and a no-recall/no-policy run leaves loop context-assembly + trace output unchanged).
+    check: cd packages/sdk-ts && pnpm exec tsc --noEmit && pnpm exec eslint . && pnpm exec vitest run
+
+budget_usd: 80
+max_steps: 40
+
+# UNATTENDED (WP-271): a genuine ESCALATE seals a RESUMABLE FAILED terminal instead of an untimed approval hang, so this
+#   run needs NO operator; the chunk-scoped judge (WP-271) will not spuriously ESCALATE an on-track intermediate chunked
+#   step. Requires WP-271 committed to HEAD (see the prerequisite note above) or `parseTaskSpec` rejects this block.
+unattended:
+  escalation: seal_resumable_failed
+
+executor:
+  adapter: codex
+  family: openai
+
+judge:
+  family: openai-compat
+  cadence: 2
+  max_cost_share: 0.5
+
+routing:
+  stages:
+    plan: { provider: openai-compat, model: gpt-5.5 }
+    code: { provider: openai-compat, model: gpt-5.5 }
+    review: { provider: openai-compat, model: gpt-5.5 }
+    judge: { provider: openai-compat, model: gemini-3.1-pro-preview }
