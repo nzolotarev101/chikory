@@ -97,3 +97,30 @@ Friction numbering is global + sequential; highest prior = F-100 (dogfood-082), 
 ### Verdict on the addendum
 
 🟢 **Thesis win — self-correction caught a shipped durable-execution bug the ACs + judge had greened.** The first WP-270 delivery passed every gate yet skipped rolled-back chunks under adverse verdicts; a re-run, with no human pointing at the line, rewrote the counter to be PROCEED-gated and pinned it with a LIVE scripted-ROLLBACK regression test. That is exactly the compounding-error mitigation the project exists to demonstrate — the cost is F-102 (a run slot spent on a duplicate spec instead of a routed track-B PR).
+
+---
+
+## SECOND ADDENDUM — re-run `run-0a285f5b` (083c) CLOSES nothing new; it is the launcher-glob accident (2026-07-04)
+
+> The identical dogfood-083 spec was launched a **THIRD** time — not on purpose. The pre-`59c57f6` launcher glob `dogfood-[0-9][0-9][0-9].yaml` (3-digit-EXACT) did not match the newly-authored, suffix-named `dogfood-084-wp214-multirepo-nonhollow-horizon.yaml`, so it silently fell back to the bare-named `dogfood-083.yaml` and re-ran the already-closed WP-270 spec. The executor found the work done and padded the forced horizon with test-only assertions.
+
+- **Run-id:** `run-0a285f5b-fcfb-4f22-847b-1c11b6e93f8c`. SUCCESS · **4 steps** · **$3.02 / $40.00** (exact sum $3.0199, 7.5%) · 10m 10s · executor `codex(openai)`/gpt-5.5 · judge `openai-compat/gemini-3.1-pro-preview`. 3 judge passes (cadence 2), all ✓ PROCEED 4/4, judge share **0.8%** ($0.02), **0 rollbacks / 0 escalations**, 4 checkpoints.
+- **Ledger row:** `083c,WP-270,run,SUCCESS,4,3.02,loose,product,0,0,0,0` (the WP-270 family's third row; `rollbacks` column populated = 0).
+- **Landed:** the test-only harvest committed as **`b103645`** (`test(sdk-ts): assert context snapshots and check ordered chunk horizon`, +60/−1 to `test/runner/work-chunk.test.ts`) by the auto-commit hook. Pack §3 re-ran all 4 ACs on the tree → **681 passed | 19 skipped**, tsc+eslint exit 0.
+
+### 🔴 The hollow half — step 1 is a $1.43 empty probe
+
+- **Evidence:** step 1 sealed a **0-byte diff** at **$1.4342 = 47.5% of the whole run** (1105k in / 5.3k out, 33 tool calls, 3m 13s) — the executor confirmed WP-270 + the F-101 fix already exist on HEAD and produced nothing. Steps 2–4 sealed **1311 / 1854 / 1493-byte** diffs — assertions on `work-chunk.test.ts` only, no product code. The `work_chunks` field this spec's successor was meant to exercise was **still not used** (the spec pre-dates it in HEAD). This is a HOLLOW horizon by construction: nothing left to build.
+- **Why it greened anyway:** the ACs are symbol-presence greps (`decideWorkChunk` in `src/workflow/`) + `tsc/eslint/vitest` — all satisfied by the incumbent code, so a run that builds nothing passes. The F-90 net-new-symbol guard protects against false-green on a WRONG file; it does NOT protect against a spec whose named symbol has since SHIPPED (the F-106 failure mode below).
+
+### New friction (global sequential; prior max = F-103)
+
+**🟡 F-104 → launcher-glob fallback (CLOSED-ON-ARRIVAL by `59c57f6`).** The 3-digit-exact spec-pick glob could not match a suffix-named spec (`dogfood-084-…-horizon.yaml`) and silently fell back to the previous bare-named spec, re-running closed dogfood-083 for **$3.02** — 47.5% of it wasted on the empty probe. *Fix (landed `59c57f6`):* the glob is now `dogfood-[0-9][0-9][0-9]*.yaml | sort | tail -1` (zero-padded numeric prefix keeps order; a suffixed name sorts after its bare sibling). *WP it spawns:* none — fixed; regression-guarded by the `sort|tail` semantics.
+
+**🟡 F-105 → warn-only spec-pick gate (CLOSED-ON-ARRIVAL by `59c57f6`).** The staleness/spec-pick precheck warned but launched anyway, so a mis-resolved glob could still burn a run. *Fix (landed `59c57f6`):* refuse-by-default staleness gate. *WP it spawns:* none — fixed.
+
+**🟡 F-106 → queued-headline invalidated by out-of-loop delivery (this review; doc-drift, F-98 class, opposite direction).** WP-214 multi-repo workspaces — the host of the QUEUED dogfood-084 headline — was implemented OUTSIDE the dogfood loop (`fadc124`, `collectWorkspaceRepos`), so dogfood-084's net-new AC symbol (asserted "absent on HEAD") already exists → the headline is dead on arrival and would green hollow (a guaranteed 083c-repeat). *Fix (this review):* dogfood-084 RETIRED (`.yaml.retired`, out of the launcher glob); the identical non-hollow rung-3 horizon re-hosted on the only surviving §6 candidate, **WP-215 architecture rubric**, as **dogfood-085**. *Operational lesson (→ DOGFOODING §7):* before launching a queued headline, re-validate it against HEAD — grep its net-new AC symbol; if present, the host WP already shipped and the headline must be rewritten.
+
+### Verdict on the second addendum
+
+🔴 **Pure waste, cleanly bounded — a process bug, not a thesis result.** run-0a285f5b delivered no product code ($3.02, 47.5% of it an empty probe) and exists only because a launcher glob mis-resolved (F-104) past a refuse-gate that only warned (F-105), onto a spec whose successor was already invalidated by an out-of-loop WP-214 delivery (F-106). All three are closed — two by `59c57f6`, the third by retiring dogfood-084 and re-hosting the horizon as dogfood-085 on WP-215. The one durable signal: the progression gate correctly flips **⛔ STALLED** over 083/083b/083c, which BINDS the next headline to the current ladder rung — exactly what dogfood-085 is.

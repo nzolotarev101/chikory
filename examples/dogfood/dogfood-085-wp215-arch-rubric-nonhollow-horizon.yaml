@@ -1,0 +1,217 @@
+# Dogfood-085: WP-215 ARCHITECTURE RUBRIC, hosting the NON-HOLLOW rung-3 HORIZON.
+#   dogfood-082 REACHED the intra-run ≥5-durable-step horizon but HOLLOW (F-100): seal-deferral
+#   without work-CHUNKING let codex front-load ALL product code into step 1 while steps 2–6
+#   sealed thin test-tweaks — so the per-step-reliability / compounding-error KPI (95%→5% over
+#   60 steps → target 99%+) was NOT trustworthy. dogfood-083 built the fix: WP-270 per-step
+#   work-unit CHUNKING (`work_chunks` on `bounded_work_unit` + pure `decideWorkChunk` wired into
+#   `agent-loop.ts`), LIVE-proven. THIS run is the payoff: the FIRST launch that USES `work_chunks`
+#   in its own YAML (the field EXISTS in HEAD after dogfood-083's harvest) to force a ≥5-step
+#   `chikory run` where EACH sealed checkpoint carries a DISTINCT, non-trivial product diff —
+#   converting the hollow horizon into a TRUSTWORTHY per-step-reliability curve.
+#
+# WHY NOT dogfood-084: 084 hosted this same horizon on WP-214 (multi-repo workspaces), but WP-214
+#   shipped OUTSIDE the dogfood loop (`fadc124`, `collectWorkspaceRepos` at `workspace-repos.ts:72`,
+#   wired `activities.ts:314`, LIVE test `multi-repo-workspace.test.ts`). 084 is therefore DEAD on
+#   arrival (its net-new AC symbol already exists) and is RETIRED. This run re-hosts the identical
+#   non-hollow machinery on the ONLY surviving §6 candidate: WP-215's architecture rubric (F-106).
+#
+# HOST WP — WP-215 ARCHITECTURE RUBRIC (real open plan.md §6 product WP, judge JD-4 pillar). The
+#   SECURITY side of WP-215 is done (secret-scan S1→S3 + dependency-scan S4→S5, all landed); the
+#   ARCHITECTURE side is genuinely UNBUILT (REQUIREMENTS.md JD-4: "Architecture rubric still P2").
+#   Adding a deterministic architecture-posture judge-evidence signal — a diff-scan that flags a
+#   forbidden cross-layer import direction, wired into inner-loop evidence + the standing rubric —
+#   is the exact `scanDiffForSecrets`/`scanDiffForNewDependencies` analog and decomposes into FIVE
+#   dependency-ordered sub-goals, each an independently-FAILABLE increment producing a distinct
+#   real diff. The chunking mechanism (WP-270) is the VEHICLE seeded INTO this real WP's code.
+#
+# Format: LOOSE (headline — goal states the OUTCOME + constraints; ACs pin "done" via OUTCOME
+#   SYMBOLS THE GOAL NAMES; module/test layout LEFT TO THE EXECUTOR, F-82/F-83; NO prescribed
+#   diff). Ladder-rung: 3.
+# Ladder-rung: 3
+# Thesis-KPI: NON-HOLLOW per-step reliability — a ≥5-step single `chikory run` where every sealed
+#   durable checkpoint carries a DISTINCT non-trivial product diff (a genuine per-step failure
+#   surface), driven by `work_chunks` (WP-270), turning dogfood-082's hollow horizon into a
+#   trustworthy compounding-error datapoint. Hosted on real WP-215 architecture-rubric feature code.
+#
+# F-90 APPLIED: AC-1/2 grep a NET-NEW symbol the goal NAMES (`scanDiffForLayeringViolations`),
+#   absent on HEAD, so a recursive grep cannot false-green on an incumbent file.
+# F-97 APPLIED: AC-3 does NOT bare-grep the symbol — it requires the net-new
+#   `scanDiffForLayeringViolations` to co-live with the LIVE runner driver `createRunnerWorker` in
+#   a `test/` file, so the LIVE evidence-rendering + rubric-gating proof is actually enforced (the
+#   dogfood-081/083 pattern).
+#
+# LAUNCH WITH `chikory run` (a single durable run):
+#      devbox run run-dogfood       # <- `chikory run`; picks the latest spec (this one)
+
+name: dogfood-085-wp215-arch-rubric-nonhollow-horizon
+goal: >
+  Give the Agent-as-a-Judge a DETERMINISTIC ARCHITECTURE-POSTURE signal — a pure diff-scan that
+  flags a FORBIDDEN cross-layer import direction, threaded into inner-loop judge evidence and
+  answered by a standing rubric item — advancing the REAL open WP-215 (JD-4 architecture rubric),
+  whose security side (secret + dependency scans) is done but whose ARCHITECTURE side is still
+  unbuilt (REQUIREMENTS.md: "Architecture rubric still P2"). This is the exact analog of the
+  landed `scanDiffForSecrets` / `scanDiffForNewDependencies` evidence primitives. Deliver it in
+  FIVE bounded, dependency-ordered sub-goals, ONE per durable step, so every sealed checkpoint
+  carries DISTINCT non-trivial product work (the non-hollow rung-3 horizon, F-100/WP-270):
+
+    * PART 1 — PURE PRIMITIVE (testable, no I/O): add a net-new pure, side-effect-free
+      `scanDiffForLayeringViolations(diff): string[]` in a NEW `src/judge/` module — added-lines
+      only, extract each changed file's import/require specifiers, apply a small declared layer
+      order (e.g. `cli` above `runner`/`workflow` above `judge` above `types`), and flag an added
+      upward-pointing import (a forbidden dependency direction), returning stable `from→to` labels
+      sorted + de-duped. Total over its inputs: no Temporal, no clock, no network.
+      Unit-test exhaustively (a forbidden upward import → its label; a legal downward/sibling import
+      → nothing; a relative/`node:`/external import → nothing; empty diff → `[]`). Do NOT yet wire
+      it into evidence.
+
+    * PART 2 — EVIDENCE WIRE (depends on 1): call `scanDiffForLayeringViolations` from
+      `collectEvidence` (`src/judge/evidence.ts`) over the FULL diff (BEFORE the prompt-excerpt
+      truncation) into a NEW REQUIRED `CollectedEvidence.architectureLabels` field, and thread it
+      through `harness.ts`. Additive — a diff with no violation yields `[]` and no behavior change;
+      do NOT reshape any frozen evidence contract beyond adding the required field, mirroring how
+      `secretScanLabels` / `newDependencyLabels` were added.
+
+    * PART 3 — PROMPT RENDER (depends on 2): render a `## EVIDENCE — deterministic architecture
+      scan (added diff lines)` section in `src/judge/prompt.ts` (a `renderArchitectureLabels`
+      sibling of the secret/dependency renderers) — one `- <label>` line per violation, or
+      `(none)` — so the LLM judge SEES the deterministic signal. Additive; the LLM still
+      adjudicates the verdict.
+
+    * PART 4 — STANDING RUBRIC ITEM (depends on 3): add a `no_architecture_violations` item to the
+      `STANDING_RUBRIC` (`src/judge/rubric.ts`) so every judge pass ANSWERS whether the diff
+      introduces a forbidden cross-layer dependency, using the PART-3 evidence. Keep it
+      NON-destructive (the LLM adjudicates from the rendered signal, exactly as the security
+      posture items do) — do NOT make it a CONTRACTS.md §4 rule-1 auto-ROLLBACK trigger, and do NOT
+      reshape `RubricItem`.
+
+    * PART 5 — LIVE PROOF (depends on 4): add a LIVE Temporal test (reuse `createRunnerWorker` /
+      `createTemporalRunner` / the scripted registry + `waitFor` helpers, `describe.skipIf(address
+      === null)`, `makeJudgedSpec` — do NOT mock the workflow) that drives ONE real `chikory run`
+      whose step diff introduces a SEEDED forbidden cross-layer import, and asserts: the run reaches
+      a terminal state; the collected evidence's `architectureLabels` names the violation; and the
+      rendered judge prompt carries the architecture section with that label. AND asserts a CLEAN
+      diff (no forbidden import) yields `architectureLabels: []` and a `(none)` render (the additive
+      guarantee). Co-reference BOTH `scanDiffForLayeringViolations` AND `createRunnerWorker` in this
+      SAME file (F-97).
+
+  CONSTRAINTS: strict TypeScript, ESM `.js` relative imports, named exports only; NO new
+  dependency; a no-violation diff MUST leave judge behavior byte-equivalent to today (additivity is
+  a live assertion, not a claim); do NOT change the SHAPE of any frozen contract (`StepRecord`,
+  `JournalEntry`, `Checkpoint`, `RubricItem`) — `architectureLabels` is an ADDITIVE required field
+  on `CollectedEvidence` exactly as `secretScanLabels` / `newDependencyLabels` were,
+  `scanDiffForLayeringViolations` is a NEW pure module, the rubric item is additive and
+  non-destructive. Reuse the `scanDiffForSecrets` / `scanDiffForNewDependencies` evidence-primitive
+  pattern; do NOT re-implement diff parsing from scratch if a shared helper already exists. Do NOT
+  weaken the WP-123 crash-recovery, WP-206 suspend/resume, WP-269 step-forcing, or WP-270 chunking
+  paths. If a verification step reports a failing test or type error, READ the failure and fix the
+  IMPLEMENTATION — do NOT weaken or delete any assertion.
+
+repos:
+  - url: /Users/nikitazolotarev/repos/chikory
+    writable: true
+
+# NON-HOLLOW HORIZON DRIVER: this is the FIRST launch to USE `work_chunks` (WP-270, HEAD-valid
+#   after dogfood-083's harvest) — each of the 5 ordered chunks is ONE PART, so `decideWorkChunk`
+#   hands the executor EXACTLY one bounded sub-goal per durable step and completion defers until
+#   all 5 chunks are consumed AND the judge confirms the ACs. Combined with `min_durable_steps: 5`
+#   this forces ≥5 sealed checkpoints EACH carrying a distinct, non-trivial diff — the trustworthy
+#   per-step-reliability curve dogfood-082 could not produce. (Verify parse before launch:
+#   `parseTaskSpec` over this file, or `pnpm chikory run` which validates first.)
+bounded_work_unit:
+  min_durable_steps: 5
+  directive: >
+    Advance EXACTLY the ONE numbered PART named by this step's chunk — no more — then stop and let
+    the durable checkpoint seal. Do NOT front-load a later PART into an earlier step. Do NOT
+    declare the whole run complete until every PART has landed with its tests and the ACs pass.
+  work_chunks:
+    - name: part-1-pure-primitive
+      directive: >
+        PART 1 ONLY: add the net-new pure `scanDiffForLayeringViolations(diff): string[]` in a new
+        `src/judge/` module — added-lines-only import extraction, a small declared layer order,
+        forbidden-upward-direction detection, stable `from→to` labels sorted + de-duped — with
+        exhaustive unit tests. Do NOT wire it into evidence yet.
+    - name: part-2-evidence-wire
+      directive: >
+        PART 2 ONLY: call `scanDiffForLayeringViolations` from `collectEvidence` over the FULL diff
+        (before prompt truncation) into a NEW REQUIRED `CollectedEvidence.architectureLabels` field
+        and thread it through `harness.ts`, additively — mirroring `secretScanLabels` /
+        `newDependencyLabels`. No frozen-contract reshape beyond the added field.
+    - name: part-3-prompt-render
+      directive: >
+        PART 3 ONLY: render a `## EVIDENCE — deterministic architecture scan (added diff lines)`
+        section in `prompt.ts` (`renderArchitectureLabels` sibling), one `- <label>` per violation
+        or `(none)`, so the LLM judge sees the signal. Additive.
+    - name: part-4-standing-rubric-item
+      directive: >
+        PART 4 ONLY: add a NON-destructive `no_architecture_violations` item to `STANDING_RUBRIC`
+        (`rubric.ts`) so every judge pass answers it from the PART-3 evidence. Do NOT make it a
+        rule-1 auto-ROLLBACK trigger; do NOT reshape `RubricItem`.
+    - name: part-5-live-proof
+      directive: >
+        PART 5 ONLY: add the LIVE Temporal test (reuse `createRunnerWorker`/`createTemporalRunner`
+        /scripted registry/`waitFor`/`describe.skipIf`, `makeJudgedSpec`) asserting a run whose diff
+        seeds a forbidden cross-layer import surfaces the violation in `architectureLabels` + the
+        rendered architecture section, AND a clean diff yields `[]` + `(none)`. Co-reference
+        `scanDiffForLayeringViolations` AND `createRunnerWorker` in this file (F-97).
+
+acceptance_criteria:
+  - id: AC-1
+    description: >
+      The net-new pure `scanDiffForLayeringViolations` architecture-scan primitive exists in the
+      judge source — a side-effect-free total function over a diff. (OUTCOME symbol the goal
+      NAMES — `scanDiffForLayeringViolations` — absent on HEAD so a recursive grep cannot
+      false-green on an incumbent file, F-90. Module/test layout is the executor's, F-82/F-83.)
+    check: >
+      cd packages/sdk-ts &&
+      grep -rq 'scanDiffForLayeringViolations' src/judge/
+
+  - id: AC-2
+    description: >
+      The inner-loop judge evidence HONORS the scan — `scanDiffForLayeringViolations` is called
+      from `src/judge/evidence.ts` so every judge pass carries the architecture signal (the
+      def+wire pattern of dogfood-081/082/083 and the landed secret/dependency scans).
+    check: >
+      cd packages/sdk-ts &&
+      grep -rq 'scanDiffForLayeringViolations' src/judge/evidence.ts
+
+  - id: AC-3
+    description: >
+      A LIVE Temporal test exercises the architecture signal end-to-end. (F-97-SAFE: not a bare
+      symbol grep a UNIT test would false-green — it requires a `test/` file that references BOTH
+      the net-new `scanDiffForLayeringViolations` symbol AND the LIVE runner driver
+      `createRunnerWorker`, so the LIVE evidence-render + rubric-gating proof is actually enforced.
+      Both are OUTCOME symbols the goal names; the test filename is the executor's, F-82.)
+    check: >
+      cd packages/sdk-ts &&
+      for f in $(grep -rl 'scanDiffForLayeringViolations' test/ 2>/dev/null); do
+        grep -q 'createRunnerWorker' "$f" && { echo ok; break; };
+      done | grep -q ok
+
+  - id: AC-4
+    description: >
+      The SDK stays type- and lint-clean and the FULL existing suite — including the new
+      architecture-scan unit + live tests — is green, proving the signal is additive and nothing
+      outside it regressed (no `CollectedEvidence`-consumer break beyond the added required field,
+      no `StepRecord`/`JournalEntry`/`Checkpoint`/`RubricItem` shape change; the WP-123
+      crash-recovery, WP-206 suspend/resume, WP-269 step-forcing, and WP-270 chunking tests still
+      pass, and a no-violation diff leaves judge behavior unchanged).
+    check: cd packages/sdk-ts && pnpm exec tsc --noEmit && pnpm exec eslint . && pnpm exec vitest run
+
+budget_usd: 50
+max_steps: 30
+
+executor:
+  adapter: codex
+  family: openai
+
+judge:
+  family: openai-compat
+  cadence: 2
+  max_cost_share: 0.5
+
+routing:
+  stages:
+    plan: { provider: openai-compat, model: gpt-5.5 }
+    code: { provider: openai-compat, model: gpt-5.5 }
+    review: { provider: openai-compat, model: gpt-5.5 }
+    judge: { provider: openai-compat, model: gemini-3.1-pro-preview }

@@ -18,8 +18,7 @@ per-step diffs; the no-chunk-list variant stays on WP-269), 658 tests green; har
 (re-run `run-03d161e9`, un-harvested):** the chunk counter now uses a dedicated PROCEED-gated `consumedWorkChunks` (not raw
 `checkpoints.length`) so a rolled-back chunk is re-handed; LIVE scripted-ROLLBACK regression test, 660 tests green. ℹ️ the build run
 ITSELF front-loaded (F-100 recurred: step 1 = $3.56/20.5KB) because the new field can't be referenced in its own launch
-YAML (HEAD `.strict()` rejects it) — proven in-code. **NEXT: dogfood-084 — the NON-HOLLOW rung-3 horizon on `work_chunks`**
-(a ≥5-step run whose every sealed checkpoint carries a distinct non-trivial diff). See §7 (troubleshooting), §8 (known limitations), §1.5, §1.4, §3.
+YAML (HEAD `.strict()` rejects it) — proven in-code. ⚠️ **dogfood-084 RETIRED** — host WP-214 shipped outside the loop (`fadc124`); its 3-digit-exact launcher glob also mis-fired, re-running closed 083 as `run-0a285f5b` (083c, $3.02, F-104/F-106; glob + refuse-by-default staleness gate fixed `59c57f6`). **NEXT: dogfood-085 — NON-HOLLOW rung-3 horizon on `work_chunks`, re-hosted on WP-215 architecture rubric** (≥5-step run, every sealed checkpoint a distinct non-trivial diff). See §7 (troubleshooting), §8 (known limitations), §1.5, §1.4, §3.
 
 Related docs: [`docs/spec/task-spec.md`](spec/task-spec.md) (schema
 reference) · [`docs/TASK-PROTOCOL.md`](TASK-PROTOCOL.md) (WP etiquette, §7 is
