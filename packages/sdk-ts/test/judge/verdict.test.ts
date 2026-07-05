@@ -104,6 +104,21 @@ describe("computeVerdict (CONTRACTS.md §4)", () => {
     expect(decision.escalateReason).toContain("flip-flop");
   });
 
+  it("rule 5 (WP-273): flip-flop ESCALATE SUPPRESSED while consuming a non-final chunk — an AC oscillating across chunks is state-change, not judge drift", () => {
+    const history = { "AC-1": [true, false, true, false] };
+    // Same oscillating history: ESCALATE without the flag, PROCEED while chunking.
+    expect(computeVerdict(form({ criterionResults: [pass("AC-1")] }), history).kind).toBe(
+      "ESCALATE",
+    );
+    const inProgress = computeVerdict(
+      form({ criterionResults: [pass("AC-1")] }),
+      history,
+      STANDING_RUBRIC,
+      true,
+    );
+    expect(inProgress.kind).toBe("PROCEED");
+  });
+
   it("rule 5: a single flip-flop is tolerated", () => {
     const decision = computeVerdict(form({ criterionResults: [pass("AC-1")] }), {
       "AC-1": [true, false],

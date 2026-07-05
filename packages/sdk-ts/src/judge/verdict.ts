@@ -95,7 +95,13 @@ export function computeVerdict(
   }
 
   // Rule 5 — criterion flip-flop (pass→fail→pass) twice → ESCALATE (judge-drift guard).
-  const flippers = sequences.filter((s) => flipFlops(s.history) >= FLIP_FLOPS_TO_ESCALATE);
+  // Also suppressed while chunking (F-112 / WP-273): the guard catches judge
+  // drift on a STABLE diff, but under bounded-work-unit chunking the diff
+  // changes each step, so a criterion oscillating as later chunks touch shared
+  // code is expected STATE change, not judge drift. Resumes on the final chunk.
+  const flippers = workChunkInProgress
+    ? []
+    : sequences.filter((s) => flipFlops(s.history) >= FLIP_FLOPS_TO_ESCALATE);
   if (flippers.length > 0) {
     const reason =
       `criterion ${flippers.map((s) => s.id).join(", ")} flip-flopped ` +
