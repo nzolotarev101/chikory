@@ -1,0 +1,222 @@
+# Dogfood-089: WP-105 DURABLE-LOOP OTel SPANS, run as the ⑦ rung's FIRST WALL-CLOCK-ENDURANCE SOAK RUN. The genuine
+#   rung-4 CLIMB — a real `chikory run` PACED OVER HOURS by the WP-272 `soak` durable re-entry mechanism (dogfood-088),
+#   surviving durable parks (proxy-token expiry, Temporal worker uptime, F-78-class hangs), while landing real product
+#   OTel instrumentation of the durable loop.
+#
+# WHY THIS IS THE NEXT HEADLINE.
+#   dogfood-088 LANDED the WP-272 soak / time-paced durable re-entry mechanism (hand-fixed) → the ⑦ rung's WALL-CLOCK
+#   axis is UNBLOCKED. The progression gate stays ⛔ STALLED because 088's autonomous run false-FAILed (F-114, a bad AC);
+#   the mechanism exists but no run has yet CLIMBED rung 4 by actually enduring hours of wall-clock. THIS run is that
+#   climb: it launches with a REAL multi-hour `soak` policy so the durable loop genuinely suspends and re-enters across
+#   real time, and the endurance evidence is the run's OWN trace (`re-entries N · soak-slept <hours>`) + SUCCESS.
+#
+# HOST WP — WP-105 OTel spans + accounting (real open plan.md §6 product WP; CLAUDE.md thesis pillar: "OTel — all agent
+#   runs emit OTel-compliant spans" + "full trajectory observability"). WP-105's LLM-CALL layer is done
+#   (`recordLLMCallSpan`/`recordJudgePassSpan` in `src/otel.ts`, `chikory.llm.call`/`chikory.judge.pass`), BUT the
+#   DURABLE LOOP itself emits NO spans — `agent-loop.ts` has zero OTel refs, so a long run's step / checkpoint / soak
+#   re-entry structure is invisible to a standard OTel backend. This run instruments the loop, so an OVERNIGHT run is
+#   auditable as a span tree — the exact observability a long-horizon operator needs. The `soak` mechanism is the RUN
+#   VEHICLE (it paces the run over hours); the OTel loop spans are the LANDED PRODUCT DIFF (§1.2 — real WP, not scaffold).
+#
+# ⚠️ DETERMINISM — LOOP SPANS EMIT FROM ACTIVITIES, NEVER THE WORKFLOW BODY. `agent-loop.ts` is a Temporal workflow;
+#   OTel spans use wall-clock time + ambient context and would BREAK replay determinism if started in the workflow body.
+#   Follow the LANDED pattern: `recordLLMCallSpan`/`recordJudgePassSpan` are called from ACTIVITIES
+#   (`runner/activities.ts`), never from the workflow. The step / checkpoint / soak spans MUST likewise emit from the
+#   existing activities (`executeStep`, `writeCheckpoint`, `recordControlEvent`), NOT from `agent-loop.ts`.
+#
+# ⚠️ HONEST SCOPING — THIS IS A GENUINE MULTI-HOUR RUN. The `soak` block below paces ~5 durable parks of ~30 min ≈ ~2.5h
+#   wall-clock (product work is ~6 short steps; the hours come from the durable sleeps). Size `sleepMs` ABOVE your proxy
+#   token's TTL to actually surface token-expiry-across-park (a ~30-min park may not expire a ~60-min token — bump
+#   `sleepMs`/`maxReentries` toward the literal ~8h ⑦ target once a 2-3h climb is clean). You may launch and walk away.
+#
+# Format: LOOSE (headline — goal states the OUTCOME + constraints; ACs pin "done" via OUTCOME SYMBOLS THE GOAL NAMES;
+#   module/test layout LEFT TO THE EXECUTOR, F-82/F-83; NO prescribed diff).
+# Ladder-rung: 4
+# Thesis-KPI: WALL-CLOCK ENDURANCE (the rung-4 climb) — a real `chikory run` PACED OVER HOURS by the WP-272 `soak`
+#   durable re-entry reaches SUCCESS, surviving each durable park (proxy-token refresh, worker uptime), with the endurance
+#   auditable as `re-entries N · soak-slept <hours>` in the trace AND as a standard OTel span tree over the loop. Lands
+#   real WP-105 durable-loop OTel instrumentation. First run to actually CLIMB rung 4 (dogfood-088 built the mechanism).
+#
+# F-114 APPLIED (the dogfood-088 run-killer, MINE): AC greps key on net-new FUNCTION symbols + CONSUMED fields, NEVER a
+#   bare TYPE-name token a correct call site is free not to spell. AC-1/2 grep `recordRunStepSpan` (net-new fn, absent on
+#   HEAD → F-90-safe) and the consumed `activities`/`executeStep` wiring — not an interface name.
+# F-97 APPLIED: AC-3 requires the net-new span symbol to co-live with the LIVE runner driver `createRunnerWorker` in a
+#   `test/` file, so the LIVE span-emission proof is actually enforced.
+#
+# ✅ UNATTENDED (WP-271) — needs NO operator across the multi-hour parks.
+#
+# ✅ PREREQUISITE SATISFIED — WP-272 is COMMITTED (`8a64dbd feat(sdk-ts): implement WP-272 soak/re-entry and record
+#   dogfood-088`), so the `soak:` block parses against HEAD and the workspace clone carries the soak mechanism. Confirm
+#   the working tree is clean of any further WP-272 edits before launching (the workspace clones HEAD).
+#
+# LAUNCH WITH `chikory run` (a single durable run):
+#      devbox run run-dogfood       # <- `chikory run`; picks the latest spec (this one)
+
+name: dogfood-089-wp105-loop-otel-spans-soak-endurance
+goal: >
+  Instrument the DURABLE LOOP with OTel spans AND run it as the first genuine WALL-CLOCK-ENDURANCE soak run (WP-105
+  observability pillar, paced over hours by the WP-272 `soak` durable re-entry from dogfood-088). Today the LLM-call
+  layer emits spans (`recordLLMCallSpan`/`recordJudgePassSpan`, `src/otel.ts`) but the loop emits NONE — a long run's
+  step / checkpoint / soak-re-entry structure is invisible to an OTel backend. Deliver the loop instrumentation in SIX
+  bounded, dependency-ordered sub-goals, ONE per durable step, so every sealed checkpoint carries DISTINCT non-trivial
+  product work (the non-hollow horizon, F-100/WP-270); the run is launched UNATTENDED under a real multi-hour `soak`
+  policy so it genuinely endures durable parks:
+
+    * PART 1 — PURE STEP-SPAN EMITTER (additive): add a net-new `recordRunStepSpan(input): void` in `src/otel.ts`
+      (a sibling of `recordLLMCallSpan`), emitting a `chikory.run.step` span (define a `SPAN_RUN_STEP` const) with
+      attributes for the step index, terminal status, tokens, and cost, via the existing `getTracer()`. Mirror the
+      landed emitter shape exactly (start span → setAttribute → end). Re-export from the barrel. Unit-tested with the
+      in-memory exporter pattern (`test/otel.test.ts`): a `chikory.run.step` span is recorded with the right attributes.
+
+    * PART 2 — WIRE THE STEP SPAN INTO THE `executeStep` ACTIVITY (depends on 1): call `recordRunStepSpan` from the
+      `executeStep` activity in `src/runner/activities.ts` (where `recordLLMCallSpan`/`recordJudgePassSpan` already emit
+      — an ACTIVITY, NOT the workflow body, so replay determinism holds), so every real step emits a loop span.
+      Additive — no behavior change beyond the emitted span; the step record is unchanged.
+
+    * PART 3 — CHECKPOINT SPAN (depends on 1's pattern): add a net-new `recordCheckpointSpan(input): void` + a
+      `SPAN_CHECKPOINT` const (`chikory.checkpoint`, attributes: checkpoint id, step index, lastGood) in `src/otel.ts`,
+      wired into the `writeCheckpoint` activity, so each sealed checkpoint is a span. Additive; unit + wire coverage.
+
+    * PART 4 — SOAK RE-ENTRY SPAN (depends on 1's pattern; ties WP-272): add a net-new `recordSoakSpan(input): void` +
+      a `SPAN_SOAK` const (`chikory.soak.reentry`, attributes: sleepMs, completedReentries, totalSleptMs) in
+      `src/otel.ts`, wired into the soak `control_event` activity path (`recordControlEvent`, `source:"soak"`), so each
+      durable re-entry across the multi-hour horizon is a span — the endurance is auditable as a span tree, not just the
+      trace counter. Additive.
+
+    * PART 5 — RUN ROOT SPAN + PARENTING (depends on 2/3/4): emit a `chikory.run` root span (a `SPAN_RUN` const) for the
+      run lifetime and parent the step/checkpoint/soak spans under it (via the OTel context APIs, still from the
+      ACTIVITIES), so the loop renders as a single run-rooted span TREE in an OTel backend. Additive; a run still emits
+      the LLM-call/judge spans unchanged.
+
+    * PART 6 — LIVE PROOF (depends on 1–5): add a LIVE Temporal test (reuse `createRunnerWorker`/`createTemporalRunner`/
+      the scripted registry + `waitFor`/`describe.skipIf`/`makeJudgedSpec`, and the in-memory `InMemorySpanExporter`
+      pattern from `test/otel.test.ts` — do NOT mock the workflow) driving a real multi-chunk run UNDER a SHORT `soak`
+      policy (compressed for the test) that asserts: `chikory.run.step` spans emitted for the real steps,
+      `chikory.checkpoint` spans for the checkpoints, AT LEAST ONE `chikory.soak.reentry` span for a durable re-entry,
+      all parented under a `chikory.run` root span, and the run reached SUCCESS unattended (never `AWAITING_APPROVAL`).
+      Co-reference BOTH `recordRunStepSpan` AND `createRunnerWorker` in this SAME file (F-97).
+
+  CONSTRAINTS: strict TypeScript, ESM `.js` relative imports, named exports only; NO new dependency (the
+  `@opentelemetry/api` + `@opentelemetry/sdk-trace-base` deps are ALREADY present); OTel spans MUST be emitted from
+  ACTIVITIES (`runner/activities.ts`), NEVER from the `agent-loop.ts` workflow body (replay determinism — the rule at the
+  top of `agent-loop.ts`); do NOT change the SHAPE of any frozen contract (`StepRecord`, `JournalEntry`, `Checkpoint`,
+  `ContextBundle`, `ArtifactRef`, `RunStatus`) — the span emitters are NEW pure side-effect helpers, the SPAN_* consts
+  are NEW, all wiring is ADDITIVE (a run with no OTLP exporter configured still runs unchanged; spans are no-ops without
+  a registered provider). Do NOT weaken the WP-123 crash-recovery, WP-206 suspend/resume, WP-250 window-park, WP-269
+  step-forcing, WP-270 chunking, WP-271 unattended-escalate, WP-272 soak, WP-273 chunk-aware verdict, or the WP-202
+  memory paths. If a verification step reports a failing test or type error, READ the failure and fix the
+  IMPLEMENTATION — do NOT weaken or delete any assertion.
+
+repos:
+  - url: /Users/nikitazolotarev/repos/chikory
+    writable: true
+
+# LONG-HORIZON DRIVER: 6 ordered chunks, ONE PART each, so `decideWorkChunk` hands the executor EXACTLY one bounded
+#   sub-goal per durable step; combined with `min_durable_steps: 6` this forces ≥6 sealed checkpoints each carrying a
+#   distinct non-trivial diff, and the `soak` block below paces the durable parks BETWEEN those steps over hours.
+bounded_work_unit:
+  min_durable_steps: 6
+  directive: >
+    Advance EXACTLY the ONE numbered PART named by this step's chunk — no more — then stop and let the durable checkpoint
+    seal. Do NOT front-load a later PART into an earlier step. Do NOT declare the whole run complete until every PART has
+    landed with its tests and the ACs pass.
+  work_chunks:
+    - name: part-1-pure-step-span
+      directive: >
+        PART 1 ONLY: add a net-new `recordRunStepSpan(input): void` + `SPAN_RUN_STEP` (`chikory.run.step`) in
+        `src/otel.ts`, mirroring `recordLLMCallSpan` (getTracer → startSpan → setAttribute → end); re-export from the
+        barrel; unit test with the in-memory exporter (`test/otel.test.ts` pattern) asserting the span + attributes.
+    - name: part-2-wire-step-span
+      directive: >
+        PART 2 ONLY: call `recordRunStepSpan` from the `executeStep` activity in `src/runner/activities.ts` (an ACTIVITY,
+        never the workflow body). Additive — no behavior change beyond the emitted span.
+    - name: part-3-checkpoint-span
+      directive: >
+        PART 3 ONLY: add `recordCheckpointSpan` + `SPAN_CHECKPOINT` (`chikory.checkpoint`) in `src/otel.ts`, wired into
+        the `writeCheckpoint` activity; unit + wire coverage. Additive.
+    - name: part-4-soak-span
+      directive: >
+        PART 4 ONLY: add `recordSoakSpan` + `SPAN_SOAK` (`chikory.soak.reentry`, attrs sleepMs/completedReentries/
+        totalSleptMs) in `src/otel.ts`, wired into the soak `recordControlEvent` activity path (`source:"soak"`).
+        Additive.
+    - name: part-5-run-root-span
+      directive: >
+        PART 5 ONLY: emit a `chikory.run` root span (`SPAN_RUN`) and parent the step/checkpoint/soak spans under it via
+        the OTel context APIs, still from the ACTIVITIES. Additive; LLM-call/judge spans unchanged.
+    - name: part-6-live-proof
+      directive: >
+        PART 6 ONLY: add the LIVE Temporal test (reuse `createRunnerWorker`/`createTemporalRunner`/scripted registry/
+        `waitFor`/`describe.skipIf`/`makeJudgedSpec` + `InMemorySpanExporter`) under a SHORT `soak` policy: assert
+        `chikory.run.step` + `chikory.checkpoint` + ≥1 `chikory.soak.reentry` spans, parented under `chikory.run`, and
+        SUCCESS unattended. Co-reference `recordRunStepSpan` AND `createRunnerWorker` (F-97).
+
+acceptance_criteria:
+  - id: AC-1
+    description: >
+      The net-new durable-loop step-span emitter exists in the OTel source — a side-effect helper emitting a
+      `chikory.run.step` span via the shared tracer. (OUTCOME symbol the goal NAMES — `recordRunStepSpan` — absent on
+      HEAD so a recursive grep cannot false-green, F-90. F-114-SAFE: a FUNCTION symbol, not a type-name token. Module/test
+      layout is the executor's, F-82/F-83.)
+    check: >
+      cd packages/sdk-ts &&
+      grep -rq 'recordRunStepSpan' src/otel.ts
+  - id: AC-2
+    description: >
+      The durable-loop spans emit from the ACTIVITY layer (determinism-safe) — `recordRunStepSpan` is called from
+      `src/runner/activities.ts`, where `recordLLMCallSpan` already emits. (F-114-SAFE: keyed on the net-new FUNCTION
+      symbol at its wiring site, not a type name. The determinism rule — spans NEVER started in the `agent-loop.ts`
+      workflow body — is a goal CONSTRAINT enforced by the WP-123/206 replay tests in AC-4, NOT a fragile negative grep
+      that F-83 would false-fail on a comment.)
+    check: >
+      cd packages/sdk-ts &&
+      grep -rq 'recordRunStepSpan' src/runner/activities.ts
+  - id: AC-3
+    description: >
+      A LIVE Temporal test exercises durable-loop span emission end-to-end under the soak policy. (F-97-SAFE: requires a
+      `test/` file referencing BOTH the net-new `recordRunStepSpan` symbol AND the LIVE runner driver `createRunnerWorker`,
+      so the live span-tree proof is actually enforced. Both are OUTCOME symbols the goal names; filename is the executor's.)
+    check: >
+      cd packages/sdk-ts &&
+      for f in $(grep -rl 'recordRunStepSpan' test/ 2>/dev/null); do
+        grep -q 'createRunnerWorker' "$f" && { echo ok; break; };
+      done | grep -q ok
+  - id: AC-4
+    description: >
+      The SDK stays type- and lint-clean and the FULL existing suite — including the new span unit + live tests — is green,
+      proving the change is additive and nothing regressed (no `StepRecord`/`JournalEntry`/`Checkpoint`/`ContextBundle`/
+      `ArtifactRef`/`RunStatus` shape change; the WP-123/206/250/269/270/271/272/273/202 paths still pass, and a run with
+      no OTLP exporter configured is unaffected).
+    check: cd packages/sdk-ts && pnpm exec tsc --noEmit && pnpm exec eslint . && pnpm exec vitest run
+
+budget_usd: 80
+max_steps: 40
+
+# UNATTENDED (WP-271): operator-free across the multi-hour parks; a genuine ESCALATE seals a resumable FAILED instead of
+#   an untimed hang, and the chunk-scoped judge (WP-271) + chunk-aware verdict rules (WP-273) will not spuriously
+#   halt/escalate an on-track intermediate chunked step.
+unattended:
+  escalation: seal_resumable_failed
+
+# SOAK (WP-272): the ⑦ wall-clock endurance vehicle — durable re-entry paces this run over hours. Each durable park is a
+#   zero-compute Temporal timer (proxy-token expiry + worker-uptime surface). Defaults ≈ 5 parks × 30 min ≈ ~2.5h; size
+#   `sleepMs` ABOVE your proxy token TTL to surface token-expiry-across-park, and raise toward ~8h for the literal ⑦.
+soak:
+  sleep_ms: 1800000        # 30 min per durable park
+  max_reentries: 5         # ≈ 2.5h total durable soak across the 6-chunk horizon
+  max_total_sleep_ms: 10800000  # hard cap 3h of soak (safety bound)
+
+executor:
+  adapter: codex
+  family: openai
+
+judge:
+  family: openai-compat
+  cadence: 2
+  max_cost_share: 0.5
+
+routing:
+  stages:
+    plan: { provider: openai-compat, model: gpt-5.5 }
+    code: { provider: openai-compat, model: gpt-5.5 }
+    review: { provider: openai-compat, model: gpt-5.5 }
+    judge: { provider: openai-compat, model: gemini-3.1-pro-preview }
