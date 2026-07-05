@@ -65,6 +65,35 @@ describe("computeVerdict (CONTRACTS.md §4)", () => {
     expect(decision.kind).toBe("PROCEED");
   });
 
+  it("rule 3 (F-112): SUPPRESSED while consuming a non-final work chunk — a terminal AC a later chunk satisfies is not goal drift", () => {
+    // 3rd consecutive fail of a criterion a later chunk will satisfy: HALT
+    // without the flag, PROCEED (work-in-progress) while chunking is in progress.
+    const halted = computeVerdict(form({ criterionResults: [fail("AC-2")] }), {
+      "AC-2": [false, false],
+    });
+    expect(halted.kind).toBe("HALT");
+
+    const inProgress = computeVerdict(
+      form({ criterionResults: [fail("AC-2")] }),
+      { "AC-2": [false, false] },
+      STANDING_RUBRIC,
+      true,
+    );
+    expect(inProgress.kind).toBe("PROCEED");
+    expect(inProgress.rationale).toContain("unmet criteria: AC-2");
+  });
+
+  it("rule 3 (F-112): guard RESUMES on the final chunk / completion re-verification (flag false)", () => {
+    const decision = computeVerdict(
+      form({ criterionResults: [fail("AC-2")] }),
+      { "AC-2": [false, false] },
+      STANDING_RUBRIC,
+      false,
+    );
+    expect(decision.kind).toBe("HALT");
+    expect(decision.rationale).toContain("AC-2");
+  });
+
   it("rule 5: criterion flip-flopping twice → ESCALATE with escalateReason", () => {
     // history t,f,t,f + current pass → windows (t,f,t) and (t,f,t) = 2 flip-flops.
     const decision = computeVerdict(form({ criterionResults: [pass("AC-1")] }), {

@@ -498,6 +498,12 @@ export async function agentLoop(spec: TaskSpec): Promise<RunStatus> {
         ...(activeWorkChunk.action === "use_chunk"
           ? { activeWorkChunkDirective: activeWorkChunk.chunk.directive }
           : {}),
+        // F-112: while consuming a NON-FINAL chunk, a terminal AC a later chunk
+        // will satisfy fails by design — suppress the Rule 3 consecutive-fail
+        // HALT until the final chunk + completion re-verification.
+        workChunkInProgress:
+          activeWorkChunk.action === "use_chunk" &&
+          consumedWorkChunks < (spec.boundedWorkUnit?.workChunks?.length ?? 0) - 1,
         lastGoodCheckpointId,
       });
       spentUsd += verdict.costUsd;

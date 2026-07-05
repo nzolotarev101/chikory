@@ -39,6 +39,12 @@ export interface BuildVerdictOptions {
   /** ROLLBACK target; absent → the run's base checkpoint. */
   lastGoodCheckpointId?: CheckpointId;
   rubric?: RubricItem[];
+  /**
+   * True while a bounded-work-unit run is still consuming EARLIER chunks —
+   * suppresses the Rule 3 consecutive-failure HALT for a terminal AC a later
+   * chunk will satisfy (F-112). Absent = false = the guard is active.
+   */
+  workChunkInProgress?: boolean;
 }
 
 /** Fallback ROLLBACK target: the workspace state right after `prepareRun`. */
@@ -56,7 +62,12 @@ export function buildVerdict(
   criteriaHistory: Record<string, boolean[]>,
   opts: BuildVerdictOptions,
 ): JudgeVerdict {
-  const decision = computeVerdict(form, criteriaHistory, opts.rubric ?? STANDING_RUBRIC);
+  const decision = computeVerdict(
+    form,
+    criteriaHistory,
+    opts.rubric ?? STANDING_RUBRIC,
+    opts.workChunkInProgress ?? false,
+  );
   return {
     kind: decision.kind,
     form,
@@ -170,6 +181,12 @@ export interface RunJudgePassInput {
   stepSummaries: string[];
   /** Current bounded work chunk directive for this judge pass, when this step used one. */
   activeWorkChunkDirective?: string;
+  /**
+   * True when this step is executing a non-final work chunk (earlier chunks
+   * still to come) — suppresses the Rule 3 consecutive-failure HALT for a
+   * terminal AC that a later chunk is designed to satisfy (F-112).
+   */
+  workChunkInProgress?: boolean;
   lastGoodCheckpointId?: CheckpointId;
   rubric?: RubricItem[];
   checkTimeoutMs?: number;
@@ -223,6 +240,7 @@ export async function runJudgePass(input: RunJudgePassInput): Promise<JudgePassR
     tokens: ZERO_TOKENS,
     lastGoodCheckpointId: input.lastGoodCheckpointId,
     rubric,
+    workChunkInProgress: input.workChunkInProgress ?? false,
   };
 
   if (result.status === "FAILED") {

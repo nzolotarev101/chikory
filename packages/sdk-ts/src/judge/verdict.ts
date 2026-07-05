@@ -46,6 +46,7 @@ export function computeVerdict(
   form: JudgeForm,
   criteriaHistory: Record<string, boolean[]>,
   rubric: RubricItem[] = STANDING_RUBRIC,
+  workChunkInProgress = false,
 ): VerdictDecision {
   const destructiveIds = new Set(rubric.filter((r) => r.destructive).map((r) => r.id));
   const rubricFails = form.rubricResults.filter((r) => !r.pass);
@@ -75,7 +76,15 @@ export function computeVerdict(
   }));
 
   // Rule 3 — same criterion failed by ≥3 consecutive verdicts → HALT.
-  const stuck = sequences.filter((s) => trailingFails(s.history) >= HALT_CONSECUTIVE_FAILS);
+  // Suppressed while a bounded-work-unit run is still consuming EARLIER chunks
+  // (F-112): a terminal acceptance criterion that a LATER chunk is designed to
+  // satisfy fails the earlier chunks BY DESIGN, which is not goal drift. The
+  // guard resumes on the final chunk + post-chunk completion re-verification,
+  // where a criterion stuck failing is real budget-waste. This is the
+  // deterministic-gate analog of the WP-271 chunk-scoped LLM adjudication.
+  const stuck = workChunkInProgress
+    ? []
+    : sequences.filter((s) => trailingFails(s.history) >= HALT_CONSECUTIVE_FAILS);
   if (stuck.length > 0) {
     return {
       kind: "HALT",

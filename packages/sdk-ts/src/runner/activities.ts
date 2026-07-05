@@ -498,6 +498,8 @@ export function createRunnerActivities(deps: RunnerActivityDeps) {
       sinceCommit: string;
       /** Current bounded work chunk directive for this judge pass, when this step used one. */
       activeWorkChunkDirective?: string;
+      /** True while consuming a non-final work chunk — suppresses the Rule 3 HALT (F-112). */
+      workChunkInProgress?: boolean;
       /** ROLLBACK target; absent → `<runId>@base`. */
       lastGoodCheckpointId?: CheckpointId;
     }): Promise<JudgeVerdict> {
@@ -577,6 +579,7 @@ export function createRunnerActivities(deps: RunnerActivityDeps) {
             ...(input.activeWorkChunkDirective !== undefined
               ? { activeWorkChunkDirective: input.activeWorkChunkDirective }
               : {}),
+            workChunkInProgress: input.workChunkInProgress ?? false,
             lastGoodCheckpointId: input.lastGoodCheckpointId,
           });
           verdict = pass.verdict;
