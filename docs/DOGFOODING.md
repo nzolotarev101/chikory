@@ -5,20 +5,20 @@ This is the complete operating manual for executing Phase 2+ work packages
 task spec for a WP (every field explained), how to launch, supervise, and
 recover a run, and how to land the result as a normal PR.
 
-**Status (2026-07-05, bounded — update discipline: REPLACE this block, ≤15 lines;
+**Status (2026-07-06, bounded — update discipline: REPLACE this block, ≤15 lines;
 displaced prose moves verbatim to [`PLAN-HISTORY.md`](PLAN-HISTORY.md); per-run detail:
 `docs/reports/dogfood-NNN.md`; queue + course correction: `plan.md` §6).**
-Latest: dogfood-088 — **WP-272 SOAK / TIME-PACED DURABLE RE-ENTRY (the ⑦ rung's WALL-CLOCK unblock)** (`run-eeb0d5d7-9334-47f4-b9ba-c9cb114f14a9`,
-`docs/reports/dogfood-088.md`). 🟡🟢 **FAILED-then-HAND-LANDED · 6 steps · $9.10/$80 · 28m28s · hand-harvested.** The mechanism is BUILT + LIVE-PROVEN:
-net-new pure `decideSoakDelay` + `SoakPolicy`; the loop's `soakBeforeNextStep()` runs it under opt-in `spec.soak` → `status="SUSPENDED"` → a durable
-`sleep(sleepMs)` **Temporal timer** (replay-safe, NOT a busy-wait) → additive `control_event` `source:"soak"`; + `re-entries N · soak-slept <duration>`
-telemetry; resume rehydrates `soakState` (+ incidentally `consumedWorkChunks`, the F-108 surface); additive `soak` contract w/ Python parity. LIVE proof
-(`soak-live.test.ts`): a compressed-soak run durably sleeps between chunks (`>=950ms`), renders `re-entries 1 · soak-slept 1s`, SUCCEEDs unattended; no-soak
-byte-equivalent. **WP-272 → 🟢; ⑦ wall-clock axis UNBLOCKED. 744 TS + 52 py green.** ⚠️ **The autonomous run false-FAILed** — a mis-specified AC-2
-(🔴 F-114 type-name AC, MINE) tripped the WP-273 chunk-aware Rule-3 HALT at the final chunk (WP-273 worked correctly); delivery hand-harvested + hand-fixed
-(🟡 F-115 wall-clock-flake in the no-soak test). Rung did NOT autonomously climb — landed by hand. 🟡 F-108/F-110/F-113 open.
-**NEXT: dogfood-089 — the ⑦ ACTUAL long-horizon overnight SOAK run ON the WP-272 mechanism** (a real `soak`-policy `chikory run` paced over hours to
-surface proxy-token expiry / worker uptime / F-78 hangs — the first genuine rung-4 CLIMB, now that the mechanism exists). See §7, §8, §1.5, §1.4, §3.
+Latest: dogfood-089 — **WP-105 DURABLE-LOOP OTel SPANS, the FIRST GENUINE rung-4 (wall-clock-endurance) CLIMB** (`run-c3a1c54e-0c8a-42c0-a433-00c2a368329e`,
+`docs/reports/dogfood-089.md`). 🟢 **SUCCESS · 6 steps · $5.19/$80 · 2h50m · autonomous · byte-identical harvest.** An unattended `soak`-paced `chikory run`
+genuinely endured **5 durable Temporal-timer parks / 2h30m slept** and self-certified SUCCESS — the first run to climb the rung-4 wall-clock axis autonomously
+(dogfood-088 built the WP-272 mechanism but false-FAILed). Landed real WP-105: `recordRunStepSpan`/`recordCheckpointSpan`/`recordSoakSpan` + a `chikory.run`
+root, all emitted from ACTIVITIES (determinism-safe), so the durable loop renders as a standard OTel span tree — **live-proven** parenting (shared traceId +
+parent spanId) in `soak-live.test.ts`. Additive, contract-safe, no new dep; **748 TS green**. WP-273 (chunk-aware verdict) validated a 2nd time (honest by-design
+AC-3 progression passed through without a spurious HALT). **Progression ⛔→✅ PROGRESSING (rung 3→4).** 🟡 **F-116** (§8) — the run-root span-parenting Map is
+process-local (correct single-worker, breaks across a multi-worker Temporal fleet). Two ⑦-literal axes still open: parks were 30 min (under the proxy-token TTL)
+so **token-expiry-across-park was NOT surfaced.**
+**NEXT: dogfood-090 — the ⑦ literal overnight consolidation** (parks sized ABOVE the proxy-token TTL to force token-refresh + worker-uptime across a park,
+hosting the WP-105 F-116 durable-span-context fix as the landed diff). See §7, §8, §1.5, §1.4, §3.
 
 Related docs: [`docs/spec/task-spec.md`](spec/task-spec.md) (schema
 reference) · [`docs/TASK-PROTOCOL.md`](TASK-PROTOCOL.md) (WP etiquette, §7 is

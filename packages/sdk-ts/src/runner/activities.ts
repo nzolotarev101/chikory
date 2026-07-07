@@ -18,7 +18,14 @@ import { heartbeat } from "@temporalio/activity";
 import { createLocalArtifactStore } from "../artifacts/index.js";
 import { buildVerdict, enforceFamilyDiversity, runJudgePass } from "../judge/index.js";
 import { Journal, reportFromJournal, runTotals } from "../journal/journal.js";
-import { getTracer, recordJudgePassSpan } from "../otel.js";
+import {
+  recordCheckpointSpan,
+  recordJudgePassSpan,
+  recordRunStepSpan,
+  recordRunEndSpan,
+  recordRunStartSpan,
+  recordSoakSpan,
+} from "../otel.js";
 import { createRouter, type RouterOptions } from "../router.js";
 import type {
   AcceptanceCriterion,
@@ -50,9 +57,6 @@ import {
   type WorkspaceRepo,
 } from "./workspace-repos.js";
 import { undeclaredWritePaths } from "../chain/write-set.js";
-
-/** observability.md: one span per checkpoint write (CONTRACTS.md §8). */
-export const SPAN_CHECKPOINT = "chikory.checkpoint";
 
 /**
  * Compaction default (WP-203 / ADR-006 / CM-1): once the recall tier exceeds
@@ -328,6 +332,7 @@ export function createRunnerActivities(deps: RunnerActivityDeps) {
         const setupJournal = openJournal(deps, input.runId);
         try {
           setupJournal.createRun(input.runId, input.spec);
+          recordRunStartSpan({ runId: input.runId });
         } finally {
           setupJournal.close();
         }
@@ -484,6 +489,12 @@ export function createRunnerActivities(deps: RunnerActivityDeps) {
               artifactRefs: [record.diffRef, record.transcriptRef],
             },
           );
+          recordRunStepSpan({
+            runId: input.runId,
+            stepIndex: input.stepIndex,
+            planItem: input.context.planItem,
+            record,
+          });
           return record;
         } finally {
           journal.close();
@@ -916,14 +927,12 @@ export function createRunnerActivities(deps: RunnerActivityDeps) {
             },
           );
 
-          const span = getTracer().startSpan(SPAN_CHECKPOINT, { startTime });
-          span.setAttribute("run.id", input.runId);
-          span.setAttribute("step", input.stepIndex);
-          span.setAttribute("git.commit", Object.values(gitCommits)[0] ?? "");
-          span.setAttribute("journal.idx", journalIdx);
-          span.setAttribute("last.good", input.lastGood);
-          span.setAttribute("budget.spent.usd", input.budgetSpentUsd);
-          span.end();
+          recordCheckpointSpan({
+            runId: input.runId,
+            stepIndex: input.stepIndex,
+            checkpoint,
+            startedAtMs: startTime,
+          });
 
           return checkpoint;
         } finally {
@@ -1092,6 +1101,15 @@ export function createRunnerActivities(deps: RunnerActivityDeps) {
             artifactRefs: [],
           },
         );
+        if (input.source === "soak" && input.details !== undefined) {
+          recordSoakSpan({
+            runId: input.runId,
+            atStep: input.atStep,
+            sleepMs: input.details.sleepMs ?? 0,
+            completedReentries: input.details.completedReentries ?? 0,
+            totalSleptMs: input.details.totalSleptMs ?? 0,
+          });
+        }
       } finally {
         journal.close();
       }
@@ -1393,6 +1411,11 @@ export function createRunnerActivities(deps: RunnerActivityDeps) {
           });
         }
         journal.sealRun(input.status);
+        recordRunEndSpan({
+          runId: input.runId,
+          status: input.status,
+          ...(input.reason !== undefined ? { reason: input.reason } : {}),
+        });
       } finally {
         journal.close();
       }

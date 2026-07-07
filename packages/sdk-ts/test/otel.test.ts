@@ -14,9 +14,19 @@ import {
 } from "@opentelemetry/sdk-trace-base";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 
-import { SPAN_LLM_CALL } from "../src/otel.js";
+import {
+  recordCheckpointSpan,
+  recordRunEndSpan,
+  recordRunStepSpan,
+  recordSoakSpan,
+  SPAN_CHECKPOINT,
+  SPAN_LLM_CALL,
+  SPAN_RUN,
+  SPAN_RUN_STEP,
+  SPAN_SOAK,
+} from "../src/otel.js";
 import { createRouter } from "../src/router.js";
-import type { RoutingPolicy } from "../src/types.js";
+import type { Checkpoint, RoutingPolicy, StepRecord } from "../src/types.js";
 
 const exporter = new InMemorySpanExporter();
 let server: Server;
@@ -87,6 +97,180 @@ function makeRouter() {
 }
 
 describe("OTel spans (WP-105)", () => {
+  it("run step emits chikory.run.step with durable-loop attributes", () => {
+    const record: StepRecord = {
+      status: "SUCCESS",
+      diffRef: { id: "diff-1", kind: "diff", bytes: 123, summary: "step diff" },
+      summary: "changed one file",
+      toolCalls: 3,
+      tokens: { input: 1200, output: 240 },
+      costUsd: 0.0123,
+      costEstimated: true,
+      durationMs: 42,
+      transcriptRef: {
+        id: "transcript-1",
+        kind: "transcript",
+        bytes: 456,
+        summary: "step transcript",
+      },
+    };
+
+    recordRunStepSpan({
+      runId: "run-otel-test",
+      stepIndex: 2,
+      planItem: "add telemetry",
+      record,
+    });
+
+    const spans = exporter.getFinishedSpans();
+    expect(spans).toHaveLength(1);
+    const span = spans[0];
+    expect(span.name).toBe(SPAN_RUN_STEP);
+    expect(span.attributes).toMatchObject({
+      "run.id": "run-otel-test",
+      "step.index": 2,
+      "plan.item": "add telemetry",
+      status: "SUCCESS",
+      "tokens.input": 1200,
+      "tokens.output": 240,
+      "cost.usd": 0.0123,
+      "cost.estimated": true,
+      "duration.ms": 42,
+      "tool.calls": 3,
+      "artifact.diff.id": "diff-1",
+      "artifact.transcript.id": "transcript-1",
+    });
+    recordRunEndSpan({ runId: "run-otel-test", status: "SUCCESS" });
+  });
+
+  it("checkpoint emits chikory.checkpoint with durable checkpoint attributes", () => {
+    const checkpoint: Checkpoint = {
+      id: "run-otel-test@7",
+      journalIdx: 7,
+      gitCommits: { "file:///repo": "abc123" },
+      contextSnapshotRef: {
+        id: "snapshot-1",
+        kind: "context_snapshot",
+        bytes: 789,
+        summary: "context snapshot",
+      },
+      budgetSpentUsd: 0.045,
+      lastGood: true,
+    };
+
+    recordCheckpointSpan({
+      runId: "run-otel-test",
+      stepIndex: 3,
+      checkpoint,
+      startedAtMs: Date.now() - 25,
+    });
+
+    const spans = exporter.getFinishedSpans();
+    expect(spans).toHaveLength(1);
+    const span = spans[0];
+    expect(span.name).toBe(SPAN_CHECKPOINT);
+    expect(span.attributes).toMatchObject({
+      "run.id": "run-otel-test",
+      step: 3,
+      "git.commit": "abc123",
+      "journal.idx": 7,
+      "last.good": true,
+      "budget.spent.usd": 0.045,
+    });
+    recordRunEndSpan({ runId: "run-otel-test", status: "SUCCESS" });
+  });
+
+  it("soak re-entry emits chikory.soak.reentry with timer counters", () => {
+    recordSoakSpan({
+      runId: "run-otel-test",
+      atStep: 4,
+      sleepMs: 1_200,
+      completedReentries: 2,
+      totalSleptMs: 2_400,
+    });
+
+    const spans = exporter.getFinishedSpans();
+    expect(spans).toHaveLength(1);
+    const span = spans[0];
+    expect(span.name).toBe(SPAN_SOAK);
+    expect(span.attributes).toMatchObject({
+      "run.id": "run-otel-test",
+      step: 4,
+      sleepMs: 1_200,
+      completedReentries: 2,
+      totalSleptMs: 2_400,
+    });
+    recordRunEndSpan({ runId: "run-otel-test", status: "SUCCESS" });
+  });
+
+  it("parents durable-loop spans under the run root via OTel context", () => {
+    const record: StepRecord = {
+      status: "SUCCESS",
+      diffRef: { id: "diff-1", kind: "diff", bytes: 123, summary: "step diff" },
+      summary: "changed one file",
+      toolCalls: 3,
+      tokens: { input: 1200, output: 240 },
+      costUsd: 0.0123,
+      costEstimated: true,
+      durationMs: 42,
+      transcriptRef: {
+        id: "transcript-1",
+        kind: "transcript",
+        bytes: 456,
+        summary: "step transcript",
+      },
+    };
+    const checkpoint: Checkpoint = {
+      id: "run-tree-test@7",
+      journalIdx: 7,
+      gitCommits: { "file:///repo": "abc123" },
+      contextSnapshotRef: {
+        id: "snapshot-1",
+        kind: "context_snapshot",
+        bytes: 789,
+        summary: "context snapshot",
+      },
+      budgetSpentUsd: 0.045,
+      lastGood: true,
+    };
+
+    recordRunStepSpan({
+      runId: "run-tree-test",
+      stepIndex: 2,
+      planItem: "add telemetry",
+      record,
+    });
+    recordCheckpointSpan({
+      runId: "run-tree-test",
+      stepIndex: 2,
+      checkpoint,
+      startedAtMs: Date.now() - 25,
+    });
+    recordSoakSpan({
+      runId: "run-tree-test",
+      atStep: 3,
+      sleepMs: 1_200,
+      completedReentries: 1,
+      totalSleptMs: 1_200,
+    });
+    recordRunEndSpan({ runId: "run-tree-test", status: "SUCCESS" });
+
+    const spans = exporter.getFinishedSpans();
+    const runSpan = spans.find((s) => s.name === SPAN_RUN)!;
+    const durableSpans = spans.filter((s) =>
+      [SPAN_RUN_STEP, SPAN_CHECKPOINT, SPAN_SOAK].includes(s.name),
+    );
+    expect(durableSpans).toHaveLength(3);
+    expect(runSpan.attributes).toMatchObject({
+      "run.id": "run-tree-test",
+      status: "SUCCESS",
+    });
+    for (const span of durableSpans) {
+      expect(span.spanContext().traceId).toBe(runSpan.spanContext().traceId);
+      expect(span.parentSpanContext?.spanId).toBe(runSpan.spanContext().spanId);
+    }
+  });
+
   it("SUCCESS call emits chikory.llm.call with full attribute set", async () => {
     const result = await makeRouter().complete({
       stage: "judge",

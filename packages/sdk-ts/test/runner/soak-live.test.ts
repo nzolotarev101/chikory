@@ -10,6 +10,12 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
+import { trace } from "@opentelemetry/api";
+import {
+  BasicTracerProvider,
+  InMemorySpanExporter,
+  SimpleSpanProcessor,
+} from "@opentelemetry/sdk-trace-base";
 import { afterEach, describe, expect, inject, test } from "vitest";
 
 import {
@@ -18,7 +24,12 @@ import {
   decideSoakDelay,
   Journal,
   journalPath,
+  recordRunStepSpan,
   runTotals,
+  SPAN_CHECKPOINT,
+  SPAN_RUN,
+  SPAN_RUN_STEP,
+  SPAN_SOAK,
   type JournalEntry,
   type RunRow,
   type RunStatusReport,
@@ -40,6 +51,12 @@ const address = inject("temporalAddress");
 const bundlePath = inject("workflowBundlePath");
 
 const hostSleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
+const SHORT_SOAK_MS = 500;
+const exporter = new InMemorySpanExporter();
+const provider = new BasicTracerProvider({
+  spanProcessors: [new SimpleSpanProcessor(exporter)],
+});
+trace.setGlobalTracerProvider(provider);
 
 describe.skipIf(address === null)("durable soak re-entry", () => {
   const cleanups: Array<() => Promise<void>> = [];
@@ -112,13 +129,16 @@ describe.skipIf(address === null)("durable soak re-entry", () => {
     return line;
   }
 
-  test("opt-in compressed soak durably suspends between multi-chunk steps and renders telemetry", async () => {
+  test("opt-in short soak emits live durable-loop spans under the run root", async () => {
+    exporter.reset();
+    expect(createRunnerWorker).toBeTypeOf("function");
+    expect(recordRunStepSpan).toBeTypeOf("function");
     expect(
       decideSoakDelay(
         { completedReentries: 0, totalSleptMs: 0 },
-        { sleepMs: 1_200, maxReentries: 1 },
+        { sleepMs: SHORT_SOAK_MS, maxReentries: 1 },
       ),
-    ).toEqual({ sleepMs: 1_200 });
+    ).toEqual({ sleepMs: SHORT_SOAK_MS });
 
     const wire = await startFakeJudgeWire([judgeForm({ criteria: { "AC-1": true } })]);
     cleanups.push(() => wire.close());
@@ -134,7 +154,7 @@ describe.skipIf(address === null)("durable soak re-entry", () => {
       cadence: 10,
       boundedWorkUnit: { minDurableSteps: chunks.length, workChunks: chunks },
       unattended: { escalation: "seal_resumable_failed" },
-      soak: { sleepMs: 1_200, maxReentries: 1, maxTotalSleepMs: 1_200 },
+      soak: { sleepMs: SHORT_SOAK_MS, maxReentries: 1, maxTotalSleepMs: SHORT_SOAK_MS },
     });
 
     const startedAt = Date.now();
@@ -150,7 +170,7 @@ describe.skipIf(address === null)("durable soak re-entry", () => {
     );
     expect(parked.spentUsd).toBeCloseTo(0.01, 10);
 
-    await hostSleep(350);
+    await hostSleep(100);
     expect(existsSync(dbPath)).toBe(true);
     const duringSoak = new Journal(dbPath);
     try {
@@ -171,7 +191,7 @@ describe.skipIf(address === null)("durable soak re-entry", () => {
     expect(finished.status).toBe("SUCCESS");
     expect(finished.currentStep).toBe(2);
     expect(finished.lastVerdict).toEqual({ kind: "PROCEED", atStep: chunks.length - 1 });
-    expect(Date.now() - startedAt).toBeGreaterThanOrEqual(950);
+    expect(Date.now() - startedAt).toBeGreaterThanOrEqual(350);
     expect(observedStatuses).toContain("SUSPENDED");
     expect(observedStatuses).not.toContain("AWAITING_APPROVAL");
     expect(wire.hits).toBe(chunks.length);
@@ -194,7 +214,11 @@ describe.skipIf(address === null)("durable soak re-entry", () => {
           event: "resume",
           source: "soak",
           atStep: 1,
-          details: { sleepMs: 1_200, completedReentries: 1, totalSleptMs: 1_200 },
+          details: {
+            sleepMs: SHORT_SOAK_MS,
+            completedReentries: 1,
+            totalSleptMs: SHORT_SOAK_MS,
+          },
         },
       ]);
       expect(journal.totalCostUsd()).toBeCloseTo(0.02, 10);
@@ -210,9 +234,29 @@ describe.skipIf(address === null)("durable soak re-entry", () => {
     expect(rendered).toContain("re-entries 1 · soak-slept 1s");
     expect(rendered).toContain("feedback frequency 1/1 steps");
     expect(rendered).not.toContain("AWAITING_APPROVAL");
+
+    const spans = exporter.getFinishedSpans();
+    const runSpan = spans.find((span) => span.name === SPAN_RUN);
+    expect(runSpan).toBeDefined();
+    expect(runSpan!.attributes).toMatchObject({
+      "run.id": handle.runId,
+      status: "SUCCESS",
+    });
+    const durableSpans = spans.filter((span) =>
+      [SPAN_RUN_STEP, SPAN_CHECKPOINT, SPAN_SOAK].includes(span.name),
+    );
+    expect(durableSpans.filter((span) => span.name === SPAN_RUN_STEP)).toHaveLength(2);
+    expect(durableSpans.filter((span) => span.name === SPAN_CHECKPOINT)).toHaveLength(2);
+    expect(durableSpans.filter((span) => span.name === SPAN_SOAK).length).toBeGreaterThanOrEqual(1);
+    for (const span of durableSpans) {
+      expect(span.attributes["run.id"]).toBe(handle.runId);
+      expect(span.spanContext().traceId).toBe(runSpan!.spanContext().traceId);
+      expect(span.parentSpanContext?.spanId).toBe(runSpan!.spanContext().spanId);
+    }
   });
 
   test("no-soak byte-equivalent path finishes without Temporal timer telemetry", async () => {
+    exporter.reset();
     expect(decideSoakDelay({ completedReentries: 0, totalSleptMs: 0 })).toBeNull();
 
     const chunks = [

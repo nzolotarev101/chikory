@@ -4,6 +4,16 @@
 > per-run detail lives in [`docs/reports/`](reports/). Content below was moved
 > verbatim out of the living docs on 2026-07-02 (course correction — plan.md §6).
 
+## Archived 2026-07-06 — displaced by dogfood-089 (`run-c3a1c54e`, first rung-4 climb)
+
+Rolled out of the plan.md "Last 3 runs" window when dogfood-089 landed (see `docs/reports/dogfood-089.md`):
+
+- **dogfood-086 — WP-271 CHUNK-SCOPED JUDGE + UNATTENDED-SAFE ESCALATE (`run-88235198`, 🟢 SUCCESS · 4 steps, $5.72):** chunk-scoped judge prompt + `decideEscalationWait`/`UnattendedPolicy`; 4/4 non-hollow, 0 escalations. **WP-271 → 🟢; F-107 CLOSED.**
+
+Displaced verbatim from the DOGFOODING.md status block (was "Latest: dogfood-088"):
+
+> Latest: dogfood-088 — **WP-272 SOAK / TIME-PACED DURABLE RE-ENTRY (the ⑦ rung's WALL-CLOCK unblock)** (`run-eeb0d5d7-9334-47f4-b9ba-c9cb114f14a9`, `docs/reports/dogfood-088.md`). 🟡🟢 **FAILED-then-HAND-LANDED · 6 steps · $9.10/$80 · 28m28s · hand-harvested.** The mechanism is BUILT + LIVE-PROVEN: net-new pure `decideSoakDelay` + `SoakPolicy`; the loop's `soakBeforeNextStep()` runs it under opt-in `spec.soak` → `status="SUSPENDED"` → a durable `sleep(sleepMs)` **Temporal timer** → additive `control_event` `source:"soak"`; + `re-entries N · soak-slept <duration>` telemetry; resume rehydrates `soakState` (+ incidentally `consumedWorkChunks`, the F-108 surface); additive `soak` contract w/ Python parity. LIVE proof (`soak-live.test.ts`): a compressed-soak run durably sleeps between chunks (`>=950ms`), renders `re-entries 1 · soak-slept 1s`, SUCCEEDs unattended. **WP-272 → 🟢; ⑦ wall-clock axis UNBLOCKED. 744 TS + 52 py green.** ⚠️ The autonomous run false-FAILed — a mis-specified AC-2 (🔴 F-114 type-name AC, MINE) tripped the WP-273 chunk-aware Rule-3 HALT at the final chunk; delivery hand-harvested + hand-fixed (🟡 F-115). Rung did NOT autonomously climb — landed by hand.
+
 ## Archived 2026-07-04 — displaced by dogfood-083 re-run (`run-03d161e9`, F-101 closure)
 
 Superseded when the dogfood-083 re-run closed F-101 (see `docs/reports/dogfood-083.md` ADDENDUM):

@@ -1,0 +1,225 @@
+# Dogfood-090: WP-105 DURABLE RUN-ROOT SPAN CONTEXT (the F-116 fix), run as the ⑦ rung's LITERAL OVERNIGHT SOAK —
+#   parks sized ABOVE the proxy-token TTL so token-refresh-across-park + worker-uptime are actually surfaced, and the
+#   OTel span tree stays run-rooted ACROSS every durable park (not just within one worker process).
+#
+# WHY THIS IS THE NEXT HEADLINE.
+#   dogfood-089 (run-c3a1c54e) was the FIRST GENUINE rung-4 CLIMB: an autonomous `soak`-paced run endured 2h50m / 5
+#   durable parks and landed real WP-105 durable-loop OTel spans. But it left TWO axes of the LITERAL ⑦ (~8h overnight)
+#   rung un-proven, and the review flagged 🟡 F-116:
+#     (a) TOKEN-EXPIRY-ACROSS-PARK NOT SURFACED — 089's parks were 30 min, under the proxy-token TTL, so no
+#         token-refresh happened across a park. The overnight axis needs parks ABOVE the TTL.
+#     (b) F-116 — the run-root span is parented via a MODULE-LEVEL PROCESS-LOCAL `activeRunSpans` Map (`src/otel.ts`).
+#         Correct within one worker (089 live-proved it), but across a multi-worker Temporal fleet — OR across a durable
+#         park that could resume on a fresh worker process — the child activity won't find the root in the (other/empty)
+#         Map, so `ensureRunSpan` mints a FRESH ORPHAN root and the "single run-rooted span tree" claim breaks. Plus a
+#         crash-before-seal leaks the run span in the Map forever.
+#   This run CLIMBS toward the literal ⑦ AND lands the F-116 fix as the WP-105 product diff — the two are the same
+#   observability outcome: an OVERNIGHT run's span tree must stay run-rooted across every park, independent of which
+#   worker process each activity lands on.
+#
+# HOST WP — WP-105 OTel spans (real open plan.md §6 product WP; CLAUDE.md observability pillar "all agent runs emit
+#   OTel-compliant spans" + "full trajectory observability"; REQUIREMENTS OB-4 in-progress). The DURABLE FIX: derive the
+#   run-root span context DETERMINISTICALLY from the durable `runId` (a stable W3C traceId + spanId), so ANY activity in
+#   ANY worker process — before or after any durable park — reconstructs the SAME root SpanContext and parents its
+#   step / checkpoint / soak span under it, with NO reliance on process-local memory. The `soak` mechanism (WP-272) is
+#   the RUN VEHICLE (paces the run overnight); the durable-context fix is the LANDED PRODUCT DIFF (§1.2 — real WP).
+#
+# ⚠️ DETERMINISM — SPANS STILL EMIT FROM ACTIVITIES, NEVER THE WORKFLOW BODY. Unchanged from 089/WP-105: the run-root
+#   context resolution + all span emission happen in the ACTIVITIES (`runner/activities.ts` / `src/otel.ts` helpers),
+#   NEVER in the `agent-loop.ts` workflow body (OTel uses wall-clock + ambient context → would break replay). The fix
+#   REPLACES the in-process Map with a durable derivation; it does NOT move any emission into the workflow.
+#
+# ⚠️ HONEST SCOPING — THIS IS A GENUINE OVERNIGHT RUN. The product diff is ~5 short steps; the hours come from the
+#   durable soak parks. The `soak` block sizes each park ABOVE a nominal ~60-min proxy-token TTL (default 90 min) so a
+#   token-refresh actually happens across a park; ~5 parks ≈ ~7.5h ≈ the literal ⑦ overnight. ⚠️ SIZE `sleep_ms` TO YOUR
+#   ACTUAL PROXY-TOKEN TTL before launch — the one launch knob that determines whether token-expiry-across-park is
+#   surfaced (set `sleep_ms` > TTL). You may launch and walk away.
+#
+# Format: LOOSE (headline — goal states the OUTCOME + constraints; ACs pin "done" via OUTCOME SYMBOLS THE GOAL NAMES;
+#   module/test layout LEFT TO THE EXECUTOR, F-82/F-83; NO prescribed diff).
+# Ladder-rung: 4
+# Thesis-KPI: WALL-CLOCK ENDURANCE toward the LITERAL ⑦ overnight — a real `chikory run` paced ABOVE the proxy-token TTL
+#   reaches SUCCESS across ~overnight wall-clock, surviving token-refresh + worker-uptime at each durable park, with the
+#   OTel span tree staying RUN-ROOTED across every park (the F-116 fix). Endurance auditable as `re-entries N ·
+#   soak-slept <hours>` in the trace AND as a single-rooted span tree whose root traceId is STABLE across parks.
+#
+# F-114/F-90 APPLIED: AC greps key on the net-new FUNCTION symbol `resolveRunRootContext` (absent on HEAD → a recursive
+#   grep cannot false-green, and it is a value/function, NOT a bare type-name a call site is free not to spell).
+# F-97 APPLIED: AC-3 requires the net-new symbol to co-live with the LIVE runner driver `createRunnerWorker` in a
+#   `test/` file, so the live cross-park span-root proof is actually enforced.
+#
+# ✅ UNATTENDED (WP-271) — needs NO operator across the overnight parks.
+# ✅ PREREQUISITE — dogfood-089's WP-105 loop-span delivery must be COMMITTED first (the workspace clones HEAD; the
+#   `recordRunStepSpan`/`SPAN_RUN`/`activeRunSpans` surface this fix refactors must exist in HEAD). Confirm the working
+#   tree is clean of further WP-105 edits before launching.
+#
+# LAUNCH WITH `chikory run` (a single durable run):
+#      devbox run run-dogfood       # <- `chikory run`; picks the latest spec (this one)
+
+name: dogfood-090-wp105-durable-span-context-overnight-soak
+goal: >
+  Make the durable-loop OTel span tree stay RUN-ROOTED across every durable park — independent of which worker process
+  each activity lands on — AND run it as the LITERAL ⑦ overnight soak (WP-105 observability pillar, paced over ~overnight
+  wall-clock by the WP-272 `soak` durable re-entry, with parks sized ABOVE the proxy-token TTL). Today (dogfood-089) the
+  run-root span is parented via a MODULE-LEVEL PROCESS-LOCAL `activeRunSpans` Map in `src/otel.ts` (F-116): correct within
+  one worker, but a child activity on a DIFFERENT worker — or after a durable park that resumes on a fresh process —
+  won't find the root and mints a FRESH ORPHAN root, breaking the single-rooted tree; a crash-before-seal also leaks the
+  root span. Deliver the fix in FIVE bounded, dependency-ordered sub-goals, ONE per durable step, so every sealed
+  checkpoint carries DISTINCT non-trivial product work (the non-hollow horizon, F-100/WP-270); the run is launched
+  UNATTENDED under a real overnight `soak` policy so it genuinely endures parks above the token TTL:
+
+    * PART 1 — PURE DURABLE ROOT-CONTEXT DERIVATION (additive): add a net-new pure `resolveRunRootContext(runId): { traceId, spanId }`
+      in `src/otel.ts` that derives a STABLE, VALID W3C trace id (32-hex, non-zero) + span id (16-hex, non-zero) purely
+      from the durable `runId` — same `runId` ⇒ byte-identical ids, no process state, no randomness. Re-export from the
+      barrel. Unit-tested: determinism (two calls agree), well-formedness (hex lengths, non-all-zero), and distinct
+      `runId`s ⇒ distinct ids.
+
+    * PART 2 — PARENT LOOP SPANS UNDER THE DERIVED CONTEXT (depends on 1): change the run-child span parenting in
+      `src/otel.ts` so step / checkpoint / soak spans parent under a SpanContext RECONSTRUCTED from
+      `resolveRunRootContext(runId)` (e.g. `trace.wrapSpanContext` + `trace.setSpan`), NOT via a lookup in the
+      process-local `activeRunSpans` Map. Behavior-preserving for a single worker (children still share the run-root
+      traceId); the difference is the parent is now derivable durably. Existing 089 unit/live assertions stay green.
+
+    * PART 3 — RUN ROOT SPAN + TERMINAL SEAL VIA DERIVED CONTEXT (depends on 1/2): make the `chikory.run` root span use
+      the derived traceId/spanId (so the emitted root matches the parent the children reference), and make
+      `recordRunEndSpan` / the terminal seal resolvable WITHOUT the in-process Map — so a run that never revisits the
+      creating process still ends its root cleanly and nothing leaks. Additive; the `chikory.run` span still carries the
+      run-lifetime + status attributes it did in 089.
+
+    * PART 4 — SOAK-PARK SPAN-ROOT SURVIVAL WIRING (depends on 1-3; ties WP-272): ensure the post-park step /
+      checkpoint / `chikory.soak.reentry` spans emitted AFTER a durable re-entry parent under the SAME derived run-root —
+      i.e. clearing or bypassing the in-process Map (a fresh worker after a park) does NOT orphan them. Additive; no
+      behavior change beyond the durable parenting.
+
+    * PART 5 — LIVE CROSS-PARK PROOF (depends on 1-4): add a LIVE Temporal test (reuse `createRunnerWorker`/
+      `createTemporalRunner`/the scripted registry + `waitFor`/`describe.skipIf`/`makeJudgedSpec` and the in-memory
+      `InMemorySpanExporter` pattern — do NOT mock the workflow) driving a real multi-chunk run under a SHORT `soak`
+      policy that SIMULATES A FRESH WORKER ACROSS THE PARK (clear/replace the in-process run-span state between the
+      pre-park and post-park steps) and asserts: the POST-PARK `chikory.run.step` / `chikory.checkpoint` /
+      `chikory.soak.reentry` spans STILL share the SAME run-root traceId as the PRE-PARK spans (the F-116 regression —
+      would fail against the process-local Map), AT LEAST ONE `chikory.soak.reentry` span exists, all parent under a
+      single `chikory.run` root, and the run reached SUCCESS unattended (never `AWAITING_APPROVAL`). Co-reference BOTH
+      `resolveRunRootContext` AND `createRunnerWorker` in this SAME file (F-97).
+
+  CONSTRAINTS: strict TypeScript, ESM `.js` relative imports, named exports only; NO new dependency (the
+  `@opentelemetry/api` + `@opentelemetry/sdk-trace-base` deps are ALREADY present); OTel spans MUST be emitted from
+  ACTIVITIES (`runner/activities.ts` / the `src/otel.ts` helpers), NEVER from the `agent-loop.ts` workflow body (replay
+  determinism); do NOT change the SHAPE of any frozen contract (`StepRecord`, `JournalEntry`, `Checkpoint`,
+  `ContextBundle`, `ArtifactRef`, `RunStatus`) — `resolveRunRootContext` is a NEW pure helper, the parenting change is
+  internal to the existing emitters, all wiring is ADDITIVE (a run with no OTLP exporter configured still runs unchanged;
+  spans are no-ops without a registered provider). Do NOT weaken the 089 durable-loop span assertions, the WP-123
+  crash-recovery, WP-206 suspend/resume, WP-250 window-park, WP-269 step-forcing, WP-270 chunking, WP-271
+  unattended-escalate, WP-272 soak, WP-273 chunk-aware verdict, or the WP-202 memory paths. Never assert a WALL-CLOCK
+  duration to prove a STRUCTURAL fact (F-115). If a verification step reports a failing test or type error, READ the
+  failure and fix the IMPLEMENTATION — do NOT weaken or delete any assertion.
+
+repos:
+  - url: /Users/nikitazolotarev/repos/chikory
+    writable: true
+
+# LONG-HORIZON DRIVER: 5 ordered chunks, ONE PART each, so `decideWorkChunk` hands the executor EXACTLY one bounded
+#   sub-goal per durable step; combined with `min_durable_steps: 5` this forces ≥5 sealed checkpoints each carrying a
+#   distinct non-trivial diff, and the `soak` block below paces the durable parks BETWEEN those steps overnight.
+bounded_work_unit:
+  min_durable_steps: 5
+  directive: >
+    Advance EXACTLY the ONE numbered PART named by this step's chunk — no more — then stop and let the durable checkpoint
+    seal. Do NOT front-load a later PART into an earlier step. Do NOT declare the whole run complete until every PART has
+    landed with its tests and the ACs pass.
+  work_chunks:
+    - name: part-1-pure-root-context
+      directive: >
+        PART 1 ONLY: add a net-new pure `resolveRunRootContext(runId): { traceId, spanId }` in `src/otel.ts` deriving a
+        stable, valid W3C traceId (32-hex non-zero) + spanId (16-hex non-zero) purely from `runId`; re-export from the
+        barrel; unit test determinism + well-formedness + distinctness.
+    - name: part-2-parent-under-derived
+      directive: >
+        PART 2 ONLY: parent the step/checkpoint/soak child spans under a SpanContext reconstructed from
+        `resolveRunRootContext(runId)` (`trace.wrapSpanContext`/`trace.setSpan`), replacing the process-local
+        `activeRunSpans` Map lookup. Behavior-preserving single-worker; existing 089 assertions stay green.
+    - name: part-3-root-and-seal-durable
+      directive: >
+        PART 3 ONLY: make the `chikory.run` root span use the derived ids and make `recordRunEndSpan`/terminal seal
+        resolvable WITHOUT the in-process Map (no leak on crash-before-seal). Additive; root attributes unchanged.
+    - name: part-4-soak-park-survival
+      directive: >
+        PART 4 ONLY: ensure POST-PARK step/checkpoint/`chikory.soak.reentry` spans parent under the SAME derived root —
+        clearing/bypassing the in-process Map (fresh worker after a park) does NOT orphan them. Additive.
+    - name: part-5-live-cross-park-proof
+      directive: >
+        PART 5 ONLY: add the LIVE Temporal test (reuse `createRunnerWorker`/`createTemporalRunner`/scripted registry/
+        `waitFor`/`describe.skipIf`/`makeJudgedSpec` + `InMemorySpanExporter`) under a SHORT `soak` policy that clears
+        the in-process run-span state across the park and asserts POST-park spans share the PRE-park run-root traceId,
+        ≥1 `chikory.soak.reentry` span, single `chikory.run` root, SUCCESS unattended. Co-reference
+        `resolveRunRootContext` AND `createRunnerWorker` (F-97).
+
+acceptance_criteria:
+  - id: AC-1
+    description: >
+      The net-new durable run-root-context derivation exists in the OTel source — a pure helper mapping `runId` to a
+      stable W3C trace/span id pair. (OUTCOME symbol the goal NAMES — `resolveRunRootContext` — absent on HEAD so a
+      recursive grep cannot false-green, F-90. F-114-SAFE: a FUNCTION symbol, not a type-name token. Layout is the
+      executor's, F-82/F-83.)
+    check: >
+      cd packages/sdk-ts &&
+      grep -rq 'resolveRunRootContext' src/otel.ts
+  - id: AC-2
+    description: >
+      The loop-span parenting consumes the derived root context (not the process-local Map) — `resolveRunRootContext` is
+      referenced at the parenting site in the OTel source. (F-114-SAFE: keyed on the net-new FUNCTION symbol at its
+      consumption site. The determinism rule — spans NEVER started in the `agent-loop.ts` workflow body — is a goal
+      CONSTRAINT enforced by the WP-123/206 replay tests in AC-4, NOT a fragile negative grep.)
+    check: >
+      cd packages/sdk-ts &&
+      test "$(grep -rc 'resolveRunRootContext' src/otel.ts)" -ge 2
+  - id: AC-3
+    description: >
+      A LIVE Temporal test exercises cross-park run-root span survival end-to-end under the soak policy. (F-97-SAFE:
+      requires a `test/` file referencing BOTH the net-new `resolveRunRootContext` symbol AND the LIVE runner driver
+      `createRunnerWorker`, so the live cross-park span-root proof is actually enforced. Both are OUTCOME symbols the goal
+      names; filename is the executor's.)
+    check: >
+      cd packages/sdk-ts &&
+      for f in $(grep -rl 'resolveRunRootContext' test/ 2>/dev/null); do
+        grep -q 'createRunnerWorker' "$f" && { echo ok; break; };
+      done | grep -q ok
+  - id: AC-4
+    description: >
+      The SDK stays type- and lint-clean and the FULL existing suite — including the 089 durable-loop span tests and the
+      new cross-park proof — is green, proving the change is additive and nothing regressed (no `StepRecord`/
+      `JournalEntry`/`Checkpoint`/`ContextBundle`/`ArtifactRef`/`RunStatus` shape change; the WP-123/206/250/269/270/271/
+      272/273/202 paths still pass, and a run with no OTLP exporter configured is unaffected).
+    check: cd packages/sdk-ts && pnpm exec tsc --noEmit && pnpm exec eslint . && pnpm exec vitest run
+
+budget_usd: 80
+max_steps: 40
+
+# UNATTENDED (WP-271): operator-free across the overnight parks; a genuine ESCALATE seals a resumable FAILED instead of
+#   an untimed hang, and the chunk-scoped judge (WP-271) + chunk-aware verdict rules (WP-273) will not spuriously
+#   halt/escalate an on-track intermediate chunked step.
+unattended:
+  escalation: seal_resumable_failed
+
+# SOAK (WP-272): the ⑦ LITERAL overnight endurance vehicle. ⚠️ SIZE `sleep_ms` ABOVE YOUR ACTUAL PROXY-TOKEN TTL before
+#   launch — this is the knob that determines whether token-refresh-across-park is surfaced. Default 90 min > a nominal
+#   ~60-min TTL; ~5 parks ≈ ~7.5h ≈ the literal ⑦ overnight. `max_total_sleep_ms` caps total soak at 9h (safety bound).
+soak:
+  sleep_ms: 5400000        # 90 min per durable park (ABOVE a nominal ~60-min proxy-token TTL — size to YOUR TTL)
+  max_reentries: 5         # ≈ 7.5h total durable soak across the 5-chunk horizon (the literal ⑦ overnight)
+  max_total_sleep_ms: 32400000  # hard cap 9h of soak (safety bound)
+
+executor:
+  adapter: codex
+  family: openai
+
+judge:
+  family: openai-compat
+  cadence: 2
+  max_cost_share: 0.5
+
+routing:
+  stages:
+    plan: { provider: openai-compat, model: gpt-5.5 }
+    code: { provider: openai-compat, model: gpt-5.5 }
+    review: { provider: openai-compat, model: gpt-5.5 }
+    judge: { provider: openai-compat, model: gemini-3.1-pro-preview }

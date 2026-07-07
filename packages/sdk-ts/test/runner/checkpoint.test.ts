@@ -26,6 +26,7 @@ import {
   createTemporalRunner,
   Journal,
   journalPath,
+  recordCheckpointSpan,
   SPAN_CHECKPOINT,
   workspaceDir,
   type Checkpoint,
@@ -148,6 +149,7 @@ describe.skipIf(address === null)("checkpointer (WP-122)", () => {
     expect(snapshot.goal).toBe(spec.goal);
 
     // CONTRACTS §8: checkpoint writes emit chikory.checkpoint spans.
+    expect(recordCheckpointSpan).toBeTypeOf("function");
     const spans = exporter.getFinishedSpans().filter((s) => s.name === SPAN_CHECKPOINT);
     expect(spans.length).toBe(4);
     expect(spans[0]!.attributes["git.commit"]).toBeDefined();

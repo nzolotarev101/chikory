@@ -23,13 +23,27 @@ export {
 export { createRouter, type RetryPolicy, type RouterOptions } from "./router.js";
 export {
   getTracer,
+  recordCheckpointSpan,
   recordJudgePassSpan,
   recordLLMCallSpan,
+  recordRunEndSpan,
+  recordRunStartSpan,
+  recordRunStepSpan,
+  recordSoakSpan,
+  SPAN_CHECKPOINT,
   SPAN_JUDGE_PASS,
   SPAN_LLM_CALL,
+  SPAN_RUN,
+  SPAN_RUN_STEP,
+  SPAN_SOAK,
   TRACER_NAME,
+  type CheckpointSpanInput,
   type JudgePassSpanInput,
   type LLMCallSpanInput,
+  type RunEndSpanInput,
+  type RunSpanInput,
+  type RunStepSpanInput,
+  type SoakSpanInput,
 } from "./otel.js";
 export {
   createLocalArtifactStore,
@@ -192,7 +206,6 @@ export {
 } from "./journal/journal.js";
 export {
   createRunnerActivities,
-  SPAN_CHECKPOINT,
   type AdapterFactory,
   type AdapterRegistry,
   type JudgePayload,

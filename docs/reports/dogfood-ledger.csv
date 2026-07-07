@@ -26,3 +26,4 @@ run,wp,mode,outcome,steps,cost_usd,spec_format,class,resumes,judge_catches,rung,
 087a,WP-202,run,FAILED,3,2.46,loose,product,0,0,3,0
 087,WP-202,run,SUCCESS,6,8.03,loose,product,0,0,3,0
 088,WP-272,run,FAILED,6,9.10,loose,product,0,0,3,0
+089,WP-105,run,SUCCESS,6,5.19,loose,product,0,0,4,0
