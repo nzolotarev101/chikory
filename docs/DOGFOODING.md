@@ -5,20 +5,20 @@ This is the complete operating manual for executing Phase 2+ work packages
 task spec for a WP (every field explained), how to launch, supervise, and
 recover a run, and how to land the result as a normal PR.
 
-**Status (2026-07-06, bounded — update discipline: REPLACE this block, ≤15 lines;
+**Status (2026-07-07, bounded — update discipline: REPLACE this block, ≤15 lines;
 displaced prose moves verbatim to [`PLAN-HISTORY.md`](PLAN-HISTORY.md); per-run detail:
 `docs/reports/dogfood-NNN.md`; queue + course correction: `plan.md` §6).**
-Latest: dogfood-089 — **WP-105 DURABLE-LOOP OTel SPANS, the FIRST GENUINE rung-4 (wall-clock-endurance) CLIMB** (`run-c3a1c54e-0c8a-42c0-a433-00c2a368329e`,
-`docs/reports/dogfood-089.md`). 🟢 **SUCCESS · 6 steps · $5.19/$80 · 2h50m · autonomous · byte-identical harvest.** An unattended `soak`-paced `chikory run`
-genuinely endured **5 durable Temporal-timer parks / 2h30m slept** and self-certified SUCCESS — the first run to climb the rung-4 wall-clock axis autonomously
-(dogfood-088 built the WP-272 mechanism but false-FAILed). Landed real WP-105: `recordRunStepSpan`/`recordCheckpointSpan`/`recordSoakSpan` + a `chikory.run`
-root, all emitted from ACTIVITIES (determinism-safe), so the durable loop renders as a standard OTel span tree — **live-proven** parenting (shared traceId +
-parent spanId) in `soak-live.test.ts`. Additive, contract-safe, no new dep; **748 TS green**. WP-273 (chunk-aware verdict) validated a 2nd time (honest by-design
-AC-3 progression passed through without a spurious HALT). **Progression ⛔→✅ PROGRESSING (rung 3→4).** 🟡 **F-116** (§8) — the run-root span-parenting Map is
-process-local (correct single-worker, breaks across a multi-worker Temporal fleet). Two ⑦-literal axes still open: parks were 30 min (under the proxy-token TTL)
-so **token-expiry-across-park was NOT surfaced.**
-**NEXT: dogfood-090 — the ⑦ literal overnight consolidation** (parks sized ABOVE the proxy-token TTL to force token-refresh + worker-uptime across a park,
-hosting the WP-105 F-116 durable-span-context fix as the landed diff). See §7, §8, §1.5, §1.4, §3.
+Latest: dogfood-090 — **WP-105 DURABLE-ROOT-CONTEXT FIX (the F-116 cure), run as the LITERAL ⑦ (~overnight) SOAK** (`run-45ce1499-7463-4492-ba66-0d252e0c229c`,
+`docs/reports/dogfood-090.md`). 🟢 **SUCCESS · 5 steps · $4.94/$80 · 6h 19m · autonomous · byte-identical harvest.** An unattended `soak`-paced `chikory run`
+endured **4 durable parks each 90 min (ABOVE the proxy-token TTL) / 6h slept** and self-certified SUCCESS. Landed the WP-105 fix: `resolveRunRootContext(runId)`
+derives a stable W3C traceId/spanId, so the run-root span tree stays run-rooted across every park with **no process-local memory** — the `activeRunSpans` Map is
+gone. **F-116 FIXED and live-proven on a genuine SECOND worker process** (`soak-live.test.ts` starts worker A, SUSPENDs, shuts A, starts worker B, asserts
+post-park spans share the derived root). Both 089 ⑦-axes closed: token-refresh-across-park is surfaced (survived 4 parks > TTL). Additive, contract-safe, no new
+dep; **753 TS green.** WP-273 chunk-aware verdict's 3rd clean live validation (step-1 honest 2/4 PROCEED). **Progression ✅ PROGRESSING (rung 4 consolidated).**
+🟡 **F-117** (§8) private-`_spanContext` mutation forces the root id (fragile vs OTel-SDK bump); 🟡 **F-118** (§8) root no longer measures run lifetime (two spans
+share one spanId). Both track-B under WP-105. **Compaction NEVER fired — `peak window 1%` — idle soak adds no context.**
+**NEXT: dogfood-091 — the ⑧ P2-exit axis: force LIVE compaction (WP-203/204/207) under real BROWNFIELD context growth** (peak window >0, compact ≥1 — the
+un-proven context-rot pillar; endurance-via-idle-soak is proven, context-growth-driven compaction is not). See §7, §8, §1.5, §1.4, §3.
 
 Related docs: [`docs/spec/task-spec.md`](spec/task-spec.md) (schema
 reference) · [`docs/TASK-PROTOCOL.md`](TASK-PROTOCOL.md) (WP etiquette, §7 is
@@ -664,6 +664,24 @@ broken (a false-green, not a follow-on fix).
 
 ## 8. Known P1 limitations (so you don't fight them)
 
+- **OTel run-root span identity is forced via a private-field mutation** (F-117,
+  dogfood-090, track-B under WP-105): `applyDerivedRunRootIdentity` (`src/otel.ts`)
+  reassigns the SDK-internal `span._spanContext` (and clears `parentSpanContext`) so
+  the emitted `chikory.run` root's spanId equals `resolveRunRootContext(runId)` — the
+  OTel **API** has no way to set a span's own spanId. It is guarded by a structural
+  typeguard, so an `@opentelemetry/sdk-trace-base` upgrade that reshapes `_spanContext`
+  fails **silently**: the guard skips the mutation, the root reverts to a random spanId,
+  and children re-orphan (the F-116 symptom, no Map to blame). Clean cure = a per-run
+  seeded custom `IdGenerator` or a wrapped-`SpanContext`-only root. Don't rely on the
+  root spanId being stable across an OTel SDK bump.
+- **The `chikory.run` root span no longer measures run wall-clock lifetime** (F-118,
+  dogfood-090, track-B under WP-105): to survive a durable park on a fresh worker,
+  `recordRunStartSpan`/`recordRunEndSpan` each emit a zero-duration span with
+  `lifecycle:"start"`/`"end"` sharing the SAME derived traceId AND spanId (two spans,
+  one spanId — technically non-conformant OTel; some backends may dedup/mis-render).
+  Run duration is NOT on the root anymore — recover it by diffing the two spans'
+  timestamps, or read the journal. Inherent to the durable design (you can't hold one
+  live `Span` object across a cross-worker park).
 - **`bounded_work_unit` seal-deferral (WP-269) alone yields a HOLLOW horizon —
   use `work_chunks` (WP-270) to distribute work per step** (F-100 → WP-270 CLOSED,
   dogfood-082/083): an active `bounded_work_unit:{min_durable_steps:N}` policy

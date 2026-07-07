@@ -17,8 +17,10 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import {
   recordCheckpointSpan,
   recordRunEndSpan,
+  recordRunStartSpan,
   recordRunStepSpan,
   recordSoakSpan,
+  resolveRunRootContext,
   SPAN_CHECKPOINT,
   SPAN_LLM_CALL,
   SPAN_RUN,
@@ -97,6 +99,42 @@ function makeRouter() {
 }
 
 describe("OTel spans (WP-105)", () => {
+  it("derives a stable well-formed run root context from runId", () => {
+    const first = resolveRunRootContext("run-root-context-test");
+    const second = resolveRunRootContext("run-root-context-test");
+
+    expect(second).toEqual(first);
+    expect(first.traceId).toMatch(/^[0-9a-f]{32}$/);
+    expect(first.spanId).toMatch(/^[0-9a-f]{16}$/);
+    expect(first.traceId).not.toBe("00000000000000000000000000000000");
+    expect(first.spanId).not.toBe("0000000000000000");
+  });
+
+  it("derives distinct root contexts for distinct runIds", () => {
+    const first = resolveRunRootContext("run-root-context-test-a");
+    const second = resolveRunRootContext("run-root-context-test-b");
+
+    expect(second.traceId).not.toBe(first.traceId);
+    expect(second.spanId).not.toBe(first.spanId);
+  });
+
+  it("run root start/end spans use the derived durable root identity", () => {
+    const rootContext = resolveRunRootContext("run-root-identity-test");
+
+    recordRunStartSpan({ runId: "run-root-identity-test" });
+    recordRunEndSpan({ runId: "run-root-identity-test", status: "SUCCESS" });
+
+    const runSpans = exporter.getFinishedSpans().filter((span) => span.name === SPAN_RUN);
+    expect(runSpans).toHaveLength(2);
+    expect(runSpans.map((span) => span.attributes.lifecycle)).toEqual(["start", "end"]);
+    for (const span of runSpans) {
+      expect(span.attributes["run.id"]).toBe("run-root-identity-test");
+      expect(span.spanContext().traceId).toBe(rootContext.traceId);
+      expect(span.spanContext().spanId).toBe(rootContext.spanId);
+      expect(span.parentSpanContext).toBeUndefined();
+    }
+  });
+
   it("run step emits chikory.run.step with durable-loop attributes", () => {
     const record: StepRecord = {
       status: "SUCCESS",
@@ -204,6 +242,7 @@ describe("OTel spans (WP-105)", () => {
   });
 
   it("parents durable-loop spans under the run root via OTel context", () => {
+    const rootContext = resolveRunRootContext("run-tree-test");
     const record: StepRecord = {
       status: "SUCCESS",
       diffRef: { id: "diff-1", kind: "diff", bytes: 123, summary: "step diff" },
@@ -263,11 +302,15 @@ describe("OTel spans (WP-105)", () => {
     expect(durableSpans).toHaveLength(3);
     expect(runSpan.attributes).toMatchObject({
       "run.id": "run-tree-test",
+      lifecycle: "end",
       status: "SUCCESS",
     });
+    expect(runSpan.spanContext().traceId).toBe(rootContext.traceId);
+    expect(runSpan.spanContext().spanId).toBe(rootContext.spanId);
+    expect(runSpan.parentSpanContext).toBeUndefined();
     for (const span of durableSpans) {
-      expect(span.spanContext().traceId).toBe(runSpan.spanContext().traceId);
-      expect(span.parentSpanContext?.spanId).toBe(runSpan.spanContext().spanId);
+      expect(span.spanContext().traceId).toBe(rootContext.traceId);
+      expect(span.parentSpanContext?.spanId).toBe(rootContext.spanId);
     }
   });
 

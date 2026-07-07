@@ -25,6 +25,7 @@ import {
   Journal,
   journalPath,
   recordRunStepSpan,
+  resolveRunRootContext,
   runTotals,
   SPAN_CHECKPOINT,
   SPAN_RUN,
@@ -52,6 +53,7 @@ const bundlePath = inject("workflowBundlePath");
 
 const hostSleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
 const SHORT_SOAK_MS = 500;
+const FRESH_WORKER_SOAK_MS = 800;
 const exporter = new InMemorySpanExporter();
 const provider = new BasicTracerProvider({
   spanProcessors: [new SimpleSpanProcessor(exporter)],
@@ -96,6 +98,28 @@ describe.skipIf(address === null)("durable soak re-entry", () => {
     return { repoUrl, dataDir, runner };
   }
 
+  async function startWorker(opts: {
+    dataDir: string;
+    taskQueue: string;
+    judgeWireUrl: string;
+  }) {
+    const worker = await createRunnerWorker({
+      adapters: scriptedRegistry,
+      address: address!,
+      taskQueue: opts.taskQueue,
+      dataDir: opts.dataDir,
+      workflowBundlePath: bundlePath!,
+      routerOptions: { baseUrls: { "openai-compat": opts.judgeWireUrl } },
+    });
+    const done = worker.run();
+    return {
+      async shutdown() {
+        worker.shutdown();
+        await done;
+      },
+    };
+  }
+
   async function awaitStatus(
     handle: { status(): Promise<RunStatusReport> },
     want: (r: RunStatusReport) => boolean,
@@ -133,6 +157,7 @@ describe.skipIf(address === null)("durable soak re-entry", () => {
     exporter.reset();
     expect(createRunnerWorker).toBeTypeOf("function");
     expect(recordRunStepSpan).toBeTypeOf("function");
+    expect(resolveRunRootContext).toBeTypeOf("function");
     expect(
       decideSoakDelay(
         { completedReentries: 0, totalSleptMs: 0 },
@@ -236,12 +261,19 @@ describe.skipIf(address === null)("durable soak re-entry", () => {
     expect(rendered).not.toContain("AWAITING_APPROVAL");
 
     const spans = exporter.getFinishedSpans();
-    const runSpan = spans.find((span) => span.name === SPAN_RUN);
+    const rootContext = resolveRunRootContext(handle.runId);
+    const runSpan = spans.find(
+      (span) => span.name === SPAN_RUN && span.attributes.lifecycle === "end",
+    );
     expect(runSpan).toBeDefined();
     expect(runSpan!.attributes).toMatchObject({
       "run.id": handle.runId,
+      lifecycle: "end",
       status: "SUCCESS",
     });
+    expect(runSpan!.spanContext().traceId).toBe(rootContext.traceId);
+    expect(runSpan!.spanContext().spanId).toBe(rootContext.spanId);
+    expect(runSpan!.parentSpanContext).toBeUndefined();
     const durableSpans = spans.filter((span) =>
       [SPAN_RUN_STEP, SPAN_CHECKPOINT, SPAN_SOAK].includes(span.name),
     );
@@ -250,8 +282,172 @@ describe.skipIf(address === null)("durable soak re-entry", () => {
     expect(durableSpans.filter((span) => span.name === SPAN_SOAK).length).toBeGreaterThanOrEqual(1);
     for (const span of durableSpans) {
       expect(span.attributes["run.id"]).toBe(handle.runId);
-      expect(span.spanContext().traceId).toBe(runSpan!.spanContext().traceId);
-      expect(span.parentSpanContext?.spanId).toBe(runSpan!.spanContext().spanId);
+      expect(span.spanContext().traceId).toBe(rootContext.traceId);
+      expect(span.parentSpanContext?.spanId).toBe(rootContext.spanId);
+    }
+  });
+
+  test("post-park spans survive re-entry on a fresh worker under the same derived root", async () => {
+    exporter.reset();
+    expect(createRunnerWorker).toBeTypeOf("function");
+    expect(resolveRunRootContext).toBeTypeOf("function");
+
+    const wire = await startFakeJudgeWire([judgeForm({ criteria: { "AC-1": true } })]);
+    cleanups.push(() => wire.close());
+    const tmp = await mkdtemp(join(tmpdir(), "chikory-soak-fresh-worker-"));
+    cleanups.push(() => rm(tmp, { recursive: true, force: true }));
+    const repoUrl = await initSourceRepo(join(tmp, "src"), {
+      costPerStep: 0.01,
+      claimsCompleteSteps: [1, 2],
+      echoJudgeFeedback: true,
+    });
+    const dataDir = join(tmp, "data");
+    const taskQueue = `tq-${randomUUID()}`;
+    const runner = createTemporalRunner({ address: address!, taskQueue, dataDir });
+    cleanups.push(() => runner.close());
+
+    const chunks = [
+      { name: "parser", directive: "Implement only the parser chunk before the soak." },
+      { name: "cli", directive: "Implement only the CLI chunk after the soak." },
+    ];
+    const spec = makeJudgedSpec({
+      repoUrl,
+      goal: "Complete the soak-paced product surface across a worker restart.",
+      maxSteps: 4,
+      cadence: 10,
+      boundedWorkUnit: { minDurableSteps: chunks.length, workChunks: chunks },
+      unattended: { escalation: "seal_resumable_failed" },
+      soak: {
+        sleepMs: FRESH_WORKER_SOAK_MS,
+        maxReentries: 1,
+        maxTotalSleepMs: FRESH_WORKER_SOAK_MS,
+      },
+    });
+
+    const firstWorker = await startWorker({ dataDir, taskQueue, judgeWireUrl: wire.url });
+    const handle = await runner.start(spec);
+    const parked = await awaitStatus(
+      handle,
+      (report) => report.status === "SUSPENDED" && report.currentStep === 1,
+      "soak SUSPENDED before fresh worker re-entry",
+    );
+    expect(parked.spentUsd).toBeCloseTo(0.01, 10);
+
+    await firstWorker.shutdown();
+    const secondWorker = await startWorker({ dataDir, taskQueue, judgeWireUrl: wire.url });
+    cleanups.push(() => secondWorker.shutdown());
+
+    const finished = await awaitStatus(
+      handle,
+      (report) => TERMINAL_STATUSES.includes(report.status),
+      "terminal after fresh worker soak re-entry",
+    );
+    expect(finished.status).toBe("SUCCESS");
+    expect(finished.currentStep).toBe(chunks.length);
+    expect(wire.hits).toBe(chunks.length);
+
+    const rootContext = resolveRunRootContext(handle.runId);
+    const spans = exporter.getFinishedSpans();
+    const postParkStep = spans.find(
+      (span) => span.name === SPAN_RUN_STEP && span.attributes["step.index"] === 1,
+    );
+    const postParkCheckpoint = spans.find(
+      (span) => span.name === SPAN_CHECKPOINT && span.attributes.step === 1,
+    );
+    const soakReentry = spans.find((span) => span.name === SPAN_SOAK);
+    for (const span of [soakReentry, postParkStep, postParkCheckpoint]) {
+      expect(span).toBeDefined();
+      expect(span!.attributes["run.id"]).toBe(handle.runId);
+      expect(span!.spanContext().traceId).toBe(rootContext.traceId);
+      expect(span!.parentSpanContext?.spanId).toBe(rootContext.spanId);
+    }
+  });
+
+  test("post-park spans keep the pre-park run-root trace after clearing in-memory span state", async () => {
+    exporter.reset();
+    expect(createRunnerWorker).toBeTypeOf("function");
+    expect(resolveRunRootContext).toBeTypeOf("function");
+
+    const wire = await startFakeJudgeWire([judgeForm({ criteria: { "AC-1": true } })]);
+    cleanups.push(() => wire.close());
+    const { repoUrl, runner } = await setup({ judgeWireUrl: wire.url });
+    const chunks = [
+      { name: "parser", directive: "Implement only the parser chunk before the park." },
+      { name: "cli", directive: "Implement only the CLI chunk after the park." },
+    ];
+    const spec = makeJudgedSpec({
+      repoUrl,
+      goal: "Complete the soak-paced product surface after in-memory span state is cleared.",
+      maxSteps: 4,
+      cadence: 10,
+      boundedWorkUnit: { minDurableSteps: chunks.length, workChunks: chunks },
+      unattended: { escalation: "seal_resumable_failed" },
+      soak: { sleepMs: SHORT_SOAK_MS, maxReentries: 1, maxTotalSleepMs: SHORT_SOAK_MS },
+    });
+
+    const handle = await runner.start(spec);
+    const parked = await awaitStatus(
+      handle,
+      (report) => report.status === "SUSPENDED" && report.currentStep === 1,
+      "soak SUSPENDED before clearing in-memory span state",
+    );
+    expect(parked.spentUsd).toBeCloseTo(0.01, 10);
+
+    const rootContext = resolveRunRootContext(handle.runId);
+    const preParkSpans = exporter.getFinishedSpans();
+    const preParkRunRoot = preParkSpans.find(
+      (span) => span.name === SPAN_RUN && span.attributes.lifecycle === "start",
+    );
+    expect(preParkRunRoot).toBeDefined();
+    expect(preParkRunRoot!.attributes["run.id"]).toBe(handle.runId);
+    expect(preParkRunRoot!.spanContext().traceId).toBe(rootContext.traceId);
+    expect(preParkRunRoot!.spanContext().spanId).toBe(rootContext.spanId);
+    expect(preParkRunRoot!.parentSpanContext).toBeUndefined();
+    const preParkRunRootTraceId = preParkRunRoot!.spanContext().traceId;
+
+    exporter.reset();
+
+    const finished = await awaitStatus(
+      handle,
+      (report) => TERMINAL_STATUSES.includes(report.status),
+      "unattended SUCCESS after in-memory span state is cleared across the park",
+    );
+    expect(finished.status).toBe("SUCCESS");
+    expect(finished.currentStep).toBe(chunks.length);
+    expect(finished.lastVerdict).toEqual({ kind: "PROCEED", atStep: chunks.length - 1 });
+    expect(wire.hits).toBe(chunks.length);
+
+    const postParkSpans = exporter.getFinishedSpans();
+    const postParkRunRoots = postParkSpans.filter((span) => span.name === SPAN_RUN);
+    expect(postParkRunRoots).toHaveLength(1);
+    expect(postParkRunRoots[0]!.attributes).toMatchObject({
+      "run.id": handle.runId,
+      lifecycle: "end",
+      status: "SUCCESS",
+    });
+    expect(postParkRunRoots[0]!.spanContext().traceId).toBe(preParkRunRootTraceId);
+    expect(postParkRunRoots[0]!.spanContext().spanId).toBe(rootContext.spanId);
+    expect(postParkRunRoots[0]!.parentSpanContext).toBeUndefined();
+
+    const soakReentries = postParkSpans.filter((span) => span.name === SPAN_SOAK);
+    expect(soakReentries.length).toBeGreaterThanOrEqual(1);
+    const postParkDurableSpans = postParkSpans.filter((span) =>
+      [SPAN_RUN_STEP, SPAN_CHECKPOINT, SPAN_SOAK].includes(span.name),
+    );
+    expect(
+      postParkDurableSpans.some(
+        (span) => span.name === SPAN_RUN_STEP && span.attributes["step.index"] === 1,
+      ),
+    ).toBe(true);
+    expect(
+      postParkDurableSpans.some(
+        (span) => span.name === SPAN_CHECKPOINT && span.attributes.step === 1,
+      ),
+    ).toBe(true);
+    for (const span of postParkDurableSpans) {
+      expect(span.attributes["run.id"]).toBe(handle.runId);
+      expect(span.spanContext().traceId).toBe(preParkRunRootTraceId);
+      expect(span.parentSpanContext?.spanId).toBe(rootContext.spanId);
     }
   });
 

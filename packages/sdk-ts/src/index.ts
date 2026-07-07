@@ -30,6 +30,7 @@ export {
   recordRunStartSpan,
   recordRunStepSpan,
   recordSoakSpan,
+  resolveRunRootContext,
   SPAN_CHECKPOINT,
   SPAN_JUDGE_PASS,
   SPAN_LLM_CALL,

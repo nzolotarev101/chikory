@@ -6,7 +6,17 @@
  * and keep their existing stack (RT-7); with no provider registered the
  * API no-ops at zero cost.
  */
-import { context, SpanStatusCode, trace, type Span, type SpanOptions, type Tracer } from "@opentelemetry/api";
+import { createHash } from "node:crypto";
+import {
+  context,
+  SpanStatusCode,
+  trace,
+  TraceFlags,
+  type Span,
+  type SpanContext,
+  type SpanOptions,
+  type Tracer,
+} from "@opentelemetry/api";
 
 import type {
   Checkpoint,
@@ -34,20 +44,68 @@ export function getTracer(): Tracer {
   return trace.getTracer(TRACER_NAME);
 }
 
-const activeRunSpans = new Map<string, Span>();
+function forceNonZeroHex(value: string): string {
+  if (!/^0+$/.test(value)) return value;
+  return `${value.slice(0, -1)}1`;
+}
 
-function ensureRunSpan(runId: string): Span {
-  const existing = activeRunSpans.get(runId);
-  if (existing) return existing;
-  const span = getTracer().startSpan(SPAN_RUN);
-  span.setAttribute("run.id", runId);
-  activeRunSpans.set(runId, span);
+/**
+ * Derive a stable W3C root context for a durable run.
+ *
+ * W3C trace IDs are 16 bytes (32 lowercase hex chars) and span IDs are 8 bytes
+ * (16 lowercase hex chars); both all-zero values are invalid.
+ */
+export function resolveRunRootContext(runId: string): { traceId: string; spanId: string } {
+  const digest = createHash("sha256").update("chikory.run-root:").update(runId).digest("hex");
+  return {
+    traceId: forceNonZeroHex(digest.slice(0, 32)),
+    spanId: forceNonZeroHex(digest.slice(32, 48)),
+  };
+}
+
+function runRootOtelContext(runId: string) {
+  return trace.setSpan(
+    context.active(),
+    trace.wrapSpanContext({
+      ...resolveRunRootContext(runId),
+      isRemote: true,
+      traceFlags: TraceFlags.SAMPLED,
+    }),
+  );
+}
+
+function hasMutableSpanContext(value: unknown): value is { _spanContext: SpanContext } {
+  if (typeof value !== "object" || value === null || !("_spanContext" in value)) return false;
+  const spanContext = (value as { _spanContext: unknown })._spanContext;
+  return (
+    typeof spanContext === "object" &&
+    spanContext !== null &&
+    "traceId" in spanContext &&
+    "spanId" in spanContext &&
+    "traceFlags" in spanContext
+  );
+}
+
+function applyDerivedRunRootIdentity(span: Span, runId: string): Span {
+  const mutable = span as unknown;
+  if (!hasMutableSpanContext(mutable)) return span;
+
+  const current = mutable._spanContext;
+  mutable._spanContext = {
+    ...current,
+    ...resolveRunRootContext(runId),
+    traceFlags: current.traceFlags === TraceFlags.NONE ? TraceFlags.NONE : TraceFlags.SAMPLED,
+  };
+
+  if ("parentSpanContext" in mutable) {
+    (mutable as { parentSpanContext?: SpanContext }).parentSpanContext = undefined;
+  }
+
   return span;
 }
 
 function startRunChildSpan(runId: string, name: string, options?: SpanOptions): Span {
-  const runSpan = ensureRunSpan(runId);
-  return getTracer().startSpan(name, options, trace.setSpan(context.active(), runSpan));
+  return getTracer().startSpan(name, options, runRootOtelContext(runId));
 }
 
 export interface RunSpanInput {
@@ -56,7 +114,13 @@ export interface RunSpanInput {
 
 /** Start the durable run root span from an activity, if it is not active yet. */
 export function recordRunStartSpan(input: RunSpanInput): void {
-  ensureRunSpan(input.runId);
+  const span = applyDerivedRunRootIdentity(
+    getTracer().startSpan(SPAN_RUN, undefined, runRootOtelContext(input.runId)),
+    input.runId,
+  );
+  span.setAttribute("run.id", input.runId);
+  span.setAttribute("lifecycle", "start");
+  span.end();
 }
 
 export interface RunEndSpanInput {
@@ -67,7 +131,12 @@ export interface RunEndSpanInput {
 
 /** End the durable run root span from the terminal seal activity. */
 export function recordRunEndSpan(input: RunEndSpanInput): void {
-  const span = ensureRunSpan(input.runId);
+  const span = applyDerivedRunRootIdentity(
+    getTracer().startSpan(SPAN_RUN, undefined, runRootOtelContext(input.runId)),
+    input.runId,
+  );
+  span.setAttribute("run.id", input.runId);
+  span.setAttribute("lifecycle", "end");
   span.setAttribute("status", input.status);
   if (input.reason !== undefined) span.setAttribute("terminal.reason", input.reason);
   if (input.status !== "SUCCESS") {
@@ -77,7 +146,6 @@ export function recordRunEndSpan(input: RunEndSpanInput): void {
     });
   }
   span.end();
-  activeRunSpans.delete(input.runId);
 }
 
 export interface LLMCallSpanInput {
