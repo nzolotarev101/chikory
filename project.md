@@ -109,6 +109,8 @@ This consolidates every feature named across the idea note, the three research r
 - Configurable scoring methodologies: pointwise rubric scoring and pairwise comparison; support for chain-of-thought / form-filling (G-Eval-style) and, optionally, specialized evaluator models or multi-agent debate (ChatEval / DEBATE / CourtEval) where the compute overhead is justified.
 - Guardrails on the judge itself: strict binary/low-precision scoring with detailed explicit rubrics; awareness of inter-model disagreement, evaluator drift, reward hacking, and the latency/cost overhead of extra judging passes.
 
+- Self-healing by default (ADR-009): when the judge finds an issue, the runtime heals automatically before any human is asked — rollback with the judge's rationale, then a bounded remediation attempt against an explicit remediation brief, then (chain-level) replanning from the failure as evidence; only then escalation. Every heal attempt is bounded and journaled; a failure that exhausts healing seals as resumable, preserving the diagnosis. "Self-correcting" means failures heal by default, in single runs and chains alike.
+
 5.4 Context & memory management
 - Context-rot mitigation as a first-class primitive, co-designed with checkpointing — not left as a "pattern."
 - Compaction, structured note-taking, and sub-agent architectures shipped as runtime primitives.
@@ -133,6 +135,7 @@ This consolidates every feature named across the idea note, the three research r
 - Targets the gap none of the three competitor camps own: "did the agent build and ship a maintainable application end-to-end with verified behavior?"
 - Reliable and redundant execution, in case of failure of existing exercise the process can fluently be restarted to continue working on the exercise.
 - Underlying model token awareness and intelligent pace of work assessment, both during project planning AND during execution. Thoughtfully pacing the work is key to ensure an optimal balance between token efficiency, speed, and quality and project completion without unnecessary token waste or redundant work. This can be used to decide how many changes/features to include in a single run, how many tests to run, how many checkpoints to create, etc. This is also important for longer running sessions where the agent can decide to take a break and resume work later without losing progress.
+- North star for the chain layer (ADR-008, 2026-07-07): tech-spec-in → product-out. The user provides no plan and no step breakdown — at most a tech spec or architectural design; the system delivers the completed product plus a ledger of the assumptions it made (including ones the spec never mentioned), and proactively asks the user to validate high-grade assumptions before acting on them. All interactive autonomy lives in the chain layer; the single-run loop stays a focused durable primitive. Path: the chain-autonomy ladder C-1…C-5 (plan.md §6, ADR-008).
 
 5.9 Orchestrator self-evaluation & process metrics (from the supplementary note)
 - Checkpoint notifications: notify the user to review checkpoints at Agent-as-a-Judge milestones.

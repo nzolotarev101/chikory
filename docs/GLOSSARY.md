@@ -41,6 +41,7 @@ Coined identifiers used across `plan.md`, reports, and specs. Per
 | `WP-n` | Work package | One PR-sized planned unit in `plan.md` with acceptance criteria + verification command. |
 | `F-n` | Friction | A problem a dogfood run surfaced. Global, sequential numbering across all runs. |
 | `rung-N` | Horizon-ladder rung | Run difficulty tier (WP-265 ladder); higher = longer/harder horizon. `0` = off-ladder. |
+| `C-n` | Chain-autonomy ladder rung | Autonomy tier (ADR-008 ladder); higher = less the user must author. Distinct from `rung-N` (run horizon): `rung-N` measures how long a run survives, `C-n` how little input it needs. C-1 chain e2e → C-5 tech-spec-only input. |
 | `§n` | plan.md section | A numbered section of `plan.md` (e.g. `§6` = the work queue). |
 | `RT-n` | Requirement — routing | LLM-routing requirement in `REQUIREMENTS.md`. |
 | `DX-n` | Requirement — durability | Durable-execution requirement. |
