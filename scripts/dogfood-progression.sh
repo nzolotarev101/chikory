@@ -182,6 +182,24 @@ if [ -n "$SPEC" ]; then
       printf '%s\n' "$NEG" | sed 's/^/      /'
       LINT_HIT=1
     fi
+    # F-119 (dogfood-091): a `grep -c`/`grep -rc` count piped into an arithmetic `test` is
+    # UNSATISFIABLE over a delegated (loose) path — `grep -rc <dir>` emits one `path:count`
+    # line PER FILE, so `test "$(...)" -ge N` gets a MULTI-LINE string → `integer expression
+    # expected` → exit ≠0 on EVERY judge pass no matter how correct the delivery. That turns the
+    # judge's "AC failed 3+ consecutive → HALT" budget-waste guard into a guaranteed false-FAILED.
+    # Match PER LINE (the count-grep and the arithmetic `test` on ONE line — how a folded `check:`
+    # scalar renders) so a `grep -rc` mentioned in an AC `description:` prose does NOT false-trip
+    # (F-83's own lesson). The safe idioms `grep -roh`/`grep -rl … | wc -l` have no `c` flag.
+    F119=$(printf '%s\n' "$AC_BLOCK" | grep -nE 'test .*grep +-[a-zA-Z]*c\b.*-(ge|le|eq|ne|lt|gt)\b' || true)
+    if [ -n "$F119" ]; then
+      echo "⛔ F-119: an AC pipes a \`grep -c\`/\`grep -rc\` count into an arithmetic \`test\` —"
+      echo "    over a LOOSE (delegated) path this is MULTI-LINE (\`path:count\` per file) and"
+      echo "    \`test -ge\` fails with 'integer expression expected' on EVERY pass → false-HALT."
+      echo "    Use an occurrence count \`grep -roh PAT PATH | wc -l\` or file count"
+      echo "    \`grep -rl PAT PATH | wc -l\` piped into \`test\` instead."
+      printf '%s\n' "$F119" | sed 's/^/      /'
+      LINT_HIT=1
+    fi
     if [ "$LINT_HIT" -eq 0 ]; then
       echo "🟢 AC checks: no F-82 file-pin / F-83 prose-grep hazard (WP-266 lint)."
     else

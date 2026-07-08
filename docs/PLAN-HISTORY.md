@@ -4,6 +4,10 @@
 > per-run detail lives in [`docs/reports/`](reports/). Content below was moved
 > verbatim out of the living docs on 2026-07-02 (course correction — plan.md §6).
 
+## Archived 2026-07-07 — displaced by dogfood-091 (`run-7fca16bc`, WP-251 false-HALT)
+
+- **dogfood-088 — WP-272 SOAK / TIME-PACED DURABLE RE-ENTRY (`run-eeb0d5d7`, 🟡🟢 FAILED-then-hand-landed · 6 steps, $9.10/$80):** durable Temporal-timer re-entry live-proven; **WP-272 mechanism → 🟢, the ⑦ wall-clock axis UNBLOCKED.** ⚠️ autonomous run false-FAILed on a mis-specified AC (🔴 F-114 type-name AC — mine); hand-landed.
+
 ## Archived 2026-07-06 — displaced by dogfood-089 (`run-c3a1c54e`, first rung-4 climb)
 
 Rolled out of the plan.md "Last 3 runs" window when dogfood-089 landed (see `docs/reports/dogfood-089.md`):

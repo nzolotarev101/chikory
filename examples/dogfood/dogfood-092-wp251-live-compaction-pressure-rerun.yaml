@@ -1,0 +1,233 @@
+# Dogfood-092: WP-251 — OBSERVE A LIVE PACING-DRIVEN COMPACTION FOLD ON A REAL RUN, the ⑧ P2-exit CONTEXT-ROT axis (RE-RUN of dogfood-091).
+#
+# WHY THIS IS A RE-RUN, NOT A NEW HEADLINE.
+#   dogfood-091 (run-7fca16bc) delivered the SAME goal CORRECTLY — all 4 parts landed, full SDK suite green in-workspace —
+#   but the run sealed FAILED for TWO reasons, BOTH in the spec/launch, NOT the product code (docs/reports/dogfood-091.md):
+#     • F-119 (loop-integrity, FIXED): AC-2 was `test "$(grep -rc … src/)" -ge 2`. `grep -rc` over a DIRECTORY emits one
+#       `path:count` line PER FILE → the `$(...)` is MULTI-LINE → `test -ge` errors `integer expression expected` → exit 2
+#       on EVERY judge pass no matter how correct the delivery. AC-2 read RED all 4 passes though the symbol appeared 4× in
+#       `src/`; the judge budget-waste HALT guard then guillotined the green delivery once part 4 (verify-only) stopped
+#       producing diffs. THIS SPEC FIXES AC-2 to the arithmetic-safe occurrence-count idiom (`grep -roh … | wc -l`), now
+#       enforced by `scripts/dogfood-progression.sh --spec` (the WP-266 lint ⛔s `grep -c`/`grep -rc` into a `test`).
+#     • F-120 (launch-config): the real run NEVER FOLDED — `peak window 1% (compact 0 · park 0)`. The launch armed
+#       `CHIKORY_CONTEXT_WINDOW_TOKENS=1200000`, sized for codex's ≈400k–900k INTERNAL step tokens. But the pacing window
+#       compares against Chikory's OWN ASSEMBLED-CONTEXT token count (`projectedTokens`, which the run logged as ~2.1k→3.0k),
+#       NOT codex's internal consumption. 3k against a 1.2M window ≈ 0.2% → never near the compact threshold → 0 folds. THIS
+#       SPEC SIZES THE WINDOW TO THE ASSEMBLED-CONTEXT SCALE (~2k) so the real run actually FOLDS (see the launch note).
+#
+# WHY THIS AXIS IS STILL THE HEADLINE (unchanged from 091).
+#   dogfood-090 consolidated the ⑦ (~overnight) rung via IDLE soak — `peak window 1%`, idle soak adds ZERO context. The ONE
+#   remaining un-live-proven P2-exit pillar is CONTEXT-ROT MITIGATION: does the durable loop actually FOLD (compact) history
+#   under real token pressure, and is that fold OBSERVABLE in `chikory trace`? The mechanism is heavily UNIT-proven
+#   (`compaction-wiring.test.ts` tiny-window `trigger:"pacing"` fold; `summarizeCompaction`; `decideContextWindowPacing`
+#   compact/park bands) but NO dogfood RUN has ever RENDERED a live pressure-driven fold — dogfood-053 OVERSHOT INTO PARK
+#   (0 folds), dogfood-091 UNDERSHOT (window too large, 0 folds). This run closes it with a correctly-sized window.
+#
+# THE NET-NEW PRODUCT INCREMENT (so this is NOT a pure observation run — §1.2).
+#   `summarizePacing` (pacing decisions) and `summarizeCompaction` (folds/pacingFolds) live in SEPARATE reducers; NOTHING
+#   JOINS them. That is the dogfood-053 blind spot — a run with pacing PRESSURE but ZERO folds (parked/overshot) is
+#   INDISTINGUISHABLE in the totals from a run with no pressure at all. This run adds a net-new pure
+#   `describeCompactionPressure(entries)` that JOINS the two journals into one operator-facing view — how many steps hit
+#   compaction PRESSURE, how many produced a PACING FOLD, how many pressure-steps folded NOTHING — rendered additively in
+#   `chikory trace` totals. So the trace can finally answer "did pressure fire AND fold, or fire and NOT fold?" — the WP-251
+#   payoff, proven on a live run.
+#
+# HOST WP — WP-251 (observe the compaction-summary telemetry live), 🟡 OPEN in plan.md §6, on the WP-203/WP-207 context-rot
+#   pillar (CLAUDE.md "context rot … first-class mitigation required"; REQUIREMENTS FA-3/SE-2). The `describeCompactionPressure`
+#   reducer + trace wire is the LANDED PRODUCT DIFF; the `debug.contextWindowTokens` compact-band seam is the RUN VEHICLE
+#   that forces a real fold (the `parkBeforeStep`/`seedBadDiff` analog — off the happy path, replay-safe, rides the frozen
+#   workflow input). NOT invented scaffolding — it advances a real open WP on the last un-live-proven P2 pillar.
+#
+# ⚠️ DETERMINISM. `describeCompactionPressure` is a PURE reducer over journal entries — no wall-clock, no ambient state. The
+#   pacing/compaction decisions already happen in the ACTIVITIES / workflow gate (unchanged); this run only ADDS the join
+#   reducer and its trace render. Do NOT move any decision into a new place; do NOT weaken any existing pacing/compaction test.
+#
+# ⚠️ THE FAILURE SURFACE (why a competent agent can plausibly fail this — §1.1). The compact-vs-park tuning is EXACTLY what
+#   tripped dogfood-053 (overshoot→park) AND dogfood-091 (undershoot→no fold). `decideContextWindowPacing` PARKS when
+#   `estimatedNextStepTokens > contextWindowTokens` and COMPACTS when `projectedTokens > contextWindowTokens * 0.8` without
+#   parking. Size `debug.contextWindowTokens` to the ASSEMBLED-CONTEXT scale so accumulated projected crosses the compact
+#   threshold while a single step's estimate stays below the window (no park). The PART-3 LIVE test pins the mechanism
+#   DETERMINISTICALLY with a scripted executor + a tiny window seam so the proof does not depend on real codex token counts;
+#   the real-run render is the live observation on top.
+#
+# Format: LOOSE (headline — goal states the OUTCOME + constraints; ACs pin "done" via the net-new OUTCOME symbol the goal
+#   NAMES; module/test layout LEFT TO THE EXECUTOR, F-82/F-83; NO prescribed diff).
+# Ladder-rung: 4
+# Thesis-KPI: CONTEXT-ROT MITIGATION OBSERVED LIVE — a real `chikory run` FOLDS history under live pacing pressure and
+#   `chikory trace` renders ≥1 `trigger:"pacing"` compaction with the net-new pressure JOIN, so "pressure fired AND folded"
+#   is distinguishable from dogfood-053's "pressure fired but parked / 0 folds". The un-proven half of the ⑧ P2 exit gate.
+#
+# F-114/F-90 APPLIED: ACs key on the net-new FUNCTION symbol `describeCompactionPressure` (absent on HEAD → a recursive grep
+#   cannot false-green; a value/function, NOT a bare type-name a call site is free not to spell).
+# F-119 APPLIED: AC-2 counts OCCURRENCES with `grep -roh … | wc -l` (a single integer), NEVER `grep -rc <dir>` (multiline →
+#   `integer expression expected` → the false-HALT that killed dogfood-091). `scripts/dogfood-progression.sh --spec` lints it.
+# F-97 APPLIED: the live cross-check requires the net-new symbol to co-live with the LIVE runner driver `createRunnerWorker`
+#   in a `test/` file, so the live pressure-driven fold is actually exercised end-to-end.
+#
+# ✅ PREREQUISITE — the working tree must be CLEAN before launching; the workspace clones HEAD. dogfood-091 harvested NOTHING
+#   (it FAILED), so HEAD does NOT contain `describeCompactionPressure` — this run re-delivers it from scratch (confirmed:
+#   `grep -rq describeCompactionPressure packages/sdk-ts/src` is empty on HEAD).
+#
+# ⚠️ THE COMPACT-BAND SEAM IS ENV-ARMED, NOT A YAML FIELD (F-120-CORRECTED SIZING). `debug.contextWindowTokens` is armed
+#   HOST-SIDE from the `CHIKORY_CONTEXT_WINDOW_TOKENS` env at launch (see `src/cli/commands.ts` — the task-spec schema is
+#   `.strict()` and does NOT accept a `debug:` key, so putting it in this YAML would FAIL parse). The pacing window compares
+#   `projectedTokens` (Chikory's ASSEMBLED-CONTEXT tokens — run-7fca16bc logged ~2.1k→3.0k) against
+#   `contextWindowTokens * 0.8` (compactAtFraction), and PARKS only if a single step's `estimatedNextStepTokens` exceeds the
+#   whole window. Size it to ~2000 (compact threshold 1600 < the ~2.1k projected → FOLDS by step 1; a per-step summary
+#   estimate stays well under 2000 → NO park):
+#      export CHIKORY_CONTEXT_WINDOW_TOKENS=2000   # assembled-context scale, NOT codex's internal 400k–900k (F-120)
+#      devbox run run-dogfood                       # <- `chikory run`; picks the latest spec (this one)
+#   If the real run PARKS (0 folds, `park 1`), RAISE the value; if it never folds (`compact 0`, window% stays ~1%), LOWER it.
+#   The PART-3 LIVE test does NOT need the env — it constructs the spec object directly and sets `debug.contextWindowTokens`
+#   in-object (valid at the TS type level, as `compaction-wiring.test.ts` does), so the deterministic proof is self-contained.
+
+name: dogfood-092-wp251-live-compaction-pressure-rerun
+goal: >
+  Make a real `chikory run` FOLD its context under LIVE pacing pressure and have `chikory trace` RENDER that
+  pressure-driven fold — the first dogfood RUN to observe a live compaction fold (dogfood-053 built the reducer but its own
+  run OVERSHOT INTO PARK with 0 folds; dogfood-091 delivered the reducer correctly but UNDERSHOT the window and never folded,
+  and false-FAILed on an unsatisfiable AC — so WP-251 stays un-live-proven). Deliver a net-new pure JOIN reducer that finally
+  distinguishes "pacing pressure fired AND folded" from "pressure fired but parked / nothing to fold", and prove the whole
+  path live. Deliver in FOUR bounded, dependency-ordered sub-goals, ONE per durable step, so every sealed checkpoint carries
+  DISTINCT non-trivial product work (the non-hollow horizon, F-100/WP-270):
+
+    * PART 1 — PURE PRESSURE-JOIN REDUCER (additive): add a net-new pure `describeCompactionPressure(entries)` (a
+      `summarizeCompaction`/`summarizePacing` analog, in its own `src/runner/` module, re-exported from the barrel) that
+      reads the run's `pacing` decisions AND `compaction` folds from ONE journal-entry list and returns a small result
+      object reporting: PRESSURE STEPS (pacing decisions of `compact` or `park`), PACING FOLDS (compaction entries with
+      `trigger:"pacing"`), and UNFOLDED PRESSURE STEPS (pressure steps that produced no pacing fold — the parked/overshot
+      case). Pure, no wall-clock, no ambient state. Unit-tested: a mixed fixture (some compact decisions that folded, one
+      park that did not) yields the correct counts; an empty/no-pressure list yields all-zero.
+
+    * PART 2 — RENDER THE JOIN IN `chikory trace` (depends on 1): extend the trace totals so the compaction sub-line also
+      surfaces the pressure join (e.g. append `· pressure-steps K (unfolded U)` alongside the existing
+      `compactions N (pacing M)`), consuming `describeCompactionPressure`. ADDITIVE and byte-equivalent when there is no
+      pacing/compaction activity (a run that never folds renders exactly as it does today). Renderer unit test covers a
+      folded run and a zero run.
+
+    * PART 3 — LIVE PRESSURE-DRIVEN FOLD PROOF (depends on 1-2; F-97): add a LIVE Temporal test (reuse
+      `createRunnerWorker`/`createTemporalRunner`/the scripted registry + `waitFor`/`describe.skipIf`/`makeJudgedSpec`; do
+      NOT mock the workflow) that drives a real multi-step run with `pacing:{mode:"auto"}` and a SMALL
+      `debug.contextWindowTokens` sized into the COMPACT band (ABOVE the compact threshold, BELOW the park threshold, so the
+      loop COMPACTS — not parks), and asserts: at least ONE `compaction` journal entry with `trigger:"pacing"` exists, the
+      run reached SUCCESS, and `describeCompactionPressure` over the run's journal reports pacingFolds ≥ 1 (a REAL live
+      fold, not a scripted stub). Co-reference BOTH `describeCompactionPressure` AND `createRunnerWorker` in this SAME file
+      (F-97). This is the deterministic proof the headline rests on, independent of real codex token counts.
+
+    * PART 4 — FULL-SUITE REGRESSION (depends on 1-3): the SDK stays type- and lint-clean and the FULL existing suite —
+      including every pacing/compaction test (`pacing.test.ts`, `compaction-wiring.test.ts`, `compaction-summary.ts` tests,
+      the WP-105 durable-loop span tests) — is green, proving the change is purely additive and nothing regressed.
+
+  CONSTRAINTS: strict TypeScript, ESM `.js` relative imports, named exports only; NO new dependency; the pacing/compaction
+  DECISIONS stay where they are (workflow gate / activities) — this run ADDS a pure reducer + a trace render + a live test,
+  it does NOT relocate any decision or emit anything from the `agent-loop.ts` workflow body; do NOT change the SHAPE of any
+  frozen contract (`StepRecord`, `JournalEntry`, `Checkpoint`, `ContextBundle`, `ArtifactRef`, `RunStatus`) —
+  `describeCompactionPressure` is a NEW pure reducer, the trace change is a render-only additive segment. Do NOT weaken any
+  existing pacing (`decideContextWindowPacing`/`shouldParkForWindow`/`summarizePacing`) or compaction
+  (`planCompaction`/`summarizeCompaction`/`compaction-wiring`) assertion, nor the WP-105 span, WP-123 crash-recovery,
+  WP-206 suspend/resume, WP-250 window-park, WP-269 step-forcing, WP-270 chunking, WP-271 unattended-escalate, WP-272 soak,
+  WP-273 chunk-aware verdict, or WP-202 memory paths. Never assert a WALL-CLOCK duration to prove a STRUCTURAL fact (F-115).
+  If a verification step reports a failing test or type error, READ the failure and fix the IMPLEMENTATION — do NOT weaken
+  or delete any assertion.
+
+repos:
+  - url: /Users/nikitazolotarev/repos/chikory
+    writable: true
+
+# LONG-HORIZON DRIVER: 4 ordered chunks, ONE PART each, so `decideWorkChunk` hands the executor EXACTLY one bounded
+#   sub-goal per durable step; with `min_durable_steps: 4` this forces ≥4 sealed checkpoints each carrying a distinct
+#   non-trivial diff (the non-hollow horizon).
+bounded_work_unit:
+  min_durable_steps: 4
+  directive: >
+    Advance EXACTLY the ONE numbered PART named by this step's chunk — no more — then stop and let the durable checkpoint
+    seal. Do NOT front-load a later PART into an earlier step. Do NOT declare the whole run complete until every PART has
+    landed with its tests and the ACs pass.
+  work_chunks:
+    - name: part-1-pure-pressure-join
+      directive: >
+        PART 1 ONLY: add a net-new pure `describeCompactionPressure(entries)` in its own `src/runner/` module (a
+        `summarizeCompaction` analog), re-exported from the barrel, reporting pressure-steps / pacing-folds / unfolded
+        pressure-steps from ONE journal list; unit test a mixed fixture + the all-zero empty case.
+    - name: part-2-render-pressure-in-trace
+      directive: >
+        PART 2 ONLY: consume `describeCompactionPressure` in the `chikory trace` totals to surface the pressure join
+        additively alongside `compactions N (pacing M)`; byte-equivalent when there is no pacing/compaction activity;
+        renderer unit test for a folded run and a zero run.
+    - name: part-3-live-pressure-fold-proof
+      directive: >
+        PART 3 ONLY: add the LIVE Temporal test (reuse `createRunnerWorker`/`createTemporalRunner`/scripted registry/
+        `waitFor`/`describe.skipIf`/`makeJudgedSpec`) driving a real run under `pacing:{mode:auto}` + a SMALL
+        `debug.contextWindowTokens` in the COMPACT band; assert ≥1 `trigger:"pacing"` compaction entry, SUCCESS, and
+        `describeCompactionPressure` pacingFolds ≥ 1. Co-reference `describeCompactionPressure` AND `createRunnerWorker` (F-97).
+    - name: part-4-full-suite-regression
+      directive: >
+        PART 4 ONLY: run `tsc --noEmit && eslint . && vitest run`; if anything fails, fix the IMPLEMENTATION, never weaken
+        an assertion. Confirm every existing pacing/compaction/span test stays green.
+
+acceptance_criteria:
+  - id: AC-1
+    description: >
+      The net-new pressure-join reducer exists in the runner source — a pure function joining pacing decisions to
+      compaction folds. (OUTCOME symbol the goal NAMES — `describeCompactionPressure` — absent on HEAD so a recursive grep
+      cannot false-green, F-90. F-114-SAFE: a FUNCTION symbol, not a type-name token. Layout is the executor's, F-82/F-83.)
+    check: >
+      cd packages/sdk-ts &&
+      grep -rq 'describeCompactionPressure' src/runner/
+  - id: AC-2
+    description: >
+      The trace renderer CONSUMES the join reducer (not just defines it) — `describeCompactionPressure` appears at least
+      twice across the source (its definition + the `chikory trace` consumption site). (F-114-SAFE: keyed on the net-new
+      FUNCTION symbol. F-119-SAFE: counts OCCURRENCES with `grep -roh … | wc -l` — a single integer — NEVER `grep -rc`
+      over a directory, whose multi-line `path:count` output makes `test -ge` error `integer expression expected`.)
+    check: >
+      cd packages/sdk-ts &&
+      test "$(grep -roh 'describeCompactionPressure' src/ | wc -l)" -ge 2
+  - id: AC-3
+    description: >
+      A LIVE Temporal test exercises a real pressure-driven fold end-to-end. (F-97-SAFE: requires a `test/` file
+      referencing BOTH the net-new `describeCompactionPressure` symbol AND the LIVE runner driver `createRunnerWorker`, so
+      the live pacing-fold proof is actually enforced. Both are OUTCOME symbols the goal names; filename is the executor's.)
+    check: >
+      cd packages/sdk-ts &&
+      for f in $(grep -rl 'describeCompactionPressure' test/ 2>/dev/null); do
+        grep -q 'createRunnerWorker' "$f" && { echo ok; break; };
+      done | grep -q ok
+  - id: AC-4
+    description: >
+      The SDK stays type- and lint-clean and the FULL existing suite — including every pacing/compaction test and the
+      WP-105 durable-loop span tests — is green, proving the change is additive and nothing regressed (no frozen-contract
+      shape change; a run that never folds renders its trace exactly as before).
+    check: cd packages/sdk-ts && pnpm exec tsc --noEmit && pnpm exec eslint . && pnpm exec vitest run
+
+budget_usd: 80
+max_steps: 40
+
+# CONTEXT-ROT VEHICLE (WP-207/WP-203): NO soak block — idle soak adds ZERO context and cannot drive a fold. Instead force
+#   real pacing PRESSURE via the deterministic `debug.contextWindowTokens` seam, ARMED AT LAUNCH from
+#   `CHIKORY_CONTEXT_WINDOW_TOKENS` (see the header launch note — NOT a YAML field). Sized to the ASSEMBLED-CONTEXT scale
+#   (~2000, F-120-corrected) so the projected assembled context (~2.1k–3.0k) crosses `contextWindowTokens * 0.8` (COMPACTS)
+#   while a single step's estimate stays below the window (NO park). ⚠️ If the real run PARKS (0 folds) or never folds, the
+#   PART-3 live test still proves the mechanism deterministically; log the miss as friction and re-size the env.
+pacing:
+  mode: auto
+
+# UNATTENDED (WP-271): operator-free; a genuine ESCALATE seals a resumable FAILED instead of an untimed hang.
+unattended:
+  escalation: seal_resumable_failed
+
+executor:
+  adapter: codex
+  family: openai
+
+judge:
+  family: openai-compat
+  cadence: 2
+  max_cost_share: 0.5
+
+routing:
+  stages:
+    plan: { provider: openai-compat, model: gpt-5.5 }
+    code: { provider: openai-compat, model: gpt-5.5 }
+    review: { provider: openai-compat, model: gpt-5.5 }
+    judge: { provider: openai-compat, model: gemini-3.1-pro-preview }
