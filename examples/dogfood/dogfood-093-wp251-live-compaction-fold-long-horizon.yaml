@@ -1,0 +1,264 @@
+# Dogfood-093: WP-251 — OBSERVE A LIVE PACING-DRIVEN COMPACTION FOLD ON A REAL RUN, the ⑧ P2-exit CONTEXT-ROT axis (4th attempt; RE-RUN of dogfood-092).
+#
+# WHY THIS IS A RE-RUN, NOT A NEW HEADLINE, AND WHAT CHANGED FROM dogfood-092.
+#   dogfood-092 (run-4481c735) delivered WP-251's reducer CORRECTLY, sealed SUCCESS, full-suite-green, and CURED both
+#   dogfood-091 launch bugs (docs/reports/dogfood-092.md): the window was FINALLY sized right —
+#   `peak window 115% · compact 4`, first pacing entry `remaining 227 + projected 1773 = 2000` (F-120/F-121 CONFIRMED
+#   fixed), and AC-2 was arithmetic-safe (F-119 fixed). BUT the real run STILL folded 0×: `pressure-steps 4 (unfolded 4)`,
+#   ZERO `compaction` journal entries. ROOT CAUSE (F-122, verified in code) is NEW and distinct from 053/091:
+#     • A pacing `compact` DECISION and an actual `compaction` FOLD are TWO DIFFERENT GATES. `decideContextWindowPacing`
+#       recommends `compact` as soon as `projectedTokens > contextWindowTokens × compactAtFraction` (fired all 4 steps).
+#       But `planCompaction` (`src/runner/compaction.ts:22`) only folds when `summaries.length > triggerAfterSteps AND
+#       > keepLastN`. Under pacing pressure the effective trigger is lowered to `keepLastN` (`activities.ts:1103`), and
+#       `DEFAULT_COMPACTION_POLICY.keepLastN = 5` (`activities.ts:74`).
+#     • dogfood-092 ran only 4 durable steps (`min_durable_steps: 4`) → ≤4 resident summaries → `4 ≤ 5` → `planCompaction`
+#       folds NOTHING on every compact decision. The window was right; the HORIZON was too short.
+#   FIX FOR THIS RUN: keep the SAME ~2000 window, but decompose the goal into ENOUGH ordered chunks that the run seals
+#   ≥6-7 durable steps, so resident summaries cross `keepLastN=5` and a real `trigger:"pacing"` fold fires by ~step 6
+#   (matches the deterministic `compaction-wiring.test.ts` maxSteps-7 / fold-at-step-6 behavior). HORIZON, not window.
+#
+# THE NET-NEW PRODUCT INCREMENT (so this is NOT a pure observation run — §1.2). dogfood-092's post-run review surfaced
+#   F-123: when a correctly-sized window folds NOTHING (pressure fired, 0 folds), the run seals GREEN and SILENT — only a
+#   hand journal query revealed the miss. This run lands the F-123 fix as its net-new WP-251 observability increment: a
+#   pure `pressureFoldGapWarning(description)` that turns the silent 0-fold-under-pressure condition into a LOUD
+#   `chikory trace` line, plus a `firstPacingFoldStep` enrichment on `describeCompactionPressure` (WHICH step first folded —
+#   real operator telemetry). So the trace can finally answer "did pressure fire AND fold (and WHEN), or fire and NOT fold
+#   (and SAY SO loudly)?" — and this run's own headline outcome becomes SELF-REPORTING: if the ≥6-step horizon folds, the
+#   warning stays silent and `firstPacingFoldStep` renders; if it STILL does not fold, the warning fires LOUD in the trace
+#   instead of a silent green (the F-123 payoff de-risks a 4th miss).
+#
+# HOST WP — WP-251 (observe the compaction-summary telemetry live), 🟡 OPEN in plan.md §6, on the WP-203/WP-207 context-rot
+#   pillar (CLAUDE.md "context rot … first-class mitigation required"; REQUIREMENTS FA-3/SE-2). `describeCompactionPressure`
+#   landed in dogfood-092; this run EXTENDS it (`firstPacingFoldStep` + the F-123 `pressureFoldGapWarning`) — a real
+#   observability increment on the same open WP, NOT invented scaffolding. The `debug.contextWindowTokens` compact-band
+#   seam is the RUN VEHICLE that forces a real fold; the ≥6-step horizon is the NEW correctly-sized dimension.
+#
+# ⚠️ DETERMINISM. `pressureFoldGapWarning` and the `firstPacingFoldStep` join are PURE reducers over journal entries — no
+#   wall-clock, no ambient state. The pacing/compaction DECISIONS stay in the activities / workflow gate (unchanged); this
+#   run only ADDS pure reducer output + trace render + tests. Do NOT relocate any decision; do NOT weaken any existing
+#   pacing/compaction/span test. Never assert a WALL-CLOCK duration to prove a STRUCTURAL fact (F-115).
+#
+# ⚠️ THE FAILURE SURFACE (why a competent agent can plausibly fail this — §1.1). The compact-vs-park-vs-FOLD tuning tripped
+#   dogfood-053 (overshoot→park), 091 (undershoot→no compact), and 092 (compact-but-too-short→no fold). A ≥6-step run under
+#   a 2000 window can still fail three ways: PARK if a single step's estimate exceeds 2000, NO FOLD if the horizon somehow
+#   stays ≤5 summaries, or a wrong join count. The PART-5 LIVE test pins the fold DETERMINISTICALLY (scripted executor +
+#   tiny window, ≥6 steps) so the proof does not depend on real codex token counts; the real-run render is the live
+#   observation on top, now self-reporting via the F-123 warning.
+#
+# Format: LOOSE (headline — goal states the OUTCOME + constraints; ACs pin "done" via the net-new FUNCTION symbol the goal
+#   NAMES; module/test layout LEFT TO THE EXECUTOR, F-82/F-83; NO prescribed diff).
+# Ladder-rung: 4
+# Thesis-KPI: CONTEXT-ROT MITIGATION OBSERVED LIVE — a real `chikory run` FOLDS history under live pacing pressure across a
+#   ≥6-step horizon and `chikory trace` renders ≥1 `trigger:"pacing"` compaction with the pressure JOIN (`firstPacingFoldStep`
+#   set, `pressureFoldGapWarning` silent), so "pressure fired AND folded" is distinguishable from dogfood-092's "pressure
+#   fired but the run was too short to fold" — which the SAME trace now reports LOUDLY. The un-proven half of the ⑧ P2 exit.
+#
+# F-114/F-90 APPLIED: ACs key on the net-new FUNCTION symbol `pressureFoldGapWarning` (absent on HEAD → a recursive grep
+#   cannot false-green; a value/function, NOT a bare type-name a call site is free not to spell).
+# F-119 APPLIED: AC-2 counts OCCURRENCES with `grep -roh … | wc -l` (a single integer), NEVER `grep -rc <dir>` (multiline →
+#   `integer expression expected` → the false-HALT that killed dogfood-091). `scripts/dogfood-progression.sh --spec` lints it.
+# F-97 APPLIED: the live cross-check requires the net-new symbol to co-live with the LIVE runner driver `createRunnerWorker`
+#   in a `test/` file, so the live pressure-driven fold is actually exercised end-to-end.
+# F-122 APPLIED: the horizon is sized to ≥6 durable steps (`min_durable_steps: 6` + 7 ordered chunks) so resident summaries
+#   cross `keepLastN=5` and a real fold fires — the fix this review pinned. The window stays ~2000 (do NOT shrink it — that
+#   risks a park; lengthen the run instead, DOGFOODING §7).
+#
+# ✅ PREREQUISITE — COMMIT dogfood-092's delivery FIRST. The workspace clones HEAD; this run BUILDS ON
+#   `describeCompactionPressure` (its `src/runner/compaction-pressure.ts` module + barrel export + `chikory trace` wire must
+#   exist in HEAD). Confirm: `grep -rq describeCompactionPressure packages/sdk-ts/src` is NON-empty on HEAD before launching.
+#
+# ⚠️ THE COMPACT-BAND SEAM IS ENV-ARMED, NOT A YAML FIELD (unchanged from 092). `debug.contextWindowTokens` is armed
+#   HOST-SIDE from the `CHIKORY_CONTEXT_WINDOW_TOKENS` env at launch (`src/cli/commands.ts` — the task-spec schema is
+#   `.strict()` and rejects a `debug:` key). Size it to 2000 (the dogfood-092-proven value: compact threshold 1600 < the
+#   ~1.8k–3.0k projected assembled context → FOLDS band; a per-step summary estimate stays under 2000 → NO park):
+#      export CHIKORY_CONTEXT_WINDOW_TOKENS=2000   # assembled-context scale (F-120), the 092-proven value
+#      devbox run run-dogfood                       # <- `chikory run`; picks the latest spec (this one)
+#   F-121 GUARDED: the launcher REFUSES (exit 4) when this spec-named env is unset and echoes the armed seam with its
+#   compact/park thresholds; `CHIKORY_PREFLIGHT_ONLY=1 devbox run run-dogfood` dry-runs every guard at $0. Post-run, confirm
+#   the seam applied: the first pacing entry's `remainingTokens + projectedTokens` must equal 2000, AND — the whole point —
+#   there must now be ≥1 `compaction` entry (`chikory trace` totals show `compactions N (pacing M)` with M ≥ 1, and
+#   `pressure-steps K (unfolded U)` with U < K). If U == K again (still 0 folds), the F-123 warning WILL render loudly —
+#   read it, confirm the horizon reached ≥6 steps, and if it did but still did not fold, that is a DEEPER `planCompaction`
+#   bug to file, not a re-size. If the run PARKS (`park ≥1`), a single step's estimate exceeded 2000 — RAISE the window a
+#   little (e.g. 2500) and re-run.
+
+name: dogfood-093-wp251-live-compaction-fold-long-horizon
+goal: >
+  Make a real `chikory run` FOLD its context under LIVE pacing pressure ACROSS A ≥6-STEP HORIZON and have `chikory trace`
+  RENDER that pressure-driven fold — the first dogfood RUN to observe a live compaction fold (dogfood-053 OVERSHOT into
+  park, dogfood-091 UNDERSHOT the window, dogfood-092 sized the window RIGHT but ran only 4 steps so nothing crossed the
+  `keepLastN=5` fold threshold — F-122). Keep the dogfood-092-proven ~2000 window; the NEW correctly-sized dimension is the
+  HORIZON. Deliver, as the net-new WP-251 observability increment, the dogfood-092-review F-123 fix so the run's OWN outcome
+  is self-reporting: a pure diagnostic that turns a silent 0-fold-under-pressure into a LOUD trace line, plus a
+  first-fold-step enrichment on the existing `describeCompactionPressure`. Deliver in SEVEN bounded, dependency-ordered
+  sub-goals, ONE per durable step, so every sealed checkpoint carries DISTINCT non-trivial product work (the non-hollow
+  horizon, F-100/WP-270) AND the run accumulates > keepLastN=5 resident summaries so a real fold fires by ~step 6:
+
+    * PART 1 — PURE FOLD-GAP DIAGNOSTIC (additive): add a net-new pure `pressureFoldGapWarning(description)` (in its own
+      `src/runner/` module or alongside the existing pressure reducer, re-exported from the barrel) that takes a
+      `describeCompactionPressure` result and returns a short human diagnostic STRING when pressure fired but nothing folded
+      (`pressureSteps > 0 && pacingFolds === 0`) — e.g. "pressure fired on K steps but 0 folds (history below keepLastN)" —
+      and `null` otherwise (folded, or no pressure). Pure, no wall-clock, no ambient state. Unit-tested: the unfolded case
+      yields a non-null warning, a folded case (pacingFolds ≥ 1) yields null, the no-pressure case yields null.
+
+    * PART 2 — FIRST-FOLD-STEP ENRICHMENT (depends on 1): extend `describeCompactionPressure`'s result with an additive
+      `firstPacingFoldStep` field — the step index of the FIRST `trigger:"pacing"` compaction entry, or `null` if none.
+      ADDITIVE (no existing field renamed/removed — a frozen-contract-safe superset). Unit-tested: a mixed fixture reports
+      the correct first-fold step; an unfolded/empty fixture reports `null`.
+
+    * PART 3 — RENDER THE FOLD-GAP WARNING IN `chikory trace` (depends on 1): consume `pressureFoldGapWarning` in the trace
+      totals and render the warning line ONLY when it is non-null (additive; byte-equivalent when there is a fold or no
+      pressure — a normal run renders exactly as today). Renderer unit test covers the unfolded (warning shown) and folded
+      (warning absent) cases.
+
+    * PART 4 — RENDER THE FIRST-FOLD STEP IN `chikory trace` (depends on 2): surface `firstPacingFoldStep` additively in the
+      compaction sub-line when it is non-null (e.g. `first-fold step N`). Byte-equivalent when there is no fold. Renderer
+      unit test covers a folded run and a zero run.
+
+    * PART 5 — LIVE PRESSURE-DRIVEN FOLD PROOF ACROSS A ≥6-STEP HORIZON (depends on 1-4; F-97): add a LIVE Temporal test
+      (reuse `createRunnerWorker`/`createTemporalRunner`/the scripted registry + `waitFor`/`describe.skipIf`/`makeJudgedSpec`;
+      do NOT mock the workflow) that drives a real multi-step run (≥6 steps) with `pacing:{mode:"auto"}` and a SMALL
+      `debug.contextWindowTokens` in the COMPACT band (above the compact threshold, below the park threshold), and asserts:
+      at least ONE `compaction` journal entry with `trigger:"pacing"` exists, the run reached SUCCESS,
+      `describeCompactionPressure` over the run's journal reports `pacingFolds ≥ 1` and a non-null `firstPacingFoldStep`, and
+      `pressureFoldGapWarning` over that same result is `null` (folded → silent). Co-reference BOTH `pressureFoldGapWarning`
+      AND `createRunnerWorker` in this SAME file (F-97). This is the deterministic proof the headline rests on.
+
+    * PART 6 — LOUD-ON-SILENT-FOLD PROOF (depends on 1-2): add a test pinning the F-123 behavior — over a fixture (or a
+      short-horizon journal) where pressure fired but 0 folds, `pressureFoldGapWarning` returns a non-null warning and
+      `firstPacingFoldStep` is `null`, so the 0-fold-under-pressure miss can never again seal green-and-silent.
+
+    * PART 7 — FULL-SUITE REGRESSION (depends on 1-6): the SDK stays type- and lint-clean and the FULL existing suite —
+      including every pacing/compaction test (`pacing.test.ts`, `compaction-wiring.test.ts`, `compaction-summary` tests,
+      `compaction-pressure.test.ts`, the WP-105 durable-loop span tests) — is green, proving the change is purely additive
+      and nothing regressed.
+
+  CONSTRAINTS: strict TypeScript, ESM `.js` relative imports, named exports only; NO new dependency; the pacing/compaction
+  DECISIONS stay where they are (workflow gate / activities) — this run ADDS pure reducers + trace renders + tests, it does
+  NOT relocate any decision or emit anything from the `agent-loop.ts` workflow body; do NOT change the SHAPE of any frozen
+  contract (`StepRecord`, `JournalEntry`, `Checkpoint`, `ContextBundle`, `ArtifactRef`, `RunStatus`) — `pressureFoldGapWarning`
+  is a NEW pure reducer, `firstPacingFoldStep` is an ADDITIVE field on the existing `CompactionPressureDescription`, the
+  trace changes are render-only additive segments. Do NOT weaken any existing pacing (`decideContextWindowPacing`/
+  `shouldParkForWindow`/`summarizePacing`) or compaction (`planCompaction`/`summarizeCompaction`/`compaction-wiring`/
+  `describeCompactionPressure`) assertion, nor the WP-105 span, WP-123 crash-recovery, WP-206 suspend/resume, WP-250
+  window-park, WP-269 step-forcing, WP-270 chunking, WP-271 unattended-escalate, WP-272 soak, WP-273 chunk-aware verdict, or
+  WP-202 memory paths. Never assert a WALL-CLOCK duration to prove a STRUCTURAL fact (F-115). If a verification step reports
+  a failing test or type error, READ the failure and fix the IMPLEMENTATION — do NOT weaken or delete any assertion.
+
+repos:
+  - url: /Users/nikitazolotarev/repos/chikory
+    writable: true
+
+# LONG-HORIZON DRIVER: 7 ordered chunks, ONE PART each, so `decideWorkChunk` hands the executor EXACTLY one bounded
+#   sub-goal per durable step; with `min_durable_steps: 6` this forces ≥6 sealed checkpoints each carrying a distinct
+#   non-trivial diff (the non-hollow horizon) AND ≥6 resident summaries so the pressure-driven fold crosses keepLastN=5.
+bounded_work_unit:
+  min_durable_steps: 6
+  directive: >
+    Advance EXACTLY the ONE numbered PART named by this step's chunk — no more — then stop and let the durable checkpoint
+    seal. Do NOT front-load a later PART into an earlier step. Do NOT declare the whole run complete until every PART has
+    landed with its tests and the ACs pass.
+  work_chunks:
+    - name: part-1-pure-fold-gap-warning
+      directive: >
+        PART 1 ONLY: add a net-new pure `pressureFoldGapWarning(description)` (a `describeCompactionPressure` companion)
+        returning a diagnostic string when `pressureSteps > 0 && pacingFolds === 0`, else null; re-export from the barrel;
+        unit test the unfolded (non-null), folded (null), and no-pressure (null) cases.
+    - name: part-2-first-pacing-fold-step
+      directive: >
+        PART 2 ONLY: extend `describeCompactionPressure` with an ADDITIVE `firstPacingFoldStep` field (step index of the
+        first `trigger:"pacing"` compaction, or null); unit test a mixed fixture (correct index) + an unfolded/empty fixture
+        (null). Do NOT rename or remove any existing field.
+    - name: part-3-render-warning-in-trace
+      directive: >
+        PART 3 ONLY: consume `pressureFoldGapWarning` in the `chikory trace` totals; render the warning line ONLY when
+        non-null; byte-equivalent when folded or no pressure; renderer unit test for the unfolded and folded cases.
+    - name: part-4-render-first-fold-step
+      directive: >
+        PART 4 ONLY: surface `firstPacingFoldStep` additively in the `chikory trace` compaction sub-line when non-null;
+        byte-equivalent when there is no fold; renderer unit test for a folded run and a zero run.
+    - name: part-5-live-fold-proof-long-horizon
+      directive: >
+        PART 5 ONLY: add the LIVE Temporal test (reuse `createRunnerWorker`/`createTemporalRunner`/scripted registry/
+        `waitFor`/`describe.skipIf`/`makeJudgedSpec`) driving a real ≥6-step run under `pacing:{mode:auto}` + a SMALL
+        `debug.contextWindowTokens` in the COMPACT band; assert ≥1 `trigger:"pacing"` compaction entry, SUCCESS,
+        `describeCompactionPressure` pacingFolds ≥ 1 with a non-null `firstPacingFoldStep`, and `pressureFoldGapWarning`
+        null. Co-reference `pressureFoldGapWarning` AND `createRunnerWorker` (F-97).
+    - name: part-6-loud-on-silent-fold-proof
+      directive: >
+        PART 6 ONLY: add a test over an unfolded fixture (pressure fired, 0 folds) asserting `pressureFoldGapWarning` is
+        non-null and `firstPacingFoldStep` is null — pinning the F-123 loud behavior so a 0-fold-under-pressure run can
+        never again seal green-and-silent.
+    - name: part-7-full-suite-regression
+      directive: >
+        PART 7 ONLY: run `tsc --noEmit && eslint . && vitest run`; if anything fails, fix the IMPLEMENTATION, never weaken
+        an assertion. Confirm every existing pacing/compaction/span test stays green.
+
+acceptance_criteria:
+  - id: AC-1
+    description: >
+      The net-new fold-gap diagnostic exists in the runner source — a pure function over a `describeCompactionPressure`
+      result. (OUTCOME symbol the goal NAMES — `pressureFoldGapWarning` — absent on HEAD so a recursive grep cannot
+      false-green, F-90. F-114-SAFE: a FUNCTION symbol, not a type-name token. Layout is the executor's, F-82/F-83.)
+    check: >
+      cd packages/sdk-ts &&
+      grep -rq 'pressureFoldGapWarning' src/runner/
+  - id: AC-2
+    description: >
+      The trace renderer CONSUMES the diagnostic (not just defines it) — `pressureFoldGapWarning` appears at least twice
+      across the source (its definition + the `chikory trace` consumption site). (F-114-SAFE: keyed on the net-new FUNCTION
+      symbol. F-119-SAFE: counts OCCURRENCES with `grep -roh … | wc -l` — a single integer — NEVER `grep -rc` over a
+      directory, whose multi-line `path:count` output makes `test -ge` error `integer expression expected`.)
+    check: >
+      cd packages/sdk-ts &&
+      test "$(grep -roh 'pressureFoldGapWarning' src/ | wc -l)" -ge 2
+  - id: AC-3
+    description: >
+      A LIVE Temporal test exercises a real pressure-driven fold across a ≥6-step horizon end-to-end. (F-97-SAFE: requires a
+      `test/` file referencing BOTH the net-new `pressureFoldGapWarning` symbol AND the LIVE runner driver
+      `createRunnerWorker`, so the live pacing-fold proof is actually enforced. Both are OUTCOME symbols the goal names;
+      filename is the executor's.)
+    check: >
+      cd packages/sdk-ts &&
+      for f in $(grep -rl 'pressureFoldGapWarning' test/ 2>/dev/null); do
+        grep -q 'createRunnerWorker' "$f" && { echo ok; break; };
+      done | grep -q ok
+  - id: AC-4
+    description: >
+      The SDK stays type- and lint-clean and the FULL existing suite — including every pacing/compaction test and the
+      WP-105 durable-loop span tests — is green, proving the change is additive and nothing regressed (no frozen-contract
+      shape change; a run that never folds renders its trace exactly as before, plus the new non-null warning line).
+    check: cd packages/sdk-ts && pnpm exec tsc --noEmit && pnpm exec eslint . && pnpm exec vitest run
+
+budget_usd: 80
+max_steps: 40
+
+# CONTEXT-ROT VEHICLE (WP-207/WP-203): NO soak block — idle soak adds ZERO context and cannot drive a fold. Force real
+#   pacing PRESSURE via the deterministic `debug.contextWindowTokens` seam, ARMED AT LAUNCH from
+#   `CHIKORY_CONTEXT_WINDOW_TOKENS` (the header launch note — NOT a YAML field). Sized to the dogfood-092-proven ~2000
+#   (F-120/F-121 confirmed reaching the workflow). The NEW dimension vs 092 is the ≥6-step HORIZON (`min_durable_steps: 6` +
+#   7 chunks) so resident summaries cross keepLastN=5 and `planCompaction` actually folds (F-122). ⚠️ If the real run PARKS
+#   (`park ≥1`) or STILL never folds, the PART-5 live test still proves the mechanism deterministically and the F-123
+#   warning renders the miss LOUDLY — read it, re-size only if parked, and file a deeper bug if a ≥6-step run still folds 0×.
+pacing:
+  mode: auto
+
+# UNATTENDED (WP-271): operator-free; a genuine ESCALATE seals a resumable FAILED instead of an untimed hang.
+unattended:
+  escalation: seal_resumable_failed
+
+executor:
+  adapter: codex
+  family: openai
+
+judge:
+  family: openai-compat
+  cadence: 2
+  max_cost_share: 0.5
+
+routing:
+  stages:
+    plan: { provider: openai-compat, model: gpt-5.5 }
+    code: { provider: openai-compat, model: gpt-5.5 }
+    review: { provider: openai-compat, model: gpt-5.5 }
+    judge: { provider: openai-compat, model: gemini-3.1-pro-preview }

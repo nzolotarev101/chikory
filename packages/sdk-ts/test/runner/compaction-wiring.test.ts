@@ -20,6 +20,7 @@ import {
   createRunnerWorker,
   createTemporalRunner,
   type ContextBundle,
+  describeCompactionPressure,
   Journal,
   journalPath,
   type RunStatusReport,
@@ -156,7 +157,7 @@ describe.skipIf(address === null)("compaction digest wiring (WP-203 S2)", () => 
     const dataDir = join(tmp, "data");
     const taskQueue = `tq-${randomUUID()}`;
 
-    const wire = await startFakeJudgeWire([judgeForm({ criteria: { "AC-1": false } })], {
+    const wire = await startFakeJudgeWire([judgeForm({ criteria: { "AC-1": true } })], {
       digestContent: "FOLDED DIGEST: pressure-triggered fold of the older summaries.",
     });
     cleanups.push(() => wire.close());
@@ -178,15 +179,16 @@ describe.skipIf(address === null)("compaction digest wiring (WP-203 S2)", () => 
     });
 
     // maxSteps 7 < DEFAULT_COMPACTION_POLICY.triggerAfterSteps (8): the COUNT
-    // cadence can never fire here. The tiny `debug.contextWindowTokens` window
-    // forces every step's pacing decision to `compact`/`park`, so the pressure
-    // cadence (effective trigger = keepLastN = 5) folds once the recall tier
-    // passes 5 — i.e. by step 6, before the count trigger could ever apply.
+    // cadence can never fire here. The small `debug.contextWindowTokens` window
+    // puts the resident context in the COMPACT band while each next summary
+    // still fits (so it does not PARK). Pressure cadence (effective trigger =
+    // keepLastN = 5) folds once the recall tier passes 5, before count cadence.
     const spec = makeJudgedSpec({
       repoUrl,
-      cadence: 100,
+      cadence: 7,
       maxSteps: 7,
-      debug: { contextWindowTokens: 10 },
+      pacing: { mode: "auto" },
+      debug: { contextWindowTokens: 40 },
       routing: {
         stages: {
           plan: { provider: "anthropic", model: "claude-fable-5" },
@@ -198,18 +200,20 @@ describe.skipIf(address === null)("compaction digest wiring (WP-203 S2)", () => 
     });
 
     const handle = await runner.start(spec);
-    await waitFor<RunStatusReport>(
+    const report = await waitFor<RunStatusReport>(
       async () => {
         const r = await handle.status();
         return TERMINAL_STATUSES.includes(r.status) ? r : undefined;
       },
       { what: "pressure-compaction run to reach a terminal status" },
     );
+    expect(report.status).toBe("SUCCESS");
 
     expect(wire.digestHits).toBeGreaterThan(0);
 
     const journal = new Journal(journalPath(dataDir, handle.runId));
     try {
+      const entries = journal.entries();
       const steps = journal.entries("step");
       // The count cadence (>8 summaries) was never reachable in 7 steps.
       expect(steps.length).toBeLessThanOrEqual(7);
@@ -226,10 +230,14 @@ describe.skipIf(address === null)("compaction digest wiring (WP-203 S2)", () => 
       }
 
       // Pacing decisions confirm the run was genuinely under window pressure.
-      const underPressure = journal
+      const pacingActions = journal
         .entries("pacing")
-        .some((e) => (e.payload as { action: string }).action !== "continue");
-      expect(underPressure).toBe(true);
+        .map((e) => (e.payload as { action: string }).action);
+      expect(pacingActions).toContain("compact");
+      expect(pacingActions).not.toContain("park");
+
+      const pressure = describeCompactionPressure(entries);
+      expect(pressure.pacingFolds).toBeGreaterThanOrEqual(1);
     } finally {
       journal.close();
     }

@@ -4,6 +4,16 @@
 > per-run detail lives in [`docs/reports/`](reports/). Content below was moved
 > verbatim out of the living docs on 2026-07-02 (course correction — plan.md §6).
 
+## Archived 2026-07-09 — displaced by dogfood-092 (`run-4481c735`, WP-251 SUCCESS, live-fold missed 3rd time)
+
+- **dogfood-089 — WP-105 DURABLE-LOOP OTel SPANS, the FIRST GENUINE rung-4 CLIMB (`run-c3a1c54e`, 🟢 SUCCESS · 6 steps, $5.19/$80, 2h50m, uncommitted):** an autonomous `soak`-paced `chikory run` (5 durable parks) landed the durable-loop span tree (live-proven parenting). **ladder rung 3→4 CLIMBED; progression ⛔→✅.** 🟡 F-116 (process-local span-parenting Map).
+
+### F-119 / F-120 / F-121 — CLOSED by dogfood-092, detail moved out of plan.md §6 "Top open friction"
+
+- 🔴 **F-121 → launch preflight (post-091 review 2026-07-08, launch-config silent no-op — FIXED):** dogfood-091's journal proves the "armed" `CHIKORY_CONTEXT_WINDOW_TOKENS=1200000` NEVER reached the workflow — `runs.task_json` carries no `debug` key and every pacing entry's denominator is the 400k gpt-5.5 default (`remainingTokens 397891 = 400000 − 2109`), so the run's whole challenge silently no-op'd. Fix landed: `scripts/dogfood.sh` treats every spec-named `CHIKORY_*` env as a LAUNCH CONTRACT (unset → refuse, exit 4), sanity-checks window scale (≥20k → refuse, F-120), echoes each armed seam with its compact/park thresholds, and gained `CHIKORY_PREFLIGHT_ONLY=1` (all guards, no spend); `dogfood-progression.sh --spec --preflight` executes every non-suite AC check against HEAD (BROKEN check → refuse — catches the F-119 class generically; zero RED-on-HEAD ACs → refuse). Confirmed cured by dogfood-092: the seam reached the workflow (`peak window 115%`, first pacing entry 227+1773=2000).
+- 🔴 **F-119 → WP-266 lint (dogfood-091 `run-7fca16bc`, the run-killer, spec-authoring — FIXED):** AC-2 `test "$(grep -rc 'describeCompactionPressure' src/)" -ge 2` is UNSATISFIABLE — `grep -rc <dir>` emits `path:count` per file (multiline) so `test -ge` errors `integer expression expected` → exit 2 on EVERY judge pass → the "AC failed 3+ consecutive → HALT" budget-waste guard guillotined a complete, full-suite-green 4-part delivery. Fix landed: `dogfood-progression.sh` §WP-266 ⛔s any AC piping `grep -c`/`grep -rc` into an arithmetic `test`; sanctioned idiom `grep -roh PAT PATH | wc -l`. Confirmed cured by dogfood-092 (SUCCESS, AC-2 green all passes).
+- 🟡 **F-120 → WP-251 re-run (dogfood-091, launch-config):** the real run never folded (`peak window 1% · compact 0`) — `CHIKORY_CONTEXT_WINDOW_TOKENS=1200000` was sized for codex's ≈400k–900k internal tokens, but the pacing window tracks Chikory's ASSEMBLED-CONTEXT tokens (~3k projected) → never crossed the compact band. Fixed via `=2000` in dogfood-092 (`peak 115% · compact 4`). NOTE: sizing was cured but folds still 0 — see F-122 (horizon, not window).
+
 ## Archived 2026-07-07 — displaced by dogfood-091 (`run-7fca16bc`, WP-251 false-HALT)
 
 - **dogfood-088 — WP-272 SOAK / TIME-PACED DURABLE RE-ENTRY (`run-eeb0d5d7`, 🟡🟢 FAILED-then-hand-landed · 6 steps, $9.10/$80):** durable Temporal-timer re-entry live-proven; **WP-272 mechanism → 🟢, the ⑦ wall-clock axis UNBLOCKED.** ⚠️ autonomous run false-FAILed on a mis-specified AC (🔴 F-114 type-name AC — mine); hand-landed.

@@ -221,6 +221,7 @@ describe("renderTrace (WP-142)", () => {
     expect(text.split("\n")).toContain(
       "        injections 1 · checkpoints 1 · feedback frequency 1/2 steps",
     );
+    expect(text).not.toContain("pressure-steps");
     expect(text).not.toContain("re-entries");
     expect(text).not.toContain("soak-slept");
   });
@@ -316,6 +317,14 @@ describe("renderTrace (WP-142)", () => {
   test("reports compaction fold count only when digest-bearing compaction entries exist", () => {
     const entriesWithCompaction: JournalEntry[] = [
       ...entries,
+      entry(8, "pacing", {
+        pacingEventIndex: 0,
+        atStep: 0,
+        action: "compact",
+        projectedTokens: 180_000,
+        remainingTokens: 20_000,
+        utilization: 0.9,
+      }),
       entry(9, "compaction", {
         tokensBefore: 120_000,
         tokensAfter: 40_000,
@@ -331,8 +340,11 @@ describe("renderTrace (WP-142)", () => {
     ];
     const entriesNoCompaction = entries;
 
-    expect(renderTrace(run, entriesWithCompaction, totals)).toContain("compactions 2 (pacing 1)");
+    expect(renderTrace(run, entriesWithCompaction, totals)).toContain(
+      "compactions 2 (pacing 1) · pressure-steps 1 (unfolded 0)",
+    );
     expect(renderTrace(run, entriesNoCompaction, totals)).not.toContain("compactions");
+    expect(renderTrace(run, entriesNoCompaction, totals)).not.toContain("pressure-steps");
   });
 
   test("reports issues found and changes made", () => {

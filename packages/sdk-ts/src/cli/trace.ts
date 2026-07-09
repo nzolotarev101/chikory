@@ -8,6 +8,7 @@
  */
 import type { RunRow, RunTotals } from "../journal/journal.js";
 import type { JudgePayload, StepPayload } from "../runner/activities.js";
+import { describeCompactionPressure } from "../runner/compaction-pressure.js";
 import { summarizeCompaction } from "../runner/compaction-summary.js";
 import { summarizePacing } from "../runner/pacing-summary.js";
 import type {
@@ -223,6 +224,7 @@ export function renderTrace(run: RunRow, entries: JournalEntry[], totals: RunTot
   const pacingEvents = entries.filter((e) => e.kind === "pacing").length;
   const pacing = summarizePacing(entries);
   const compaction = summarizeCompaction(entries);
+  const compactionPressure = describeCompactionPressure(entries);
   const soak = summarizeSoakTrace(entries);
   const issuesFound = entries.reduce((count, entry) => {
     if (entry.kind !== "judge") return count;
@@ -267,6 +269,10 @@ export function renderTrace(run: RunRow, entries: JournalEntry[], totals: RunTot
     compaction.folds > 0
       ? ` · compactions ${compaction.folds} (pacing ${compaction.pacingFolds})`
       : "";
+  const compactionPressureSummary =
+    compactionPressure.pressureSteps > 0 || compactionPressure.pacingFolds > 0
+      ? ` · pressure-steps ${compactionPressure.pressureSteps} (unfolded ${compactionPressure.unfoldedPressureSteps})`
+      : "";
   const memoryRecalls = totals.memoryRecalls ?? 0;
   const memoryEvictions = totals.memoryEvictions ?? 0;
   const memorySummary =
@@ -278,7 +284,7 @@ export function renderTrace(run: RunRow, entries: JournalEntry[], totals: RunTot
       ? ` · re-entries ${soak.reentries} · soak-slept ${formatDuration(soak.sleptMs)}`
       : "";
   lines.push(
-    `        injections ${injections} · checkpoints ${checkpoints}${seamSummary}${pacingSummary}${compactionSummary}${memorySummary}${soakSummary}${feedback}`,
+    `        injections ${injections} · checkpoints ${checkpoints}${seamSummary}${pacingSummary}${compactionSummary}${compactionPressureSummary}${memorySummary}${soakSummary}${feedback}`,
   );
   lines.push(
     `        issues found ${issuesFound} · changes made ${changesMade} ` +
