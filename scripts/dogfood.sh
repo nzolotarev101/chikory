@@ -9,6 +9,15 @@
 #   bash scripts/dogfood.sh --run|--chain [<spec-path>]
 #   (spec defaults to the latest created spec in examples/dogfood/)
 #
+#   CHIKORY_PREFLIGHT_ONLY=1 devbox run run-dogfood
+#     — run every launch guard (spec lint, AC dry-run, spec-env contract, window
+#       sizing) and exit WITHOUT launching. Zero LLM cost.
+#
+# Launch guards (all before any build/spend; each has a deliberate override env):
+#   exit 3 — WP-266/WP-267 AC hazard (static lint or dynamic dry-run: broken check,
+#            file-pin, bare-word negative grep, or no RED-on-HEAD challenge AC)
+#   exit 4 — F-121 spec-named env unset, or F-120 window sized at executor scale
+#
 # The LAUNCH MODE is now EXPLICIT (--run / --chain), chosen by the operator.
 # The old auto-detection (grep the spec for "chikory chain") was BROKEN: every
 # single-run spec's header warns "NOT `chikory chain`", so the grep matched the
@@ -69,7 +78,7 @@ echo "Dogfooding: Using spec file $SPEC_FILE"
 # deliberate exception: CHIKORY_ALLOW_LOOSE_AC_HAZARD=1.
 if [ -f scripts/dogfood-progression.sh ]; then
   set +e
-  bash scripts/dogfood-progression.sh --spec "$SPEC_FILE"
+  bash scripts/dogfood-progression.sh --spec "$SPEC_FILE" --preflight
   PROGRESSION_RC=$?
   set -e
   echo
@@ -77,13 +86,85 @@ if [ -f scripts/dogfood-progression.sh ]; then
     if [ "${CHIKORY_ALLOW_LOOSE_AC_HAZARD:-}" = "1" ]; then
       echo "⚠️  WP-266 loose-AC lint ⛔ — OVERRIDDEN by CHIKORY_ALLOW_LOOSE_AC_HAZARD=1. Launching anyway." >&2
     else
-      echo "⛔ REFUSING LAUNCH (WP-267): the spec's loose ACs would false-FAIL a correct delivery" >&2
-      echo "   (WP-266 lint above). Fix the AC to grep an OUTCOME symbol as it appears in CODE —" >&2
-      echo "   never \`test -f <new-file>\` and never a bare-word negative grep. Then relaunch." >&2
+      echo "⛔ REFUSING LAUNCH (WP-267): the spec's ACs would false-FAIL a correct delivery or" >&2
+      echo "   enforce no challenge at all (WP-266 lint + dry-run above). Fix the AC to grep an" >&2
+      echo "   OUTCOME symbol as it appears in CODE — never \`test -f <new-file>\`, never a" >&2
+      echo "   bare-word negative grep, never a check that ERRORS instead of failing cleanly," >&2
+      echo "   and at least one AC must be RED on HEAD. Then relaunch." >&2
       echo "   Deliberate override: CHIKORY_ALLOW_LOOSE_AC_HAZARD=1 devbox run run-dogfood" >&2
       exit 3
     fi
   fi
+fi
+
+# 1c. Spec-referenced env contract (F-121, dogfood-091). run-7fca16bc's journal proves the
+# armed `CHIKORY_CONTEXT_WINDOW_TOKENS` seam NEVER reached the workflow (`runs.task_json`
+# carries no `debug` key; the pacing denominator was the 400k model default, not the
+# "armed" 1.2M) — the run's entire challenge silently no-op'd and NOTHING surfaced it.
+# Any CHIKORY_* env the spec text names is therefore a LAUNCH CONTRACT: every one must be
+# exported in the launching shell or the launch is refused at zero LLM cost.
+# Deliberate exception: CHIKORY_ALLOW_MISSING_ENV=1.
+LAUNCHER_INTERNAL_ENVS='^CHIKORY_(ALLOW_LOOSE_AC_HAZARD|ALLOW_MISSING_ENV|ALLOW_WINDOW_SIZE|PREFLIGHT_ONLY)$'
+SPEC_ENVS=$(grep -oE 'CHIKORY_[A-Z0-9_]+' "$SPEC_FILE" | sort -u | grep -vE "$LAUNCHER_INTERNAL_ENVS" || true)
+MISSING_ENVS=""
+for VAR in $SPEC_ENVS; do
+  if [ -z "${!VAR:-}" ]; then
+    MISSING_ENVS="$MISSING_ENVS $VAR"
+  else
+    echo "Setup: spec env armed: $VAR=${!VAR}"
+  fi
+done
+if [ -n "$MISSING_ENVS" ]; then
+  if [ "${CHIKORY_ALLOW_MISSING_ENV:-}" = "1" ]; then
+    echo "⚠️  Spec names unset env(s):$MISSING_ENVS — OVERRIDDEN by CHIKORY_ALLOW_MISSING_ENV=1." >&2
+  else
+    echo "⛔ REFUSING LAUNCH (F-121): the spec names env var(s) that are NOT set in this shell:" >&2
+    echo "  $MISSING_ENVS" >&2
+    echo "   An env-armed challenge seam that is not exported silently NO-OPs (dogfood-091: the" >&2
+    echo "   window seam never reached the workflow, the run never folded, nothing warned)." >&2
+    echo "   Export the var(s) per the spec's launch note, then relaunch." >&2
+    echo "   Deliberate override: CHIKORY_ALLOW_MISSING_ENV=1 devbox run run-dogfood" >&2
+    exit 4
+  fi
+fi
+
+# 1d. F-120 window-sizing sanity (dogfood-091). The pacing window compares Chikory's OWN
+# ASSEMBLED-CONTEXT tokens (projected ≈2.1k–3.0k on run-7fca16bc) against
+# `contextWindowTokens * 0.8` — NOT the executor's internal 400k–900k token burn. A
+# window at executor scale can NEVER fold (091 undershot: 3k/1.2M ≈ 0.25%).
+if [ -n "${CHIKORY_CONTEXT_WINDOW_TOKENS:-}" ]; then
+  W="$CHIKORY_CONTEXT_WINDOW_TOKENS"
+  case "$W" in
+    ''|*[!0-9]*)
+      echo "⛔ REFUSING LAUNCH: CHIKORY_CONTEXT_WINDOW_TOKENS='$W' is not a positive integer." >&2
+      exit 4
+      ;;
+  esac
+  echo "Setup: context-window seam: window=$W tokens → COMPACTS when projected > $((W * 8 / 10)), PARKS when one step's estimate > $W"
+  echo "       (denominator = Chikory's assembled-context tokens, single-digit-k in practice — F-120)."
+  if [ "$W" -ge 20000 ]; then
+    if [ "${CHIKORY_ALLOW_WINDOW_SIZE:-}" = "1" ]; then
+      echo "⚠️  Window $W ≥ 20000 (executor-scale) — OVERRIDDEN by CHIKORY_ALLOW_WINDOW_SIZE=1." >&2
+    else
+      echo "⛔ REFUSING LAUNCH (F-120): CHIKORY_CONTEXT_WINDOW_TOKENS=$W is sized at EXECUTOR scale." >&2
+      echo "   The pacing denominator is Chikory's ASSEMBLED-CONTEXT token count (~2.1k–3.0k" >&2
+      echo "   observed), so a $W-token window never approaches the compact threshold and the" >&2
+      echo "   run cannot fold. Size it a bit above observed-projected × 0.8 (e.g. 2000)." >&2
+      echo "   Deliberate override: CHIKORY_ALLOW_WINDOW_SIZE=1 devbox run run-dogfood" >&2
+      exit 4
+    fi
+  fi
+fi
+
+# 1e. Preflight-only mode: run every launch guard above, then stop WITHOUT building,
+# starting Temporal/proxy, or spending a cent. The one-command answer to "is the next
+# run's hypothesis + challenge actually armed?":
+#   CHIKORY_PREFLIGHT_ONLY=1 [spec envs...] devbox run run-dogfood
+if [ "${CHIKORY_PREFLIGHT_ONLY:-}" = "1" ]; then
+  echo
+  echo "✅ Preflight OK (CHIKORY_PREFLIGHT_ONLY=1) — spec lint, AC dry-run, env contract, and"
+  echo "   window sizing all pass. Not launching."
+  exit 0
 fi
 
 # 2. Rebuild the SDK (stale dist can run old code)

@@ -77,6 +77,13 @@
 #   estimate stays well under 2000 → NO park):
 #      export CHIKORY_CONTEXT_WINDOW_TOKENS=2000   # assembled-context scale, NOT codex's internal 400k–900k (F-120)
 #      devbox run run-dogfood                       # <- `chikory run`; picks the latest spec (this one)
+#   F-121 GUARDED (dogfood-091 post-review): 091's "armed" window NEVER reached the workflow (journal `runs.task_json`
+#   has no `debug` key; denominator was the 400k model default) — the export wasn't in the launching shell and nothing
+#   warned. The launcher now REFUSES (exit 4) when a spec-named CHIKORY_* env is unset, echoes the armed seam with its
+#   compact/park thresholds, and `CHIKORY_PREFLIGHT_ONLY=1 devbox run run-dogfood` dry-runs every guard at $0.
+#   SIZING IS JOURNAL-DERIVED: 091 logged projected 2109→3027, so W=2000 → compact threshold 1600 < proj₀ 2109 → FOLDS
+#   from step 1; a 5000 window (threshold 4000 > peak 3027) would NEVER fold. Post-run, confirm the seam applied:
+#   the first pacing entry's remainingTokens + projectedTokens must equal 2000.
 #   If the real run PARKS (0 folds, `park 1`), RAISE the value; if it never folds (`compact 0`, window% stays ~1%), LOWER it.
 #   The PART-3 LIVE test does NOT need the env — it constructs the spec object directly and sets `debug.contextWindowTokens`
 #   in-object (valid at the TS type level, as `compaction-wiring.test.ts` does), so the deterministic proof is self-contained.

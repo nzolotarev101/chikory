@@ -30,6 +30,12 @@ plan.md work-package slice through Chikory itself. Full operating manual:
   Linted at launch by `scripts/dogfood-progression.sh --spec <file>`; the
   progression verdict over `docs/reports/dogfood-ledger.csv` binds what may
   headline next (DOGFOODING §1.5).
+- **Launch guards (F-119/F-120/F-121, DOGFOODING §4):** at launch every
+  non-suite AC `check` is DRY-RUN against HEAD (a BROKEN check or zero
+  RED-on-HEAD ACs refuses, exit 3), every `CHIKORY_*` env the spec names must
+  be exported (exit 4), and `CHIKORY_CONTEXT_WINDOW_TOKENS` must be
+  assembled-context scale (<20k, exit 4). Preflight everything without
+  spending: `CHIKORY_PREFLIGHT_ONLY=1 devbox run run-dogfood`.
 
 ## Index
 

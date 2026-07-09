@@ -9,8 +9,11 @@
 # COMPUTED verdict over the machine-readable run ledger, not a judgment call.
 #
 # Usage:
-#   bash scripts/dogfood-progression.sh                 # trend report + verdict
-#   bash scripts/dogfood-progression.sh --spec <yaml>   # + lint a candidate spec
+#   bash scripts/dogfood-progression.sh                        # trend report + verdict
+#   bash scripts/dogfood-progression.sh --spec <yaml>          # + lint a candidate spec
+#   bash scripts/dogfood-progression.sh --spec <yaml> --preflight
+#                                       # + launch-strict: ALSO refuse when the dry-run
+#                                       #   finds NO RED-on-HEAD AC (no armed challenge)
 #
 # Data source: docs/reports/dogfood-ledger.csv — one row per terminal run,
 # appended by /dogfood-review phase 4 (columns: run,wp,mode,outcome,steps,
@@ -36,15 +39,22 @@
 #      (DOGFOODING §1.5) — the next headline MUST be class=product.
 #
 # Exit code: 0 = PROGRESSING, 1 = STALLED (callers can gate on it), 2 = usage,
-#            3 = candidate-spec AC lint ⛔ (WP-266: loose AC file-pins / prose-greps).
+#            3 = candidate-spec AC lint ⛔ (WP-266: loose AC file-pins / prose-greps /
+#                broken checks found by the dynamic dry-run; under --preflight also
+#                a spec with zero RED-on-HEAD ACs — no armed challenge).
 
 set -euo pipefail
 
 LEDGER="docs/reports/dogfood-ledger.csv"
 SPEC=""
-if [ "${1:-}" = "--spec" ]; then
-  SPEC="${2:?--spec requires a path}"
-fi
+PREFLIGHT=0
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --spec) SPEC="${2:?--spec requires a path}"; shift 2 ;;
+    --preflight) PREFLIGHT=1; shift ;;
+    *) echo "Usage: $0 [--spec <yaml>] [--preflight]" >&2; exit 2 ;;
+  esac
+done
 
 if [ ! -f "$LEDGER" ]; then
   echo "Error: ledger not found at $LEDGER" >&2
@@ -163,9 +173,9 @@ if [ -n "$SPEC" ]; then
   # anchor on OUTCOME SYMBOLS the goal NAMES — never file-exist-pin a delegated path (F-82,
   # dogfood-075) and never negative-grep a BARE WORD that also matches comments/strings/prose
   # (F-83, dogfood-076: `! grep 'execFile|spawn'` matched the comment "…is spawned").
+  LINT_HIT=0
   if [ "$PRESCRIBED" -eq 0 ]; then
     AC_BLOCK=$(awk '/^acceptance_criteria:/{f=1} f' "$SPEC")
-    LINT_HIT=0
     if printf '%s\n' "$AC_BLOCK" | grep -qE 'test +-[fe] '; then
       echo "⛔ F-82: an AC \`check\` uses \`test -f\`/\`test -e\` — a LOOSE spec must not pin a file"
       echo "    the goal delegates; grep an OUTCOME symbol the goal NAMES instead."
@@ -202,9 +212,96 @@ if [ -n "$SPEC" ]; then
     fi
     if [ "$LINT_HIT" -eq 0 ]; then
       echo "🟢 AC checks: no F-82 file-pin / F-83 prose-grep hazard (WP-266 lint)."
-    else
-      EXIT_FLAG=3
     fi
+  fi
+
+  # ---------- WP-266 dynamic AC dry-run (F-119/F-121 class — EXECUTE every check) ----------
+  # The static patterns above only catch KNOWN bad idioms, and each new class (F-82, F-83,
+  # F-114, F-119) arrived one burned run at a time. Executing every AC `check` against the
+  # CURRENT TREE before any LLM spend is the GENERIC guard — it classifies each check by
+  # what a sound spec must look like BEFORE its delivery exists:
+  #   exit 1  → RED-on-HEAD    🟢 the challenge is armed (a new-work AC must start red)
+  #   exit 0  → GREEN-on-HEAD  ⚠️ can't gate new work (F-90/F-114 false-green hazard,
+  #             unless it is a deliberate regression guard)
+  #   exit ≥2 → BROKEN CHECK   ⛔ the check ERRORS instead of failing cleanly (F-119's
+  #             `integer expression expected` was exit 2) — it can NEVER gate correctly;
+  #             fatal in EVERY context (also catches multi-line folds the static regex,
+  #             which matches one physical line, cannot see)
+  # Suite-shaped checks (vitest/tsc/eslint/pnpm/pytest/ruff) are NOT executed — they run
+  # minutes and are legitimately green pre-delivery (regression ACs); labeled VERIFY-SUITE.
+  # Under --preflight (the scripts/dogfood.sh launch path) a spec whose executable ACs are
+  # ALL green/absent is REFUSED: zero RED-on-HEAD ACs means the run has NO enforced
+  # challenge — the F-121 lesson generalized (a challenge that silently isn't armed).
+  echo
+  echo "### AC dry-run against the current tree (WP-266 dynamic)"
+  AC_TSV=""
+  if command -v node >/dev/null 2>&1; then
+    AC_TSV=$(node -e '
+      const fs = require("fs"), path = require("path");
+      const yaml = require(path.resolve("packages/sdk-ts/node_modules/yaml"));
+      const spec = yaml.parse(fs.readFileSync(process.argv[1], "utf8"));
+      for (const ac of spec.acceptance_criteria ?? []) {
+        const check = String(ac.check ?? "").replace(/\s+/g, " ").trim();
+        if (check) console.log(`${ac.id}\t${check}`);
+      }' "$SPEC" 2>/dev/null || true)
+  fi
+  if [ -z "$AC_TSV" ]; then
+    echo "⚠️  Could not extract AC checks (node/yaml unavailable or spec unparsable) — dry-run SKIPPED."
+  else
+    RED_ACS=0
+    EXECUTED_ACS=0
+    while IFS="$(printf '\t')" read -r AC_ID AC_CHECK; do
+      [ -z "$AC_ID" ] && continue
+      if printf '%s' "$AC_CHECK" | grep -qE '(vitest|tsc --noEmit|eslint|pnpm (run|exec|-r)|pytest|ruff)'; then
+        echo "ℹ️  $AC_ID: VERIFY-SUITE — not dry-run (minutes-long; legitimately green pre-delivery)."
+        continue
+      fi
+      ERR_FILE=$(mktemp)
+      set +e
+      # alarm(2) survives execve, so the 60s watchdog rides into bash; SIGALRM → exit 142.
+      perl -e 'alarm 60; exec "bash", "-c", $ARGV[0]' "$AC_CHECK" >/dev/null 2>"$ERR_FILE"
+      AC_RC=$?
+      set -e
+      EXECUTED_ACS=$((EXECUTED_ACS + 1))
+      if [ "$AC_RC" -eq 0 ]; then
+        echo "⚠️  $AC_ID: GREEN-on-HEAD — already passes with NO delivery (F-90/F-114 false-green"
+        echo "    hazard unless this AC is a deliberate regression guard)."
+      elif [ "$AC_RC" -eq 1 ]; then
+        RED_ACS=$((RED_ACS + 1))
+        echo "🟢 $AC_ID: RED-on-HEAD (clean exit 1) — challenge armed."
+      elif [ "$AC_RC" -eq 142 ]; then
+        echo "⚠️  $AC_ID: TIMEOUT (60s) — dry-run inconclusive; keep non-suite checks fast."
+      else
+        STDERR_SNIP=$(head -c 200 "$ERR_FILE" | tr '\n' ' ')
+        echo "⛔ $AC_ID: BROKEN CHECK (exit $AC_RC${STDERR_SNIP:+; stderr: $STDERR_SNIP}) — the check"
+        echo "    ERRORS instead of failing cleanly (F-119 class): it can NEVER pass, and 3+"
+        echo "    consecutive reds convert the judge's budget-waste HALT guard into a guaranteed"
+        echo "    false FAILED. Fix the check before launching."
+        LINT_HIT=1
+      fi
+      rm -f "$ERR_FILE"
+    done <<EOF_AC
+$AC_TSV
+EOF_AC
+    if [ "$EXECUTED_ACS" -eq 0 ]; then
+      echo "⚠️  No executable (non-suite) AC to dry-run — the challenge is UNVERIFIABLE pre-launch."
+    elif [ "$RED_ACS" -eq 0 ]; then
+      if [ "$PREFLIGHT" -eq 1 ]; then
+        echo "⛔ NO CHALLENGE ARMED: every executable AC is ALREADY GREEN on the current tree —"
+        echo "    the run could seal SUCCESS having delivered NOTHING. A sound new-work AC must"
+        echo "    start RED (exit 1) and flip green only when the delivery lands. Refusing."
+        LINT_HIT=1
+      else
+        echo "⚠️  No RED-on-HEAD AC — at launch (--preflight) this REFUSES: the run would have no"
+        echo "    enforced challenge. (Advisory here: the tree may already contain the delivery.)"
+      fi
+    else
+      echo "🟢 Challenge armed: $RED_ACS RED-on-HEAD AC(s) will flip green only when the delivery lands."
+    fi
+  fi
+
+  if [ "$LINT_HIT" -eq 1 ]; then
+    EXIT_FLAG=3
   fi
 fi
 

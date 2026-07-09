@@ -82,8 +82,14 @@ Highest prior = **F-118** (dogfood-090). Continue at **F-119**.
 WP-251 must be re-run with both defects fixed. The next spec `dogfood-092` re-delivers the same LOOSE WP-251 goal with (1) AC-2 rewritten to the occurrence-count idiom (`grep -roh … | wc -l`), and (2) the compact-band window sized to the assembled-context scale so the real run folds. Launch:
 
 ```sh
-export CHIKORY_CONTEXT_WINDOW_TOKENS=5000   # assembled-context scale (~3k projected) → crosses compact, below park
+export CHIKORY_CONTEXT_WINDOW_TOKENS=2000   # journal-derived (see correction below); 5000 would NEVER fold
 devbox run run-dogfood                      # picks the latest spec: dogfood-092
 ```
 
 Commit all working-tree edits first — the workspace clones HEAD.
+
+## Post-review correction (2026-07-08) — F-121, a THIRD defect this review missed
+
+- 🔴 **F-121 — the "armed" window seam never reached the workflow at all.** This report's header ("launched with `CHIKORY_CONTEXT_WINDOW_TOKENS=1200000`") and F-120's 1.2M-denominator analysis are both **wrong**: the run journal proves the env was never in the launching shell. Evidence: `runs.task_json` contains **no `debug` key**, and every pacing entry's denominator is the 400k gpt-5.5 table default (`remainingTokens 397891 = 400000 − 2109`, utilization `0.0052725 = 2109/400000`). Env propagation through `devbox run` is verified working, so the export simply wasn't made in the shell that launched. **Nothing surfaced the silent no-op** — the run's whole challenge was void from step 0 and the review still reasoned about a 1.2M window.
+- **Fix landed (hand-fix, TASK-PROTOCOL §4):** `scripts/dogfood.sh` now treats every spec-named `CHIKORY_*` env as a launch contract (unset → refuse, exit 4), refuses executor-scale windows ≥20k (F-120), echoes each armed seam with its compact/park thresholds, and supports `CHIKORY_PREFLIGHT_ONLY=1` (all guards, no spend). `dogfood-progression.sh --spec --preflight` additionally DRY-RUNS every non-suite AC check against HEAD (BROKEN check or zero RED-on-HEAD ACs → refuse) — the generic form of the F-119 lesson. Regression: `scripts/test-dogfood-ac-preflight.sh`.
+- **Corrected dogfood-092 sizing (from this run's real pacing entries, projected 2109→3027):** `CHIKORY_CONTEXT_WINDOW_TOKENS=2000` — compact threshold 0.8×2000 = 1600 < proj₀ 2109 → folds from step 1; park needs a single-step estimate > 2000 (a ~8000-char summary), comfortably absent. The 5000 previously recommended here has threshold 4000 > the 3027 peak → **zero folds**, a guaranteed re-miss of the headline KPI.
