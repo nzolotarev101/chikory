@@ -173,8 +173,11 @@ export interface JudgeEvidence {
 
 /** The LLM fills this form; CODE computes the verdict from it (reward-hacking guard, judge.md). */
 export interface JudgeForm {
-  criterionResults: Array<{ id: string; pass: boolean; justification: string }>;
-  rubricResults: Array<{ id: string; pass: boolean; justification: string }>;
+  // infraFailed (additive, WP-263(b)): the item's judge-executed check DID NOT
+  // COMPLETE (per-check cap kill) — infra failure, not a code red; the
+  // deterministic verdict's rule-3/5 stuck/flip-flop history skips it.
+  criterionResults: Array<{ id: string; pass: boolean; justification: string; infraFailed?: boolean }>;
+  rubricResults: Array<{ id: string; pass: boolean; justification: string; infraFailed?: boolean }>;
   concerns: string[];
 }
 

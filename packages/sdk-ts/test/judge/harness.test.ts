@@ -16,6 +16,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import { createMemoryArtifactStore } from "../../src/artifacts/index.js";
 import {
+  applyCheckOverrides,
   baseCheckpointId,
   runJudgePass,
   STANDING_RUBRIC,
@@ -356,5 +357,49 @@ describe("runJudgePass (WP-131)", () => {
 
     expect(verdict.form.criterionResults.map((r) => r.id)).toEqual(["AC-1"]);
     expect(verdict.kind).toBe("PROCEED");
+  });
+});
+
+describe("applyCheckOverrides infra classification (WP-263(b))", () => {
+  const criteria = [{ id: "AC-1", description: "checked criterion", check: "true" }];
+  const llmForm: JudgeForm = {
+    criterionResults: [{ id: "AC-1", pass: true, justification: "LLM says done" }],
+    rubricResults: STANDING_RUBRIC.map((r) => ({ id: r.id, pass: true, justification: "ok" })),
+    concerns: [],
+  };
+  const checkRun = {
+    criterionId: "AC-1",
+    command: "true",
+    output: "",
+    durationMs: 1,
+  };
+
+  it("an INFRA-failed check fails the criterion conservatively but carries the flag", () => {
+    const result = applyCheckOverrides(llmForm, criteria, STANDING_RUBRIC, [
+      { ...checkRun, exitCode: 1, infraFailed: true },
+    ]);
+    if ("error" in result) throw new Error(result.error);
+    const ac1 = result.form.criterionResults.find((r) => r.id === "AC-1");
+    expect(ac1?.pass).toBe(false); // never seal SUCCESS on an unproven check
+    expect(ac1?.infraFailed).toBe(true);
+    expect(ac1?.justification).toContain("DID NOT COMPLETE");
+    // tests_pass distinguishes "infra died" from "code red".
+    const testsPass = result.form.rubricResults.find((r) => r.id === "tests_pass");
+    expect(testsPass?.pass).toBe(false);
+    expect(testsPass?.justification).toContain("DID NOT COMPLETE (infra");
+    expect(testsPass?.infraFailed).toBe(true);
+  });
+
+  it("a completed red check stays a plain code red (no flag)", () => {
+    const result = applyCheckOverrides(llmForm, criteria, STANDING_RUBRIC, [
+      { ...checkRun, exitCode: 1, infraFailed: false },
+    ]);
+    if ("error" in result) throw new Error(result.error);
+    const ac1 = result.form.criterionResults.find((r) => r.id === "AC-1");
+    expect(ac1?.pass).toBe(false);
+    expect(ac1?.infraFailed).toBeUndefined();
+    expect(ac1?.justification).toContain("exited 1");
+    const testsPass = result.form.rubricResults.find((r) => r.id === "tests_pass");
+    expect(testsPass?.infraFailed).toBeUndefined();
   });
 });

@@ -295,6 +295,8 @@ class JudgeFormResult(ContractModel):
     id: str
     pass_: bool = Field(alias="pass")
     justification: str
+    # WP-263(b): the judge-executed check did not complete (infra, not code red).
+    infra_failed: bool | None = None
 
 
 class JudgeForm(ContractModel):

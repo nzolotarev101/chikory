@@ -283,6 +283,9 @@ function criteriaHistoryFromJournal(journal: Journal): Record<string, boolean[]>
     const payload = entry.payload as VerdictPayload & { source?: string };
     if (payload.source === "runner") continue;
     for (const r of payload.verdict.form.criterionResults) {
+      // WP-263(b): an INFRA-failed result (check killed at its cap) is
+      // inconclusive — it never enters the rule-3/5 sequence.
+      if (r.infraFailed === true) continue;
       (history[r.id] ??= []).push(r.pass);
     }
   }

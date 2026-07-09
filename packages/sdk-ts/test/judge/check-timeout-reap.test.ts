@@ -58,6 +58,8 @@ describe("judge check timeout reaping (WP-264)", () => {
       expect(collected.checkRuns[0].exitCode).not.toBe(0);
       expect(collected.checkRuns[0].output).toContain("[check timed out after 1000ms]");
       expect(collected.checkRuns[0].durationMs).toBeLessThan(10_000);
+      // WP-263(b): the kill is classified INFRA-failed, not a code red.
+      expect(collected.checkRuns[0].infraFailed).toBe(true);
     },
     30_000,
   );
@@ -78,5 +80,6 @@ describe("judge check timeout reaping (WP-264)", () => {
     expect(collected.checkRuns[0].exitCode).toBe(0);
     expect(collected.checkRuns[0].output).toContain("reap-ok");
     expect(collected.checkRuns[0].output).not.toContain("check timed out");
+    expect(collected.checkRuns[0].infraFailed).toBe(false);
   });
 });

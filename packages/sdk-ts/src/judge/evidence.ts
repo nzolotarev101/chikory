@@ -39,6 +39,13 @@ export interface CheckRun {
   /** Combined stdout+stderr, tail-bounded. */
   output: string;
   durationMs: number;
+  /**
+   * WP-263(b): the check DID NOT COMPLETE (killed at the per-check cap) — an
+   * infrastructure failure, not evidence the code is red. The verdict's
+   * rule-3 stuck-criterion logic must not count it (the check-level analog
+   * of WP-233's infra/substantive classification; dogfood-072 F-76/F-79).
+   */
+  infraFailed: boolean;
 }
 
 export interface CollectedEvidence {
@@ -102,6 +109,7 @@ async function runCheck(
     exitCode,
     output: bound(output, 64 * 1024),
     durationMs: bounded.durationMs,
+    infraFailed: bounded.timedOut,
   };
 }
 

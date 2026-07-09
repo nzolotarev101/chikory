@@ -369,6 +369,8 @@ const JudgeFormItemSchema = z
     id: z.string().min(1),
     pass: z.boolean(),
     justification: z.string(),
+    // WP-263(b): the judge-executed check did not complete (infra, not code red).
+    infraFailed: z.boolean().optional(),
   })
   .strict();
 

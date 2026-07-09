@@ -310,8 +310,13 @@ export interface JudgeEvidence {
  * in CONTRACTS.md §4, implemented in `judge/verdict.ts` in P1).
  */
 export interface JudgeForm {
-  criterionResults: Array<{ id: string; pass: boolean; justification: string }>;
-  rubricResults: Array<{ id: string; pass: boolean; justification: string }>;
+  /**
+   * `infraFailed` (additive, WP-263(b)): the item's judge-executed check DID
+   * NOT COMPLETE (per-check cap kill) — an infrastructure failure, not a code
+   * red; the deterministic verdict's stuck-criterion history skips it.
+   */
+  criterionResults: Array<{ id: string; pass: boolean; justification: string; infraFailed?: boolean }>;
+  rubricResults: Array<{ id: string; pass: boolean; justification: string; infraFailed?: boolean }>;
   concerns: string[];
 }
 

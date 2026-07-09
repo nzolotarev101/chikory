@@ -70,9 +70,15 @@ export function computeVerdict(
   }
 
   // Rules 3/5 need the full per-criterion sequence including this verdict.
+  // WP-263(b): an INFRA-failed result (check killed at its cap — the check
+  // infrastructure died, not the code) is inconclusive and does not extend
+  // the sequence: three hung checks must not read as a stuck criterion.
   const sequences = form.criterionResults.map((r) => ({
     id: r.id,
-    history: [...(criteriaHistory[r.id] ?? []), r.pass],
+    history:
+      r.infraFailed === true
+        ? [...(criteriaHistory[r.id] ?? [])]
+        : [...(criteriaHistory[r.id] ?? []), r.pass],
   }));
 
   // Rule 3 — same criterion failed by ≥3 consecutive verdicts → HALT.

@@ -116,10 +116,18 @@ export function applyCheckOverrides(
   for (const criterion of criteria) {
     const check = checks.get(criterion.id);
     if (check) {
+      // WP-263(b): a check killed at its cap is INFRA-failed — it proves the
+      // check infrastructure died, not that the code is red. It still fails
+      // the criterion (conservative: never seal SUCCESS on an unproven
+      // check), but the flag rides the form so the deterministic verdict's
+      // stuck-criterion history skips it (dogfood-072 F-76/F-79).
       criterionResults.push({
         id: criterion.id,
         pass: check.exitCode === 0,
-        justification: `judge-executed check \`${check.command}\` exited ${check.exitCode}`,
+        justification: check.infraFailed
+          ? `judge-executed check \`${check.command}\` DID NOT COMPLETE (killed at the per-check cap) — infra failure, not a code red`
+          : `judge-executed check \`${check.command}\` exited ${check.exitCode}`,
+        ...(check.infraFailed ? { infraFailed: true } : {}),
       });
       continue;
     }
@@ -135,13 +143,25 @@ export function applyCheckOverrides(
   for (const item of rubric) {
     if (item.id === RUBRIC_TESTS_PASS && checkRuns.length > 0) {
       const failed = checkRuns.filter((r) => r.exitCode !== 0);
+      const infraFailed = failed.filter((r) => r.infraFailed);
+      const codeFailed = failed.filter((r) => !r.infraFailed);
       rubricResults.push({
         id: item.id,
         pass: failed.length === 0,
         justification:
           failed.length === 0
             ? `all ${checkRuns.length} judge-executed checks exited 0`
-            : `${failed.length}/${checkRuns.length} judge-executed checks failed: ${failed.map((r) => r.criterionId).join(", ")}`,
+            : [
+                codeFailed.length > 0
+                  ? `${codeFailed.length}/${checkRuns.length} judge-executed checks failed: ${codeFailed.map((r) => r.criterionId).join(", ")}`
+                  : "",
+                infraFailed.length > 0
+                  ? `${infraFailed.length}/${checkRuns.length} checks DID NOT COMPLETE (infra, killed at the per-check cap): ${infraFailed.map((r) => r.criterionId).join(", ")}`
+                  : "",
+              ]
+                .filter((part) => part.length > 0)
+                .join("; "),
+        ...(codeFailed.length === 0 && infraFailed.length > 0 ? { infraFailed: true } : {}),
       });
       continue;
     }

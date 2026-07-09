@@ -94,6 +94,31 @@ describe("computeVerdict (CONTRACTS.md §4)", () => {
     expect(decision.rationale).toContain("AC-2");
   });
 
+  it("rule 3 (WP-263(b)): an INFRA-failed result is inconclusive — it does not extend the stuck sequence", () => {
+    // Two real fails on record; the current fail is a check that DID NOT
+    // COMPLETE (killed at the per-check cap). Without the flag this is the
+    // 3rd consecutive fail → HALT; with it, the sequence stays at 2.
+    const infraFail: JudgeForm["criterionResults"][number] = {
+      id: "AC-1",
+      pass: false,
+      justification: "judge-executed check DID NOT COMPLETE (killed at the per-check cap)",
+      infraFailed: true,
+    };
+    const decision = computeVerdict(form({ criterionResults: [infraFail] }), {
+      "AC-1": [false, false],
+    });
+    expect(decision.kind).toBe("PROCEED");
+    expect(decision.rationale).toContain("unmet criteria: AC-1");
+  });
+
+  it("rule 3 (WP-263(b)): a real fail after infra noise still HALTs on genuine 3-in-a-row history", () => {
+    const decision = computeVerdict(form({ criterionResults: [fail("AC-1")] }), {
+      // History holds only CONCLUSIVE results (infra results never enter it).
+      "AC-1": [false, false],
+    });
+    expect(decision.kind).toBe("HALT");
+  });
+
   it("rule 5: criterion flip-flopping twice → ESCALATE with escalateReason", () => {
     // history t,f,t,f + current pass → windows (t,f,t) and (t,f,t) = 2 flip-flops.
     const decision = computeVerdict(form({ criterionResults: [pass("AC-1")] }), {
