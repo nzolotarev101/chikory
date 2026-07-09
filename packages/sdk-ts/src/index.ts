@@ -167,6 +167,13 @@ export {
   type StepDeadlineInput,
   type StepDeadlineStatus,
 } from "./runner/step-deadline.js";
+export {
+  estimateKilledStepUsage,
+  isBlindMeteredStep,
+  type BlindMeterStepFacts,
+  type KilledStepUsageEstimate,
+  type ObservedStepUsage,
+} from "./runner/killed-step-usage.js";
 export { summarizePacing, type PacingSummary } from "./runner/pacing-summary.js";
 export { summarizeCompaction, type CompactionSummary } from "./runner/compaction-summary.js";
 export { DIGEST_SYSTEM_PROMPT, buildDigestMessages } from "./runner/compaction-prompt.js";

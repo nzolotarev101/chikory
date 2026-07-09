@@ -50,6 +50,11 @@ import type {
 } from "../types.js";
 import { buildDigestMessages } from "./compaction-prompt.js";
 import { planCompaction } from "./compaction.js";
+import {
+  estimateKilledStepUsage,
+  isBlindMeteredStep,
+  type KilledStepUsageEstimate,
+} from "./killed-step-usage.js";
 import { artifactsDir, journalPath, runDir, sharedArtifactsDir, workspaceDir } from "./paths.js";
 import {
   collectWorkspaceRepos,
@@ -95,6 +100,12 @@ export interface StepPayload {
   instruction: string;
   planItem: string;
   record: StepRecord;
+  /**
+   * WP-515 (F-96): present when a blind-metered step's usage was estimated
+   * from the run's observed per-tool-call rate — the record's tokens/cost
+   * carry the estimate (with `costEstimated: true`), this notes the basis.
+   */
+  usageEstimate?: { basis: "per_tool_call_rate"; perToolCallTokens: number };
 }
 
 export interface VerdictPayload {
@@ -482,18 +493,48 @@ export function createRunnerActivities(deps: RunnerActivityDeps) {
             createCodeRouter: () => createRouter(codeRouting, deps.routerOptions),
           });
 
-          const record = await adapter.runStep({
+          let record = await adapter.runStep({
             workspaceDir: workspaceDir(deps.dataDir, input.runId),
             instruction: input.instruction,
             context: input.context,
             limits: input.limits,
           });
 
+          // WP-515 (F-96): a step killed at the cap (or failed before its
+          // usage event) meters $0/0 tokens despite real tool-call work —
+          // the CG-2 budget would undercount. Estimate its usage from the
+          // run's observed per-tool-call rate BEFORE journaling, so the
+          // ledger, both budget gates, and the trace see the real spend.
+          let usageEstimate: KilledStepUsageEstimate | null = null;
+          if (isBlindMeteredStep(record)) {
+            const priorSteps = journal.entries("step").map((entry) => {
+              const prior = (entry.payload as StepPayload).record;
+              return { toolCalls: prior.toolCalls, tokens: prior.tokens, costUsd: prior.costUsd };
+            });
+            usageEstimate = estimateKilledStepUsage(record.toolCalls, priorSteps);
+            if (usageEstimate !== null) {
+              record = {
+                ...record,
+                tokens: usageEstimate.tokens,
+                costUsd: usageEstimate.costUsd,
+                costEstimated: true,
+              };
+            }
+          }
+
           const payload: StepPayload = {
             stepIndex: input.stepIndex,
             instruction: input.instruction,
             planItem: input.context.planItem,
             record,
+            ...(usageEstimate !== null
+              ? {
+                  usageEstimate: {
+                    basis: usageEstimate.basis,
+                    perToolCallTokens: usageEstimate.perToolCallTokens,
+                  },
+                }
+              : {}),
           };
           journal.appendOnce(
             { field: "stepIndex", value: input.stepIndex },
