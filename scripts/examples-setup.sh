@@ -84,6 +84,37 @@ EOF
 git -C "$brownfield" add -A
 git -C "$brownfield" commit -qm "init: stats lib with a failing test"
 
+# ── signals-lab: empty greenfield playground for the dogfood-094 endurance ──
+#    rehearsal (a fine-grained reactive-signals library built from scratch;
+#    judge runs `node --test`; zero deps). A genuinely different project from
+#    Chikory itself — the long-horizon workload that drives real compaction
+#    folds under pacing (NOT idle soak) + a mid-run kill→resume.
+signals="$out/signals-lab"
+init_repo "$signals"
+cat > "$signals/package.json" <<'EOF'
+{
+  "name": "signals-lab",
+  "version": "0.0.0",
+  "type": "module",
+  "description": "A fine-grained reactive signals core, built from scratch.",
+  "scripts": {
+    "test": "node --test"
+  }
+}
+EOF
+# NB: keep this README free of the public API symbol names the dogfood-094 ACs
+#     grep for (the primitives) — otherwise a bare seed false-greens AC-2.
+cat > "$signals/README.md" <<'EOF'
+# signals-lab
+
+Empty greenfield playground for the dogfood-094 endurance rehearsal — the agent
+builds a fine-grained reactivity core from scratch here, one bounded increment
+per durable step. Pure ESM, zero dependencies; the judge runs `node --test`.
+EOF
+git -C "$signals" add -A
+git -C "$signals" commit -qm "init: empty signals-lab playground"
+
 echo "sample repos ready:"
 echo "  $greenfield"
 echo "  $brownfield   (npm test fails — that's the task)"
+echo "  $signals   (empty — dogfood-094 builds a reactive-signals core here)"

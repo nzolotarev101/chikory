@@ -1,6 +1,6 @@
 import { describe, expect, test } from "vitest";
 
-import { describeCompactionPressure } from "../../src/index.js";
+import { describeCompactionPressure, pressureFoldGapWarning } from "../../src/index.js";
 import type { JournalEntry } from "../../src/index.js";
 
 function entry(idx: number, kind: JournalEntry["kind"], payload: unknown): JournalEntry {
@@ -30,6 +30,7 @@ describe("describeCompactionPressure", () => {
       pressureSteps: 3,
       pacingFolds: 2,
       unfoldedPressureSteps: 1,
+      firstPacingFoldStep: 1,
     });
   });
 
@@ -38,6 +39,84 @@ describe("describeCompactionPressure", () => {
       pressureSteps: 0,
       pacingFolds: 0,
       unfoldedPressureSteps: 0,
+      firstPacingFoldStep: null,
     });
+  });
+
+  test("returns null first pacing fold step for an unfolded pressure journal", () => {
+    const entries: JournalEntry[] = [
+      entry(0, "pacing", { atStep: 0, action: "compact" }),
+      entry(1, "pacing", { atStep: 1, action: "park" }),
+      entry(2, "compaction", { stepIndex: 1, trigger: "count" }),
+    ];
+
+    expect(describeCompactionPressure(entries)).toEqual({
+      pressureSteps: 2,
+      pacingFolds: 0,
+      unfoldedPressureSteps: 2,
+      firstPacingFoldStep: null,
+    });
+  });
+
+  test("keeps unfolded pressure loud without a first pacing fold step", () => {
+    const entries: JournalEntry[] = [
+      entry(0, "pacing", { atStep: 0, action: "compact" }),
+      entry(1, "pacing", { atStep: 1, action: "park" }),
+      entry(2, "compaction", { stepIndex: 1, trigger: "count" }),
+    ];
+
+    const description = describeCompactionPressure(entries);
+
+    expect(description.firstPacingFoldStep).toBeNull();
+    expect(pressureFoldGapWarning(description)).not.toBeNull();
+  });
+
+  test("uses the paired pacing event step for live compaction payloads", () => {
+    const entries: JournalEntry[] = [
+      entry(0, "pacing", { atStep: 4, action: "compact" }),
+      entry(1, "compaction", { foldedCount: 1, trigger: "pacing" }),
+    ];
+
+    expect(describeCompactionPressure(entries)).toEqual({
+      pressureSteps: 1,
+      pacingFolds: 1,
+      unfoldedPressureSteps: 0,
+      firstPacingFoldStep: 4,
+    });
+  });
+});
+
+describe("pressureFoldGapWarning", () => {
+  test("returns a warning for pressure steps without pacing folds", () => {
+    expect(
+      pressureFoldGapWarning({
+        pressureSteps: 3,
+        pacingFolds: 0,
+        unfoldedPressureSteps: 3,
+        firstPacingFoldStep: null,
+      }),
+    ).toBe("pressure fired for 3 step(s), but no pacing folds were recorded");
+  });
+
+  test("returns null when pressure produced a pacing fold", () => {
+    expect(
+      pressureFoldGapWarning({
+        pressureSteps: 3,
+        pacingFolds: 1,
+        unfoldedPressureSteps: 2,
+        firstPacingFoldStep: 1,
+      }),
+    ).toBeNull();
+  });
+
+  test("returns null when there is no pressure", () => {
+    expect(
+      pressureFoldGapWarning({
+        pressureSteps: 0,
+        pacingFolds: 0,
+        unfoldedPressureSteps: 0,
+        firstPacingFoldStep: null,
+      }),
+    ).toBeNull();
   });
 });

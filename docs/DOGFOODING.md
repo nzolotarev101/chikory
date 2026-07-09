@@ -5,19 +5,19 @@ This is the complete operating manual for executing Phase 2+ work packages
 task spec for a WP (every field explained), how to launch, supervise, and
 recover a run, and how to land the result as a normal PR.
 
-**Status (2026-07-07, bounded — update discipline: REPLACE this block, ≤15 lines;
+**Status (2026-07-09, bounded — update discipline: REPLACE this block, ≤15 lines;
 displaced prose moves verbatim to [`PLAN-HISTORY.md`](PLAN-HISTORY.md); per-run detail:
 `docs/reports/dogfood-NNN.md`; queue + course correction: `plan.md` §6).**
-Latest: dogfood-092 — **WP-251 LIVE COMPACTION-FOLD OBSERVATION re-run (the ⑧ P2-exit context-rot axis), SUCCESS but LIVE FOLD MISSED a 3rd time** (`run-4481c735-d3b2-4885-b755-d2ad2c73a551`,
-`docs/reports/dogfood-092.md`). 🟢 **SUCCESS · 4 steps · $2.93/$80 · 9m 46s · uncommitted (harvest byte-IDENTICAL).** The SAME 4-part delivery (`describeCompactionPressure`
-pressure-join reducer + `chikory trace` render + deterministic live Temporal fold test) landed CLEAN + full-suite-green (781 passed), and CURED both 091 launch bugs —
-window finally sized right (`peak window 115% · compact 4`, first pacing entry 227+1773=2000): **F-119 (AC idiom), F-120/F-121 (window sizing + launch-preflight env
-contract) all CONFIRMED CURED**, and no false-HALT fired (WP-268 root-span fix held on the part-4 empty verify diff). **BUT the real run STILL folded 0×**
-(`pressure-steps 4 (unfolded 4)`, 0 compaction entries): a 4-step run never accumulates `> keepLastN=5` resident summaries, so `planCompaction` (`compaction.ts:22`)
-folds nothing on EVERY compact decision — 🟡 **F-122**, the 3rd distinct miss (053-park / 091-undershoot / 092-too-short). HORIZON length, not window size, is the last
-knob. 🟡 **F-123** — no operator warning when a sized window folds nothing (silent green); track-B trace hint. Progression **⛔ STALLED** (ladder rung 4 × 3 headlines).
-**NEXT: dogfood-093 — RE-RUN WP-251** with the SAME ~2000 window but `min_durable_steps: 6-7` so resident summaries cross keepLastN=5 and a real `trigger:"pacing"` fold
-fires by ~step 6 (matches the deterministic test's maxSteps-7 / fold-at-step-6 behavior). See §7, §1.5, §1.4, §3. (dogfood-091 F-119/F-120/F-121 detail → PLAN-HISTORY.)
+Latest: dogfood-093 — **WP-251 LIVE COMPACTION-FOLD — OBSERVED at last (the ⑧ P2-exit context-rot axis, 4th attempt)** (`run-60a32aff-0b81-4cbd-9d39-7eb50b8b9561`,
+`docs/reports/dogfood-093.md`). 🟢 **SUCCESS · 7 steps · $4.53/$80 · 20m 52s · uncommitted (harvest byte-IDENTICAL).** The F-122 fix — SAME ~2000 window but
+`min_durable_steps: 6` + 7 chunks — pushed resident summaries past `keepLastN=5`, so `planCompaction` **FOLDED TWICE**: the FIRST dogfood RUN to journal a live
+`trigger:"pacing"` compaction (`compactions 2 (pacing 2) · first pacing fold step 5 · pressure-steps 7 (unfolded 5)`). Net-new increment landed too — pure
+`pressureFoldGapWarning` (F-123 loud-on-silent-fold) + additive `firstPacingFoldStep` on `describeCompactionPressure`, rendered additively in `chikory trace`; 790 TS
+green, 6 files, 0 rollbacks/escalations. **WP-251 → 🟢 LIVE-PROVEN; the ⑧ P2-exit context-rot axis is CLOSED** (arc: 053-park / 091-undershoot / 092-too-short / 093-FOLD).
+🟡 **F-124** — the `compaction` journal entry has no `stepIndex`, so `firstPacingFoldStep` is inferred from the adjacent pacing decision (reducer's `stepIndex` branch is
+dead); track-B stamp-at-emit fix under WP-251. **NEXT (launch-gated): the P2 EXIT-GATE 24h+ brownfield endurance run** — every mechanism it needs is now live (soak
+parks WP-272, window-park WP-250, LIVE compaction WP-251, durable OTel spans WP-105, run-level self-heal WP-519/520); it must COMBINE real multi-step brownfield work
+(context grows → folds) + long wall-clock parks + ≥1 suspend/resume, unattended. See §7, §1.5, §1.4, §3. (dogfood-092 detail → PLAN-HISTORY.)
 
 Related docs: [`docs/spec/task-spec.md`](spec/task-spec.md) (schema
 reference) · [`docs/TASK-PROTOCOL.md`](TASK-PROTOCOL.md) (WP etiquette, §7 is

@@ -8,7 +8,10 @@
  */
 import type { RunRow, RunTotals } from "../journal/journal.js";
 import type { JudgePayload, StepPayload } from "../runner/activities.js";
-import { describeCompactionPressure } from "../runner/compaction-pressure.js";
+import {
+  describeCompactionPressure,
+  pressureFoldGapWarning,
+} from "../runner/compaction-pressure.js";
 import { summarizeCompaction } from "../runner/compaction-summary.js";
 import { summarizePacing } from "../runner/pacing-summary.js";
 import type {
@@ -225,6 +228,7 @@ export function renderTrace(run: RunRow, entries: JournalEntry[], totals: RunTot
   const pacing = summarizePacing(entries);
   const compaction = summarizeCompaction(entries);
   const compactionPressure = describeCompactionPressure(entries);
+  const compactionPressureWarning = pressureFoldGapWarning(compactionPressure);
   const soak = summarizeSoakTrace(entries);
   const issuesFound = entries.reduce((count, entry) => {
     if (entry.kind !== "judge") return count;
@@ -271,7 +275,10 @@ export function renderTrace(run: RunRow, entries: JournalEntry[], totals: RunTot
       : "";
   const compactionPressureSummary =
     compactionPressure.pressureSteps > 0 || compactionPressure.pacingFolds > 0
-      ? ` · pressure-steps ${compactionPressure.pressureSteps} (unfolded ${compactionPressure.unfoldedPressureSteps})`
+      ? ` · pressure-steps ${compactionPressure.pressureSteps} (unfolded ${compactionPressure.unfoldedPressureSteps}` +
+        (compactionPressure.firstPacingFoldStep === null
+          ? ")"
+          : ` · first pacing fold step ${compactionPressure.firstPacingFoldStep})`)
       : "";
   const memoryRecalls = totals.memoryRecalls ?? 0;
   const memoryEvictions = totals.memoryEvictions ?? 0;
@@ -286,6 +293,9 @@ export function renderTrace(run: RunRow, entries: JournalEntry[], totals: RunTot
   lines.push(
     `        injections ${injections} · checkpoints ${checkpoints}${seamSummary}${pacingSummary}${compactionSummary}${compactionPressureSummary}${memorySummary}${soakSummary}${feedback}`,
   );
+  if (compactionPressureWarning !== null) {
+    lines.push(`        warning: ${compactionPressureWarning}`);
+  }
   lines.push(
     `        issues found ${issuesFound} · changes made ${changesMade} ` +
       `(issues:changes ${issuesFound}:${changesMade})`,

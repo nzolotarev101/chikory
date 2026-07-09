@@ -23,6 +23,7 @@ import {
   describeCompactionPressure,
   Journal,
   journalPath,
+  pressureFoldGapWarning,
   type RunStatusReport,
 } from "../../src/index.js";
 import {
@@ -216,10 +217,14 @@ describe.skipIf(address === null)("compaction digest wiring (WP-203 S2)", () => 
       const entries = journal.entries();
       const steps = journal.entries("step");
       // The count cadence (>8 summaries) was never reachable in 7 steps.
+      expect(steps.length).toBeGreaterThanOrEqual(6);
       expect(steps.length).toBeLessThanOrEqual(7);
 
       const compactions = journal.entries("compaction");
       expect(compactions.length).toBeGreaterThan(0);
+      expect(
+        compactions.some((e) => (e.payload as { trigger?: string }).trigger === "pacing"),
+      ).toBe(true);
 
       // Every fold here was driven by the pacing pressure signal, not the count.
       for (const e of compactions) {
@@ -238,6 +243,8 @@ describe.skipIf(address === null)("compaction digest wiring (WP-203 S2)", () => 
 
       const pressure = describeCompactionPressure(entries);
       expect(pressure.pacingFolds).toBeGreaterThanOrEqual(1);
+      expect(pressure.firstPacingFoldStep).not.toBeNull();
+      expect(pressureFoldGapWarning(pressure)).toBeNull();
     } finally {
       journal.close();
     }

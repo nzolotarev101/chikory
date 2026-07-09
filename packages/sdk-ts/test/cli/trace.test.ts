@@ -222,8 +222,15 @@ describe("renderTrace (WP-142)", () => {
       "        injections 1 · checkpoints 1 · feedback frequency 1/2 steps",
     );
     expect(text).not.toContain("pressure-steps");
+    expect(text).not.toContain("warning: pressure fired");
     expect(text).not.toContain("re-entries");
     expect(text).not.toContain("soak-slept");
+  });
+
+  test("zero-fold run keeps the compaction sub-line byte-equivalent", () => {
+    expect(renderTrace(run, entries, totals).split("\n")).toContain(
+      "        injections 1 · checkpoints 1 · feedback frequency 1/2 steps",
+    );
   });
 
   test("reports soak re-entry counters only when soak control events exist", () => {
@@ -341,10 +348,64 @@ describe("renderTrace (WP-142)", () => {
     const entriesNoCompaction = entries;
 
     expect(renderTrace(run, entriesWithCompaction, totals)).toContain(
-      "compactions 2 (pacing 1) · pressure-steps 1 (unfolded 0)",
+      "compactions 2 (pacing 1) · pressure-steps 1 (unfolded 0 · first pacing fold step 0)",
     );
     expect(renderTrace(run, entriesNoCompaction, totals)).not.toContain("compactions");
     expect(renderTrace(run, entriesNoCompaction, totals)).not.toContain("pressure-steps");
+  });
+
+  test("warns when pressure fired but no pacing fold was recorded", () => {
+    const entriesWithUnfoldedPressure: JournalEntry[] = [
+      ...entries,
+      entry(9, "pacing", {
+        pacingEventIndex: 0,
+        atStep: 0,
+        action: "compact",
+        projectedTokens: 180_000,
+        remainingTokens: 20_000,
+        utilization: 0.9,
+      }),
+      entry(10, "pacing", {
+        pacingEventIndex: 1,
+        atStep: 1,
+        action: "park",
+        projectedTokens: 220_000,
+        remainingTokens: -20_000,
+        utilization: 1.1,
+      }),
+    ];
+    const rendered = renderTrace(run, entriesWithUnfoldedPressure, totals);
+
+    expect(rendered.split("\n")).toContain(
+      "        warning: pressure fired for 2 step(s), but no pacing folds were recorded",
+    );
+  });
+
+  test("surfaces the first pacing fold step in the folded pressure footer", () => {
+    const entriesWithFoldedPressure: JournalEntry[] = [
+      ...entries,
+      entry(9, "pacing", {
+        pacingEventIndex: 0,
+        atStep: 0,
+        action: "compact",
+        projectedTokens: 180_000,
+        remainingTokens: 20_000,
+        utilization: 0.9,
+      }),
+      entry(10, "compaction", {
+        stepIndex: 0,
+        tokensBefore: 120_000,
+        tokensAfter: 40_000,
+        digestRef: ref("context_snapshot", "pacing digest"),
+        trigger: "pacing",
+      }),
+    ];
+    const rendered = renderTrace(run, entriesWithFoldedPressure, totals);
+
+    expect(rendered.split("\n")).toContain(
+      "        injections 1 · checkpoints 1 · pacing events 1 · peak window 90% (compact 1 · park 0) · compactions 1 (pacing 1) · pressure-steps 1 (unfolded 0 · first pacing fold step 0) · feedback frequency 1/2 steps",
+    );
+    expect(rendered).not.toContain("warning: pressure fired");
   });
 
   test("reports issues found and changes made", () => {

@@ -1,0 +1,222 @@
+# Dogfood-094: P2 EXIT-GATE REHEARSAL — a genuine long-horizon `chikory run` that BUILDS A REAL PROJECT under live
+#   pacing (real compaction folds, NOT idle soak) AND survives a mid-run kill→resume. De-risks the launch-gated 24h run.
+#
+# WHY THIS RUN, AND WHY IT IS NOT THE 24h HEADLINE (user direction, 2026-07-09).
+#   dogfood-093 (`run-60a32aff`) closed the LAST P2-exit MECHANISM axis — the first live `trigger:"pacing"` compaction
+#   fold (`compactions 2 (pacing 2)`). Every mechanism the P2 exit gate names is now live: soak/park endurance (WP-272),
+#   window-park (WP-250), LIVE compaction (WP-251), durable-loop OTel spans (WP-105), run-level self-heal (WP-519/520).
+#   The binding progression gate says the next headline IS the P2 exit-gate 24h+ brownfield run. That is a real-day /
+#   real-repo commitment — so per explicit user direction we REHEARSE the COMBINED behaviour first, cheaply, before
+#   committing the full day: one genuine multi-hour `chikory run` that exercises compaction folds + a mid-run kill→resume
+#   TOGETHER, on a REAL workload.
+#
+# ⚠️ THE HARD CONSTRAINT (user, verbatim intent): the run must NOT weirdly / intentionally SLEEP. There is NO `soak`
+#   block. The horizon comes from GENUINE WORK across many durable steps — building a real library increment by
+#   increment — and pacing exists to KEEP SPEND BOUNDED (fewer resent tokens per step once history folds), not to burn
+#   wall-clock idling. dogfood-090 proved idle soak adds ZERO context (`peak window 1%`, 0 folds); this run instead grows
+#   context by actually writing code, so the fold is EARNED by real accumulation.
+#
+# THE WORKLOAD — a completely different project from Chikory itself (a real use case Chikory would be used for): build,
+#   from scratch, a FINE-GRAINED REACTIVE SIGNALS CORE (the Solid / Preact-signals / Svelte-5-runes / Angular-signals
+#   family — very current). It is genuinely hard (glitch-free diamond propagation, topological update order, lazy memo
+#   recomputation, cleanup on re-run) so a competent agent can PLAUSIBLY FAIL a chunk (§1.1), it decomposes into ~11
+#   ordered interdependent increments each with crisp `node --test` cases (context ACCUMULATES — the whole graph is
+#   net-new and every later increment reasons over the earlier ones), and it is pure ESM with ZERO dependencies so the
+#   judge check is a fast, deterministic `node --test` (well under the 120 s cap). Built in the greenfield playground
+#   `.chikory-examples/signals-lab` (git-ignored; the `examples/hello-greenfield.yaml` pattern), NOT in the Chikory tree.
+#
+# CLASS / LADDER. This is a HARNESS-ENDURANCE REHEARSAL, not a product-WP headline and not the numeric-rung climb — it
+#   validates the durability + context-rot PILLARS end-to-end on a real workload before the 24h exit-gate run. It does
+#   not advance a plan.md §6 product WP (the deliverable is a throwaway greenfield lib in `.chikory-examples/`); it is
+#   sanctioned explicitly by the user as the de-risking step the gate's 24h headline depends on. Record it in the ledger
+#   as a rehearsal (class=meta by primary surface — `.chikory-examples/` scaffold — even though it stresses product
+#   pillars); it does NOT reset the harness-meta headline cap because it is a user-sanctioned exit-gate rehearsal, not a
+#   friction-driven harness fix. The 24h product headline still follows.
+#
+# Format: LOOSE (greenfield — the goal states the OUTCOME + ordered increments + constraints; file/module layout, exact
+#   test names, and internal design are the executor's, F-82/F-83). ACs pin "done" via the net-new PUBLIC API symbols the
+#   goal NAMES (`createSignal`/`createEffect`/`createMemo`/`batch`/`untrack` — all absent on the seed's HEAD, which is
+#   only README + package.json → a recursive grep cannot false-green, F-90/F-114-safe) + a passing `node --test` suite.
+# Ladder-rung: 4
+# Thesis-KPI: COMBINED P2-EXIT REHEARSAL — one genuine long-horizon `chikory run` on a REAL greenfield build FOLDS its
+#   context under LIVE pacing (≥1 `trigger:"pacing"` compaction, earned by real accumulation, NO idle soak) AND survives
+#   a deliberate mid-run `kill -9` → `chikory resume` with ZERO re-execution of sealed steps, unattended — so the 24h
+#   exit-gate run's two riskiest behaviours (fold-under-growth + suspend/resume) are proven together, cheaply, first.
+#
+# ✅ PREREQUISITES — DO ALL THREE BEFORE LAUNCH.
+#   1. Seed the greenfield target (idempotent): `devbox run -- bash scripts/examples-setup.sh` — creates/refreshes
+#      `.chikory-examples/signals-lab` (an empty git repo: README + `package.json` `{"type":"module","test":"node --test"}`).
+#      Confirm: `git -C .chikory-examples/signals-lab log --oneline` shows the init commit.
+#   2. Commit everything in the Chikory repo first — the run clones Chikory HEAD to resolve the spec, and the workspace
+#      clones the TARGET repo's HEAD; an unseeded/dirty target derails the run.
+#   3. Arm the pacing window from the env (F-121 — the strict task-spec parser rejects a `debug:` key, so this is a
+#      HOST-SIDE env, NOT a YAML field), sized to force folds from GENUINE growth without parking a single step:
+#         export CHIKORY_CONTEXT_WINDOW_TOKENS=4000    # assembled-context scale; ~5+ accumulated summaries cross the
+#                                                      # 0.8×4000=3200 compact band (093 saw proj 2.6k→4.2k, no park at 2000),
+#                                                      # while one step's estimate stays < 4000 → NO park.
+#         devbox run run-dogfood                       # `chikory run`; picks the latest spec (this one). Verify the glob
+#                                                      # resolves to dogfood-094 before launching.
+#      `CHIKORY_PREFLIGHT_ONLY=1 devbox run run-dogfood` dry-runs every launch guard at $0 first.
+#
+# ⚠️ THE MID-RUN KILL→RESUME DRILL (the suspend/resume half — a MANUAL durability action, not a spec field). Watch the
+#   run (`--watch` or `pnpm chikory trace <run-id>`); AFTER a fold has fired and a checkpoint has sealed (≈ step 5–7,
+#   once `chikory trace <run-id>` totals show `compactions ≥1 (pacing ≥1)`), `kill -9` the worker process mid-step, then:
+#         devbox run -- pnpm chikory resume <run-id>
+#   Confirm on resume: the sealed pre-kill checkpoints are NOT re-executed (journal byte-identical up to the kill; cost of
+#   pre-kill steps unchanged = replay, not re-run), and the run continues to SUCCESS. This is the rehearsal's whole point
+#   alongside the fold.
+#
+# ⚠️ POST-RUN CONFIRM (what makes this a PASS): `pnpm chikory trace <run-id>` totals must show BOTH (a) `compactions N
+#   (pacing M)` with M ≥ 1 and `pressure-steps K (unfolded U)` with U < K (a real fold fired, `pressureFoldGapWarning`
+#   silent, `first pacing fold step` rendered — the dogfood-093 telemetry), AND (b) evidence of the durable resume (the
+#   checkpoint chain continues past the kill with no duplicate step entries). If the run PARKS (`park ≥1`), a single
+#   step's estimate exceeded 4000 — RAISE the window (e.g. 6000) and re-run; NEVER add a soak block.
+#
+# ⚠️ DETERMINISM / SCOPE. This run writes ONLY inside `.chikory-examples/signals-lab` (the greenfield target it clones).
+#   It touches NO Chikory source. Do NOT weaken or relocate any Chikory harness behaviour; the pacing/compaction
+#   decisions stay where they are — this run merely EXERCISES them on a real workload.
+
+name: dogfood-094-p2exit-rehearsal-signals-greenfield
+goal: >
+  Build, FROM SCRATCH, a small but real fine-grained REACTIVE SIGNALS library (the Solid / Preact-signals family) in the
+  greenfield playground, one bounded increment per durable step, so the run accumulates a genuine multi-step horizon whose
+  growing context FOLDS under live pacing pressure (NOT idle soak) and survives a mid-run kill→resume. Pure ESM, ZERO
+  runtime dependencies, tested with `node:test` / `node --test`. Deliver in ELEVEN ordered, dependency-ordered increments,
+  ONE per durable step, each adding DISTINCT non-trivial working code + tests (the non-hollow horizon, F-100/WP-270), so
+  resident step summaries accumulate past the compaction fold threshold and a real `trigger:"pacing"` fold fires mid-run:
+
+    * PART 1 — `createSignal(initial)`: returns a read accessor + a write setter (e.g. `[get, set]`); `get()` returns the
+      current value, `set(next)` updates it. Unit-tested: read initial, read-after-write, multiple independent signals.
+
+    * PART 2 — `createEffect(fn)`: runs `fn` immediately and RE-RUNS it whenever a signal READ inside it later changes
+      (automatic dependency tracking via a current-observer stack). Tested: an effect runs once on creation, re-runs on a
+      tracked signal write, and does NOT re-run for an untracked signal.
+
+    * PART 3 — `createMemo(fn)`: a cached derived signal — `fn` recomputes when its tracked deps change; reading the memo
+      elsewhere subscribes to it. Tested: memo reflects source changes; an effect reading the memo re-runs when the memo
+      changes; the memo does not recompute when unrelated signals change.
+
+    * PART 4 — `batch(fn)`: defers effect/memo re-runs until `fn` returns, so multiple writes inside a batch trigger each
+      dependent effect AT MOST ONCE. Tested: two writes in a batch → one effect run; nested batches flush once at the end.
+
+    * PART 5 — GLITCH-FREE DIAMOND: given `a = signal`, `b = memo(a)`, `c = memo(a)`, `d = memo(b + c)`, a single write to
+      `a` updates `d` EXACTLY ONCE with fully-consistent inputs (no intermediate/glitched value). Tested with a diamond
+      fixture asserting the derived effect runs once per source write and never observes a half-updated state.
+
+    * PART 6 — `untrack(fn)`: read signals inside `fn` WITHOUT subscribing the current observer. Tested: an effect that
+      reads one signal tracked and another via `untrack` re-runs only for the tracked one.
+
+    * PART 7 — CLEANUP / `onCleanup(fn)`: an effect can register cleanup callbacks that run before its next re-run and on
+      disposal. Tested: cleanup runs before each re-run and exactly once on dispose.
+
+    * PART 8 — DISPOSAL: `createEffect` (or a root/owner) returns a `dispose()` that stops all future re-runs and runs
+      pending cleanups. Tested: after dispose, a tracked write does NOT re-run the effect.
+
+    * PART 9 — NESTED effects + ownership: an effect created inside another effect is disposed when the OUTER effect
+      re-runs (no leaked inner subscriptions). Tested: outer re-run disposes the previous inner effect (cleanup fired,
+      no double-subscription).
+
+    * PART 10 — EQUALITY / dedup: `createSignal(initial, { equals })` (default `Object.is`) — a `set` to an equal value
+      does NOT notify dependents. Tested: setting the same value fires no effect; a custom `equals` suppresses/allows
+      notification as specified.
+
+    * PART 11 — README + FULL-SUITE REGRESSION: a short README documenting the public API, and the ENTIRE `node --test`
+      suite green — every earlier increment's tests still pass, proving the library is coherent end-to-end.
+
+  CONSTRAINTS: pure ESM (`import`/`export`, `.mjs` or `"type":"module"` `.js`); ZERO runtime dependencies (no npm installs
+  — `node:test` + `node:assert` only); deterministic (no wall-clock, no randomness, no real timers in assertions —
+  F-115); each PART lands its own tests and does NOT break an earlier PART's tests. Do NOT front-load a later PART into an
+  earlier step. If a verification step reports a failing `node --test`, READ the failure and fix the IMPLEMENTATION — do
+  NOT weaken or delete an assertion.
+
+repos:
+  - url: .chikory-examples/signals-lab
+    writable: true
+
+# LONG-HORIZON DRIVER: 11 ordered chunks, ONE PART each, so `decideWorkChunk` hands the executor EXACTLY one bounded
+#   increment per durable step. `min_durable_steps: 10` forces ≥10 sealed checkpoints each carrying a distinct non-trivial
+#   diff (the non-hollow horizon) AND ≥10 resident summaries so the pressure-driven fold crosses keepLastN=5 mid-run —
+#   the fold is EARNED by real code growth, not manufactured by idling.
+bounded_work_unit:
+  min_durable_steps: 10
+  directive: >
+    Advance EXACTLY the ONE numbered PART named by this step's chunk — implement it and its `node --test` cases, then stop
+    and let the durable checkpoint seal. Do NOT front-load a later PART. Do NOT declare the whole run complete until every
+    PART has landed with passing tests.
+  work_chunks:
+    - name: part-1-create-signal
+      directive: "PART 1 ONLY: createSignal(initial) → [get, set]; get returns current, set updates. Tests: initial, read-after-write, independent signals."
+    - name: part-2-create-effect
+      directive: "PART 2 ONLY: createEffect(fn) runs immediately + re-runs on a tracked signal write (auto-tracking via a current-observer stack). Tests: runs once, re-runs on write, no re-run for untracked."
+    - name: part-3-create-memo
+      directive: "PART 3 ONLY: createMemo(fn) cached derived signal; recomputes on tracked-dep change; reading it subscribes. Tests: reflects source, effect-on-memo re-runs, no recompute on unrelated write."
+    - name: part-4-batch
+      directive: "PART 4 ONLY: batch(fn) defers dependent re-runs until fn returns (each effect at most once). Tests: two writes → one effect run; nested batches flush once."
+    - name: part-5-diamond-glitch-free
+      directive: "PART 5 ONLY: glitch-free diamond (a→b,c→d=b+c): one write to a updates d exactly once with consistent inputs. Diamond fixture: derived effect runs once per source write, never a half-updated state."
+    - name: part-6-untrack
+      directive: "PART 6 ONLY: untrack(fn) reads without subscribing the current observer. Test: effect re-runs only for the tracked signal, not the untracked one."
+    - name: part-7-oncleanup
+      directive: "PART 7 ONLY: onCleanup(fn) — cleanups run before each re-run and once on dispose. Tests: cleanup before re-run + exactly once on dispose."
+    - name: part-8-dispose
+      directive: "PART 8 ONLY: dispose() stops future re-runs + flushes pending cleanups. Test: after dispose, a tracked write does not re-run the effect."
+    - name: part-9-nested-ownership
+      directive: "PART 9 ONLY: a nested effect is disposed when the outer effect re-runs (no leaked inner subscriptions). Test: outer re-run disposes the prior inner effect."
+    - name: part-10-equality-dedup
+      directive: "PART 10 ONLY: createSignal(initial,{equals}) (default Object.is) — set to an equal value does not notify. Tests: same value fires nothing; custom equals suppresses/allows as specified."
+    - name: part-11-readme-and-regression
+      directive: "PART 11 ONLY: write a short README documenting the public API and run the FULL node --test suite; if anything fails, fix the IMPLEMENTATION, never weaken a test. Confirm every earlier PART's tests stay green."
+
+acceptance_criteria:
+  - id: AC-1
+    description: >
+      The full reactive-signals test suite passes end-to-end under Node's built-in runner (the coherence + correctness
+      gate — every PART's `node:test` cases, including the glitch-free diamond, green together). cwd = the run workspace
+      (the cloned greenfield target).
+    check: node --test
+  - id: AC-2
+    description: >
+      All five public reactive primitives the goal NAMES are present in the source — `createSignal`, `createEffect`,
+      `createMemo`, `batch`, `untrack` (all absent on the seed HEAD → a recursive grep cannot false-green, F-90; FUNCTION
+      symbols, not type-name tokens, F-114; occurrence-count idiom yields a single integer, F-119). Layout is the
+      executor's (F-82/F-83).
+    check: >
+      test "$(grep -rIoh --exclude-dir=.git --exclude-dir=node_modules --exclude-dir=.chikory --exclude-dir=.chikory-examples -e createSignal -e createEffect -e createMemo -e batch -e untrack . | sort -u | wc -l | tr -d ' ')" -ge 5
+  - id: AC-3
+    description: >
+      A substantial, real `node:test` suite exists (not a token stub) — at least 8 `test(` cases across the library, so
+      the horizon is non-hollow and AC-1 is meaningful. (F-119-safe: a single integer via `wc -l`.)
+    check: >
+      test "$(grep -rIoh --exclude-dir=.git --exclude-dir=node_modules --exclude-dir=.chikory --exclude-dir=.chikory-examples 'test(' . | wc -l | tr -d ' ')" -ge 8
+
+budget_usd: 40
+max_steps: 60
+
+# CONTEXT-ROT VEHICLE (WP-203/WP-207): NO soak block — the horizon and the fold are EARNED by real multi-step work, not
+#   idling. Live pacing PRESSURE comes from the deterministic `CHIKORY_CONTEXT_WINDOW_TOKENS` seam (armed at launch, NOT a
+#   YAML field), sized to 4000 so ≥5 accumulated real summaries cross the compact band and `planCompaction` folds mid-run
+#   (the dogfood-093 ≥keepLastN=5 lesson), while one step's estimate stays under 4000 (NO park). Pacing also BOUNDS SPEND:
+#   once history folds, fewer tokens are resent per step. If a step PARKS, raise the window; do NOT idle-sleep.
+pacing:
+  mode: auto
+
+# UNATTENDED (WP-271): operator-free autonomy; a genuine ESCALATE seals a resumable FAILED instead of an untimed hang.
+#   The mid-run kill→resume is a MANUAL durability drill on top (see header), not this policy.
+unattended:
+  escalation: seal_resumable_failed
+
+executor:
+  adapter: codex
+  family: openai
+
+judge:
+  family: openai-compat
+  cadence: 2
+  max_cost_share: 0.5
+
+routing:
+  stages:
+    plan: { provider: openai-compat, model: gpt-5.5 }
+    code: { provider: openai-compat, model: gpt-5.5 }
+    review: { provider: openai-compat, model: gpt-5.5 }
+    judge: { provider: openai-compat, model: gemini-3.1-pro-preview }
