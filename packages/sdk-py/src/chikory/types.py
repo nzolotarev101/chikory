@@ -29,9 +29,12 @@ JournalEntryKind = Literal[
     "compaction",
     "pacing",
     "terminal",
+    "seam",
+    "remediation",
     "plan",
     "plan_verdict",
     "node_started",
+    "node_replanned",
     "node_sealed",
 ]
 PlanVerdictKind = Literal["PROCEED", "REVISE", "ESCALATE"]

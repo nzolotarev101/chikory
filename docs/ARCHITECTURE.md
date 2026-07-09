@@ -74,12 +74,17 @@ chikory run task.yaml
      e. If stepIndex % N == 0 or milestone: Judge pass (activity, journaled)
         - PROCEED  → continue
         - ROLLBACK → git reset to last PROCEED checkpoint, journal the fork, continue with judge feedback in context
-        - HALT     → terminal FAILED-with-checkpoint (resumable after human review)
-        - ESCALATE → workflow waits on approval signal (P1: process waits; P2: durable sleep, zero compute)
+        - HALT     → remediation-before-HALT (WP-519, ADR-009 D3): judge diagnosis → brief, rollback to
+                     last-good, ONE bounded re-judged retry; still stuck → terminal RESUMABLE FAILED (WP-520)
+        - ESCALATE → workflow waits on approval signal (P1: process waits; P2: durable sleep, zero compute);
+                     unattended policy seals RESUMABLE FAILED instead of parking
      f. Acceptance criteria all green per judge → terminal SUCCESS
-  4. Terminal: journal sealed with explicit SUCCESS/FAILED — never ambiguous (CG-1)
+  4. Terminal: journal sealed with explicit SUCCESS/FAILED — never ambiguous (CG-1); a FAILED seal is
+     marked resumable (healable — remediation exhausted / unattended seal) or dead (WP-520, ADR-009 D4)
 
 chikory resume <run-id>   → Temporal replays journaled steps from memoized results (zero duplicate LLM spend), continues at 3
+                            on a RESUMABLE FAILED seal: re-starts the workflow over the same journal — reopen journaled,
+                            failure evidence + remediation brief carried into the next step, fresh heal budget (WP-520)
 chikory trace <run-id>    → renders journal: steps, costs, tokens, verdicts, rationales, checkpoints
 chikory inject <run-id> … → journaled correction, enters context at next step (P2)
 ```

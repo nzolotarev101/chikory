@@ -36,6 +36,16 @@ interface TerminalPayload {
   status: string;
   reason?: string;
   lastCheckpoint?: string;
+  /** WP-520 (ADR-009 D4): this FAILED seal is healable — `chikory resume` re-enters it. */
+  resumable?: boolean;
+}
+
+/** journal-format.md §3 `remediation` entry (WP-519, ADR-009 D3). */
+interface RemediationTracePayload {
+  remediationIndex: number;
+  atStep: number;
+  trigger: string;
+  rollbackTo?: string;
 }
 
 interface ControlEventPayload {
@@ -237,10 +247,12 @@ export function renderTrace(run: RunRow, entries: JournalEntry[], totals: RunTot
     }
   }
   const timeline = timelineTokens.join(" ");
+  const remediationSummary =
+    (totals.remediations ?? 0) > 0 ? ` · remediations ${totals.remediations}` : "";
   lines.push(
     `totals: decisions ${totals.steps} · judge passes ${totals.judgePasses} ` +
       `($${totals.judgeCostUsd.toFixed(2)}, ${(totals.judgeCostShare * 100).toFixed(1)}%) · ` +
-      `rollbacks ${totals.rollbacks} · escalations ${totals.escalations}`,
+      `rollbacks ${totals.rollbacks} · escalations ${totals.escalations}${remediationSummary}`,
   );
   const feedback =
     totals.judgePasses > 0
@@ -274,13 +286,16 @@ export function renderTrace(run: RunRow, entries: JournalEntry[], totals: RunTot
   );
   lines.push(`        components over time: ${timeline}`);
 
-  const terminal = entries.find((e) => e.kind === "terminal");
+  // A reopened resumable-FAILED run (WP-520) may hold several terminal
+  // entries — the LAST one is the current seal.
+  const terminal = [...entries].reverse().find((e) => e.kind === "terminal");
   if (terminal) {
     const payload = terminal.payload as TerminalPayload;
     if (payload.status === "FAILED" && payload.reason) {
       lines.push(
         `failed: ${payload.reason}` +
-          (payload.lastCheckpoint ? ` (last checkpoint ${payload.lastCheckpoint})` : ""),
+          (payload.lastCheckpoint ? ` (last checkpoint ${payload.lastCheckpoint})` : "") +
+          (payload.resumable === true ? " — resumable: chikory resume re-enters this seal" : ""),
       );
     }
   }
@@ -587,11 +602,21 @@ export function formatEntryLine(entry: JournalEntry): string {
         `${dim}(${formatTokens(payload.projectedTokens)} proj)${reset}`
       );
     }
+    case "remediation": {
+      const payload = entry.payload as RemediationTracePayload;
+      return (
+        `[${ts}] 🩹 remediation attempt ${payload.remediationIndex + 1} @ step ${payload.atStep + 1} — ${payload.trigger}` +
+        (payload.rollbackTo ? ` ${dim}(rolled back to ${payload.rollbackTo})${reset}` : "")
+      );
+    }
     case "terminal": {
       const payload = entry.payload as TerminalPayload;
       const statusColor = payload.status === "SUCCESS" ? green : red;
       const statusIcon = payload.status === "SUCCESS" ? "🏁" : "⚠️";
-      return `[${ts}] ${statusIcon} terminal ${statusColor}${bold}${payload.status}${reset}${payload.reason ? ` — ${payload.reason}` : ""}`;
+      return (
+        `[${ts}] ${statusIcon} terminal ${statusColor}${bold}${payload.status}${reset}${payload.reason ? ` — ${payload.reason}` : ""}` +
+        (payload.resumable === true ? ` ${yellow}(resumable)${reset}` : "")
+      );
     }
     default:
       return `[${ts}] ${entry.kind}`;

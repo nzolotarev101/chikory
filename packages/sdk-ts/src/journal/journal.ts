@@ -141,6 +141,16 @@ export class Journal {
       .run(status, new Date().toISOString());
   }
 
+  /**
+   * Reopen a resumable-FAILED run (WP-520, ADR-009 D4): flip the run row back
+   * to RUNNING so status/list stop reporting the stale seal. The terminal
+   * ENTRY stays — history is never rewritten; the paired reopen
+   * `control_event` marks the boundary a later re-seal appends after.
+   */
+  reopenRun(): void {
+    this.db.prepare("UPDATE runs SET status = 'RUNNING', ended_at = NULL").run();
+  }
+
   append(input: AppendInput): JournalEntry {
     this.db.exec("BEGIN IMMEDIATE");
     try {
@@ -246,6 +256,8 @@ interface TerminalPayload {
   status: string;
   reason?: string;
   lastCheckpoint?: string;
+  /** WP-520 (ADR-009 D4): this FAILED seal is healable — `chikory resume` re-enters it. */
+  resumable?: boolean;
 }
 
 interface VerdictPayload {
@@ -279,8 +291,12 @@ export function reportFromJournal(journal: Journal): RunStatusReport | undefined
     const payload = lastVerdictEntry.payload as VerdictPayload;
     report.lastVerdict = { kind: payload.verdict.kind, atStep: payload.atStep };
   }
-  const terminal = journal.entries("terminal")[0];
-  if (terminal) {
+  // A reopened resumable-FAILED run (WP-520) may carry more than one terminal
+  // entry — the LAST one is the current seal, and it only counts while the
+  // run row still says FAILED (reopenRun flips it back to RUNNING).
+  const terminals = journal.entries("terminal");
+  const terminal = terminals[terminals.length - 1];
+  if (terminal && run.status === "FAILED") {
     const payload = terminal.payload as TerminalPayload;
     if (payload.status === "FAILED") {
       report.failure = {
@@ -298,6 +314,8 @@ export interface RunTotals {
   judgePasses: number;
   rollbacks: number;
   escalations: number;
+  /** WP-519 heal attempts (ADR-009 D3) journaled as `remediation` entries. */
+  remediations?: number;
   memoryRecalls?: number;
   memoryEvictions?: number;
   costUsd: number;
@@ -347,6 +365,7 @@ export function runTotals(journal: Journal): RunTotals {
     judgePasses: judgeEntries.length,
     rollbacks: verdictKinds.filter((k) => k === "ROLLBACK").length,
     escalations: verdictKinds.filter((k) => k === "ESCALATE").length,
+    remediations: journal.entries("remediation").length,
     memoryRecalls: memoryCounters.recalls,
     memoryEvictions: memoryCounters.evicted,
     costUsd,

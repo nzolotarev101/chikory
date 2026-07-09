@@ -65,6 +65,11 @@ import {
 } from "../runner/memory-pointer.js";
 import { isCompletionMilestone } from "./judge-trigger.js";
 import { decideEscalationWait } from "./escalation-wait.js";
+import {
+  buildCriterionFeedback,
+  buildRemediationBrief,
+  decideRemediation,
+} from "./remediation.js";
 import { decideSoakDelay } from "./soak.js";
 import { decideStepForcing } from "./step-forcing.js";
 import { decideWorkChunk } from "./work-chunk.js";
@@ -190,6 +195,14 @@ export async function agentLoop(spec: TaskSpec): Promise<RunStatus> {
   const pendingApprovals: ApproveDecision[] = [];
   const checkpoints: Checkpoint[] = [];
   let consumedWorkChunks = 0;
+  // WP-519 (ADR-009 D3): bounded heal state — attempts used since the last
+  // terminal seal (the bound), the global journal index (idempotency key,
+  // keeps counting across resumable-FAILED reopenings), and whether the NEXT
+  // step is a remediation attempt that must be re-judged off-cadence.
+  let remediationAttempts = 0;
+  let remediationIndexBase = 0;
+  let remediationPending = false;
+  let lastRemediationBrief: string | undefined;
 
   setHandler(cancelSignal, () => {
     cancelRequested = true;
@@ -226,6 +239,10 @@ export async function agentLoop(spec: TaskSpec): Promise<RunStatus> {
   async function seal(
     terminal: "SUCCESS" | "FAILED" | "CANCELLED",
     reason?: string,
+    // WP-520 (ADR-009 D4): a resumable FAILED is healable — `chikory resume`
+    // re-enters it with the failure evidence (and remediation brief, if any)
+    // in context. Omitted → a dead seal, the default.
+    opts?: { resumable?: boolean; remediation?: { attempts: number; brief: string } },
   ): Promise<RunStatus> {
     const lastCheckpoint = checkpoints[checkpoints.length - 1]?.id ?? "";
     let handoff: ChainNodeHandoff | undefined;
@@ -244,6 +261,8 @@ export async function agentLoop(spec: TaskSpec): Promise<RunStatus> {
       lastCheckpoint,
       memoryCounters: { recalls: memoryRecalls, evicted: memoryEvictions },
       ...(handoff !== undefined ? { handoff } : {}),
+      ...(opts?.resumable === true ? { resumable: true } : {}),
+      ...(opts?.remediation !== undefined ? { remediation: opts.remediation } : {}),
     });
     status = terminal;
     return status;
@@ -333,6 +352,8 @@ export async function agentLoop(spec: TaskSpec): Promise<RunStatus> {
   soakReentries = restored.soakState.completedReentries;
   soakSleptMs = restored.soakState.totalSleptMs;
   consumedWorkChunks = restored.consumedWorkChunks;
+  remediationAttempts = restored.remediationAttempts;
+  remediationIndexBase = restored.remediationIndexBase;
   sinceCommit = restored.sinceCommit ?? baseCommit;
 
   for (;;) {
@@ -587,8 +608,17 @@ export async function agentLoop(spec: TaskSpec): Promise<RunStatus> {
     // activity (WP-121/131).
     const completionMilestone = isCompletionMilestone(record);
     const workChunkMilestone = activeWorkChunk.action === "use_chunk";
+    // A remediation attempt (WP-519) is re-judged off-cadence: the heal is
+    // only real if the judge re-checks the stuck criterion right away.
+    const remediationMilestone = remediationPending;
+    remediationPending = false;
     let verdict: JudgeVerdict | undefined;
-    if (stepIndex % spec.judge.cadence === 0 || completionMilestone || workChunkMilestone) {
+    if (
+      stepIndex % spec.judge.cadence === 0 ||
+      completionMilestone ||
+      workChunkMilestone ||
+      remediationMilestone
+    ) {
       verdict = await activities.judgeStep({
         runId,
         judgeIndex: judgeIndex++,
@@ -686,9 +716,59 @@ export async function agentLoop(spec: TaskSpec): Promise<RunStatus> {
           continue;
         }
         if (acceptanceCriteriaMet) return seal("SUCCESS");
-        judgeFeedback = completionMilestone ? verdict.rationale : undefined;
+        // WP-519 slice (a) (ADR-009 D3): failing-criterion rationale rides
+        // into the next step on EVERY judge pass, not only at completion
+        // milestones — the executor never retries blind against evidence the
+        // judge already holds.
+        judgeFeedback =
+          buildCriterionFeedback(verdict.form) ??
+          (completionMilestone ? verdict.rationale : undefined);
       } else if (verdict.kind === "HALT") {
-        return seal("FAILED", `judge HALT: ${verdict.rationale}`);
+        // WP-519 (ADR-009 D3) remediation-before-HALT: instead of discarding
+        // the judge's diagnosis, fold it into a remediation brief, roll back
+        // to the last-good checkpoint, and grant ONE bounded retry that is
+        // re-judged off-cadence. Still stuck → seal *resumable* FAILED
+        // (WP-520), the diagnosis preserved for `chikory resume`. Chunk-aware
+        // for free: rule 3 is already suppressed on non-final chunks (WP-273),
+        // so remediation only triggers where HALT would have.
+        const remediation = decideRemediation({ attemptsUsed: remediationAttempts });
+        if (remediation.action === "remediate") {
+          remediationAttempts = remediation.attempt;
+          remediationIndexBase += 1;
+          const brief = buildRemediationBrief(verdict.form, verdict.rationale);
+          lastRemediationBrief = brief;
+          await activities.recordRemediation({
+            runId,
+            remediationIndex: remediationIndexBase - 1,
+            atStep: stepIndex - 1,
+            trigger: verdict.rationale,
+            brief,
+            ...(lastGoodCheckpointId !== undefined ? { rollbackTo: lastGoodCheckpointId } : {}),
+          });
+          if (lastGoodCheckpointId !== undefined) {
+            await activities.restoreCheckpoint({ runId, checkpointId: lastGoodCheckpointId });
+            // The next judge diff must cover the remediation attempt's own
+            // work from the restored state, not the undo of the halted work.
+            const restoredCheckpoint = checkpoints.find((c) => c.id === lastGoodCheckpointId);
+            const restoredCommit = restoredCheckpoint
+              ? Object.values(restoredCheckpoint.gitCommits)[0]
+              : undefined;
+            if (restoredCommit !== undefined) sinceCommit = restoredCommit;
+          }
+          judgeFeedback = brief;
+          remediationPending = true;
+          continue;
+        }
+        return seal(
+          "FAILED",
+          `judge HALT: ${verdict.rationale} (remediation exhausted after ${remediationAttempts} attempt${remediationAttempts === 1 ? "" : "s"})`,
+          {
+            resumable: true,
+            ...(lastRemediationBrief !== undefined
+              ? { remediation: { attempts: remediationAttempts, brief: lastRemediationBrief } }
+              : {}),
+          },
+        );
       } else if (verdict.kind === "BRANCH") {
         judgeFeedback = verdict.rationale;
       } else if (verdict.kind === "ESCALATE") {
@@ -698,7 +778,7 @@ export async function agentLoop(spec: TaskSpec): Promise<RunStatus> {
           spec.unattended,
         );
         if (escalationWait.action === "seal_resumable_failed") {
-          return seal("FAILED", escalationWait.failureReason);
+          return seal("FAILED", escalationWait.failureReason, { resumable: true });
         }
         status = "AWAITING_APPROVAL";
         await condition(() => pendingApprovals.length > 0 || cancelRequested);
@@ -729,7 +809,7 @@ export async function agentLoop(spec: TaskSpec): Promise<RunStatus> {
         spec.unattended,
       );
       if (escalationWait.action === "seal_resumable_failed") {
-        return seal("FAILED", escalationWait.failureReason);
+        return seal("FAILED", escalationWait.failureReason, { resumable: true });
       }
       status = "AWAITING_APPROVAL";
       await condition(() => pendingApprovals.length > 0 || cancelRequested);

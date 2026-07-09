@@ -181,6 +181,15 @@ export {
   type EscalationWaitState,
 } from "./workflow/escalation-wait.js";
 export {
+  buildCriterionFeedback,
+  buildRemediationBrief,
+  decideRemediation,
+  MAX_REMEDIATION_ATTEMPTS,
+  REMEDIATION_BRIEF_MAX_CHARS,
+  type RemediationDecision,
+  type RemediationState,
+} from "./workflow/remediation.js";
+export {
   decideSoakDelay,
   type SoakDelayDecision,
   type SoakPolicy,
@@ -210,6 +219,7 @@ export {
   type AdapterFactory,
   type AdapterRegistry,
   type JudgePayload,
+  type RemediationPayload,
   type RunnerActivities,
   type RunnerActivityDeps,
   type StepPayload,

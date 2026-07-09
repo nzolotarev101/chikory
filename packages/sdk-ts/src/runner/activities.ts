@@ -134,7 +134,23 @@ export interface RestoredWorkflowState {
     totalSleptMs: number;
   };
   consumedWorkChunks: number;
+  /** WP-519: heal attempts already granted since the last terminal seal (the bound). */
+  remediationAttempts: number;
+  /** WP-519: total journaled heal attempts ever — the next remediationIndex (idempotency key). */
+  remediationIndexBase: number;
   sinceCommit?: string;
+}
+
+/** journal-format.md §3 `remediation` entry (WP-519, ADR-009 D3). */
+export interface RemediationPayload {
+  remediationIndex: number;
+  atStep: number;
+  /** The HALT rationale that triggered the heal attempt. */
+  trigger: string;
+  /** The judge-diagnosis brief the remediation attempt works against. */
+  brief: string;
+  /** Last-good checkpoint the workspace was restored to (absent → no restore). */
+  rollbackTo?: string;
 }
 
 /** journal-format.md §3 `judge` entry: evidence refs + form + model + cost. */
@@ -728,7 +744,8 @@ export function createRunnerActivities(deps: RunnerActivityDeps) {
       const journal = openJournal(deps, input.runId);
       try {
         const report = reportFromJournal(journal);
-        const steps = journal.entries("step").map((e) => e.payload as StepPayload);
+        const stepEntries = journal.entries("step");
+        const steps = stepEntries.map((e) => e.payload as StepPayload);
         const checkpoints = journal.entries("checkpoint").map((e) => e.payload as Checkpoint & { stepIndex?: number });
         const verdictEntries = journal.entries("verdict").map((e) => e.payload as VerdictPayload);
         const lastVerdictPayload = verdictEntries[verdictEntries.length - 1];
@@ -757,6 +774,68 @@ export function createRunnerActivities(deps: RunnerActivityDeps) {
           steps.length === 0 ? 0 : Math.max(...steps.map((step) => step.stepIndex)) + 1;
         const stepCosts = steps.map((step) => step.record.costUsd);
         const stepTokens = steps.map((step) => step.record.tokens.input + step.record.tokens.output);
+
+        // WP-520 (ADR-009 D4) — resumable-FAILED reopen: re-starting the
+        // agentLoop workflow over a journal whose LAST terminal entry is a
+        // resumable FAILED seal *is* `chikory resume` on a sealed run. Journal
+        // an idempotent reopen `control_event` (the boundary a later re-seal
+        // appends after), flip the run row back to RUNNING, and carry the seal's
+        // failure evidence into the next step as judge feedback — the run
+        // re-enters from the sealed state, diagnosis intact.
+        const terminalEntries = journal.entries("terminal");
+        const lastTerminal = terminalEntries[terminalEntries.length - 1];
+        const lastTerminalPayload = lastTerminal?.payload as
+          | {
+              status?: string;
+              reason?: string;
+              resumable?: boolean;
+              remediation?: { attempts?: number; brief?: string };
+            }
+          | undefined;
+        const lastReopenIdx = journal
+          .entries("control_event")
+          .filter((entry) => {
+            const payload = entry.payload as { event?: unknown; source?: unknown };
+            return payload.event === "resume" && payload.source === "failed_seal";
+          })
+          .reduce((max, entry) => Math.max(max, entry.idx), -1);
+        const lastStepEntryIdx = stepEntries.reduce((max, entry) => Math.max(max, entry.idx), -1);
+        const atResumableSeal =
+          lastTerminal !== undefined &&
+          lastTerminal.idx > lastStepEntryIdx &&
+          lastTerminalPayload?.status === "FAILED" &&
+          lastTerminalPayload.resumable === true;
+        let reopenedFeedback: string | undefined;
+        if (atResumableSeal) {
+          if (lastTerminal.idx > lastReopenIdx) {
+            journal.append({
+              kind: "control_event",
+              payload: {
+                controlEventIndex: nextPayloadIndex("control_event", "controlEventIndex"),
+                event: "resume",
+                source: "failed_seal",
+                atStep: stepIndex,
+              },
+              costDeltaUsd: 0,
+              artifactRefs: [],
+            });
+          }
+          journal.reopenRun();
+          reopenedFeedback =
+            `resuming after a resumable FAILED seal — ${lastTerminalPayload.reason ?? "unknown"}` +
+            (lastTerminalPayload.remediation?.brief !== undefined
+              ? `\n\n${lastTerminalPayload.remediation.brief}`
+              : "");
+        }
+        // Heal attempts since the last seal — a human resume grants a fresh
+        // remediation budget (bounded per incarnation, ADR-009 D1). The
+        // journal idempotency key keeps counting globally across incarnations.
+        const remediationEntries = journal.entries("remediation");
+        const remediationAttempts = remediationEntries.filter(
+          (entry) => entry.idx > (lastTerminal?.idx ?? -1),
+        ).length;
+        const remediationIndexBase = remediationEntries.length;
+
         const workChunks = journal.getRun()?.task.boundedWorkUnit?.workChunks ?? [];
         const stepsByIndex = new Map(steps.map((step) => [step.stepIndex, step]));
         let restoredConsumedWorkChunks = 0;
@@ -833,9 +912,13 @@ export function createRunnerActivities(deps: RunnerActivityDeps) {
           stepTokens,
           ...(lastVerdict !== undefined ? { lastVerdict } : {}),
           ...(lastGoodCheckpoint !== undefined ? { lastGoodCheckpointId: lastGoodCheckpoint.id } : {}),
-          ...(lastVerdictPayload !== undefined && lastVerdictPayload.verdict.kind !== "PROCEED"
-            ? { judgeFeedback: lastVerdictPayload.verdict.rationale }
-            : {}),
+          // A reopened seal's failure evidence outranks the stale verdict
+          // rationale (WP-520 — resume re-enters with the diagnosis in context).
+          ...(reopenedFeedback !== undefined
+            ? { judgeFeedback: reopenedFeedback }
+            : lastVerdictPayload !== undefined && lastVerdictPayload.verdict.kind !== "PROCEED"
+              ? { judgeFeedback: lastVerdictPayload.verdict.rationale }
+              : {}),
           checkpoints,
           memoryCounters: {
             recalls: restoredMemoryCounters?.recalls ?? 0,
@@ -843,6 +926,8 @@ export function createRunnerActivities(deps: RunnerActivityDeps) {
           },
           soakState: restoredSoakState,
           consumedWorkChunks: restoredConsumedWorkChunks,
+          remediationAttempts,
+          remediationIndexBase,
           sinceCommit,
         };
       } finally {
@@ -1284,6 +1369,39 @@ export function createRunnerActivities(deps: RunnerActivityDeps) {
       }
     },
 
+    /**
+     * WP-519 (ADR-009 D3): journal one bounded heal attempt — the rule-3 HALT
+     * intercepted, the judge-diagnosis brief the retry works against, and the
+     * checkpoint the workspace rolled back to. Heal attempts are journaled
+     * with trigger, evidence, and outcome (D1 — no magic; the records enrich
+     * the trace dataset). Idempotent by remediationIndex (WP-123).
+     */
+    async recordRemediation(input: {
+      runId: string;
+      remediationIndex: number;
+      atStep: number;
+      trigger: string;
+      brief: string;
+      rollbackTo?: string;
+    }): Promise<void> {
+      const journal = openJournal(deps, input.runId);
+      try {
+        const payload: RemediationPayload = {
+          remediationIndex: input.remediationIndex,
+          atStep: input.atStep,
+          trigger: input.trigger,
+          brief: input.brief,
+          ...(input.rollbackTo !== undefined ? { rollbackTo: input.rollbackTo } : {}),
+        };
+        journal.appendOnce(
+          { field: "remediationIndex", value: input.remediationIndex },
+          { kind: "remediation", payload, costDeltaUsd: 0, artifactRefs: [] },
+        );
+      } finally {
+        journal.close();
+      }
+    },
+
     /** Publish a self-contained repository bundle before a chain node seals SUCCESS. */
     async publishChainHandoff(input: {
       runId: string;
@@ -1389,10 +1507,27 @@ export function createRunnerActivities(deps: RunnerActivityDeps) {
       lastCheckpoint?: string;
       memoryCounters?: MemoryCounters;
       handoff?: ChainNodeHandoff;
+      /** WP-520 (ADR-009 D4): FAILED but healable — `chikory resume` re-enters it. */
+      resumable?: boolean;
+      /** WP-519: the exhausted heal attempt this seal preserves for the resume. */
+      remediation?: { attempts: number; brief: string };
     }): Promise<void> {
       const journal = openJournal(deps, input.runId);
       try {
-        if (journal.entries("terminal").length === 0) {
+        // One terminal entry per incarnation: a reopened resumable-FAILED run
+        // (WP-520) seals again AFTER its reopen control_event; within one
+        // incarnation the append stays idempotent.
+        const lastTerminalIdx = journal
+          .entries("terminal")
+          .reduce((max, entry) => Math.max(max, entry.idx), -1);
+        const lastReopenIdx = journal
+          .entries("control_event")
+          .filter((entry) => {
+            const payload = entry.payload as { event?: unknown; source?: unknown };
+            return payload.event === "resume" && payload.source === "failed_seal";
+          })
+          .reduce((max, entry) => Math.max(max, entry.idx), -1);
+        if (lastTerminalIdx === -1 || lastReopenIdx > lastTerminalIdx) {
           journal.append({
             kind: "terminal",
             payload: {
@@ -1404,6 +1539,8 @@ export function createRunnerActivities(deps: RunnerActivityDeps) {
                 ? { memoryCounters: input.memoryCounters }
                 : {}),
               ...(input.handoff !== undefined ? { handoff: input.handoff } : {}),
+              ...(input.resumable === true ? { resumable: true } : {}),
+              ...(input.remediation !== undefined ? { remediation: input.remediation } : {}),
             },
             costDeltaUsd: 0,
             artifactRefs:

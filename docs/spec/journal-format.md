@@ -41,11 +41,12 @@ The persisted/exported form of a run's journal. Single format consumed by: `chik
 | `verdict` | `{ judgeIndex, atStep, verdict: JudgeVerdict }` (judge-sourced), or the runner-sourced loop-breaker escalation `{ escalationIndex, source: "runner", atStep, verdict: { kind: "ESCALATE", rationale, escalateReason } }` — no JudgeForm/judgeModel because no judge ran (WP-124) |
 | `checkpoint` | `Checkpoint` |
 | `injection` | `{ source: "human", text, atStep }` |
-| `control_event` | `{ controlEventIndex, event: "suspend"\|"resume", source: "operator", atStep }` |
+| `control_event` | `{ controlEventIndex, event: "suspend"\|"resume", source: "operator"\|"soak"\|"failed_seal", atStep }` — `source: "failed_seal"` (WP-520) marks a resumable-FAILED reopen: `chikory resume` re-started the workflow over this journal, and a later re-seal appends its terminal entry after this boundary |
 | `budget_event` | `{ event: "estimate"\|"halt"\|"top_up", remainingUsd, details }` + WP-218 additive token fields `cause?: "usd"\|"tokens"` (absent ⇒ `"usd"`, back-compatible) and `remainingTokens?` on a token HALT; token figures (`spentTokens`/`budgetTokens`/`estimateTokens`) ride `details`. The USD path omits both, so pre-WP-218 journals stay byte-identical |
 | `compaction` | `{ tokensBefore, tokensAfter, digestRef }` (WP-203 — emitted at the checkpoint boundary; see CONTRACTS.md §6a) |
 | `pacing` | `{ decision, batchSize, reasoning }` (P2) |
-| `terminal` | `{ status: "SUCCESS"\|"FAILED"\|"CANCELLED", reason, lastCheckpoint, handoff? }`; successful chain nodes attach their artifact-backed `ChainNodeHandoff` and bundle refs |
+| `remediation` | `{ remediationIndex, atStep, trigger, brief, rollbackTo? }` (WP-519, ADR-009 D3) — one bounded heal attempt: the rule-3 HALT `trigger`, the judge-diagnosis `brief` the retry works against, and the last-good checkpoint restored |
+| `terminal` | `{ status: "SUCCESS"\|"FAILED"\|"CANCELLED", reason, lastCheckpoint, handoff?, resumable?, remediation? }`; successful chain nodes attach their artifact-backed `ChainNodeHandoff` and bundle refs. `resumable: true` (WP-520, ADR-009 D4) marks a healable FAILED seal — `chikory resume` re-enters it (reopen `control_event`, evidence carried as feedback); `remediation: { attempts, brief }` preserves the exhausted heal. A reopened run appends a NEW terminal entry per incarnation — the LAST one is the current seal |
 
 Every payload carries enough human rationale to render the decision tree without external lookups (NF-2).
 

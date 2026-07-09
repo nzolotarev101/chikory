@@ -72,6 +72,39 @@ export function createTemporalRunner(opts: TemporalRunnerOptions = {}): Temporal
     }
   }
 
+  /**
+   * WP-520 (ADR-009 D4): the sealed state a resume decision needs — the run
+   * row's terminal status plus the LAST terminal entry's resumable flag and
+   * reason, and the persisted spec a re-start reuses. Undefined while the run
+   * is live (or has no journal yet) — the signal path handles those.
+   */
+  function sealedRunState(
+    runId: string,
+  ): { status: "SUCCESS" | "FAILED" | "CANCELLED"; resumable: boolean; reason: string; spec: TaskSpec } | undefined {
+    const path = journalPath(dataDir, runId);
+    if (!existsSync(path)) return undefined;
+    const journal = new Journal(path);
+    try {
+      const run = journal.getRun();
+      if (!run) return undefined;
+      if (run.status !== "SUCCESS" && run.status !== "FAILED" && run.status !== "CANCELLED") {
+        return undefined;
+      }
+      const terminals = journal.entries("terminal");
+      const payload = terminals[terminals.length - 1]?.payload as
+        | { reason?: string; resumable?: boolean }
+        | undefined;
+      return {
+        status: run.status,
+        resumable: payload?.resumable === true,
+        reason: payload?.reason ?? "unknown",
+        spec: run.task,
+      };
+    } finally {
+      journal.close();
+    }
+  }
+
   function makeHandle(runId: string): RunHandle {
     return {
       runId,
@@ -129,6 +162,36 @@ export function createTemporalRunner(opts: TemporalRunnerOptions = {}): Temporal
     },
 
     async resume(runId, runOpts): Promise<RunHandle> {
+      // WP-520 (ADR-009 D4): a sealed run's resume semantics depend on HOW it
+      // sealed. Resumable FAILED → re-start the agentLoop workflow over the
+      // same journal (Temporal allows workflowId reuse after completion);
+      // restoreWorkflowState reopens the journal and carries the failure
+      // evidence into the next step. Dead FAILED / SUCCESS / CANCELLED →
+      // refuse with the way forward.
+      const sealed = sealedRunState(runId);
+      if (sealed !== undefined) {
+        if (sealed.status !== "FAILED") {
+          throw new Error(`run ${runId} already sealed ${sealed.status} — nothing to resume`);
+        }
+        if (!sealed.resumable) {
+          throw new Error(
+            `run ${runId} sealed a dead FAILED (${sealed.reason}) — not resumable; ` +
+              `fork a checkpoint instead: chikory branch ${runId}@<journalIdx>`,
+          );
+        }
+        const client = await getClient();
+        await client.workflow.start("agentLoop", {
+          workflowId: runId,
+          taskQueue,
+          args: [sealed.spec],
+        });
+        if (runOpts?.addBudgetUsd !== undefined) {
+          await client.workflow
+            .getHandle(runId)
+            .signal(SIGNAL_TOP_UP, { amountUsd: runOpts.addBudgetUsd });
+        }
+        return makeHandle(runId);
+      }
       // The workflow lives in Temporal; resuming = reattaching a handle
       // (and the caller ensuring a worker is up — WP-141 owns that UX).
       // A budget-halted run additionally needs funds to clear the gate.

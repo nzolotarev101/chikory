@@ -236,9 +236,13 @@ export type CheckpointId = string; // `${runId}@${journalIdx}`
 
 export type JournalEntryKind =
   | "step" | "judge" | "checkpoint" | "verdict" | "injection"
-  | "budget_event" | "compaction" | "pacing" | "terminal"
+  | "control_event" | "budget_event" | "compaction" | "pacing" | "terminal"
+  | "seam"
+  // P2 (WP-519, ADR-009 D3) — one journaled heal attempt (rule-3 HALT
+  // intercepted: brief + rollback + bounded retry)
+  | "remediation"
   // P2 (WP-219, ADR-005) — chain-scope kinds (emitted to the chain store)
-  | "plan" | "plan_verdict" | "node_started" | "node_sealed";
+  | "plan" | "plan_verdict" | "node_started" | "node_replanned" | "node_sealed";
 
 export interface JournalEntry {
   idx: number;                  // monotonic per run

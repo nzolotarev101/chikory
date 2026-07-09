@@ -386,6 +386,9 @@ export type JournalEntryKind =
   | "pacing"
   | "terminal"
   | "seam"
+  // P2 (WP-519, ADR-009 D3) — one journaled heal attempt: rule-3 HALT
+  // intercepted, brief authored, rollback + bounded retry.
+  | "remediation"
   // P2 (WP-219, ADR-005) — chain-scope kinds (shared JIF; emitted to the
   // chain store, not a per-run journal).
   | "plan"

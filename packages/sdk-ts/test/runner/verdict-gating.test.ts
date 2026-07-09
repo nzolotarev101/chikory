@@ -194,7 +194,7 @@ describe.skipIf(address === null)("verdict gating (WP-132)", () => {
     expect(count).toBe("2");
   });
 
-  test("HALT (criterion stuck 3 consecutive verdicts) seals FAILED on a resumable checkpoint", async () => {
+  test("HALT (criterion stuck 3 consecutive verdicts) heals once (WP-519), then seals a RESUMABLE FAILED (WP-520)", async () => {
     const wire = await startFakeJudgeWire([judgeForm({ criteria: { "AC-1": false } })]);
     const { dataDir, handle } = await run(wire, {});
     const report = await awaitTerminal(handle);
@@ -202,10 +202,28 @@ describe.skipIf(address === null)("verdict gating (WP-132)", () => {
     expect(report.status).toBe("FAILED");
     expect(report.failure?.reason).toContain("judge HALT");
     expect(report.failure?.reason).toContain("AC-1");
-    expect(verdictKinds(dataDir, handle.runId)).toEqual(["PROCEED", "PROCEED", "HALT"]);
+    expect(report.failure?.reason).toContain("remediation exhausted");
+    // ADR-009 D3: the first HALT grants ONE bounded remediation attempt
+    // (journaled) before the second HALT seals — never a silent dead end.
+    expect(verdictKinds(dataDir, handle.runId)).toEqual([
+      "PROCEED",
+      "PROCEED",
+      "HALT",
+      "HALT",
+    ]);
     // The covering checkpoint was written before the seal — resumable state.
-    expect(report.checkpoints).toHaveLength(3);
-    expect(report.failure?.lastCheckpoint).toBe(report.checkpoints[2]!.id);
+    expect(report.checkpoints).toHaveLength(4);
+    expect(report.failure?.lastCheckpoint).toBe(report.checkpoints[3]!.id);
+
+    const journal = new Journal(journalPath(dataDir, handle.runId));
+    try {
+      expect(journal.entries("remediation")).toHaveLength(1);
+      // WP-520: the seal is marked resumable — `chikory resume` re-enters it.
+      const terminal = journal.entries("terminal")[0]!.payload as { resumable?: boolean };
+      expect(terminal.resumable).toBe(true);
+    } finally {
+      journal.close();
+    }
   });
 
   test("ESCALATE pauses for approval; approve resumes the loop", async () => {

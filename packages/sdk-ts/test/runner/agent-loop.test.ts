@@ -404,9 +404,10 @@ describe.skipIf(address === null)("agent loop (WP-121)", () => {
     try {
       const steps = journal.entries("step").map((entry) => entry.payload as StepPayload);
       expect(steps).toHaveLength(2);
-      expect(steps[1]!.record.summary).toContain(
-        "judge feedback: work in progress, no regressions — unmet criteria: AC-1",
-      );
+      // WP-519 slice (a): the carried feedback is the failing-criterion
+      // EVIDENCE (per-criterion justification), not just the verdict rationale.
+      expect(steps[1]!.record.summary).toContain("judge feedback: unmet acceptance criteria");
+      expect(steps[1]!.record.summary).toContain("AC-1");
       expect(journal.entries("judge")).toHaveLength(1);
       expect(journal.entries("terminal")).toHaveLength(1);
     } finally {

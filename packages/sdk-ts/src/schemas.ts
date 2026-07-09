@@ -413,6 +413,7 @@ export const JournalEntryKindSchema = z.enum([
   "pacing",
   "terminal",
   "seam",
+  "remediation",
   "plan",
   "plan_verdict",
   "node_started",
