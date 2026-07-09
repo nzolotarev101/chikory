@@ -127,17 +127,31 @@ export interface RunEndSpanInput {
   runId: string;
   status: "SUCCESS" | "FAILED" | "CANCELLED";
   reason?: string;
+  /**
+   * F-118: the journal run row's `started_at` in epoch ms. When present, the
+   * terminal root span opens there, so its duration measures the RUN's
+   * wall-clock lifetime (parks and soaks included) — the durable-park-safe
+   * substitute for a root span held open across worker processes.
+   */
+  startedAtMs?: number;
 }
 
 /** End the durable run root span from the terminal seal activity. */
 export function recordRunEndSpan(input: RunEndSpanInput): void {
   const span = applyDerivedRunRootIdentity(
-    getTracer().startSpan(SPAN_RUN, undefined, runRootOtelContext(input.runId)),
+    getTracer().startSpan(
+      SPAN_RUN,
+      input.startedAtMs !== undefined ? { startTime: input.startedAtMs } : undefined,
+      runRootOtelContext(input.runId),
+    ),
     input.runId,
   );
   span.setAttribute("run.id", input.runId);
   span.setAttribute("lifecycle", "end");
   span.setAttribute("status", input.status);
+  if (input.startedAtMs !== undefined) {
+    span.setAttribute("run.duration.ms", Math.max(0, Date.now() - input.startedAtMs));
+  }
   if (input.reason !== undefined) span.setAttribute("terminal.reason", input.reason);
   if (input.status !== "SUCCESS") {
     span.setStatus({

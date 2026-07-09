@@ -135,6 +135,21 @@ describe("OTel spans (WP-105)", () => {
     }
   });
 
+  it("terminal root span measures the run's wall-clock lifetime (F-118)", () => {
+    const startedAtMs = Date.now() - 5_000;
+    recordRunEndSpan({ runId: "run-duration-test", status: "SUCCESS", startedAtMs });
+
+    const spans = exporter.getFinishedSpans().filter((span) => span.name === SPAN_RUN);
+    expect(spans).toHaveLength(1);
+    const span = spans[0]!;
+    // hrTime → ms: the span opened at the run row's started_at, so its
+    // duration covers the whole run (parks and soaks included).
+    const durationMs = span.duration[0] * 1000 + span.duration[1] / 1e6;
+    expect(durationMs).toBeGreaterThanOrEqual(4_900);
+    expect(span.attributes["run.duration.ms"]).toBeGreaterThanOrEqual(4_900);
+    expect(span.attributes["lifecycle"]).toBe("end");
+  });
+
   it("run step emits chikory.run.step with durable-loop attributes", () => {
     const record: StepRecord = {
       status: "SUCCESS",

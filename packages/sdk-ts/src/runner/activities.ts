@@ -1589,10 +1589,15 @@ export function createRunnerActivities(deps: RunnerActivityDeps) {
           });
         }
         journal.sealRun(input.status);
+        // F-118: the run row's started_at anchors the terminal root span so
+        // its duration measures the whole run's wall-clock lifetime.
+        const startedAt = journal.getRun()?.startedAt;
+        const startedAtMs = startedAt === undefined ? Number.NaN : Date.parse(startedAt);
         recordRunEndSpan({
           runId: input.runId,
           status: input.status,
           ...(input.reason !== undefined ? { reason: input.reason } : {}),
+          ...(Number.isFinite(startedAtMs) ? { startedAtMs } : {}),
         });
       } finally {
         journal.close();
