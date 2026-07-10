@@ -42,7 +42,7 @@ import {
   shouldParkForWindow,
   type ContextWindowPacingPolicy,
 } from "../runner/pacing.js";
-import { resolveContextWindowForSpec } from "../runner/context-window.js";
+import { calibrateContextWindow, resolveContextWindowForSpec } from "../runner/context-window.js";
 import type {
   ArtifactRef,
   ChainNodeHandoff,
@@ -178,6 +178,9 @@ export async function agentLoop(spec: TaskSpec): Promise<RunStatus> {
   let resumeRequested = false;
   let lastVerdict: { kind: JudgeVerdict["kind"]; atStep: number } | undefined;
   let lastGoodCheckpointId: string | undefined;
+  // F-125: the auto-calibrated pacing window, locked once from step 1's observed
+  // resident tokens. Workflow state → deterministic across a resume replay.
+  let calibratedWindowTokens: number | undefined;
   let judgeFeedback: string | undefined;
   let failure: { reason: string; lastCheckpoint: string } | undefined;
   const recentSummaries: string[] = [];
@@ -549,19 +552,32 @@ export async function agentLoop(spec: TaskSpec): Promise<RunStatus> {
         retainedSummaryCount: RECENT_STEPS_WINDOW,
       }),
     );
+    // The next step's marginal addition to OUR window is ~one more summary, not
+    // the executor subprocess's internal throughput (WP-254).
+    const estimatedNextStepTokens = estimateTokensFromText(record.summary);
+    // Default 200k window; a dogfood/test may shrink it via the frozen
+    // `debug.contextWindowTokens` seam to force a deterministic pressure
+    // decision (WP-207 act half — replay-safe, never read from env here).
+    const baseWindowTokens =
+      spec.debug?.contextWindowTokens ??
+      resolveContextWindowForSpec(spec, DEFAULT_CONTEXT_WINDOW_TOKENS);
+    // F-125: when `pacing.autoCalibrate` is opted in, size the window from this
+    // run's OWN first-step assembled-context tokens (locked once, on step 1) so a
+    // static per-workload guess can no longer mis-size it. Purely derived from the
+    // journaled step result → a Temporal replay recomputes the identical window.
+    if (spec.pacing?.autoCalibrate === true && calibratedWindowTokens === undefined) {
+      calibratedWindowTokens = calibrateContextWindow(residentInputTokens + estimatedNextStepTokens);
+    }
+    const effectiveWindowTokens =
+      spec.pacing?.autoCalibrate === true && calibratedWindowTokens !== undefined
+        ? calibratedWindowTokens
+        : baseWindowTokens;
     const pacing = decideContextWindowPacing(
       {
         currentInputTokens: residentInputTokens,
         currentOutputTokens: 0,
-        // The next step's marginal addition to OUR window is ~one more summary, not
-        // the executor subprocess's internal throughput (WP-254).
-        estimatedNextStepTokens: estimateTokensFromText(record.summary),
-        // Default 200k window; a dogfood/test may shrink it via the frozen
-        // `debug.contextWindowTokens` seam to force a deterministic pressure
-        // decision (WP-207 act half — replay-safe, never read from env here).
-        contextWindowTokens:
-          spec.debug?.contextWindowTokens ??
-          resolveContextWindowForSpec(spec, DEFAULT_CONTEXT_WINDOW_TOKENS),
+        estimatedNextStepTokens,
+        contextWindowTokens: effectiveWindowTokens,
       },
       DEFAULT_PACING_POLICY,
     );
@@ -677,6 +693,16 @@ export async function agentLoop(spec: TaskSpec): Promise<RunStatus> {
       carriedRefs.length = 0;
       carriedRefs.push(...kept, compaction.digestRef);
       memoryEvictions += applyMemoryEviction(carriedRefs, memoryEvictionPolicy);
+    }
+
+    // F-127 durable-resume drill: once THIS step's checkpoint (and compaction)
+    // are durably sealed, the seam hard-exits the worker so `chikory resume`
+    // continues from the sealed checkpoint with zero re-execution — a reproducible
+    // crash the suspend/resume axis can be proven on. Gate rides the frozen input
+    // (replay-safe); the activity reads `CHIKORY_KILL_AT_STEP` (unset on the
+    // resuming worker → no-op), so the crash fires exactly once.
+    if (spec.debug?.killAtStep === stepIndex - 1) {
+      await activities.maybeCrashForResumeDrill({ runId, atStep: stepIndex - 1 });
     }
 
     // Verdict gating (WP-132). PROCEED advances the diff base and the

@@ -135,6 +135,19 @@ export interface TaskSpec {
      * (replay-safe — rides the frozen workflow input).
      */
     contextWindowTokens?: number;
+    /**
+     * F-127 dogfood/test-only durable-resume drill seam. After the step at this
+     * index seals its checkpoint, the worker hard-exits (simulating a crash), so
+     * `chikory resume` can be driven REPRODUCIBLY — the suspend/resume analog of
+     * `seedBadDiff` for the durability pillar (dogfood-094 F-127: catching a fast
+     * run mid-step by hand to prove resume is impractical). Off the happy path;
+     * armed host-side from `CHIKORY_KILL_AT_STEP`, which the resuming worker does
+     * NOT set — so the crash fires exactly ONCE and the resume proceeds cleanly.
+     * The workflow gate rides the frozen input (replay-safe); the actual exit is
+     * an activity that reads the env (resume without it = no-op), breaking any
+     * re-crash loop on replay.
+     */
+    killAtStep?: number;
   };
 }
 
@@ -175,6 +188,15 @@ export interface JudgePolicy {
 /** P2 (WP-207) — reserved; shape finalized after dogfood-001 data. */
 export interface PacingPolicy {
   mode: "auto" | "fixed";
+  /**
+   * F-125 opt-in: derive the pacing context window from the run's OWN first-step
+   * assembled-context tokens instead of a static `debug.contextWindowTokens`
+   * guess or the model's full window. When set, the window is locked after step 1
+   * from the observed projected resident tokens (see `calibrateContextWindow`),
+   * so real growth reliably crosses the compact band without a hand-tuned window.
+   * Absent/false = unchanged (fixed window). Overrides `debug.contextWindowTokens`.
+   */
+  autoCalibrate?: boolean;
 }
 
 export interface UnattendedPolicy {

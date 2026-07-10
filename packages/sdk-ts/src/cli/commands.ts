@@ -389,6 +389,18 @@ export async function cmdRun(
       debug: { ...spec.debug, contextWindowTokens: Number(contextWindowTokens) },
     };
   }
+  // F-127 durable-resume drill seam, armed host-side (same convention).
+  // `CHIKORY_KILL_AT_STEP=N` hard-exits the worker after step N's checkpoint
+  // seals, so `chikory resume` (launched WITHOUT the env) proves the durable loop
+  // continues from the seal with zero re-execution — a reproducible crash the
+  // suspend/resume axis rests on (dogfood-094 F-127).
+  const killAtStep = process.env["CHIKORY_KILL_AT_STEP"];
+  if (killAtStep !== undefined && killAtStep.length > 0) {
+    spec = {
+      ...spec,
+      debug: { ...spec.debug, killAtStep: Number(killAtStep) },
+    };
+  }
   try {
     return await hostAndFollow(args, args.watch, deps, ioPair, (runner) => runner.start(spec));
   } catch (err) {

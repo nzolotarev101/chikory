@@ -147,6 +147,9 @@ class JudgePolicy(ContractModel):
 
 class PacingPolicy(ContractModel):
     mode: Literal["auto", "fixed"]
+    # F-125: opt-in — derive the pacing context window from the run's own
+    # first-step assembled-context tokens instead of a static guess.
+    auto_calibrate: bool | None = None
 
 
 class UnattendedPolicy(ContractModel):

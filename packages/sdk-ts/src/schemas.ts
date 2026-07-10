@@ -163,6 +163,7 @@ export const JudgePolicySchema = z
 export const PacingPolicySchema = z
   .object({
     mode: z.enum(["auto", "fixed"]),
+    autoCalibrate: z.boolean().optional(),
   })
   .strict();
 

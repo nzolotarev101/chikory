@@ -8,16 +8,15 @@ recover a run, and how to land the result as a normal PR.
 **Status (2026-07-09, bounded — update discipline: REPLACE this block, ≤15 lines;
 displaced prose moves verbatim to [`PLAN-HISTORY.md`](PLAN-HISTORY.md); per-run detail:
 `docs/reports/dogfood-NNN.md`; queue + course correction: `plan.md` §6).**
-Latest: dogfood-093 — **WP-251 LIVE COMPACTION-FOLD — OBSERVED at last (the ⑧ P2-exit context-rot axis, 4th attempt)** (`run-60a32aff-0b81-4cbd-9d39-7eb50b8b9561`,
-`docs/reports/dogfood-093.md`). 🟢 **SUCCESS · 7 steps · $4.53/$80 · 20m 52s · uncommitted (harvest byte-IDENTICAL).** The F-122 fix — SAME ~2000 window but
-`min_durable_steps: 6` + 7 chunks — pushed resident summaries past `keepLastN=5`, so `planCompaction` **FOLDED TWICE**: the FIRST dogfood RUN to journal a live
-`trigger:"pacing"` compaction (`compactions 2 (pacing 2) · first pacing fold step 5 · pressure-steps 7 (unfolded 5)`). Net-new increment landed too — pure
-`pressureFoldGapWarning` (F-123 loud-on-silent-fold) + additive `firstPacingFoldStep` on `describeCompactionPressure`, rendered additively in `chikory trace`; 790 TS
-green, 6 files, 0 rollbacks/escalations. **WP-251 → 🟢 LIVE-PROVEN; the ⑧ P2-exit context-rot axis is CLOSED** (arc: 053-park / 091-undershoot / 092-too-short / 093-FOLD).
-🟡 **F-124** — the `compaction` journal entry has no `stepIndex`, so `firstPacingFoldStep` is inferred from the adjacent pacing decision (reducer's `stepIndex` branch is
-dead); track-B stamp-at-emit fix under WP-251. **NEXT (launch-gated): the P2 EXIT-GATE 24h+ brownfield endurance run** — every mechanism it needs is now live (soak
-parks WP-272, window-park WP-250, LIVE compaction WP-251, durable OTel spans WP-105, run-level self-heal WP-519/520); it must COMBINE real multi-step brownfield work
-(context grows → folds) + long wall-clock parks + ≥1 suspend/resume, unattended. See §7, §1.5, §1.4, §3. (dogfood-092 detail → PLAN-HISTORY.)
+Latest: dogfood-094 — **P2 EXIT-GATE REHEARSAL (reactive-signals greenfield build) — delivery SUCCESS, but the rehearsal MISSED both target axes** (`run-b319713b-efaf-4a4b-bb3e-c409ea285ae8`,
+`docs/reports/dogfood-094.md`). 🟢 **SUCCESS · 11 steps · $1.95/$40 · 13m 10s.** Chikory autonomously built a real, correct fine-grained reactive-signals library from
+scratch (11 increments, **21/21 `node --test` green** in the workspace, 6 primitives incl. a glitch-free diamond) — a clean *build*. **But the Thesis-KPI (fold under LIVE
+pacing pressure + a mid-run kill→resume) was 0/2:** the window `4000` was too big for this small greenfield (proj 1.6k–2.6k = 40–65%), so pacing stayed `continue` all
+11 steps (`peak window 65% · compact 0`) and the 3 folds were `trigger:"count"` (`compactions 3 (pacing 0)`), NOT pacing; and the manual kill→resume never fired
+(`resumes 0`). 🔴 **F-125** — seam-window sizing is workload-dependent with NO calibration (4th distinct sizing miss: 053-overshoot/091-undershoot/092-too-short/094-too-big) →
+WP: pre-flight window auto-calibration off step-1 assembled tokens. 🟡 **F-126** — stale-spec precheck false-fired on the `WP-270` concept ref in the goal (WP-260-class
+mis-target). 🟡 **F-127** — the kill→resume drill relies on a human racing a 13-min run; needs a deterministic `debug.killAtStep` seam. **The user's caveat holds: this was
+not a real long build and did not stress the hypothesis — its value was negative-space.** ✅ **F-125 (`pacing.autoCalibrate` — window sized from the run's own first-step tokens) + F-127 (`CHIKORY_KILL_AT_STEP` deterministic resume-drill seam) HAND-LANDED track-B this sitting** (uncommitted; 797 TS + 84 py green, tsc/eslint/ruff clean). **NEXT: dogfood-095 (armed, preflight ✅) re-runs the rehearsal on both mechanisms so the pacing-driven fold + kill→resume actually fire, THEN the launch-gated 24h exit-gate run.** See §7, §1.5, §1.4, §3. (dogfood-093 detail → PLAN-HISTORY.)
 
 Related docs: [`docs/spec/task-spec.md`](spec/task-spec.md) (schema
 reference) · [`docs/TASK-PROTOCOL.md`](TASK-PROTOCOL.md) (WP etiquette, §7 is

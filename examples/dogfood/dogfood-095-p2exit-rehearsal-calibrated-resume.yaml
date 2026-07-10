@@ -1,0 +1,197 @@
+# Dogfood-095: P2 EXIT-GATE REHEARSAL, re-run — the SAME genuine long-horizon greenfield build as dogfood-094, but now
+#   on the two mechanisms that run's misses forced into existence, so BOTH target axes actually fire this time.
+#
+# WHY THIS RE-RUN (dogfood-094 review, 2026-07-09). dogfood-094 (`run-b319713b`) autonomously built a real, correct
+#   fine-grained reactive-signals library (11 increments, 21/21 `node --test` green) — a clean BUILD — but MISSED BOTH
+#   Thesis-KPI axes (`docs/reports/dogfood-094.md`):
+#     • NO pacing-driven fold: the hand-guessed window `4000` was too big for this small greenfield (projected 1.6k–2.6k =
+#       40–65%), so pacing stayed `continue` all 11 steps (`peak window 65% · compact 0`) and the 3 folds that happened
+#       were `trigger:"count"` (`compactions 3 (pacing 0)`), NOT pacing. Fourth distinct sizing miss (053/091/092/094).
+#     • NO kill→resume: the drill was a manual action on a 13-minute run and never fired (`resumes 0`).
+#   BOTH misses had a root cause that is now FIXED IN PRODUCT CODE (landed track-B this sitting, TASK-PROTOCOL §4):
+#     • F-125 → `pacing.autoCalibrate` — the pacing window is derived from THIS run's OWN first-step assembled-context
+#       tokens (`calibrateContextWindow`, `src/runner/context-window.ts`), locked once after step 1, so no static per-
+#       workload guess is needed and real growth reliably crosses the compact band. NO manual window env is set or named.
+#     • F-127 → the `CHIKORY_KILL_AT_STEP` durable-resume drill seam — after the named step's checkpoint seals, the worker
+#       hard-exits (137), so `chikory resume` (launched WITHOUT the env) proves the durable loop continues from the seal
+#       with zero re-execution. A REPRODUCIBLE crash, not a human racing the run.
+#
+# THE WORKLOAD is unchanged from dogfood-094: build the fine-grained reactive-signals core (Solid/Preact-signals family)
+#   from scratch in `.chikory-examples/signals-lab`, ONE bounded increment per durable step (11 chunks). It is genuinely
+#   hard (glitch-free diamond propagation, cleanup/dispose ownership), decomposes into interdependent increments whose
+#   context ACCUMULATES, and is pure zero-dep ESM tested by a fast deterministic `node --test`. This run PROVES THE
+#   MECHANISMS on a real horizon; a richer/longer application workload can follow once calibration + resume are trusted.
+#
+# CLASS / LADDER. Harness-endurance REHEARSAL (not a product-WP headline, not a numeric-rung climb) — it validates the
+#   durability + context-rot pillars end-to-end on the now-landed F-125/F-127 mechanisms before the launch-gated 24h
+#   exit-gate run. class=meta by primary surface (`.chikory-examples/` + the seam mechanisms); user-sanctioned.
+#
+# Format: LOOSE (greenfield — outcome goal + ordered increments; layout/test-names the executor's, F-82/F-83). ACs pin
+#   "done" via the net-new public API symbols the goal NAMES (absent on the empty seed HEAD → grep cannot false-green,
+#   F-90/F-114) + a passing `node --test` suite.
+# Ladder-rung: 4
+# Thesis-KPI: COMBINED P2-EXIT REHEARSAL, PROVEN — one genuine long-horizon `chikory run` on a REAL greenfield build FOLDS
+#   its context under LIVE pacing pressure with an AUTO-CALIBRATED window (≥1 `trigger:"pacing"` compaction, `compactions N
+#   (pacing M)` with M ≥ 1, earned by real accumulation — NO manual window, NO idle soak) AND survives a deterministic
+#   mid-run kill→resume with ZERO re-execution of sealed steps, unattended. Both axes dogfood-094 missed, now fired.
+#
+# ✅ PREREQUISITES — DO ALL THREE BEFORE LAUNCH.
+#   1. Re-seed the greenfield target (idempotent — wipes 094's run to a fresh empty repo):
+#         devbox run -- bash scripts/examples-setup.sh    # recreates .chikory-examples/signals-lab (empty)
+#   2. Commit everything in the Chikory repo first (the F-125/F-127 code must be in HEAD; the workspace clones the target's
+#      HEAD).
+#   3. Arm the durable-resume drill from the env (F-127; host-side, NOT a YAML field — the strict parser rejects `debug:`).
+#      NO window env — `pacing.autoCalibrate` sizes it automatically:
+#         export CHIKORY_KILL_AT_STEP=6      # after step index 6 (the 7th sealed step, past the first fold) → worker exits 137
+#         devbox run run-dogfood             # `chikory run`; picks the latest spec (this one). The F-121 guard REQUIRES
+#                                            # CHIKORY_KILL_AT_STEP to be exported (the spec names it) — that is the contract.
+#      `CHIKORY_PREFLIGHT_ONLY=1 devbox run run-dogfood` dry-runs every guard at $0 first.
+#
+# ⚠️ THE RESUME STEP (the whole point of the drill). The run will hard-exit after step 6's checkpoint seals (you will see
+#   the worker die). Then resume — WITHOUT re-exporting the kill env — so the crash fires exactly once:
+#         unset CHIKORY_KILL_AT_STEP
+#         devbox run -- pnpm chikory resume <run-id>
+#   Confirm on resume: steps 1–6 are NOT re-executed (their journal entries/costs are byte-identical = replay), and the run
+#   continues 7→11 to SUCCESS.
+#
+# ⚠️ POST-RUN CONFIRM (what makes this a PASS): `pnpm chikory trace <run-id>` totals show BOTH (a) `compactions N (pacing M)`
+#   with M ≥ 1 and `pressure-steps K (unfolded U)` with U < K (a real PACING-DRIVEN fold, auto-calibrated window — the
+#   `pressureFoldGapWarning` stays silent, `first pacing fold step` renders), AND (b) the checkpoint chain continues past
+#   the kill with NO duplicate step entries and one resume. If pacing never leaves `continue`, the auto-calibration under-
+#   pressured — file it (do NOT hand-set a window); if a step PARKS, calibration over-tightened — file it.
+#
+# ⚠️ DETERMINISM / SCOPE. Writes ONLY inside `.chikory-examples/signals-lab`. Touches NO Chikory source. The pacing/
+#   compaction/kill DECISIONS live in the (now-landed) harness; this run only EXERCISES them on a real workload.
+
+name: dogfood-095-p2exit-rehearsal-calibrated-resume
+goal: >
+  Build, FROM SCRATCH, a small but real fine-grained REACTIVE SIGNALS library (the Solid / Preact-signals family) in the
+  greenfield playground, ONE bounded increment per durable step, so the run accumulates a genuine multi-step horizon whose
+  growing context FOLDS under live pacing pressure with an AUTO-CALIBRATED window (no hand-set window, no idle soak) and
+  survives a deterministic mid-run kill→resume. Pure ESM, ZERO runtime dependencies, tested with `node:test` /
+  `node --test`. Deliver in ELEVEN ordered, dependency-ordered increments, ONE per durable step, each adding DISTINCT
+  non-trivial working code + tests (the non-hollow horizon, F-100/WP-270), so resident step summaries accumulate past the
+  compaction fold threshold and a real `trigger:"pacing"` fold fires mid-run:
+
+    * PART 1 — `createSignal(initial)`: read accessor + write setter (`[get, set]`); `get()` returns current, `set(next)`
+      updates. Tested: initial, read-after-write, independent signals.
+
+    * PART 2 — `createEffect(fn)`: runs immediately and RE-RUNS when a signal READ inside it later changes (auto-tracking
+      via a current-observer stack). Tested: runs once, re-runs on a tracked write, no re-run for an untracked signal.
+
+    * PART 3 — `createMemo(fn)`: cached derived signal; recomputes on tracked-dep change; reading it subscribes. Tested:
+      reflects source, an effect reading the memo re-runs, no recompute on an unrelated write.
+
+    * PART 4 — `batch(fn)`: defer dependent re-runs until `fn` returns, each dependent effect AT MOST ONCE. Tested: two
+      writes in a batch → one effect run; nested batches flush once.
+
+    * PART 5 — GLITCH-FREE DIAMOND (`a` → `b`,`c` → `d=b+c`): one write to `a` updates `d` exactly once with consistent
+      inputs, never a half-updated value. Tested with a diamond fixture.
+
+    * PART 6 — `untrack(fn)`: read signals without subscribing the current observer. Tested: an effect re-runs only for the
+      tracked signal, not the untracked one.
+
+    * PART 7 — CLEANUP / `onCleanup(fn)`: cleanups run before each re-run and once on disposal. Tested accordingly.
+
+    * PART 8 — DISPOSAL: `dispose()` stops future re-runs and flushes pending cleanups. Tested: after dispose, a tracked
+      write does not re-run the effect.
+
+    * PART 9 — NESTED effects + ownership: a nested effect is disposed when the outer effect re-runs (no leaked inner
+      subscriptions). Tested.
+
+    * PART 10 — EQUALITY / dedup: `createSignal(initial, { equals })` (default `Object.is`) — a `set` to an equal value
+      does not notify. Tested: same value fires nothing; a custom `equals` suppresses/allows as specified.
+
+    * PART 11 — README + FULL-SUITE REGRESSION: a short README documenting the public API, and the ENTIRE `node --test`
+      suite green — every earlier increment's tests still pass.
+
+  CONSTRAINTS: pure ESM; ZERO runtime dependencies (`node:test` + `node:assert` only); deterministic (no wall-clock, no
+  randomness, no real timers in assertions — F-115); each PART lands its own tests and does NOT break an earlier PART's
+  tests; do NOT front-load a later PART into an earlier step. If a verification step reports a failing `node --test`, READ
+  the failure and fix the IMPLEMENTATION — do NOT weaken or delete any assertion.
+
+repos:
+  - url: .chikory-examples/signals-lab
+    writable: true
+
+bounded_work_unit:
+  min_durable_steps: 10
+  directive: >
+    Advance EXACTLY the ONE numbered PART named by this step's chunk — implement it and its `node --test` cases, then stop
+    and let the durable checkpoint seal. Do NOT front-load a later PART. Do NOT declare the whole run complete until every
+    PART has landed with passing tests.
+  work_chunks:
+    - name: part-1-create-signal
+      directive: "PART 1 ONLY: createSignal(initial) → [get, set]. Tests: initial, read-after-write, independent signals."
+    - name: part-2-create-effect
+      directive: "PART 2 ONLY: createEffect(fn) runs immediately + re-runs on a tracked write (current-observer stack). Tests: runs once, re-runs on write, no re-run for untracked."
+    - name: part-3-create-memo
+      directive: "PART 3 ONLY: createMemo(fn) cached derived; recomputes on tracked-dep change; reading subscribes. Tests: reflects source, effect-on-memo re-runs, no recompute on unrelated write."
+    - name: part-4-batch
+      directive: "PART 4 ONLY: batch(fn) defers dependent re-runs until fn returns (each effect at most once). Tests: two writes → one run; nested batches flush once."
+    - name: part-5-diamond-glitch-free
+      directive: "PART 5 ONLY: glitch-free diamond (a→b,c→d=b+c): one write to a updates d exactly once. Diamond fixture: derived effect runs once per source write, never half-updated."
+    - name: part-6-untrack
+      directive: "PART 6 ONLY: untrack(fn) reads without subscribing. Test: effect re-runs only for the tracked signal."
+    - name: part-7-oncleanup
+      directive: "PART 7 ONLY: onCleanup(fn) — cleanups run before each re-run and once on dispose. Tests accordingly."
+    - name: part-8-dispose
+      directive: "PART 8 ONLY: dispose() stops future re-runs + flushes cleanups. Test: after dispose, a tracked write does not re-run."
+    - name: part-9-nested-ownership
+      directive: "PART 9 ONLY: a nested effect is disposed when the outer effect re-runs (no leaked subscriptions). Test accordingly."
+    - name: part-10-equality-dedup
+      directive: "PART 10 ONLY: createSignal(initial,{equals}) (default Object.is) — equal value does not notify. Tests: same value fires nothing; custom equals suppresses/allows."
+    - name: part-11-readme-and-regression
+      directive: "PART 11 ONLY: write a short README for the public API and run the FULL node --test suite; if anything fails, fix the IMPLEMENTATION, never weaken a test."
+
+acceptance_criteria:
+  - id: AC-1
+    description: >
+      The full reactive-signals test suite passes end-to-end under Node's built-in runner (every PART's `node:test` cases,
+      including the glitch-free diamond). cwd = the run workspace (the cloned greenfield target).
+    check: node --test
+  - id: AC-2
+    description: >
+      All five public reactive primitives the goal NAMES are present in source — `createSignal`, `createEffect`,
+      `createMemo`, `batch`, `untrack` (absent on the seed HEAD → grep cannot false-green, F-90; FUNCTION symbols, F-114;
+      occurrence-count idiom yields a single integer, F-119). Layout is the executor's (F-82/F-83).
+    check: >
+      test "$(grep -rIoh --exclude-dir=.git --exclude-dir=node_modules --exclude-dir=.chikory --exclude-dir=.chikory-examples -e createSignal -e createEffect -e createMemo -e batch -e untrack . | sort -u | wc -l | tr -d ' ')" -ge 5
+  - id: AC-3
+    description: >
+      A substantial, real `node:test` suite exists (not a token stub) — at least 8 `test(` cases across the library, so the
+      horizon is non-hollow and AC-1 is meaningful. (F-119-safe: a single integer via `wc -l`.)
+    check: >
+      test "$(grep -rIoh --exclude-dir=.git --exclude-dir=node_modules --exclude-dir=.chikory --exclude-dir=.chikory-examples 'test(' . | wc -l | tr -d ' ')" -ge 8
+
+budget_usd: 40
+max_steps: 60
+
+# CONTEXT-ROT VEHICLE (WP-203/WP-207) + F-125: NO soak block, NO manual window. `pacing.autoCalibrate` derives the window
+#   from this run's OWN first-step assembled-context tokens (`calibrateContextWindow`), so real accumulation crosses the
+#   compact band and `planCompaction` folds under GENUINE pacing pressure by ~step 6 (>keepLastN=5). Pacing also bounds
+#   spend (fewer resent tokens once history folds).
+pacing:
+  mode: auto
+  autoCalibrate: true
+
+# UNATTENDED (WP-271): operator-free autonomy; a genuine ESCALATE seals a resumable FAILED instead of an untimed hang.
+#   The mid-run kill→resume is a DETERMINISTIC drill via CHIKORY_KILL_AT_STEP (see header), not this policy.
+unattended:
+  escalation: seal_resumable_failed
+
+executor:
+  adapter: codex
+  family: openai
+
+judge:
+  family: openai-compat
+  cadence: 2
+  max_cost_share: 0.5
+
+routing:
+  stages:
+    plan: { provider: openai-compat, model: gpt-5.5 }
+    code: { provider: openai-compat, model: gpt-5.5 }
+    review: { provider: openai-compat, model: gpt-5.5 }
+    judge: { provider: openai-compat, model: gemini-3.1-pro-preview }

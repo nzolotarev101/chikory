@@ -340,6 +340,22 @@ function repoDiffBasesSinceLastVerdict(
 
 export type RunnerActivities = ReturnType<typeof createRunnerActivities>;
 
+/**
+ * F-127 pure guard for the durable-resume drill seam: crash only when
+ * `CHIKORY_KILL_AT_STEP` is set to exactly the step whose checkpoint just sealed.
+ * The resuming worker is launched WITHOUT the env → returns false → the run
+ * proceeds (breaking any re-crash loop on replay). Extracted so the decision is
+ * unit-testable without exercising `process.exit`.
+ */
+export function shouldCrashForResumeDrill(
+  killAtStepEnv: string | undefined,
+  atStep: number,
+): boolean {
+  if (killAtStepEnv === undefined || killAtStepEnv.length === 0) return false;
+  const target = Number(killAtStepEnv);
+  return Number.isInteger(target) && target === atStep;
+}
+
 export function createRunnerActivities(deps: RunnerActivityDeps) {
   return {
     /**
@@ -1263,6 +1279,23 @@ export function createRunnerActivities(deps: RunnerActivityDeps) {
       const target = join(workspaceDir(deps.dataDir, input.runId), rel);
       await mkdir(dirname(target), { recursive: true });
       await writeFile(target, input.content);
+    },
+
+    /**
+     * F-127 durable-resume drill seam. When `CHIKORY_KILL_AT_STEP` names the step
+     * whose checkpoint just sealed, hard-exit the worker (137) to simulate a
+     * crash, so `chikory resume` can be driven reproducibly. Reading the env here
+     * (an ACTIVITY, not the workflow) is what breaks the re-crash loop: the
+     * resuming worker is launched WITHOUT the env, so on replay this activity
+     * completes as a no-op and the run proceeds. Off the happy path — only
+     * reached when `spec.debug.killAtStep` was armed host-side.
+     */
+    async maybeCrashForResumeDrill(input: { runId: string; atStep: number }): Promise<void> {
+      if (shouldCrashForResumeDrill(process.env["CHIKORY_KILL_AT_STEP"], input.atStep)) {
+        // Durable checkpoint for `atStep` is already sealed by the caller; exiting
+        // now leaves a clean resumable seam. 137 = SIGKILL-style crash code.
+        process.exit(137);
+      }
     },
 
     /**

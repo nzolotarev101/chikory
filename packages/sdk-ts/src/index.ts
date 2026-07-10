@@ -175,6 +175,12 @@ export {
   type ObservedStepUsage,
 } from "./runner/killed-step-usage.js";
 export { summarizePacing, type PacingSummary } from "./runner/pacing-summary.js";
+export {
+  calibrateContextWindow,
+  lookupContextWindow,
+  resolveContextWindowForSpec,
+  type ContextWindowCalibrationOptions,
+} from "./runner/context-window.js";
 export { summarizeCompaction, type CompactionSummary } from "./runner/compaction-summary.js";
 export {
   describeCompactionPressure,
