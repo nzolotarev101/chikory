@@ -50,6 +50,10 @@ totals: decisions 11 · judge passes 11 ($0.07, 4.2%) · rollbacks 0 · escalati
 | **Fold under LIVE pacing pressure** | 🟢 | The auto-calibrated window successfully triggered compact pressure once context accumulated, producing 6 pacing compactions. |
 | **Mid-run kill→resume** | 🟢 | Deterministic exit code 137 triggered right after step index 6 sealed. `chikory resume` re-entered and completed steps 8-11 with zero re-execution. |
 
+## New friction
+
+**F-128 (🟡 track-B, reviewer tooling — hand-fix candidate) — `scripts/dogfood-verify.sh` §3 re-runs the run's ACs against the Chikory repo root, not the run's own workspace, so a scaffold-hosted run false-FAILs AC-1.** This run writes only into the git-ignored `.chikory-examples/signals-lab` and is never harvested to the host tree, so re-running AC-1 (`node --test`) from the repo root discovers the Chikory project's own 119 test files (117 fail — wrong project) and the pack prints a scary `⚠ One or more acceptance checks FAILED`. **Evidence:** verify §3 = `node --test` → 117/119 fail; the SAME check with cwd pinned to the run workspace (`.chikory/runs/run-7746e7fa…/workspace`) = **20 tests, 20 pass, 0 fail** — the real, green delivery. Compounded by `devbox run` resetting cwd to the repo root, so even a manual `cd workspace && devbox run -- node --test` re-fails. **Impact:** an entirely clean run flags a false red in the evidence pack, wasting reviewer time (or, worse, masking a real fail on a harvested run). **Fix (hand):** §3 should run each AC `check` with cwd = the run's workspace dir (or the harvested repo tree), not the invocation dir. **WP it spawns:** none — track-B verifier-plumbing fix; harness-meta, and the §1.5 cap is busted, so it cannot headline. Not loop-integrity (the durable loop ran flawlessly). Recorded for the next hand-fix sitting.
+
 ## Verdict on the thesis
 
 The newly-introduced mechanisms (F-125 auto-calibration and F-127 crash seam) are fully validated. The durable execution state machine and the pacing/context-rot mitigation strategy are now proven on a real workload.

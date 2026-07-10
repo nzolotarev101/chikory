@@ -1,0 +1,227 @@
+# Dogfood-096: THE P2 EXIT-GATE RUN — 24h+ multi-session BROWNFIELD run on the real Chikory repo that COMBINES every
+#   P2 mechanism the rehearsals proved: an auto-calibrated pacing fold (dogfood-095), soak-paced wall-clock endurance
+#   over 24h+ (dogfood-090), and a deterministic mid-run kill→resume (dogfood-095) — while it advances a REAL open
+#   product WP on live Chikory source.
+#
+# WHY NOW (dogfood-095 review, 2026-07-09). Both rehearsal axes fired end-to-end on dogfood-095 (`run-7746e7fa`):
+#   auto-calibrated pacing fold (`peak window 123% · compactions 6 (pacing 6)`) + deterministic `CHIKORY_KILL_AT_STEP`
+#   kill→resume with zero re-execution. Every P2-exit MECHANISM (soak endurance WP-272, live compaction WP-251,
+#   auto-calibration F-125, deterministic resume seam F-127, run-level self-heal WP-519/520) is landed AND live-proven.
+#   The ONLY remaining P2 item (plan.md §6 queue ⑦, exit gate at plan.md §"Phase 2 exit") is THIS run: a 24h+
+#   multi-session brownfield horizon on a REAL repo that seals SUCCESS with ≥1 suspend/resume + compaction events in
+#   trace + no context-rot-shaped failure.
+#
+# HOST WP (real product progress, §1.2). WP-214 — MULTI-REPO WORKSPACES ("TaskSpec accepts N repos; checkpoints span
+#   all; per-repo diffs in evidence"). PARTIALLY built: `src/runner/workspace-repos.ts` already resolves N repos
+#   (`collectWorkspaceRepos`/`WorkspaceRepo`, `multiRepo`), but the checkpoint/evidence/resume/chain path still assumes
+#   ONE repo — `activities.ts:1494` hardcodes `spec.repos[0]` and FAILs any chain handoff with `repos.length !== 1`.
+#   This run finishes the threading so a durable run over N repos commits ALL of them per checkpoint and carries a
+#   per-repo diff into the judge's evidence. A REAL durable-execution pillar advance, not throwaway scaffolding.
+#
+# GATE VERDICTS (dogfood-095 review phase 5): progression ✅ PROGRESSING, but 🔴 CAP BUSTED (2 harness-meta headlines /3)
+#   → next headline MUST be class=product; ⚠️ rung stuck at 4 → this climbs to the exit gate. §1.1 ✅ (24h+ brownfield,
+#   multi-session, cross-file, suspend/resume, compaction — maximally failable). §1.2 ✅ (advances real open WP-214 on
+#   live Chikory source). §1.3 ✅ PROCEED (the single most thesis-critical run in the project). §1.5 ✅ (class=product,
+#   clears the meta cap). class=product by primary surface (`packages/sdk-ts/`). USER-SANCTIONED, launch-gated.
+#
+# CLASS / LADDER. WP-265 exit-gate rung (the 24h brownfield gate). Ladder-rung: 5. This is the culminating rung.
+#
+# Format: LOOSE (brownfield feature — outcome goal + 11 ordered increments; layout/test-names the executor's, F-82/F-83).
+#   ACs pin "done" via net-new FUNCTION symbols the goal NAMES that are ABSENT on HEAD (`commitAllRepos`,
+#   `collectPerRepoDiffs` — verified 0 occurrences, so a recursive grep cannot false-green, F-90/F-114) + a LIVE Temporal
+#   multi-repo test + the FULL suite green.
+# Ladder-rung: 5
+# Thesis-KPI: P2 EXIT GATE — one 24h+ multi-session BROWNFIELD `chikory run` on the real Chikory repo seals SUCCESS with
+#   (a) ≥1 suspend/resume in the trace (soak parks AND/OR the deterministic kill→resume, journal-verified zero
+#   re-execution), (b) compaction events under LIVE auto-calibrated pacing pressure (`compactions N (pacing M)`, M ≥ 1),
+#   and (c) NO context-rot-shaped failure across the horizon — while landing a real WP-214 advance (checkpoints span all
+#   repos, per-repo diffs in evidence).
+#
+# ✅ PREREQUISITES — DO ALL THREE BEFORE LAUNCH.
+#   1. Commit everything in the Chikory repo first — the workspace clones the target's HEAD (so the WP-214 residual and
+#      all mechanism code must be in HEAD).
+#   2. SIZE THE SOAK to your actual proxy-token TTL: `soak.sleep_ms` (below, 150 min) must be ABOVE your TTL so
+#      token-refresh-across-park is genuinely exercised. 10 parks × 150 min ≈ 25h ≥ the 24h gate.
+#   3. (Recommended) ARM the deterministic crash-recovery drill from the env (host-side, NOT a YAML field):
+#         export CHIKORY_KILL_AT_STEP=5   # after step index 5 seals (past the first pacing fold) → worker exits 137
+#      Then resume WITHOUT the env so the crash fires exactly once (see below). The soak parks independently satisfy the
+#      suspend/resume axis, so this arm is OPTIONAL — omit it for a pure soak-endurance gate.
+#      `CHIKORY_PREFLIGHT_ONLY=1 devbox run run-dogfood` dry-runs every launch guard at $0 first.
+#
+# ⚠️ LAUNCH: `devbox run run-dogfood` (picks the latest spec — this one). This is a MULTI-DAY unattended run; watch with
+#   `pnpm chikory watch <run-id>`. If armed with the kill seam, the worker hard-exits after step 5 seals — then resume:
+#         unset CHIKORY_KILL_AT_STEP
+#         devbox run -- pnpm chikory resume <run-id>
+#   Confirm on resume: steps 1–5 are NOT re-executed (journal byte-identical = replay), the multi-repo workspace is
+#   restored, and the run continues to SUCCESS across the remaining soak parks.
+#
+# ⚠️ POST-RUN CONFIRM (what makes this the exit-gate PASS): `pnpm chikory trace <run-id>` totals show ALL of:
+#   (a) `compactions N (pacing M)` with M ≥ 1 (a real auto-calibrated pacing fold); (b) ≥1 suspend/resume — soak
+#   `re-entries K` and/or the kill→resume — with NO duplicate step entries (clean replay); (c) SUCCESS, unattended,
+#   ≥24h wall-clock; AND the landed diff advances WP-214 (per-repo checkpoint commits + per-repo evidence diffs).
+#
+# ⚠️ DETERMINISM / SCOPE. Writes ONLY inside `packages/sdk-ts/` (+ the `docs/spec/` doc PART) on the real Chikory repo.
+#   Additive: no frozen-contract shape change on a single-repo run (a 1-repo run must render/behave EXACTLY as before).
+
+name: dogfood-096-p2exit-24h-multirepo-brownfield
+goal: >
+  Finish WP-214 (MULTI-REPO WORKSPACES) on the real Chikory SDK so a single durable `chikory run` over N repos commits
+  ALL of them at every checkpoint and carries a per-repo diff into the judge's evidence — today only the FIRST repo
+  (`spec.repos[0]`) is committed/diffed and any chain handoff FAILs with more than one repo. Extend the existing
+  `src/runner/workspace-repos.ts` resolver (`collectWorkspaceRepos`/`WorkspaceRepo` already exist — do NOT re-create
+  them) through the checkpoint, evidence, resume, chain-handoff, scope-gate, trace, and report paths. Deliver in ELEVEN
+  ordered, dependency-ordered increments, ONE per durable step, each adding DISTINCT non-trivial working code + tests
+  (the non-hollow horizon, F-100/WP-270), so resident step summaries accumulate past the compaction fold threshold and a
+  real `trigger:"pacing"` fold fires mid-run:
+
+    * PART 1 — COMMIT ALL REPOS AT CHECKPOINT: a net-new `commitAllRepos` seals a per-repo commit map at every durable
+      checkpoint (today `activities.ts` commits only `spec.repos[0]`). Journal a `perRepoCommits` map. Tested: a 2-repo
+      run seals a checkpoint carrying a commit for EACH writable repo; a 1-repo run is byte-identical to today.
+
+    * PART 2 — PER-REPO DIFF EVIDENCE: a net-new `collectPerRepoDiffs` builds the judge evidence pack with a LABELED
+      diff per repo (not just the first). Tested: a 2-repo change surfaces both repos' diffs in the evidence.
+
+    * PART 3 — RESUME RESTORES ALL REPOS: on `chikory resume`, every repo is rehydrated to its sealed commit (not just
+      `repos[0]`). Tested: a resumed 2-repo run restores both workspaces with no re-execution.
+
+    * PART 4 — CHAIN HANDOFF SUPPORTS N REPOS: replace the `spec.repos.length !== 1` FAILED guard
+      (`activities.ts:~1494`) with a per-repo chain handoff. Tested: a chain link over 2 repos hands off both.
+
+    * PART 5 — PER-REPO SCOPE GATE: the writeSet / out-of-scope gate is evaluated per repo, so a write in repo B is
+      scoped to repo B, never falsely flagged against repo A's writeSet. Tested with a cross-repo write fixture.
+
+    * PART 6 — PER-REPO AC CWD: a judge/acceptance `check` that targets a named repo runs in THAT repo's workspace
+      subdir. Tested: a check `cd`-ing into repo B sees repo B's tree.
+
+    * PART 7 — TRACE RENDERS PER-REPO SUMMARY: `chikory trace` totals render the repo count + per-repo diff bytes /
+      commit. Tested: the renderer shows both repos; a 1-repo trace is unchanged.
+
+    * PART 8 — REPORT SURFACES PER-REPO: the run report (`renderReport`) surfaces per-repo commits + diffs. Tested.
+
+    * PART 9 — CHECKPOINT OBSERVABILITY: the checkpoint OTel span / attributes carry the repo count + per-repo refs
+      (durable-execution observability). Tested with an `InMemorySpanExporter`.
+
+    * PART 10 — LIVE MULTI-REPO PROOF: a LIVE Temporal test drives a real 2-repo run end-to-end (reuse
+      `createRunnerWorker`/`createTemporalRunner`/scripted registry/`waitFor`/`makeJudgedSpec`): checkpoints span BOTH
+      repos, per-repo diffs appear in evidence, a mid-run resume restores both, SUCCESS unattended. Co-reference
+      `collectPerRepoDiffs` AND `createRunnerWorker` (F-97).
+
+    * PART 11 — DOCS + FULL-SUITE REGRESSION: document multi-repo workspaces in `docs/spec/task-spec.md`, and prove the
+      ENTIRE `packages/sdk-ts` suite (tsc + eslint + vitest) is green — every earlier increment's tests still pass and a
+      single-repo run is unchanged.
+
+  CONSTRAINTS: additive — NO frozen-contract shape change; a single-repo run must render and behave EXACTLY as before
+  (byte-identical trace/report/journal on the 1-repo path). Extend `workspace-repos.ts`, do NOT duplicate its resolver.
+  Each PART lands its own tests and does NOT break an earlier PART's tests; do NOT front-load a later PART. If a
+  verification step reports a failing suite, READ the failure and fix the IMPLEMENTATION — do NOT weaken or delete any
+  assertion (F-115: never assert a wall-clock duration to prove a structural absence).
+
+repos:
+  - url: /Users/nikitazolotarev/repos/chikory
+    writable: true
+
+bounded_work_unit:
+  min_durable_steps: 10
+  directive: >
+    Advance EXACTLY the ONE numbered PART named by this step's chunk — implement it and its tests, then stop and let the
+    durable checkpoint seal. Do NOT front-load a later PART. Do NOT declare the whole run complete until every PART has
+    landed with passing tests.
+  work_chunks:
+    - name: part-1-commit-all-repos
+      directive: "PART 1 ONLY: net-new commitAllRepos seals a per-repo commit map at every checkpoint (today only repos[0]). Journal perRepoCommits. Tests: 2-repo checkpoint commits each repo; 1-repo byte-identical."
+    - name: part-2-per-repo-diff-evidence
+      directive: "PART 2 ONLY: net-new collectPerRepoDiffs builds evidence with a labeled diff per repo. Test: a 2-repo change surfaces both diffs."
+    - name: part-3-resume-restores-all-repos
+      directive: "PART 3 ONLY: chikory resume rehydrates every repo to its sealed commit (not just repos[0]). Test: resumed 2-repo run restores both, no re-execution."
+    - name: part-4-chain-handoff-n-repos
+      directive: "PART 4 ONLY: replace the spec.repos.length !== 1 FAILED guard (activities.ts:~1494) with per-repo chain handoff. Test: a chain link over 2 repos hands off both."
+    - name: part-5-per-repo-scope-gate
+      directive: "PART 5 ONLY: the writeSet/out-of-scope gate is per repo — a write in repo B is scoped to repo B. Test with a cross-repo write fixture."
+    - name: part-6-per-repo-ac-cwd
+      directive: "PART 6 ONLY: a check targeting a named repo runs in that repo's workspace subdir. Test: a check cd-ing into repo B sees repo B's tree."
+    - name: part-7-trace-per-repo-summary
+      directive: "PART 7 ONLY: chikory trace totals render repo count + per-repo diff bytes/commit. Test: both repos shown; 1-repo trace unchanged."
+    - name: part-8-report-per-repo
+      directive: "PART 8 ONLY: renderReport surfaces per-repo commits + diffs. Test accordingly."
+    - name: part-9-checkpoint-observability
+      directive: "PART 9 ONLY: the checkpoint OTel span/attributes carry repo count + per-repo refs. Test with an InMemorySpanExporter."
+    - name: part-10-live-multirepo-proof
+      directive: "PART 10 ONLY: a LIVE Temporal test drives a real 2-repo run end-to-end (checkpoints span both, per-repo diffs in evidence, mid-run resume restores both, SUCCESS unattended). Co-ref collectPerRepoDiffs + createRunnerWorker."
+    - name: part-11-docs-and-regression
+      directive: "PART 11 ONLY: document multi-repo workspaces in docs/spec/task-spec.md and run the FULL packages/sdk-ts suite (tsc + eslint + vitest); if anything fails, fix the IMPLEMENTATION, never weaken a test."
+
+acceptance_criteria:
+  - id: AC-1
+    description: >
+      The net-new per-repo checkpoint-commit function exists in the runner source — a function that commits ALL writable
+      repos at a checkpoint. (OUTCOME symbol the goal NAMES — `commitAllRepos` — absent on HEAD so a recursive grep
+      cannot false-green, F-90. F-114-SAFE: a FUNCTION symbol, not a type-name token. Layout is the executor's,
+      F-82/F-83.)
+    check: >
+      cd packages/sdk-ts &&
+      grep -rq 'commitAllRepos' src/runner/
+  - id: AC-2
+    description: >
+      The checkpoint path CONSUMES the per-repo commit function (not just defines it) — `commitAllRepos` appears at least
+      twice across the source (definition + the checkpoint/seal consumption site). (F-114-SAFE: keyed on the net-new
+      FUNCTION symbol. F-119-SAFE: counts OCCURRENCES with `grep -roh … | wc -l` — a single integer — NEVER `grep -rc`
+      over a directory.)
+    check: >
+      cd packages/sdk-ts &&
+      test "$(grep -roh 'commitAllRepos' src/ | wc -l)" -ge 2
+  - id: AC-3
+    description: >
+      A LIVE Temporal test exercises a real multi-repo run end-to-end. (F-97-SAFE: requires a `test/` file referencing
+      BOTH the net-new per-repo-evidence symbol `collectPerRepoDiffs` AND the LIVE runner driver `createRunnerWorker`, so
+      the multi-repo durable proof is actually enforced. Both are OUTCOME symbols the goal names; filename is the
+      executor's.)
+    check: >
+      cd packages/sdk-ts &&
+      for f in $(grep -rl 'collectPerRepoDiffs' test/ 2>/dev/null); do
+        grep -q 'createRunnerWorker' "$f" && { echo ok; break; };
+      done | grep -q ok
+  - id: AC-4
+    description: >
+      The SDK stays type- and lint-clean and the FULL existing suite is green, proving the change is additive and nothing
+      regressed (no frozen-contract shape change; a single-repo run renders/behaves exactly as before, plus the new
+      per-repo surfaces on the multi-repo path).
+    check: cd packages/sdk-ts && pnpm exec tsc --noEmit && pnpm exec eslint . && pnpm exec vitest run
+
+budget_usd: 120
+max_steps: 60
+
+# CONTEXT-ROT VEHICLE (WP-203/WP-207) + F-125: NO manual window. `pacing.autoCalibrate` derives the window from this
+#   run's OWN first-step assembled-context tokens (`calibrateContextWindow`), locked once after step 1, so real
+#   accumulation crosses the compact band and `planCompaction` folds under GENUINE pacing pressure (proven dogfood-095).
+pacing:
+  mode: auto
+  autoCalibrate: true
+
+# SOAK (WP-272): the 24h+ wall-clock endurance vehicle. ⚠️ SIZE `sleep_ms` ABOVE YOUR ACTUAL PROXY-TOKEN TTL before
+#   launch. 150 min/park × 10 parks ≈ 25h ≥ the 24h exit gate; `max_total_sleep_ms` hard-caps total soak at 25h.
+soak:
+  sleep_ms: 9000000          # 150 min per durable park (size ABOVE your proxy-token TTL)
+  max_reentries: 10          # ≈ 25h total durable soak across the ~10 chunk boundaries (the 24h+ gate)
+  max_total_sleep_ms: 90000000  # hard cap 25h of soak (safety bound)
+
+# UNATTENDED (WP-271): operator-free across a multi-day horizon; a genuine ESCALATE seals a resumable FAILED (WP-520)
+#   instead of an untimed hang, and the run-level self-heal (WP-519) gets one bounded remediation before any terminal
+#   seal. The mid-run kill→resume is a DETERMINISTIC drill via CHIKORY_KILL_AT_STEP (see header), not this policy.
+unattended:
+  escalation: seal_resumable_failed
+
+executor:
+  adapter: codex
+  family: openai
+
+judge:
+  family: openai-compat
+  cadence: 2
+  max_cost_share: 0.5
+
+routing:
+  stages:
+    plan: { provider: openai-compat, model: gpt-5.5 }
+    code: { provider: openai-compat, model: gpt-5.5 }
+    review: { provider: openai-compat, model: gpt-5.5 }
+    judge: { provider: openai-compat, model: gemini-3.1-pro-preview }

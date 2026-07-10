@@ -8,15 +8,15 @@ recover a run, and how to land the result as a normal PR.
 **Status (2026-07-09, bounded — update discipline: REPLACE this block, ≤15 lines;
 displaced prose moves verbatim to [`PLAN-HISTORY.md`](PLAN-HISTORY.md); per-run detail:
 `docs/reports/dogfood-NNN.md`; queue + course correction: `plan.md` §6).**
-Latest: dogfood-094 — **P2 EXIT-GATE REHEARSAL (reactive-signals greenfield build) — delivery SUCCESS, but the rehearsal MISSED both target axes** (`run-b319713b-efaf-4a4b-bb3e-c409ea285ae8`,
-`docs/reports/dogfood-094.md`). 🟢 **SUCCESS · 11 steps · $1.95/$40 · 13m 10s.** Chikory autonomously built a real, correct fine-grained reactive-signals library from
-scratch (11 increments, **21/21 `node --test` green** in the workspace, 6 primitives incl. a glitch-free diamond) — a clean *build*. **But the Thesis-KPI (fold under LIVE
-pacing pressure + a mid-run kill→resume) was 0/2:** the window `4000` was too big for this small greenfield (proj 1.6k–2.6k = 40–65%), so pacing stayed `continue` all
-11 steps (`peak window 65% · compact 0`) and the 3 folds were `trigger:"count"` (`compactions 3 (pacing 0)`), NOT pacing; and the manual kill→resume never fired
-(`resumes 0`). 🔴 **F-125** — seam-window sizing is workload-dependent with NO calibration (4th distinct sizing miss: 053-overshoot/091-undershoot/092-too-short/094-too-big) →
-WP: pre-flight window auto-calibration off step-1 assembled tokens. 🟡 **F-126** — stale-spec precheck false-fired on the `WP-270` concept ref in the goal (WP-260-class
-mis-target). 🟡 **F-127** — the kill→resume drill relies on a human racing a 13-min run; needs a deterministic `debug.killAtStep` seam. **The user's caveat holds: this was
-not a real long build and did not stress the hypothesis — its value was negative-space.** ✅ **F-125 (`pacing.autoCalibrate` — window sized from the run's own first-step tokens) + F-127 (`CHIKORY_KILL_AT_STEP` deterministic resume-drill seam) HAND-LANDED track-B this sitting** (uncommitted; 797 TS + 84 py green, tsc/eslint/ruff clean). **NEXT: dogfood-095 (armed, preflight ✅) re-runs the rehearsal on both mechanisms so the pacing-driven fold + kill→resume actually fire, THEN the launch-gated 24h exit-gate run.** See §7, §1.5, §1.4, §3. (dogfood-093 detail → PLAN-HISTORY.)
+Latest: dogfood-095 — **P2 EXIT-GATE REHEARSAL, re-run — delivery SUCCESS and BOTH rehearsal axes PASSED** (`run-7746e7fa-b16f-47d0-98c0-f99333ecafc6`,
+`docs/reports/dogfood-095.md`). 🟢 **SUCCESS · 11 steps · $1.77/$40 · 22m 29s.** The same greenfield reactive-signals build (20/20 `node --test` green in-workspace), now on
+the two mechanisms 094's misses forced into existence: (a) **auto-calibrated pacing fold** — `pacing.autoCalibrate` sized the window off this run's step-1 tokens →
+`peak window 123% · compactions 6 (pacing 6) · first pacing fold step 5`, a REAL `trigger:"pacing"` fold (vs 094's `pacing 0`); (b) **deterministic kill→resume** —
+`CHIKORY_KILL_AT_STEP=6` exited the worker 137 after the sealed step, `chikory resume` re-entered with ZERO re-execution (journal-verified: 11-min gap at the kill boundary,
+no duplicate step entries). Both axes 094 missed now fire → the F-125 (`pacing.autoCalibrate`) + F-127 (`CHIKORY_KILL_AT_STEP`) mechanisms are LIVE-PROVEN; the launch-gated
+24h+ exit-gate run is de-risked. 🟡 **F-128** — `scripts/dogfood-verify.sh` §3 re-runs ACs from the repo root, not the scaffold workspace, so a `.chikory-examples` run
+false-FAILs AC-1 (this run's "117-fail" §3 banner was that false alarm; workspace-cwd = 20/20 green). Track-B verifier hand-fix; see §7. **NEXT (only remaining P2 item):
+the launch-gated 24h+ brownfield EXIT-GATE run.** See §7, §1.5, §1.4, §3. (dogfood-094 detail → PLAN-HISTORY.)
 
 Related docs: [`docs/spec/task-spec.md`](spec/task-spec.md) (schema
 reference) · [`docs/TASK-PROTOCOL.md`](TASK-PROTOCOL.md) (WP etiquette, §7 is
@@ -635,6 +635,7 @@ broken (a false-green, not a follow-on fix).
 | `Invalid task spec: provider 'x' … missing env var Y` | Parse-time key validation. Export the key, or use the §3.8 routing workaround for keyless CLI runs. |
 | `Is the Temporal dev server up?` | It isn't. `devbox run temporal-dev`. |
 | A track-B robustness gap (e.g. an F-n queued "track-B, fix pending") tempts you to re-launch the already-green headline spec to fix it | Don't — a re-run of a closed spec consumes a dogfood slot the ladder queue owns and double-counts in the ledger (F-102, dogfood-083 re-run `run-03d161e9` fixed F-101 this way). Land a documented track-B fix as a NORMAL PR against the WP's real code; keep dogfood headlines for the WP-265 ladder rung. (The re-run's fix is legitimate and kept — the process, not the code, is the friction.) |
+| The evidence pack (`scripts/dogfood-verify.sh`) prints `⚠ acceptance checks FAILED` on a run that is actually GREEN | **§3 re-runs the run's ACs from the Chikory repo root, not the run's own workspace** (dogfood-095 **F-128**, track-B). A scaffold-hosted run (writes only into git-ignored `.chikory-examples/…`, never harvested) has no delivery in the host tree, so `node --test` from the root discovers Chikory's own suite and false-fails. Re-run the AC with cwd pinned to the workspace: `devbox run -- bash -c 'cd .chikory/runs/<run-id>/workspace && node --test'` (note `devbox run` alone resets cwd to the repo root — the `cd` must be inside the shell). Durable fix = §3 should run each `check` in the run's workspace/harvested tree. |
 | Steps fail instantly, `executor exited with code 1` | Read the failure: `pnpm chikory trace <run-id> --step 1`. Check the executor binary works headless in your env (`codex exec`/`claude -p` smoke test). |
 | Steps fail with a session/usage-limit message | Subscription executor ran dry (dogfood run 1). Reject the escalation, switch `executor` to the other CLI (or API-key auth), relaunch. |
 | Judge checks time out | 120 s/check cap. Bare `pnpm` not `devbox run` (§3.4); split slow suites into a focused test file per criterion. |

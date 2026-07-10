@@ -4,6 +4,12 @@
 > per-run detail lives in [`docs/reports/`](reports/). Content below was moved
 > verbatim out of the living docs on 2026-07-02 (course correction — plan.md §6).
 
+## Archived 2026-07-09 — displaced by dogfood-095 (`run-7746e7fa`, P2 rehearsal re-run, BOTH axes passed)
+
+Prior DOGFOODING/plan status head (dogfood-094, `run-b319713b`, the rehearsal that missed both axes):
+
+> dogfood-094 — **P2 EXIT-GATE REHEARSAL (reactive-signals greenfield build) — delivery SUCCESS, but the rehearsal MISSED both target axes.** 🟢 SUCCESS · 11 steps · $1.95/$40 · 13m 10s. Chikory autonomously built a real, correct fine-grained reactive-signals library from scratch (11 increments, 21/21 `node --test` green, 6 primitives incl. a glitch-free diamond) — a clean *build*. But the Thesis-KPI (fold under LIVE pacing pressure + a mid-run kill→resume) was 0/2: window `4000` too big for this small greenfield (proj 1.6k–2.6k = 40–65%) → pacing stayed `continue` all 11 steps (`peak window 65% · compact 0`), the 3 folds were `trigger:"count"` (`compactions 3 (pacing 0)`) NOT pacing; the manual kill→resume never fired (`resumes 0`). 🔴 F-125 (window sizing workload-dependent, no calibration — 4th miss: 053-overshoot/091-undershoot/092-too-short/094-too-big), 🟡 F-126 (stale-spec precheck false-fire on the `WP-270` concept ref), 🟡 F-127 (kill→resume needs a deterministic `debug.killAtStep` seam). F-125 (`pacing.autoCalibrate`) + F-127 (`CHIKORY_KILL_AT_STEP`) HAND-LANDED track-B this sitting; both re-proven by dogfood-095. Full 094 detail → `docs/reports/dogfood-094.md`.
+
 ## Archived 2026-07-09 — displaced by dogfood-092 (`run-4481c735`, WP-251 SUCCESS, live-fold missed 3rd time)
 
 - **dogfood-089 — WP-105 DURABLE-LOOP OTel SPANS, the FIRST GENUINE rung-4 CLIMB (`run-c3a1c54e`, 🟢 SUCCESS · 6 steps, $5.19/$80, 2h50m, uncommitted):** an autonomous `soak`-paced `chikory run` (5 durable parks) landed the durable-loop span tree (live-proven parenting). **ladder rung 3→4 CLIMBED; progression ⛔→✅.** 🟡 F-116 (process-local span-parenting Map).
