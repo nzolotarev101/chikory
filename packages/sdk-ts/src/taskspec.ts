@@ -151,7 +151,14 @@ const RawTaskSpecYaml = z
       })
       .strict()
       .optional(),
-    pacing: z.object({ mode: z.enum(["auto", "fixed"]) }).strict().optional(),
+    pacing: z
+      .object({
+        mode: z.enum(["auto", "fixed"]),
+        auto_calibrate: z.boolean().optional(),
+        autoCalibrate: z.boolean().optional(),
+      })
+      .strict()
+      .optional(),
     unattended: z
       .object({
         escalation: z.enum(["await_approval", "seal_resumable_failed"]),
@@ -242,7 +249,12 @@ export function parseTaskSpec(yamlText: string, opts: ParseTaskSpecOptions = {})
       rubricPacks: raw.judge.rubric_packs,
     },
     routing: raw.routing ?? defaultPolicy(raw.executor.family, raw.judge.family),
-    pacing: raw.pacing,
+    pacing: raw.pacing
+      ? {
+          mode: raw.pacing.mode,
+          autoCalibrate: raw.pacing.autoCalibrate ?? raw.pacing.auto_calibrate,
+        }
+      : undefined,
     unattended: raw.unattended,
     soak: raw.soak
       ? {
