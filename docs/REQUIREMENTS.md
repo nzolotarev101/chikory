@@ -21,6 +21,7 @@ Every requirement in [`project.md`](../project.md), assigned a stable ID, mapped
 | RT-9 | Runs locally; cloud only as orchestrated process | WP-004 (local Temporal), constraint on all P4 WPs | P1 | planned |
 | RT-10 | Drive CLI coding agents: Claude Code, Codex, Jules, Antigravity | WP-112, WP-113, WP-216 | P1→P2 | in-progress (Claude Code + Codex done; Jules/Antigravity in WP-216, P2) |
 | RT-11 | Launch providers: Anthropic, OpenAI, Gemini, open models (OpenAI-compat) | WP-101, WP-102 | P1 | done |
+| RT-12 | Limit-aware intelligent scaling across inference endpoints (CLI-subscription / API-key / OpenAI-compat) — headroom failover + work-conserving scheduling before any sleep; a park lasts exactly the learned reset | WP-307 (capability model), WP-308 (scheduler), WP-309 (limit telemetry) | P3 | planned — added 2026-07-10; replaces sleep-first limit handling (dogfood-090 parks, `soak.sleep_ms`, DOGFOODING §7 manual CLI switch) |
 
 ## DX — Durable execution (spec §5.2)
 
