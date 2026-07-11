@@ -208,16 +208,21 @@ describe("runJudgePass (WP-131)", () => {
         expect.stringContaining("workspace diff for service-api"),
         expect.stringContaining("workspace diff for service-worker"),
       ]);
-      await expect(
-        store.get(collected.evidence.diffRefs[0]!).then((bytes) => Buffer.from(bytes).toString()),
-      ).resolves.toContain("+api changed");
-      await expect(
-        store.get(collected.evidence.diffRefs[1]!).then((bytes) => Buffer.from(bytes).toString()),
-      ).resolves.toContain("+worker changed");
+      const [apiDiff, workerDiff] = await Promise.all(
+        collected.evidence.diffRefs.map((ref) =>
+          store.get(ref).then((bytes) => Buffer.from(bytes).toString()),
+        ),
+      );
+      expect(apiDiff).toContain("### repo service-api (service-api)");
+      expect(apiDiff).toContain("+api changed");
+      expect(workerDiff).toContain("### repo service-worker (service-worker)");
+      expect(workerDiff).toContain("+worker changed");
       expect(collected.diffSections.map((section) => section.repoName)).toEqual([
         "service-api",
         "service-worker",
       ]);
+      expect(collected.diffText).toContain("### repo service-api (service-api)");
+      expect(collected.diffText).toContain("### repo service-worker (service-worker)");
 
       const wire = JSON.parse(fake.requests[0]) as { messages: Array<{ content: string }> };
       const sent = wire.messages.map((m) => m.content).join("\n");

@@ -63,6 +63,15 @@ interface SoakTraceSummary {
   sleptMs: number;
 }
 
+interface RepoTraceSummary {
+  repoCount: number;
+  repos: {
+    name: string;
+    diffBytes: number;
+    commit?: string;
+  }[];
+}
+
 const SUMMARY_WIDTH = 36;
 const RULE_WIDTH = 79;
 
@@ -182,6 +191,45 @@ function summarizeSoakTrace(entries: JournalEntry[]): SoakTraceSummary {
   return { reentries, sleptMs };
 }
 
+function repoNameFromDiffSummary(summary: string): string | undefined {
+  const prefix = "workspace diff for ";
+  if (!summary.startsWith(prefix)) return undefined;
+  const rest = summary.slice(prefix.length);
+  const sinceIndex = rest.lastIndexOf(" since ");
+  return sinceIndex > 0 ? rest.slice(0, sinceIndex) : undefined;
+}
+
+function summarizeRepoTrace(entries: JournalEntry[]): RepoTraceSummary | undefined {
+  const checkpoints = entries.filter((entry) => entry.kind === "checkpoint");
+  const latestMultiRepoCheckpoint = [...checkpoints]
+    .reverse()
+    .map((entry) => entry.payload as Checkpoint)
+    .find(
+      (checkpoint) =>
+        checkpoint.perRepoCommits !== undefined && Object.keys(checkpoint.perRepoCommits).length > 1,
+    );
+  if (latestMultiRepoCheckpoint?.perRepoCommits === undefined) return undefined;
+
+  const diffBytesByRepo = new Map<string, number>();
+  for (const entry of entries) {
+    if (entry.kind !== "judge") continue;
+    const judge = entry.payload as JudgePayload;
+    for (const ref of judge.evidenceRefs) {
+      if (ref.kind !== "diff") continue;
+      const repoName = repoNameFromDiffSummary(ref.summary);
+      if (repoName === undefined) continue;
+      diffBytesByRepo.set(repoName, (diffBytesByRepo.get(repoName) ?? 0) + ref.bytes);
+    }
+  }
+
+  const repos = Object.entries(latestMultiRepoCheckpoint.perRepoCommits).map(([name, commit]) => ({
+    name,
+    diffBytes: diffBytesByRepo.get(name) ?? 0,
+    commit,
+  }));
+  return { repoCount: repos.length, repos };
+}
+
 /** The `chikory trace <run-id>` body (cli.md WP-142 format). */
 export function renderTrace(run: RunRow, entries: JournalEntry[], totals: RunTotals): string {
   const lines: string[] = [];
@@ -230,6 +278,7 @@ export function renderTrace(run: RunRow, entries: JournalEntry[], totals: RunTot
   const compactionPressure = describeCompactionPressure(entries);
   const compactionPressureWarning = pressureFoldGapWarning(compactionPressure);
   const soak = summarizeSoakTrace(entries);
+  const repoTrace = summarizeRepoTrace(entries);
   const issuesFound = entries.reduce((count, entry) => {
     if (entry.kind !== "judge") return count;
     const { form } = entry.payload as JudgePayload;
@@ -300,6 +349,13 @@ export function renderTrace(run: RunRow, entries: JournalEntry[], totals: RunTot
     `        issues found ${issuesFound} · changes made ${changesMade} ` +
       `(issues:changes ${issuesFound}:${changesMade})`,
   );
+  if (repoTrace !== undefined) {
+    lines.push(`        repos ${repoTrace.repoCount}`);
+    for (const repo of repoTrace.repos) {
+      const commit = repo.commit === undefined ? "?" : repo.commit.slice(0, 12);
+      lines.push(`          ${repo.name}: diff ${repo.diffBytes} bytes · commit ${commit}`);
+    }
+  }
   lines.push(`        components over time: ${timeline}`);
 
   // A reopened resumable-FAILED run (WP-520) may hold several terminal

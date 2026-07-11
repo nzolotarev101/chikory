@@ -32,6 +32,7 @@ import type {
   ArtifactRef,
   ArtifactStore,
   ChainNodeHandoff,
+  RepoHandoff,
   Checkpoint,
   CheckpointId,
   CompactionPolicy,
@@ -231,6 +232,71 @@ function workspaceReposReady(ws: string, repos: WorkspaceRepo[]): boolean {
   return repos.every((repo) => existsSync(join(workspaceRepoDir(ws, repo), ".git")));
 }
 
+export async function commitAllRepos(input: {
+  workspaceDir: string;
+  writableRepos: WorkspaceRepo[];
+  repoCount: number;
+  stepIndex: number;
+}): Promise<Record<string, string>> {
+  const commits: Record<string, string> = {};
+  for (const workspaceRepo of input.writableRepos) {
+    const repoDir = workspaceRepoDir(input.workspaceDir, workspaceRepo);
+    await git(repoDir, ["add", "-A"]);
+    // --allow-empty: a no-change step still checkpoints (DX-4 holds for every
+    // step, and resume always has a commit to anchor on).
+    await git(repoDir, [
+      "commit",
+      "--allow-empty",
+      "-m",
+      `chikory: step ${input.stepIndex}`,
+    ]);
+    commits[workspaceRepoCheckpointId(workspaceRepo, input.repoCount)] =
+      await git(repoDir, ["rev-parse", "HEAD"]);
+  }
+  return commits;
+}
+
+async function publishRepoHandoff(input: {
+  deps: RunnerActivityDeps;
+  runId: string;
+  nodeId: string;
+  workspaceDir: string;
+  workspaceRepo: WorkspaceRepo;
+  sourceCommit: string;
+}): Promise<RepoHandoff> {
+  const repoDir = workspaceRepoDir(input.workspaceDir, input.workspaceRepo);
+  const baseCommit = await git(repoDir, ["rev-parse", `${BASE_TAG}^{commit}`]);
+  const headCommit = await git(repoDir, ["rev-parse", "HEAD"]);
+  const changedPaths = (await git(repoDir, ["diff", "--name-only", `${BASE_TAG}..HEAD`]))
+    .split("\n")
+    .filter(Boolean)
+    .sort();
+  const bundlePath = join(
+    runDir(input.deps.dataDir, input.runId),
+    `handoff-${input.workspaceRepo.name}.bundle`,
+  );
+  try {
+    await unlink(bundlePath);
+  } catch {
+    // First publication attempt.
+  }
+  await git(repoDir, ["bundle", "create", bundlePath, `refs/heads/chikory/run-${input.runId}`]);
+  const bundleRef = await sharedHandoffStore(input.deps).put(await readFile(bundlePath), {
+    kind: "repo_snapshot",
+    summary: `sealed repository snapshot for ${input.nodeId} repo ${input.workspaceRepo.name}`,
+  });
+  await unlink(bundlePath);
+
+  return {
+    repoUrl: input.workspaceRepo.repo.url,
+    sourceCommit: input.sourceCommit,
+    baseCommit,
+    headCommit,
+    changedPaths,
+    bundleRef,
+  };
+}
+
 async function configureWorkspaceRepo(repoDir: string): Promise<void> {
   await git(repoDir, ["config", "user.name", "chikory"]);
   await git(repoDir, ["config", "user.email", "runner@chikory.local"]);
@@ -269,6 +335,73 @@ export async function resolveCheckpointCommit(input: {
     return commits[0];
   } finally {
     journal.close();
+  }
+}
+
+async function resolveCheckpointCommits(input: {
+  dataDir: string;
+  runId: string;
+  checkpointId: string;
+  workspaceRepos: WorkspaceRepo[];
+}): Promise<Record<string, string>> {
+  const ws = workspaceDir(input.dataDir, input.runId);
+  const repoCount = input.workspaceRepos.length;
+  const writableRepos = input.workspaceRepos.filter((repo) => repo.writable);
+  if (input.checkpointId === `${input.runId}@base`) {
+    return Object.fromEntries(
+      await Promise.all(
+        writableRepos.map(async (repo) => [
+          workspaceRepoCheckpointId(repo, repoCount),
+          await git(workspaceRepoDir(ws, repo), ["rev-parse", `${BASE_TAG}^{commit}`]),
+        ]),
+      ),
+    );
+  }
+
+  const journal = new Journal(journalPath(input.dataDir, input.runId));
+  try {
+    const entry = journal
+      .entries("checkpoint")
+      .find((e) => (e.payload as Checkpoint).id === input.checkpointId);
+    if (!entry) {
+      throw new Error(`rollback target checkpoint not found: ${input.checkpointId}`);
+    }
+
+    const checkpoint = entry.payload as Checkpoint;
+    const checkpointCommits = checkpoint.perRepoCommits ?? checkpoint.gitCommits;
+    return Object.fromEntries(
+      writableRepos.map((repo) => {
+        const key = workspaceRepoCheckpointId(repo, repoCount);
+        const commit = checkpointCommits[key];
+        if (commit === undefined) {
+          throw new Error(`checkpoint ${input.checkpointId} has no git commit recorded for ${key}`);
+        }
+        return [key, commit];
+      }),
+    );
+  } finally {
+    journal.close();
+  }
+}
+
+async function restoreWorkspaceReposToCheckpoint(input: {
+  dataDir: string;
+  runId: string;
+  checkpointId: string;
+  workspaceRepos: WorkspaceRepo[];
+}): Promise<void> {
+  const ws = workspaceDir(input.dataDir, input.runId);
+  const repoCount = input.workspaceRepos.length;
+  const commits = await resolveCheckpointCommits(input);
+  for (const workspaceRepo of input.workspaceRepos.filter((repo) => repo.writable)) {
+    const key = workspaceRepoCheckpointId(workspaceRepo, repoCount);
+    const sha = commits[key];
+    if (sha === undefined) {
+      throw new Error(`checkpoint ${input.checkpointId} has no git commit recorded for ${key}`);
+    }
+    const repoDir = workspaceRepoDir(ws, workspaceRepo);
+    await git(repoDir, ["reset", "--hard", sha]);
+    await git(repoDir, ["clean", "-fd"]);
   }
 }
 
@@ -789,20 +922,26 @@ export function createRunnerActivities(deps: RunnerActivityDeps) {
      */
     async restoreCheckpoint(input: { runId: string; checkpointId: string }): Promise<void> {
       return withHeartbeat(async () => {
-        const ws = workspaceDir(deps.dataDir, input.runId);
-        const sha = await resolveCheckpointCommit({
-          dataDir: deps.dataDir,
-          runId: input.runId,
-          checkpointId: input.checkpointId,
-        });
-        await git(ws, ["reset", "--hard", sha]);
-        await git(ws, ["clean", "-fd"]);
+        const journal = openJournal(deps, input.runId);
+        try {
+          const spec = requireSpec(journal, input.runId);
+          await restoreWorkspaceReposToCheckpoint({
+            dataDir: deps.dataDir,
+            runId: input.runId,
+            checkpointId: input.checkpointId,
+            workspaceRepos: collectWorkspaceRepos(spec.repos).all,
+          });
+        } finally {
+          journal.close();
+        }
       });
     },
 
     async restoreWorkflowState(input: { runId: string; baseCommit: string }): Promise<RestoredWorkflowState> {
       const journal = openJournal(deps, input.runId);
       try {
+        const spec = requireSpec(journal, input.runId);
+        const workspaceRepos = collectWorkspaceRepos(spec.repos).all;
         const report = reportFromJournal(journal);
         const stepEntries = journal.entries("step");
         const steps = stepEntries.map((e) => e.payload as StepPayload);
@@ -865,6 +1004,14 @@ export function createRunnerActivities(deps: RunnerActivityDeps) {
           lastTerminal.idx > lastStepEntryIdx &&
           lastTerminalPayload?.status === "FAILED" &&
           lastTerminalPayload.resumable === true;
+        if (atResumableSeal && checkpoints.length > 0) {
+          await restoreWorkspaceReposToCheckpoint({
+            dataDir: deps.dataDir,
+            runId: input.runId,
+            checkpointId: checkpoints[checkpoints.length - 1]!.id,
+            workspaceRepos,
+          });
+        }
         let reopenedFeedback: string | undefined;
         if (atResumableSeal) {
           if (lastTerminal.idx > lastReopenIdx) {
@@ -1024,21 +1171,12 @@ export function createRunnerActivities(deps: RunnerActivityDeps) {
           const ws = workspaceDir(deps.dataDir, input.runId);
           const startTime = Date.now();
 
-          const gitCommits: Record<string, string> = {};
-          for (const workspaceRepo of workspaceRepos.writable) {
-            const repoDir = workspaceRepoDir(ws, workspaceRepo);
-            await git(repoDir, ["add", "-A"]);
-            // --allow-empty: a no-change step still checkpoints (DX-4 holds
-            // for every step, and resume always has a commit to anchor on).
-            await git(repoDir, [
-              "commit",
-              "--allow-empty",
-              "-m",
-              `chikory: step ${input.stepIndex}`,
-            ]);
-            gitCommits[workspaceRepoCheckpointId(workspaceRepo, workspaceRepos.all.length)] =
-              await git(repoDir, ["rev-parse", "HEAD"]);
-          }
+          const gitCommits = await commitAllRepos({
+            workspaceDir: ws,
+            writableRepos: workspaceRepos.writable,
+            repoCount: workspaceRepos.all.length,
+            stepIndex: input.stepIndex,
+          });
 
           const store = createLocalArtifactStore(artifactsDir(deps.dataDir, input.runId));
           const contextSnapshotRef = await store.put(JSON.stringify(input.context, null, 2), {
@@ -1062,6 +1200,7 @@ export function createRunnerActivities(deps: RunnerActivityDeps) {
               payload: {
                 ...checkpoint,
                 stepIndex: input.stepIndex,
+                ...(workspaceRepos.all.length > 1 ? { perRepoCommits: gitCommits } : {}),
                 ...(input.memoryCounters !== undefined &&
                 (input.memoryCounters.recalls > 0 || input.memoryCounters.evicted > 0)
                   ? { memoryCounters: input.memoryCounters }
@@ -1491,36 +1630,50 @@ export function createRunnerActivities(deps: RunnerActivityDeps) {
         try {
           const spec = requireSpec(journal, input.runId);
           const link = spec.chainLink;
-          const repo = spec.repos[0];
-          if (!link || !repo) return { status: "FAILED", reason: "chain handoff metadata is absent" };
-          if (spec.repos.length !== 1) {
-            return { status: "FAILED", reason: "chain handoff currently supports exactly one repo" };
+          const workspaceRepos = collectWorkspaceRepos(spec.repos);
+          const writableRepos = workspaceRepos.writable;
+          if (!link || writableRepos.length === 0) {
+            return { status: "FAILED", reason: "chain handoff metadata is absent" };
           }
-
           const ws = workspaceDir(deps.dataDir, input.runId);
-          const baseCommit = await git(ws, ["rev-parse", `${BASE_TAG}^{commit}`]);
-          const headCommit = await git(ws, ["rev-parse", "HEAD"]);
-          const changedPaths = (await git(ws, ["diff", "--name-only", `${BASE_TAG}..HEAD`]))
-            .split("\n")
-            .filter(Boolean)
-            .sort();
-          if (changedPaths.length === 0) {
+          const repoChanges = await Promise.all(
+            writableRepos.map(async (workspaceRepo) => ({
+              workspaceRepo,
+              changedPaths: (
+                await git(workspaceRepoDir(ws, workspaceRepo), [
+                  "diff",
+                  "--name-only",
+                  `${BASE_TAG}..HEAD`,
+                ])
+              )
+                .split("\n")
+                .filter(Boolean)
+                .sort(),
+            })),
+          );
+          if (repoChanges.every((repo) => repo.changedPaths.length === 0)) {
             return { status: "FAILED", reason: `node ${link.nodeId} produced no repository changes` };
           }
           const undeclared =
             link.writeSet === undefined
               ? []
-              : undeclaredWritePaths(
-                  {
-                    id: link.nodeId,
-                    goal: spec.goal,
-                    acceptanceCriteria: spec.acceptanceCriteria,
-                    dependsOn: [],
-                    writeSet: link.writeSet,
-                    budgetUsd: spec.budgetUsd,
-                  },
-                  changedPaths,
-                );
+              : repoChanges
+                  .flatMap(({ workspaceRepo, changedPaths }) =>
+                    undeclaredWritePaths(
+                      {
+                        id: link.nodeId,
+                        goal: spec.goal,
+                        acceptanceCriteria: spec.acceptanceCriteria,
+                        dependsOn: [],
+                        writeSet: link.writeSet,
+                        budgetUsd: spec.budgetUsd,
+                      },
+                      changedPaths,
+                    ).map((path) =>
+                      workspaceRepos.all.length === 1 ? path : `${workspaceRepo.relativePath}/${path}`,
+                    ),
+                  )
+                  .sort();
           if (undeclared.length > 0) {
             return {
               status: "FAILED",
@@ -1528,43 +1681,41 @@ export function createRunnerActivities(deps: RunnerActivityDeps) {
             };
           }
 
-          const parentSources = new Set(
-            (link.parentHandoffs ?? []).flatMap((parent) =>
-              parent.repos.map((parentRepo) => parentRepo.sourceCommit),
-            ),
-          );
-          if (parentSources.size > 1) {
-            return { status: "FAILED", reason: "parent handoffs do not share one source commit" };
+          const handoffRepos: RepoHandoff[] = [];
+          for (const workspaceRepo of writableRepos) {
+            const parentSources = new Set(
+              (link.parentHandoffs ?? [])
+                .flatMap((parent) => parent.repos)
+                .filter((parentRepo) => parentRepo.repoUrl === workspaceRepo.repo.url)
+                .map((parentRepo) => parentRepo.sourceCommit),
+            );
+            if (parentSources.size > 1) {
+              return {
+                status: "FAILED",
+                reason: `parent handoffs for ${workspaceRepo.repo.url} do not share one source commit`,
+              };
+            }
+            const sourceCommit =
+              [...parentSources][0] ??
+              (await git(workspaceRepoDir(ws, workspaceRepo), ["rev-parse", `${BASE_TAG}^{commit}`]));
+            handoffRepos.push(
+              await publishRepoHandoff({
+                deps,
+                runId: input.runId,
+                nodeId: link.nodeId,
+                workspaceDir: ws,
+                workspaceRepo,
+                sourceCommit,
+              }),
+            );
           }
-          const sourceCommit = [...parentSources][0] ?? baseCommit;
-          const bundlePath = join(runDir(deps.dataDir, input.runId), "handoff.bundle");
-          try {
-            await unlink(bundlePath);
-          } catch {
-            // First publication attempt.
-          }
-          await git(ws, ["bundle", "create", bundlePath, `refs/heads/chikory/run-${input.runId}`]);
-          const bundleRef = await sharedHandoffStore(deps).put(await readFile(bundlePath), {
-            kind: "repo_snapshot",
-            summary: `sealed repository snapshot for ${link.nodeId}`,
-          });
-          await unlink(bundlePath);
 
           return {
             status: "SUCCESS",
             handoff: {
               nodeId: link.nodeId,
               runId: input.runId,
-              repos: [
-                {
-                  repoUrl: repo.url,
-                  sourceCommit,
-                  baseCommit,
-                  headCommit,
-                  changedPaths,
-                  bundleRef,
-                },
-              ],
+              repos: handoffRepos,
             },
           };
         } finally {

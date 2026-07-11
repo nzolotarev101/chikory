@@ -226,9 +226,66 @@ describe("OTel spans (WP-105)", () => {
       "run.id": "run-otel-test",
       step: 3,
       "git.commit": "abc123",
+      "repo.count": 1,
+      "repo.refs": ["file:///repo:abc123"],
+      "repo.0.name": "file:///repo",
+      "repo.0.git.commit": "abc123",
       "journal.idx": 7,
       "last.good": true,
       "budget.spent.usd": 0.045,
+    });
+    recordRunEndSpan({ runId: "run-otel-test", status: "SUCCESS" });
+  });
+
+  it("checkpoint span carries repo count and per-repo commit refs", () => {
+    const checkpoint: Checkpoint = {
+      id: "run-otel-test@8",
+      journalIdx: 8,
+      gitCommits: {
+        "service-api": "1111111111111111111111111111111111111111",
+        "service-worker": "2222222222222222222222222222222222222222",
+      },
+      perRepoCommits: {
+        "service-api": "1111111111111111111111111111111111111111",
+        "service-worker": "2222222222222222222222222222222222222222",
+      },
+      contextSnapshotRef: {
+        id: "snapshot-2",
+        kind: "context_snapshot",
+        bytes: 987,
+        summary: "context snapshot",
+      },
+      budgetSpentUsd: 0.067,
+      lastGood: false,
+    };
+
+    recordCheckpointSpan({
+      runId: "run-otel-test",
+      stepIndex: 4,
+      checkpoint,
+      startedAtMs: Date.now() - 25,
+    });
+
+    const spans = exporter.getFinishedSpans();
+    expect(spans).toHaveLength(1);
+    const span = spans[0];
+    expect(span.name).toBe(SPAN_CHECKPOINT);
+    expect(span.attributes).toMatchObject({
+      "run.id": "run-otel-test",
+      step: 4,
+      "git.commit": "1111111111111111111111111111111111111111",
+      "repo.count": 2,
+      "repo.refs": [
+        "service-api:1111111111111111111111111111111111111111",
+        "service-worker:2222222222222222222222222222222222222222",
+      ],
+      "repo.0.name": "service-api",
+      "repo.0.git.commit": "1111111111111111111111111111111111111111",
+      "repo.1.name": "service-worker",
+      "repo.1.git.commit": "2222222222222222222222222222222222222222",
+      "journal.idx": 8,
+      "last.good": false,
+      "budget.spent.usd": 0.067,
     });
     recordRunEndSpan({ runId: "run-otel-test", status: "SUCCESS" });
   });

@@ -251,9 +251,19 @@ export interface CheckpointSpanInput {
  */
 export function recordCheckpointSpan(input: CheckpointSpanInput): void {
   const span = startRunChildSpan(input.runId, SPAN_CHECKPOINT, { startTime: input.startedAtMs });
+  const repoCommits = Object.entries(input.checkpoint.perRepoCommits ?? input.checkpoint.gitCommits);
   span.setAttribute("run.id", input.runId);
   span.setAttribute("step", input.stepIndex);
-  span.setAttribute("git.commit", Object.values(input.checkpoint.gitCommits)[0] ?? "");
+  span.setAttribute("git.commit", repoCommits[0]?.[1] ?? "");
+  span.setAttribute("repo.count", repoCommits.length);
+  span.setAttribute(
+    "repo.refs",
+    repoCommits.map(([name, commit]) => `${name}:${commit}`),
+  );
+  for (const [index, [name, commit]] of repoCommits.entries()) {
+    span.setAttribute(`repo.${index}.name`, name);
+    span.setAttribute(`repo.${index}.git.commit`, commit);
+  }
   span.setAttribute("journal.idx", input.checkpoint.journalIdx);
   span.setAttribute("last.good", input.checkpoint.lastGood);
   span.setAttribute("budget.spent.usd", input.checkpoint.budgetSpentUsd);

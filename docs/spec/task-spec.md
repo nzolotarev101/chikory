@@ -39,19 +39,38 @@ Multi-line YAML block scalar (` > ` or ` | `) is normal.
 
 ---
 
-### `repos` (required, list, exactly 1 in P1)
+### `repos` (required, list, at least 1)
 
 ```yaml
 repos:
-  - url: /absolute/path/to/repo   # local absolute path OR git HTTPS/SSH URL
-    ref: main                     # optional branch, tag, or commit hash; default = repo's default branch
-    writable: true                # at least one repo must be writable (§9 rule 2)
+  - url: /absolute/path/to/service-api      # local absolute path OR git HTTPS/SSH URL
+    ref: main                              # optional branch, tag, or commit hash; default = repo's default branch
+    writable: true                         # at least one repo must be writable (§9 rule 2)
+  - url: /absolute/path/to/service-worker
+    writable: true
+  - url: git@github.com:org/reference.git
+    ref: docs-v1
+    writable: false                        # read-only context repo
 ```
 
-`prepareRun` **clones** this into `.chikory/runs/<run-id>/workspace` on a
-run-private branch `chikory/run-<run-id>`. Your checkout is never touched.
-Only **committed** state is cloned — commit before launching. Use an absolute
-path for local repos. Multi-repo (read-only reference repos) is P2 (WP-214).
+`prepareRun` **clones** each entry into `.chikory/runs/<run-id>/workspace` on a
+run-private branch `chikory/run-<run-id>` for writable repos. Your checkout is
+never touched. Only **committed** state is cloned — commit before launching. Use
+an absolute path for local repos.
+
+Workspace layout is compatibility-preserving:
+
+- Single-repo specs keep the historical root checkout:
+  `.chikory/runs/<run-id>/workspace` is the repo.
+- Multi-repo specs use deterministic subdirectories derived from each repo URL
+  basename, lowercased and sanitized. For example, `/src/service-api` becomes
+  `.chikory/runs/<run-id>/workspace/service-api`. Duplicate names receive
+  numeric suffixes such as `service-api-2`.
+
+Each checkpoint commits **all writable repos**. Multi-repo checkpoint journal
+entries include `perRepoCommits`, keyed by the resolved workspace repo name, so
+resume/rollback/trace/status can identify every writable repo's checkpoint
+commit. Read-only repos are cloned for context but are not checkpoint-committed.
 
 | Sub-field | Valid values | Notes |
 |---|---|---|
@@ -72,6 +91,10 @@ acceptance_criteria:
     description: strict typecheck
     check: pnpm --filter @chikory/sdk typecheck
   - id: AC-3
+    description: worker repo smoke test
+    repo: service-worker        # optional: run check from that repo subdir
+    check: test -f worker.txt
+  - id: AC-4
     description: API shape matches goal (binary rubric, no shell check)
     # omit check → judge evaluates from diff only
 ```
@@ -96,6 +119,10 @@ claims are never trusted.
   wait for the LLM to decide; code computes the verdict (JD-7).
 - **SUCCESS = PROCEED verdict + every criterion passing.** A run cannot succeed
   with any failing check.
+- **Multi-repo targeting**: set `repo` to a resolved workspace repo name to run
+  that criterion with `cwd` set to the repo subdirectory. Omit `repo` to run from
+  the workspace root. Single-repo runs resolve the only repo as `"."`, so legacy
+  checks continue to run exactly as before.
 - Prefer machine-checkable criteria (OB-3). Description-only criteria are
   judged from the diff — fine for shape assertions, weak for behavior.
 
@@ -104,6 +131,7 @@ claims are never trusted.
 | `id` | yes | Must be unique within the spec |
 | `description` | yes | Human-readable; read by the judge as rubric context |
 | `check` | no | Shell command; omit for evidence-only judgment |
+| `repo` | no | Resolved workspace repo name whose checkout should be the check cwd |
 
 ---
 
@@ -412,6 +440,61 @@ routing:
     code:   { provider: openai-compat, model: gpt-5.5 }            # → codex -m gpt-5.5
     review: { provider: openai-compat, model: gpt-5.5 }            # unused by codex
     judge:  { provider: openai-compat, model: gemini-3.1-pro-preview }  # → shim → gemini CLI
+```
+
+## Complete example — multi-repo workspace
+
+```yaml
+name: wp-214-two-service-change
+goal: >
+  Update the API and worker together. In service-api, add the new health payload
+  shape. In service-worker, consume that payload without changing the public
+  queue contract. Use reference-docs only for context. Keep both writable repos'
+  test suites green.
+
+repos:
+  - url: /Users/you/repos/service-api
+    writable: true
+  - url: /Users/you/repos/service-worker
+    writable: true
+  - url: /Users/you/repos/reference-docs
+    ref: main
+    writable: false
+
+acceptance_criteria:
+  - id: AC-1
+    description: API tests pass
+    repo: service-api
+    check: pnpm test
+  - id: AC-2
+    description: worker tests pass
+    repo: service-worker
+    check: pnpm test
+  - id: AC-3
+    description: cross-repo handoff file exists in the worker checkout
+    repo: service-worker
+    check: test -f src/health-consumer.ts
+  - id: AC-4
+    description: root-level workspace still contains both writable repos
+    check: test -d service-api && test -d service-worker
+
+budget_usd: 10
+max_steps: 8
+
+executor:
+  adapter: codex
+  family: openai
+
+judge:
+  family: openai-compat
+  cadence: 2
+
+routing:
+  stages:
+    plan:   { provider: openai-compat, model: gpt-5.5 }
+    code:   { provider: openai-compat, model: gpt-5.5 }
+    review: { provider: openai-compat, model: gpt-5.5 }
+    judge:  { provider: openai-compat, model: gemini-3.1-pro-preview }
 ```
 
 ## Complete example — API keys (claude-code executor, Gemini REST judge)

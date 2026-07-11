@@ -446,6 +446,62 @@ describe("renderTrace (WP-142)", () => {
     );
   });
 
+  test("multi-repo trace totals show repo count plus per-repo diff bytes and commit", () => {
+    const multiEntries: JournalEntry[] = [
+      step(0, 0, "changed two repos"),
+      entry(1, "judge", {
+        judgeIndex: 0,
+        atStep: 0,
+        form,
+        evidenceRefs: [
+          { ...ref("diff", "workspace diff for service-api since aaaaaaaa1111 (44 bytes)"), bytes: 44 },
+          { ...ref("diff", "workspace diff for service-worker since bbbbbbbb2222 (55 bytes)"), bytes: 55 },
+        ],
+        evidenceBytes: 99,
+        judgeModel,
+        costUsd: 0.05,
+        tokens: { input: 100, output: 50 },
+        durationMs: 4000,
+      }),
+      entry(2, "checkpoint", {
+        id: "run-x@2",
+        journalIdx: 2,
+        stepIndex: 0,
+        gitCommits: {
+          "service-api": "1111111111112222222222223333333333333333",
+          "service-worker": "aaaaaaaaaaaabbbbbbbbbbbbcccccccccccccccc",
+        },
+        perRepoCommits: {
+          "service-api": "1111111111112222222222223333333333333333",
+          "service-worker": "aaaaaaaaaaaabbbbbbbbbbbbcccccccccccccccc",
+        },
+        contextSnapshotRef: ref("context_snapshot", "ctx"),
+        budgetSpentUsd: 0.26,
+        lastGood: true,
+      }),
+    ];
+
+    const rendered = renderTrace(run, multiEntries, totals);
+
+    expect(rendered.split("\n")).toContain("        repos 2");
+    expect(rendered.split("\n")).toContain(
+      "          service-api: diff 44 bytes · commit 111111111111",
+    );
+    expect(rendered.split("\n")).toContain(
+      "          service-worker: diff 55 bytes · commit aaaaaaaaaaaa",
+    );
+  });
+
+  test("one-repo trace does not render the multi-repo totals block", () => {
+    const rendered = renderTrace(run, entries, totals);
+
+    expect(rendered.split("\n")).toContain(
+      "        injections 1 · checkpoints 1 · feedback frequency 1/2 steps",
+    );
+    expect(rendered).not.toContain("        repos ");
+    expect(rendered).not.toContain(": diff 321 bytes · commit");
+  });
+
   test("reports components over time in journal order", () => {
     const judgePayload: JudgePayload = {
       judgeIndex: 0,

@@ -115,7 +115,12 @@ const RawTaskSpecYaml = z
     acceptance_criteria: z
       .array(
         z
-          .object({ id: z.string().min(1), description: z.string().min(1), check: z.string().min(1).optional() })
+          .object({
+            id: z.string().min(1),
+            description: z.string().min(1),
+            check: z.string().min(1).optional(),
+            repo: z.string().min(1).optional(),
+          })
           .strict(),
       )
       .min(1),
@@ -234,6 +239,7 @@ export function parseTaskSpec(yamlText: string, opts: ParseTaskSpecOptions = {})
       id: c.id,
       description: c.description,
       check: c.check,
+      repo: c.repo,
     })),
     budgetUsd: raw.budget_usd,
     maxSteps: raw.max_steps ?? DEFAULT_MAX_STEPS,

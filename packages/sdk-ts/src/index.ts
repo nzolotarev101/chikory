@@ -233,6 +233,7 @@ export {
   type RunTotals,
 } from "./journal/journal.js";
 export {
+  commitAllRepos,
   createRunnerActivities,
   type AdapterFactory,
   type AdapterRegistry,

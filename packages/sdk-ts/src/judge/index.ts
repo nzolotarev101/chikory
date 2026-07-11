@@ -6,12 +6,14 @@ export {
 } from "./family.js";
 export {
   collectEvidence,
+  collectPerRepoDiffs,
   DEFAULT_CHECK_TIMEOUT_MS,
   MAX_CHECK_OUTPUT_CHARS,
   MAX_DIFF_PROMPT_CHARS,
   type CheckRun,
   type CollectedEvidence,
   type CollectEvidenceInput,
+  type CollectPerRepoDiffsInput,
 } from "./evidence.js";
 export {
   applyCheckOverrides,

@@ -75,7 +75,19 @@ export interface DiffSection {
   repoName: string;
   relativePath: string;
   sinceCommit: string;
+  label: string;
   diffText: string;
+  evidenceText: string;
+}
+
+export interface CollectPerRepoDiffsInput {
+  workspaceDir: string;
+  /** Diff base for the legacy single-root path. */
+  sinceCommit: string;
+  /** Resolved workspace repos. Absent keeps the legacy single-root evidence path. */
+  workspaceRepos?: EvidenceWorkspaceRepo[];
+  /** Per-resolved-repo diff base; keys are `EvidenceWorkspaceRepo.name`. */
+  repoDiffBases?: Record<string, string>;
 }
 
 async function git(dir: string, args: string[]): Promise<string> {
@@ -90,14 +102,84 @@ function bound(text: string, maxChars: number): string {
   return `${text.slice(0, maxChars)}\n… [truncated ${text.length - maxChars} chars]`;
 }
 
+function diffEvidenceLabel(repoName: string, relativePath: string): string {
+  return `repo ${repoName} (${relativePath})`;
+}
+
+function labeledDiffEvidence(label: string, diffText: string): string {
+  return `### ${label}\n${diffText}`;
+}
+
+export async function collectPerRepoDiffs(input: CollectPerRepoDiffsInput): Promise<{
+  perRepoDiff: boolean;
+  sections: DiffSection[];
+}> {
+  const writableRepos = input.workspaceRepos?.filter((repo) => repo.writable) ?? [];
+  const perRepoDiff =
+    writableRepos.length > 1 ||
+    (writableRepos.length === 1 && writableRepos[0]?.relativePath !== ".");
+  const sections: DiffSection[] = [];
+  if (perRepoDiff) {
+    for (const repo of writableRepos) {
+      const repoDir = repo.relativePath === "." ? input.workspaceDir : join(input.workspaceDir, repo.relativePath);
+      const sinceCommit = input.repoDiffBases?.[repo.name] ?? input.sinceCommit;
+      await git(repoDir, ["add", "-N", "."]);
+      const repoDiff = await git(repoDir, ["diff", sinceCommit]);
+      const label = diffEvidenceLabel(repo.name, repo.relativePath);
+      sections.push({
+        repoName: repo.name,
+        relativePath: repo.relativePath,
+        sinceCommit,
+        label,
+        diffText: repoDiff,
+        evidenceText: labeledDiffEvidence(label, repoDiff),
+      });
+    }
+  } else {
+    await git(input.workspaceDir, ["add", "-N", "."]);
+    const diff = await git(input.workspaceDir, ["diff", input.sinceCommit]);
+    const repoName = writableRepos[0]?.name ?? ".";
+    const relativePath = writableRepos[0]?.relativePath ?? ".";
+    const label = diffEvidenceLabel(repoName, relativePath);
+    sections.push({
+      repoName,
+      relativePath,
+      sinceCommit: input.sinceCommit,
+      label,
+      diffText: diff,
+      evidenceText: diff,
+    });
+  }
+  return { perRepoDiff, sections };
+}
+
 /** Run one criterion `check` in the workspace; exit code is the verdict input. WP-264 / dogfood-073 F-78 ports WP-255(a)'s process-group kill so pipe-holding grandchildren cannot outlive the cap. */
 async function runCheck(
   workspaceDir: string,
   criterion: AcceptanceCriterion,
   timeoutMs: number,
+  workspaceRepos: EvidenceWorkspaceRepo[],
 ): Promise<CheckRun> {
+  const repo = criterion.repo
+    ? workspaceRepos.find((candidate) => candidate.name === criterion.repo)
+    : undefined;
+  if (criterion.repo && !repo) {
+    return {
+      criterionId: criterion.id,
+      command: criterion.check!,
+      exitCode: 1,
+      output: `check target repo not found: ${criterion.repo}`,
+      durationMs: 0,
+      infraFailed: false,
+    };
+  }
+  const checkCwd = repo
+    ? repo.relativePath === "."
+      ? workspaceDir
+      : join(workspaceDir, repo.relativePath)
+    : workspaceDir;
   const bounded = await runBounded("/bin/sh", ["-c", criterion.check!], {
-    cwd: workspaceDir,
+    cwd: checkCwd,
     env: scrubExecutorEnv(process.env, []),
     maxSeconds: timeoutMs / 1000,
   });
@@ -132,41 +214,16 @@ export interface CollectEvidenceInput {
 export async function collectEvidence(input: CollectEvidenceInput): Promise<CollectedEvidence> {
   // Workspace diff since the last verdict — committed step work plus whatever
   // is still uncommitted (the judge runs before the covering checkpoint).
-  const writableRepos = input.workspaceRepos?.filter((repo) => repo.writable) ?? [];
-  const perRepoDiff =
-    writableRepos.length > 1 ||
-    (writableRepos.length === 1 && writableRepos[0]?.relativePath !== ".");
-  const sections: DiffSection[] = [];
-  if (perRepoDiff) {
-    for (const repo of writableRepos) {
-      const repoDir = repo.relativePath === "." ? input.workspaceDir : join(input.workspaceDir, repo.relativePath);
-      const sinceCommit = input.repoDiffBases?.[repo.name] ?? input.sinceCommit;
-      await git(repoDir, ["add", "-N", "."]);
-      const repoDiff = await git(repoDir, ["diff", sinceCommit]);
-      sections.push({
-        repoName: repo.name,
-        relativePath: repo.relativePath,
-        sinceCommit,
-        diffText: repoDiff,
-      });
-    }
-  } else {
-    await git(input.workspaceDir, ["add", "-N", "."]);
-    const diff = await git(input.workspaceDir, ["diff", input.sinceCommit]);
-    sections.push({
-      repoName: writableRepos[0]?.name ?? ".",
-      relativePath: writableRepos[0]?.relativePath ?? ".",
-      sinceCommit: input.sinceCommit,
-      diffText: diff,
-    });
-  }
-  const diff = sections.map((section) => section.diffText).join("\n");
+  const { perRepoDiff, sections } = await collectPerRepoDiffs(input);
+  const diff = sections
+    .map((section) => (perRepoDiff ? section.evidenceText : section.diffText))
+    .join("\n");
   const secretScanLabels = scanDiffForSecrets(diff);
   const newDependencyLabels = scanDiffForNewDependencies(diff);
   const architectureLabels = scanDiffForLayeringViolations(diff);
   const diffRefs = await Promise.all(
     sections.map((section) =>
-      input.store.put(section.diffText, {
+      input.store.put(perRepoDiff ? section.evidenceText : section.diffText, {
         kind: "diff",
         summary: perRepoDiff
           ? `workspace diff for ${section.repoName} since ${section.sinceCommit.slice(0, 12)} (${section.diffText.length} bytes)`
@@ -181,7 +238,12 @@ export async function collectEvidence(input: CollectEvidenceInput): Promise<Coll
   for (const criterion of input.criteria) {
     if (!criterion.check) continue;
     checkRuns.push(
-      await runCheck(input.workspaceDir, criterion, input.checkTimeoutMs ?? DEFAULT_CHECK_TIMEOUT_MS),
+      await runCheck(
+        input.workspaceDir,
+        criterion,
+        input.checkTimeoutMs ?? DEFAULT_CHECK_TIMEOUT_MS,
+        input.workspaceRepos ?? [],
+      ),
     );
   }
 
@@ -219,6 +281,7 @@ export async function collectEvidence(input: CollectEvidenceInput): Promise<Coll
       ? sections.map((section) => ({
           ...section,
           diffText: bound(section.diffText, MAX_DIFF_PROMPT_CHARS),
+          evidenceText: bound(section.evidenceText, MAX_DIFF_PROMPT_CHARS),
         }))
       : [],
     secretScanLabels,

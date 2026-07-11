@@ -166,6 +166,8 @@ export interface AcceptanceCriterion {
   description: string;
   /** Shell command run by the JUDGE in sandbox; exit 0 = pass (JD-4). */
   check?: string;
+  /** Optional resolved workspace repo name whose subdir is the check cwd. */
+  repo?: string;
 }
 
 export interface JudgePolicy {
@@ -443,6 +445,8 @@ export interface Checkpoint {
   journalIdx: number;
   /** Repo url → commit sha (multi-repo, WP-214). */
   gitCommits: Record<string, string>;
+  /** Resolved workspace repo → commit sha for multi-repo checkpoint evidence. */
+  perRepoCommits?: Record<string, string>;
   /** Compacted context (CM-1 co-design). */
   contextSnapshotRef: ArtifactRef;
   budgetSpentUsd: number;
