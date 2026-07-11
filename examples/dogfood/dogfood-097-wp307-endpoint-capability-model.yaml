@@ -1,0 +1,184 @@
+# Dogfood-097: WP-307 — INFERENCE-ENDPOINT CAPABILITY MODEL (first post-P2 product headline). One descriptor per way
+#   Chikory reaches inference — CLI-subscription (claude-code/codex, today's local-dev shape), API-key provider
+#   (anthropic/openai/gemini), OpenAI-compat local/self-hosted — declaring auth mode, LIMIT SEMANTICS (rolling
+#   hourly/5h window · TPM/RPM · none), cost-model linkage, and MODEL FAMILY (feeds invariant #2 judge/executor family
+#   separation). The substrate WP-308 (work-conserving limit scheduler) and WP-309 (limit telemetry + reset learning)
+#   both depend on.
+#
+# WHY NOW (dogfood-096 review, 2026-07-11). The P2 exit gate PASSED (dogfood-096, `run-f77c33db`: 25h 54m brownfield,
+#   10 clean suspend/resumes, 6 live pacing folds, 100% per-step reliability) — P2 is COMPLETE and P3 is the frontier.
+#   plan.md §7's intelligent-scaling track (added 2026-07-10, `200a18a`) is the named next product work: today a usage
+#   limit is ridden out by SLEEPING (dogfood-090's 4×90-min parks); at P3 scale (WP-302's 60–100 multi-hour tasks ×
+#   WP-304 baselines, WP-305 external users on CLI subscriptions only) sleep-first fails. WP-307 is step one: model
+#   every endpoint's capabilities so WP-308 can spend headroom before ever sleeping.
+#
+# GATE VERDICTS (dogfood-096 review phase 5): progression ✅ PROGRESSING (rung 5 vs 4 — the exit gate itself advanced),
+#   but 🔴 CAP BUSTED persists (094/095 meta in the trailing 3) → this headline MUST be class=product ✅ (primary surface
+#   `packages/sdk-ts/src/`). §1.1 ✅ (6 ordered cross-file increments over router/executors/taskspec/journal surfaces —
+#   descriptor semantics, registry resolution, and the family-separation feed are all genuinely failable). §1.2 ✅
+#   (advances real open plan.md §7 WP-307 on live Chikory source — feature code on the vendor-neutral routing pillar).
+#   §1.3 ✅ PROCEED (the P3 track's substrate WP; nothing else product-unblocked outranks it post-exit-gate). §1.5 ✅
+#   (class=product, clears the busted meta cap).
+#
+# CLASS / LADDER. class=product. The WP-265 horizon ladder is COMPLETE (rung 5 = the exit gate, passed by dogfood-096);
+#   this run is a rung-4-shape consolidation (≥6-step unattended single run), NOT a climb — the ladder has no rung above 5.
+# Ladder-rung: 4
+# Thesis-KPI: VENDOR-NEUTRALITY pillar + post-P2 reliability hold — a ≥6-step unattended product run lands the WP-307
+#   capability model (descriptors for CLI-subscription / API-key / OpenAI-compat endpoints with limit semantics + model
+#   family, resolved per routing stage and journaled replay-safe) while per-step reliability stays 100% (0 rollbacks)
+#   and the run seals SUCCESS with zero operator input.
+#
+# Format: LOOSE (outcome goal + 6 ordered increments; layout/file/test names are the executor's, F-82/F-83). ACs pin
+#   "done" via net-new FUNCTION symbols the goal NAMES that are ABSENT on HEAD (`describeEndpointCapability`,
+#   `resolveEndpointCapabilities` — verified 0 occurrences in src/ + test/, so a recursive grep cannot false-green,
+#   F-90/F-114) + a test co-referencing the router (F-97) + the FULL suite green. F-129 PREMISE CHECK (2026-07-11):
+#   `grep -rn 'EndpointCapability\|limitSemantics' packages/sdk-ts/src/` → 0 hits; `git log -S EndpointCapability` →
+#   empty — the CAPABILITY (not just the symbols) is absent on HEAD; router.ts has per-stage failover but no
+#   endpoint descriptor model, executors/index.ts registers adapters with no capability metadata.
+#
+# ⚠️ SCOPE / DETERMINISM. Writes ONLY inside `packages/sdk-ts/` (+ one doc PART). ADDITIVE — extends the existing
+#   `router.ts` provider config + `executors/` registry; NO new abstraction layer (CLAUDE.md "minimal abstraction");
+#   existing routing/executor behavior byte-identical when no capability is consulted. CLI-subscription endpoints are
+#   a FIRST-CLASS tier (RT-9 spirit; CLI-auth/no-secrets holds — no key material in descriptors, ever).
+#
+# ⚠️ LAUNCH: commit everything first (the workspace clones HEAD), then `devbox run run-dogfood` (picks the latest
+#   spec — verify the pick resolves to THIS file). `CHIKORY_PREFLIGHT_ONLY=1 devbox run run-dogfood` dry-runs the
+#   launch guards at $0.
+
+name: dogfood-097-wp307-endpoint-capability-model
+goal: >
+  Land WP-307, the inference-endpoint capability model, in the Chikory TypeScript SDK: one plain descriptor per way
+  Chikory reaches inference — CLI-subscription executor adapters (claude-code, codex — today's local-dev shape, a
+  FIRST-CLASS tier), API-key providers (anthropic, openai, gemini), and OpenAI-compat local/self-hosted — declaring
+  (a) auth mode (cli-oauth | api-key | none), (b) LIMIT SEMANTICS (rolling-window hourly/5h · TPM/RPM · none),
+  (c) cost-model linkage (whether calls meter against `pricing.ts` or a subscription), and (d) MODEL FAMILY (the
+  invariant-#2 judge/executor family-separation feed). Extend the EXISTING `router.ts` provider config and
+  `executors/` registry — do NOT introduce a new abstraction layer; behavior without a capability consumer stays
+  byte-identical. Deliver in SIX ordered increments, ONE per durable step, each adding DISTINCT non-trivial working
+  code + tests (the non-hollow horizon, F-100/WP-270):
+
+    * PART 1 — PURE DESCRIPTOR MODEL: a net-new `describeEndpointCapability` returns the descriptor for the API-key
+      provider kinds (anthropic/openai/gemini) and openai-compat, with limit semantics + family + auth mode as plain
+      data. Pure, no I/O. Tested per kind.
+
+    * PART 2 — CLI-SUBSCRIPTION TIER: descriptors for the CLI executor adapters (claude-code, codex, native) —
+      auth mode cli-oauth (native = the routed provider's mode), rolling-window limit semantics, subscription cost
+      linkage. First-class: the descriptor carries everything WP-308 needs to schedule around a subscription window.
+      Tested.
+
+    * PART 3 — PER-STAGE RESOLUTION: a net-new `resolveEndpointCapabilities` maps a parsed TaskSpec (its `routing`
+      stages + `executor.adapter`) to the descriptor per stage — pure function over existing config shapes, no new
+      registry object. Unknown model/provider combinations resolve to an explicit conservative descriptor, never a
+      throw. Tested against this repo's own dogfood spec shapes.
+
+    * PART 4 — FAMILY-SEPARATION FEED: the judge/executor family-diversity invariant (#2) reads the family from the
+      capability model at run validation, additively — a spec whose judge and executor resolve to the SAME family is
+      flagged exactly as today, but the source of truth is the descriptor, not scattered literals. Existing specs
+      validate byte-identically. Tested both directions (diverse passes, same-family flags).
+
+    * PART 5 — REPLAY-SAFE JOURNAL SURFACE: the resolved per-stage capabilities are journaled once at run start
+      (additive entry or field — no reshape of existing kinds), so WP-309's limit telemetry has a durable substrate
+      and `chikory trace` can render an endpoints summary line. 1-run-without-capabilities renders exactly as today.
+      Tested.
+
+    * PART 6 — DOCS + FULL-SUITE REGRESSION: document the capability model where the router/config docs live
+      (`docs/components/router.md` or `docs/spec/task-spec.md` — executor's judgment), and prove the ENTIRE
+      `packages/sdk-ts` suite (tsc + eslint + vitest) green — every earlier increment's tests still pass.
+
+  CONSTRAINTS: additive — NO frozen-contract shape change; a run that never consults capabilities behaves and renders
+  EXACTLY as before. NO new dependency. NO key material or secret-shaped fields in any descriptor. Each PART lands its
+  own tests and does NOT break an earlier PART's tests; do NOT front-load a later PART (the judge compares the diff
+  footprint against the active PART). If a verification step reports a failing suite, READ the failure and fix the
+  IMPLEMENTATION — never weaken or delete an assertion (F-115: never assert a wall-clock duration to prove a
+  structural absence).
+
+repos:
+  - url: /Users/nikitazolotarev/repos/chikory
+    writable: true
+
+bounded_work_unit:
+  min_durable_steps: 6
+  directive: >
+    Advance EXACTLY the ONE numbered PART named by this step's chunk — implement it and its tests, then stop and let
+    the durable checkpoint seal. Do NOT front-load a later PART. Do NOT declare the whole run complete until every
+    PART has landed with passing tests.
+  work_chunks:
+    - name: part-1-pure-descriptor-model
+      directive: "PART 1 ONLY: net-new pure describeEndpointCapability for API-key providers (anthropic/openai/gemini) + openai-compat — auth mode, limit semantics, cost linkage, family as plain data. Tests per kind."
+    - name: part-2-cli-subscription-tier
+      directive: "PART 2 ONLY: descriptors for the CLI executor adapters (claude-code, codex, native) — cli-oauth auth, rolling-window limit semantics, subscription cost linkage, first-class. Tests."
+    - name: part-3-per-stage-resolution
+      directive: "PART 3 ONLY: net-new resolveEndpointCapabilities maps a parsed TaskSpec (routing stages + executor.adapter) to a descriptor per stage; unknown combos resolve conservative, never throw. Tests on real dogfood spec shapes."
+    - name: part-4-family-separation-feed
+      directive: "PART 4 ONLY: run validation reads judge/executor family from the capability model (invariant #2), additively — existing specs validate byte-identically. Tests both directions."
+    - name: part-5-journal-surface
+      directive: "PART 5 ONLY: journal the resolved per-stage capabilities once at run start (additive, replay-safe) + a chikory trace endpoints summary line; capability-free runs render exactly as today. Tests."
+    - name: part-6-docs-and-regression
+      directive: "PART 6 ONLY: document the capability model in the router/config docs and run the FULL packages/sdk-ts suite (tsc + eslint + vitest); if anything fails, fix the IMPLEMENTATION, never weaken a test."
+
+acceptance_criteria:
+  - id: AC-1
+    description: >
+      The net-new pure descriptor function exists in the SDK source. (OUTCOME symbol the goal NAMES —
+      `describeEndpointCapability` — absent on HEAD so a recursive grep cannot false-green, F-90. F-114-SAFE: a
+      FUNCTION symbol, not a type-name token. Layout is the executor's, F-82/F-83.)
+    check: >
+      cd packages/sdk-ts &&
+      grep -rq 'describeEndpointCapability' src/
+  - id: AC-2
+    description: >
+      The per-stage resolver is CONSUMED, not just defined — `resolveEndpointCapabilities` appears at least twice
+      across the source (definition + a consumption site in validation/journal/trace). (F-114-SAFE: net-new FUNCTION
+      symbol. F-119-SAFE: occurrence count via `grep -roh … | wc -l` — a single integer — never `grep -rc` over a
+      directory.)
+    check: >
+      cd packages/sdk-ts &&
+      test "$(grep -roh 'resolveEndpointCapabilities' src/ | wc -l)" -ge 2
+  - id: AC-3
+    description: >
+      A test exercises the capability model against the REAL router config surface. (F-97-SAFE: requires a `test/`
+      file referencing BOTH the net-new resolver `resolveEndpointCapabilities` AND the existing router entry point
+      `createRouter`, so the model is proven against the actual routing shapes, not a toy. Filename is the
+      executor's.)
+    check: >
+      cd packages/sdk-ts &&
+      for f in $(grep -rl 'resolveEndpointCapabilities' test/ 2>/dev/null); do
+        grep -q 'createRouter' "$f" && { echo ok; break; };
+      done | grep -q ok
+  - id: AC-4
+    description: >
+      The SDK stays type- and lint-clean and the FULL existing suite is green, proving the change is additive and
+      nothing regressed (no frozen-contract shape change; capability-free runs behave exactly as before).
+    check: cd packages/sdk-ts && pnpm exec tsc --noEmit && pnpm exec eslint . && pnpm exec vitest run
+
+budget_usd: 40
+max_steps: 30
+
+# CONTEXT-ROT (WP-203/WP-207): auto-calibrated window (F-125 mechanism, live-proven dogfood-095/096) — the window is
+#   derived from this run's OWN first-step assembled-context tokens; real accumulation over 6 chunks crosses the
+#   compact band and folds under genuine pacing pressure.
+pacing:
+  mode: auto
+  autoCalibrate: true
+
+# UNATTENDED (WP-271): operator-free; a genuine ESCALATE seals a resumable FAILED (WP-520) instead of a hang; the
+#   run-level self-heal (WP-519) gets one bounded remediation before any terminal seal. No soak — this is a normal
+#   ~6-step product run, not an endurance gate (that gate is passed).
+unattended:
+  escalation: seal_resumable_failed
+
+executor:
+  adapter: codex
+  family: openai
+
+judge:
+  family: openai-compat
+  cadence: 2
+  max_cost_share: 0.5
+
+routing:
+  stages:
+    plan: { provider: openai-compat, model: gpt-5.5 }
+    code: { provider: openai-compat, model: gpt-5.5 }
+    review: { provider: openai-compat, model: gpt-5.5 }
+    judge: { provider: openai-compat, model: gemini-3.1-pro-preview }

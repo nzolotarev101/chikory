@@ -5,18 +5,18 @@ This is the complete operating manual for executing Phase 2+ work packages
 task spec for a WP (every field explained), how to launch, supervise, and
 recover a run, and how to land the result as a normal PR.
 
-**Status (2026-07-09, bounded — update discipline: REPLACE this block, ≤15 lines;
+**Status (2026-07-11, bounded — update discipline: REPLACE this block, ≤15 lines;
 displaced prose moves verbatim to [`PLAN-HISTORY.md`](PLAN-HISTORY.md); per-run detail:
 `docs/reports/dogfood-NNN.md`; queue + course correction: `plan.md` §6).**
-Latest: dogfood-095 — **P2 EXIT-GATE REHEARSAL, re-run — delivery SUCCESS and BOTH rehearsal axes PASSED** (`run-7746e7fa-b16f-47d0-98c0-f99333ecafc6`,
-`docs/reports/dogfood-095.md`). 🟢 **SUCCESS · 11 steps · $1.77/$40 · 22m 29s.** The same greenfield reactive-signals build (20/20 `node --test` green in-workspace), now on
-the two mechanisms 094's misses forced into existence: (a) **auto-calibrated pacing fold** — `pacing.autoCalibrate` sized the window off this run's step-1 tokens →
-`peak window 123% · compactions 6 (pacing 6) · first pacing fold step 5`, a REAL `trigger:"pacing"` fold (vs 094's `pacing 0`); (b) **deterministic kill→resume** —
-`CHIKORY_KILL_AT_STEP=6` exited the worker 137 after the sealed step, `chikory resume` re-entered with ZERO re-execution (journal-verified: 11-min gap at the kill boundary,
-no duplicate step entries). Both axes 094 missed now fire → the F-125 (`pacing.autoCalibrate`) + F-127 (`CHIKORY_KILL_AT_STEP`) mechanisms are LIVE-PROVEN; the launch-gated
-24h+ exit-gate run is de-risked. 🟡 **F-128** — `scripts/dogfood-verify.sh` §3 re-runs ACs from the repo root, not the scaffold workspace, so a `.chikory-examples` run
-false-FAILs AC-1 (this run's "117-fail" §3 banner was that false alarm; workspace-cwd = 20/20 green). Track-B verifier hand-fix; see §7. **NEXT (only remaining P2 item):
-the launch-gated 24h+ brownfield EXIT-GATE run.** See §7, §1.5, §1.4, §3. (dogfood-094 detail → PLAN-HISTORY.)
+Latest: dogfood-096 — **THE P2 EXIT-GATE RUN — PASSED** (`run-f77c33db-8628-4e50-bd91-b48e5eb5c5d4`, `docs/reports/dogfood-096.md`, landed `554e08f`).
+🟢 **SUCCESS · 11 steps · $15.70/$120 · 25h 54m** — a 24h+ multi-session BROWNFIELD `chikory run` on the real Chikory repo (host WP-214 multi-repo
+workspaces, now 🟢). All three gate axes: (a) **10 clean soak suspend/resumes** (150 min parks, journal-verified zero re-execution); (b) **live
+auto-calibrated pacing folds** — `compactions 6 (pacing 6)`, first fold step 5, peak window 133%; (c) **no context-rot-shaped failure** — 0 rollbacks,
+100% per-step reliability, every step a distinct green increment. **P2 is COMPLETE; P3 is the frontier.** New friction (none headline-worthy):
+🟡 F-129 (spec premise 6 days stale — verify a "today X only does Y" premise against the CAPABILITY on HEAD, `git log -S`, not symbol-absence; see §7)
+· 🟡 F-130 (judge scope rubric passed a front-loaded PART — WP-270 rubric-hardening evidence) · ℹ️ F-131 (per-repo diff bytes string-parsed from an
+artifact summary; track-B). **NEXT headline (meta cap still busted 2/3 → MUST be product): dogfood-097 on WP-307** (inference-endpoint capability
+model — first P3 intelligent-scaling WP). See §7, §1.5, §1.4, §3. (dogfood-095 detail → PLAN-HISTORY.)
 
 Related docs: [`docs/spec/task-spec.md`](spec/task-spec.md) (schema
 reference) · [`docs/TASK-PROTOCOL.md`](TASK-PROTOCOL.md) (WP etiquette, §7 is
@@ -682,9 +682,15 @@ broken (a false-green, not a follow-on fix).
 | A live compaction run's window is sized RIGHT (`peak window 115% · compact 4`) yet STILL folds 0× (`pressure-steps K (unfolded K)`, 0 `compaction` entries) | **The run was too SHORT to accumulate foldable history** (dogfood-092 **F-122**). A pacing `compact` DECISION and an actual `compaction` FOLD are two different gates: `decideContextWindowPacing` recommends `compact` as soon as `projectedTokens > contextWindowTokens × compactAtFraction`, but `planCompaction` (`src/runner/compaction.ts:22`) only folds when `summaries.length > triggerAfterSteps AND > keepLastN`. Under pacing pressure the effective trigger is lowered to `keepLastN` (`activities.ts:1103`), and `DEFAULT_COMPACTION_POLICY.keepLastN = 5`. A 4-step run has ≤4 resident summaries → `4 ≤ 5` → `planCompaction` folds NOTHING on every compact decision, so `compact N` in the totals can coexist with 0 folds and `unfolded == pressureSteps`. **This is DISTINCT from F-120's undershoot** (there the window was wrong and no compact decision ever fired; here the window is right and compact fires every step but there is nothing old enough to fold). **Rule:** to observe a LIVE pacing fold you need BOTH a correctly-sized window AND a horizon long enough to pile up `> keepLastN` (≥6) resident summaries — decompose the goal into `min_durable_steps: 6-7` so a real `trigger:"pacing"` fold fires by ~step 6 (matches `compaction-wiring.test.ts`'s maxSteps-7 / fold-at-step-6 deterministic proof). Do NOT respond to a 0-fold-on-a-sized-window run by shrinking the window further — that risks a park; lengthen the run instead. |
 | Codex steps run far past their `maxSeconds` cap (e.g. ~2×) before being killed, recording 0 tokens / $0 / FAILED | Codex ignores the wall-clock deadline / SIGTERM until it is SIGKILLed (dogfood-076 **F-85 → WP-268**, family of F-76/F-80): steps 3 & 4 ran 1057s (1.76×) and 1188s (1.98×) past the 600s step cap. The cap is enforced LATE (~2×). Treat a run whose wall-clock is dominated by hung dead steps as this, not real work — check per-step `dur` in the trace. Durable fix = WP-268 (escalate to SIGKILL of the executor process group at ~1× the cap). Do NOT raise `budget_usd`/`max_steps` mid-run to rescue it. |
 | A `chikory resume <run-id>` appears to hang — the journal is frozen for many minutes and nothing errors, even though the worker is up | **The resumed run lost its judge/router provider config** — `chikory resume` from a shell that did NOT export `OPENAI_COMPAT_BASE_URL` (only `dogfood.sh`'s own shell exports it) starts a judge/router activity with no base URL, and Temporal's activity-retry policy (~65 attempts over ~30 min) loops SILENTLY instead of failing loud (dogfood-082 **F-99**: a step-4 seal stalled ~37 min across the kill→resume boundary purely from this). **`OPENAI_COMPAT_BASE_URL` (and any provider env the spec's `routing` block names) is a RESUME PRECONDITION** — export it before `chikory resume`, or resume from the same shell/`dogfood.sh` context that launched the run. Diagnose a suspected stall: `echo $OPENAI_COMPAT_BASE_URL` (empty = this), and check the worker logs for repeated router-fetch failures. **F-99 CLOSED 2026-07-04 (track-B PR per the §6.1 routing rule): `cmdResume` now runs `resumeProviderEnvGaps` (`src/cli/commands.ts`) — it reads the spec persisted in the run's journal, checks every routed provider's env var (`missingProviderEnv`, `src/taskspec.ts`), and refuses fast (exit 1, naming each var) BEFORE hosting a worker; fail-open when the journal is missing/unreadable so it can never block a legitimate resume. Unit-tested in `test/cli/resume-env-precheck.test.ts`.** Seeing a silent multi-minute resume stall now is a regression — file it. |
+| A LOOSE run seals SUCCESS and every AC is green, but review finds the first PART(s) delivered only a refactor — the "net-new symbol" already had its capability on HEAD | **The spec's premise line was STALE** (dogfood-096 **F-129**): the spec asserted "today `activities.ts` commits only `spec.repos[0]`" but `fadc124` had landed the per-repo commit loop + per-repo diff evidence 6 days before launch, so PARTs 1–2 were satisfied by EXTRACTING existing code into the AC-named symbols (`commitAllRepos`, `collectPerRepoDiffs`) plus a redundant `perRepoCommits` field duplicating `gitCommits`. The F-90 "symbol absent on HEAD" armor proves the SYMBOL is new, not that the CAPABILITY is missing. **Authoring rule:** before writing a premise ("today X only does Y"), verify it against the CAPABILITY — `git log -S` on the mechanism (call sites, loops), read the current code path — not just a grep proving the symbol is absent. Same failure shape as the plan-lags-main rule (dogfood-088 review). |
 
 ## 8. Known P1 limitations (so you don't fight them)
 
+- **`judge.cadence` is INERT on a chunked spec** (dogfood-096 observation, by design
+  JD-2): every step that consumes a `work_chunks` entry is a judge milestone
+  (`workChunkMilestone`, `src/workflow/agent-loop.ts:633`), so a `min_durable_steps`
+  run is judged 1/1 regardless of `cadence`. Do not size judge cost by `cadence` on a
+  chunked spec — 096 ran 11/11 judge passes at `cadence: 2` (harmless: 0.7% share).
 - **OTel run-root span identity is forced via a private-field mutation** (F-117,
   dogfood-090, track-B under WP-105): `applyDerivedRunRootIdentity` (`src/otel.ts`)
   reassigns the SDK-internal `span._spanContext` (and clears `parentSpanContext`) so

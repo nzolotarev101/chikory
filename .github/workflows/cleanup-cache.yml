@@ -26,9 +26,26 @@ jobs:
             fi
             
             count=$(echo "$ids" | wc -l | tr -d ' ')
-            echo "Deleting $count old caches in parallel..."
-            echo "$ids" | xargs -P 16 -n 1 gh cache delete
+            echo "Deleting $count old caches sequentially with rate limit protection..."
             
-            # Give a small pause to avoid rate limiting
-            sleep 1
+            for id in $ids; do
+              echo "Deleting cache ID: $id"
+              success=false
+              for attempt in 1 2 3; do
+                if gh cache delete "$id"; then
+                  success=true
+                  break
+                else
+                  echo "Warning: Failed to delete cache $id on attempt $attempt. Retrying in 5 seconds..."
+                  sleep 5
+                fi
+              done
+              
+              if [ "$success" = false ]; then
+                echo "Error: Failed to delete cache $id after 3 attempts. Continuing..."
+              fi
+              
+              # Throttle to stay well under the 400 deletions/minute limit
+              sleep 0.25
+            done
           done
