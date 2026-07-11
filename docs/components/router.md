@@ -58,6 +58,40 @@ export interface Router {
 - `RoutingPolicy` ships in `TaskSpec`; defaults provided (`defaultPolicy(executorFamily)` picks a judge from a *different* family automatically).
 - Acceptance test: identical task run under two policies (Anthropic-exec/Gemini-judge vs OpenAI-exec/Anthropic-judge) with **zero code changes** — config diff only.
 
+## Endpoint capability model (WP-307)
+
+The router owns model choice, but scheduling and validation need to reason about
+the **effective endpoint** behind each stage. `endpoint-capability.ts` keeps that
+as pure data:
+
+| Function | Purpose |
+|---|---|
+| `describeEndpointCapability(target)` | Describes one provider or executor adapter with no env reads, network calls, or adapter construction. |
+| `resolveEndpointCapabilities(input)` | Expands a `RoutingPolicy` or parsed `TaskSpec` into per-stage endpoint descriptors, including failover choices. |
+| `endpointCapabilityFamily(capability)` | Extracts the structural family used for judge/executor diversity checks. |
+
+Capability descriptors cover:
+
+- **Provider endpoints**: `anthropic`, `openai`, `gemini`, and
+  `openai-compat`, including auth mode, request-token field, token-usage fields,
+  and pricing-table linkage.
+- **Executor endpoints**: `claude-code`, `codex`, and `native`. For parsed
+  `TaskSpec` input, the `code` stage resolves through `executor.adapter`, not
+  merely `routing.stages.code.provider`, because CLI executors are the real
+  endpoint for coding work.
+- **Unknown endpoints**: unrecognized providers/adapters resolve to conservative
+  `unknown` descriptors instead of throwing, so trace and validation callers can
+  remain total.
+
+Current consumers:
+
+- Task-spec validation compares judge and executor families from resolved
+  capabilities, so stale `executor.family` / `judge.family` labels cannot hide a
+  same-family pairing.
+- `prepareRun` journals one replay-safe `capability` row at run start; `chikory
+  trace` renders an `endpoints plan ... · code ... · review ... · judge ...`
+  line only when that row exists. Older journals stay readable without the line.
+
 ## Telemetry (WP-105)
 
 Every `complete()` wraps in an OTel span:

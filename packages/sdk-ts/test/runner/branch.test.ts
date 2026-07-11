@@ -148,12 +148,17 @@ describe("branch fork runtime", () => {
     const child = new Journal(journalPath(dataDir, childRunId));
     try {
       const entries = child.entries();
-      expect(entries.map((entry) => entry.kind)).toEqual(["step", "checkpoint", "control_event"]);
-      expect((entries[0]!.payload as { stepIndex: number }).stepIndex).toBe(0);
+      expect(entries.map((entry) => entry.kind)).toEqual([
+        "capability",
+        "step",
+        "checkpoint",
+        "control_event",
+      ]);
+      expect((entries[1]!.payload as { stepIndex: number }).stepIndex).toBe(0);
       expect(entries.some((entry) => JSON.stringify(entry.payload).includes("stepIndex\":1"))).toBe(
         false,
       );
-      expect(entries[2]!.payload).toMatchObject({
+      expect(entries[3]!.payload).toMatchObject({
         event: "branch_fork",
         parentRunId,
         forkCheckpointId: forkCheckpoint.id,

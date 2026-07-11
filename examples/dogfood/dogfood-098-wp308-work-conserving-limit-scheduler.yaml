@@ -1,0 +1,192 @@
+# Dogfood-098: WP-308 — WORK-CONSERVING LIMIT SCHEDULER. On a usage-limit signal on an inference endpoint, sleep is
+#   the LAST resort: (1) fail the throttled stage over to an endpoint with DECLARED HEADROOM (generalizes router.ts
+#   per-stage failover to the executor side, invariant #2 preserved across the swap); (2) no headroom → progress
+#   limit-independent work meanwhile; (3) nothing can progress → durable park (the WP-309 learned reset is a later WP;
+#   until then park uses the existing fixed delay). The run seals SUCCESS having SLEPT measurably less wall-clock than
+#   the park-only baseline, with the delta visible in trace totals. Consumes WP-307's `resolveEndpointCapabilities`
+#   (dogfood-097, `run-d44ff996`) as its headroom oracle.
+#
+# WHY NOW (dogfood-097 review, 2026-07-11). WP-307 ✅ DONE (dogfood-097 `run-d44ff996`, uncommitted working tree): the
+#   inference-endpoint capability model landed — every endpoint now declares limit semantics + family as plain data.
+#   plan.md §7 (`200a18a`): today an hourly/session limit is ridden out by SLEEPING (dogfood-090's 4×90-min parks,
+#   `soak.sleep_ms`, DOGFOODING §7's "switch the CLI by hand"). At P3 scale (WP-302's 60–100 multi-hour tasks ×
+#   WP-304 baselines × WP-305 external CLI-subscription-only users) sleep-first fails. WP-308 is the scheduler that
+#   spends declared headroom BEFORE ever sleeping. It is the direct dependant of the just-landed WP-307.
+#
+# GATE VERDICTS (dogfood-097 review phase 5). Progression ✅ PROGRESSING (a thesis axis moved — first genuine
+#   product-run judge true-positive pre-land); meta cap ✅ SATISFIED (1/3 — 094/095 aged out, 096/097 both product);
+#   per-step reliability 98.7% (the 097 rollback is a judge CATCH, not a durability miss). §1.1 ✅ (limit-signal
+#   classification, headroom failover, and park-last decision over router/executor/journal surfaces — a forced-limit
+#   run that STILL sleeps its full baseline is a real, failable regression). §1.2 ✅ (advances real open plan.md §7
+#   WP-308 on live Chikory source — the vendor-neutral routing pillar, the P3 moat). §1.3 ✅ PROCEED (WP-307's direct
+#   dependant; nothing else product-unblocked outranks it). §1.5 ✅ (class=product, meta cap clear).
+#
+# CLASS / LADDER. class=product. The WP-265 horizon ladder is RETIRED (rung 5 = the P2 exit gate, passed dogfood-096);
+#   this is a rung-4-shape consolidation (≥6-step unattended single run advancing a real product WP), NOT a climb.
+# Ladder-rung: 4
+# Thesis-KPI: VENDOR-NEUTRALITY pillar + work-conserving scaling — a forced usage-limit injection on ONE endpoint
+#   yields, via declared-headroom failover / limit-independent progress, a SUCCESS run that slept measurably less
+#   wall-clock than the park-only baseline (delta in trace totals), while per-step reliability holds and the run seals
+#   with zero operator input.
+#
+# Format: LOOSE (outcome goal + 6 ordered increments; layout/file/test names are the executor's, F-82/F-83). ACs pin
+#   "done" via net-new FUNCTION symbols the goal NAMES that are ABSENT on HEAD (`decideLimitResponse` — the scheduler
+#   decision; `classifyLimitSignal` — the signal model) + a test co-referencing WP-307's resolver
+#   (`resolveEndpointCapabilities`) so the scheduler is proven against the REAL capability shapes, not a toy + the
+#   FULL suite green. F-115-SAFE: no AC asserts a wall-clock duration to prove a structural fact — the "less slept"
+#   delta is the Thesis-KPI proven by the PART-6 live seam + trace totals, NOT an AC grep.
+#
+# F-129 PREMISE CHECK (2026-07-11): `grep -rn 'decideLimitResponse|classifyLimitSignal|LimitResponse|conservedMs'
+#   packages/sdk-ts/src packages/sdk-ts/test` → 0 hits; `git log -S decideLimitResponse` → empty. The CAPABILITY is
+#   absent on HEAD: `provider.ts` retries a 429 with backoff (`provider.ts:94`) but makes NO work-conserving decision;
+#   `router.ts` failover is per-stage config only, never consulted on a limit signal; `workflow/soak.ts`
+#   `decideSoakDelay` parks on a FIXED delay with no headroom check. The scheduler that turns a limit signal into
+#   failover-before-park does not exist.
+#
+# ⚠️ SCOPE / DETERMINISM. Writes ONLY inside `packages/sdk-ts/` (+ one doc PART). ADDITIVE — extends the run loop and
+#   the existing `router.ts` failover + WP-307 capability model; NO new abstraction layer (CLAUDE.md "minimal
+#   abstraction"); a run that never receives a limit signal behaves and renders BYTE-IDENTICALLY. The forced-limit
+#   injection is a DETERMINISTIC seam (`CHIKORY_LIMIT_AT_STEP`, mirroring the WP-206 `CHIKORY_KILL_AT_STEP` kill seam)
+#   — off by default, no env ⇒ no signal. NO key material or secret-shaped fields anywhere. CLI-subscription endpoints
+#   remain a first-class headroom source (CLI-auth/no-secrets holds).
+#
+# ⚠️ LAUNCH: commit everything first (the workspace clones HEAD — WP-307's uncommitted delivery MUST be committed or
+#   the scheduler has no capability model to consume), then `devbox run run-dogfood` (picks the latest spec — verify
+#   the pick resolves to THIS file). `CHIKORY_PREFLIGHT_ONLY=1 devbox run run-dogfood` dry-runs the launch guards at $0.
+
+name: dogfood-098-wp308-work-conserving-limit-scheduler
+goal: >
+  Land WP-308, the work-conserving limit scheduler, in the Chikory TypeScript SDK: on a usage-limit signal against an
+  inference endpoint, SLEEPING is the LAST resort. Consume WP-307's `resolveEndpointCapabilities` (the endpoint
+  capability model, already in the SDK) as the headroom oracle and generalize the existing `router.ts` per-stage
+  failover to the executor side. Deliver in SIX ordered increments, ONE per durable step, each adding DISTINCT
+  non-trivial working code + tests (the non-hollow horizon, F-100/WP-270):
+
+    * PART 1 — LIMIT-SIGNAL MODEL: a net-new pure `classifyLimitSignal` normalizes a raw limit signal (an HTTP 429
+      with a `retry-after`, a CLI usage-limit stderr line, or the deterministic injected seam) into a plain
+      descriptor — which endpoint, the observed/declared reset window (read from the WP-307 limit semantics, NOT
+      vendor docs), whether a reset hint is present. Pure, no I/O. Tested per signal kind.
+
+    * PART 2 — HEADROOM ORACLE: a net-new pure function over the resolved per-stage capabilities returns, for a
+      throttled stage, the endpoints with DECLARED HEADROOM that are a legal target — a compatible model family that
+      PRESERVES invariant #2 (a failover target must not collapse judge/executor family separation). Tested, incl.
+      the case where the only alternative would violate invariant #2 (⇒ no headroom target).
+
+    * PART 3 — THE SCHEDULER DECISION: a net-new pure `decideLimitResponse` takes the classified signal + the headroom
+      oracle + the run's declared failover and returns an ORDERED plan — (1) fail the throttled stage over to a
+      headroom endpoint; (2) no headroom target → progress limit-independent work (judge pass on the other family,
+      compaction fold, checkpoint); (3) nothing can progress → durable park (fixed delay until WP-309). Pure. Tested
+      for all THREE branches against this repo's real routing/failover shapes.
+
+    * PART 4 — RUN-LOOP WIRING: on a limit signal (surfaced by the deterministic `CHIKORY_LIMIT_AT_STEP` seam, off by
+      default), the run activity consults `decideLimitResponse` and takes the chosen action INSTEAD of immediately
+      parking. Additive — no signal ⇒ the loop behaves byte-identically. Tested (a wired step with an injected signal
+      fails over / conserves rather than sleeping).
+
+    * PART 5 — REPLAY-SAFE JOURNAL + TRACE TOTALS: each limit signal and the chosen response are journaled once
+      (additive entry, replay-safe — no reshape of existing kinds), and `chikory trace` totals surface `slept vs
+      conserved` wall-clock so the scheduler's benefit is legible. A run with no limit signal renders exactly as
+      today. Tested.
+
+    * PART 6 — DOCS + LIVE PROOF + FULL-SUITE REGRESSION: document the scheduler where the router/scaling docs live
+      (`docs/components/router.md` — executor's judgment), add ONE live proof (in-memory/Temporal, short) that an
+      INJECTED limit on one endpoint yields a CONSERVED (failover or limit-independent) response — the run makes
+      progress rather than sleeping its full park-only baseline — and prove the ENTIRE `packages/sdk-ts` suite
+      (tsc + eslint + vitest) green; every earlier increment's tests still pass.
+
+  CONSTRAINTS: additive — NO frozen-contract shape change; a run that never receives a limit signal behaves and
+  renders EXACTLY as before. NO new dependency. The forced-limit injection is the deterministic `CHIKORY_LIMIT_AT_STEP`
+  seam only (off by default). NO key material or secret-shaped fields. A failover swap MUST preserve invariant #2
+  (judge family ≠ executor family). Each PART lands its own tests and does NOT break an earlier PART's tests; do NOT
+  front-load a later PART (the judge compares the diff footprint against the active PART). If a verification step
+  reports a failing suite, READ the failure and fix the IMPLEMENTATION — never weaken or delete an assertion, and
+  never assert a wall-clock duration to prove a STRUCTURAL absence (F-115).
+
+repos:
+  - url: /Users/nikitazolotarev/repos/chikory
+    writable: true
+
+bounded_work_unit:
+  min_durable_steps: 6
+  directive: >
+    Advance EXACTLY the ONE numbered PART named by this step's chunk — implement it and its tests, then stop and let
+    the durable checkpoint seal. Do NOT front-load a later PART. Do NOT declare the whole run complete until every
+    PART has landed with passing tests.
+  work_chunks:
+    - name: part-1-limit-signal-model
+      directive: "PART 1 ONLY: net-new pure classifyLimitSignal normalizes a raw limit signal (429 retry-after / CLI usage-limit stderr / injected seam) into a plain descriptor reading the WP-307 limit semantics. Tests per kind."
+    - name: part-2-headroom-oracle
+      directive: "PART 2 ONLY: net-new pure headroom oracle over resolved per-stage capabilities → legal headroom targets for a throttled stage, invariant #2 preserved. Tests incl. the invariant-#2-blocks-the-only-alternative case."
+    - name: part-3-scheduler-decision
+      directive: "PART 3 ONLY: net-new pure decideLimitResponse → ordered plan (failover → limit-independent work → park last) over signal + headroom oracle + declared failover. Tests all three branches on real routing/failover shapes."
+    - name: part-4-run-loop-wiring
+      directive: "PART 4 ONLY: on a CHIKORY_LIMIT_AT_STEP-injected signal (off by default) the run activity consults decideLimitResponse and acts instead of parking; no signal ⇒ byte-identical. Tests."
+    - name: part-5-journal-and-trace-totals
+      directive: "PART 5 ONLY: journal each limit signal + chosen response (additive, replay-safe) + chikory trace totals slept-vs-conserved; capability/limit-free runs render exactly as today. Tests."
+    - name: part-6-docs-liveproof-regression
+      directive: "PART 6 ONLY: document the scheduler in the router/scaling docs, add ONE short live proof that an injected limit yields a conserved response, and run the FULL packages/sdk-ts suite (tsc + eslint + vitest); if anything fails, fix the IMPLEMENTATION, never weaken a test."
+
+acceptance_criteria:
+  - id: AC-1
+    description: >
+      The net-new pure scheduler decision function exists in the SDK source. (OUTCOME symbol the goal NAMES —
+      `decideLimitResponse` — absent on HEAD so a recursive grep cannot false-green, F-90. F-114-SAFE: a FUNCTION
+      symbol, not a type-name token. Layout is the executor's, F-82/F-83.)
+    check: >
+      cd packages/sdk-ts &&
+      grep -rq 'decideLimitResponse' src/
+  - id: AC-2
+    description: >
+      The scheduler is CONSUMED, not just defined — `decideLimitResponse` appears at least twice across the source
+      (definition + a consumption site in the run loop/journal). (F-114-SAFE: net-new FUNCTION symbol. F-119-SAFE:
+      occurrence count via `grep -roh … | wc -l` — a single integer — never `grep -rc` over a directory.)
+    check: >
+      cd packages/sdk-ts &&
+      test "$(grep -roh 'decideLimitResponse' src/ | wc -l)" -ge 2
+  - id: AC-3
+    description: >
+      A test exercises the scheduler against the REAL WP-307 capability model, proving the headroom oracle reads the
+      actual resolved capabilities (not a toy). (F-97-SAFE: requires a `test/` file referencing BOTH the net-new
+      `decideLimitResponse` AND WP-307's `resolveEndpointCapabilities`. Filename is the executor's.)
+    check: >
+      cd packages/sdk-ts &&
+      for f in $(grep -rl 'decideLimitResponse' test/ 2>/dev/null); do
+        grep -q 'resolveEndpointCapabilities' "$f" && { echo ok; break; };
+      done | grep -q ok
+  - id: AC-4
+    description: >
+      The SDK stays type- and lint-clean and the FULL existing suite is green, proving the change is additive and
+      nothing regressed (no frozen-contract shape change; limit-signal-free runs behave exactly as before).
+    check: cd packages/sdk-ts && pnpm exec tsc --noEmit && pnpm exec eslint . && pnpm exec vitest run
+
+budget_usd: 45
+max_steps: 30
+
+# CONTEXT-ROT (WP-203/WP-207): auto-calibrated window (F-125 mechanism, live-proven dogfood-095/096/097) — the window
+#   is derived from this run's OWN first-step assembled-context tokens; real accumulation over 6 chunks crosses the
+#   compact band and folds under genuine pacing pressure.
+pacing:
+  mode: auto
+  autoCalibrate: true
+
+# UNATTENDED (WP-271): operator-free; a genuine ESCALATE seals a resumable FAILED (WP-520) instead of a hang; the
+#   run-level self-heal (WP-519) gets one bounded remediation before any terminal seal. No soak — this is a normal
+#   ~6-step product run, not an endurance gate (that gate is passed).
+unattended:
+  escalation: seal_resumable_failed
+
+executor:
+  adapter: codex
+  family: openai
+
+judge:
+  family: openai-compat
+  cadence: 2
+  max_cost_share: 0.5
+
+routing:
+  stages:
+    plan: { provider: openai-compat, model: gpt-5.5 }
+    code: { provider: openai-compat, model: gpt-5.5 }
+    review: { provider: openai-compat, model: gpt-5.5 }
+    judge: { provider: openai-compat, model: gemini-3.1-pro-preview }

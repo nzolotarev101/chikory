@@ -123,6 +123,22 @@ function sameFamilySpec(allowSameFamily: boolean): TaskSpec {
   };
 }
 
+function staleExecutorFamilySpec(): TaskSpec {
+  const openai = { provider: "openai" as const, model: "fake-judge" };
+  const gemini = { provider: "gemini" as const, model: "fake-executor-label" };
+  return {
+    name: "family-test",
+    goal: "exercise capability-backed family enforcement",
+    repos: [{ url: "unused", writable: true }],
+    acceptanceCriteria: [{ id: "AC-1", description: "anything" }],
+    budgetUsd: 1,
+    maxSteps: 2,
+    executor: { adapter: "codex", family: "gemini" },
+    judge: { family: "openai", cadence: 1 },
+    routing: { stages: { plan: gemini, code: gemini, review: gemini, judge: openai } },
+  };
+}
+
 describe("judgeStep enforces family diversity (WP-133)", () => {
   const cleanups: Array<() => Promise<void>> = [];
   afterEach(async () => {
@@ -165,6 +181,22 @@ describe("judgeStep enforces family diversity (WP-133)", () => {
         sinceCommit,
       }),
     ).rejects.toThrowError(FamilyDiversityError);
+  });
+
+  it("stale executor.family cannot hide Codex's OpenAI family at the judge boundary", async () => {
+    const spec = staleExecutorFamilySpec();
+    const { dataDir, sinceCommit } = await setup("run-family-capability-refuse", spec);
+    const activities = createRunnerActivities({ dataDir, adapters: {} });
+
+    await expect(
+      activities.judgeStep({
+        runId: "run-family-capability-refuse",
+        judgeIndex: 0,
+        atStep: 0,
+        criteria: spec.acceptanceCriteria,
+        sinceCommit,
+      }),
+    ).rejects.toThrowError(/judge.family 'openai' equals executor.family 'openai'/);
   });
 
   it("opt-in runs the pass but warns loudly AND journals the warning", async () => {

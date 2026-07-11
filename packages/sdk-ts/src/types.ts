@@ -418,6 +418,7 @@ export type JournalEntryKind =
   | "budget_event"
   | "compaction"
   | "pacing"
+  | "capability"
   | "terminal"
   | "seam"
   // P2 (WP-519, ADR-009 D3) — one journaled heal attempt: rule-3 HALT

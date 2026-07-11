@@ -5,6 +5,7 @@
 import { parse as parseYaml } from "yaml";
 import { z } from "zod";
 
+import { endpointCapabilityFamily, resolveEndpointCapabilities } from "./endpoint-capability.js";
 import { TaskSpecSchema } from "./schemas.js";
 import type { LLMProvider, ModelChoice, RoutingPolicy, Stage, TaskSpec } from "./types.js";
 
@@ -285,19 +286,25 @@ export function parseTaskSpec(yamlText: string, opts: ParseTaskSpecOptions = {})
   };
 
   const issues: string[] = [];
+  const capabilities = resolveEndpointCapabilities({ routing: spec.routing, executor: spec.executor });
+  const executorFamily = endpointCapabilityFamily(capabilities.code[0]) ?? spec.executor.family;
+  const judgeSameFamilyCapability = capabilities.judge.find(
+    (capability) => endpointCapabilityFamily(capability) === executorFamily,
+  );
+  const judgeFamily = endpointCapabilityFamily(judgeSameFamilyCapability ?? capabilities.judge[0]) ?? spec.judge.family;
 
   // §9 rule 1 — invariant #2: judge family ≠ executor family unless opted in.
-  if (spec.judge.family === spec.executor.family) {
+  if (judgeSameFamilyCapability) {
     if (spec.judge.allowSameFamily) {
       warn(
-        `[chikory] WARNING: judge family '${spec.judge.family}' equals executor family ` +
+        `[chikory] WARNING: judge family '${judgeFamily}' equals executor family ` +
           `(allow_same_family: true). Bias mitigation is reduced — the judge shares the ` +
           `executor's blind spots (invariant #2).`,
       );
     } else {
       issues.push(
-        `judge.family '${spec.judge.family}' must differ from executor.family ` +
-          `'${spec.executor.family}' (invariant #2). Set allow_same_family: true to override.`,
+        `judge.family '${judgeFamily}' must differ from executor.family ` +
+          `'${executorFamily}' (invariant #2). Set allow_same_family: true to override.`,
       );
     }
   }
@@ -317,6 +324,16 @@ export function parseTaskSpec(yamlText: string, opts: ParseTaskSpecOptions = {})
   // §9 rule 3 — every routed provider configured in env; fail fast naming the var.
   for (const { provider, envVar } of missingProviderEnv(spec, env)) {
     issues.push(`provider '${provider}' is routed but not configured: missing env var ${envVar}`);
+  }
+
+  const codeCapability = capabilities.code[0];
+  if (codeCapability?.kind === "executor") {
+    if (codeCapability.adapter === "claude-code" && spec.executor.family !== codeCapability.family) {
+      issues.push("executor.adapter 'claude-code' must use executor.family 'anthropic'");
+    }
+    if (codeCapability.adapter === "codex" && spec.executor.family !== codeCapability.family) {
+      issues.push("executor.adapter 'codex' must use executor.family 'openai'");
+    }
   }
 
   if (issues.length > 0) throw new TaskSpecValidationError(issues);

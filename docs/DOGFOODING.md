@@ -8,16 +8,16 @@ recover a run, and how to land the result as a normal PR.
 **Status (2026-07-11, bounded — update discipline: REPLACE this block, ≤15 lines;
 displaced prose moves verbatim to [`PLAN-HISTORY.md`](PLAN-HISTORY.md); per-run detail:
 `docs/reports/dogfood-NNN.md`; queue + course correction: `plan.md` §6).**
-Latest: dogfood-096 — **THE P2 EXIT-GATE RUN — PASSED** (`run-f77c33db-8628-4e50-bd91-b48e5eb5c5d4`, `docs/reports/dogfood-096.md`, landed `554e08f`).
-🟢 **SUCCESS · 11 steps · $15.70/$120 · 25h 54m** — a 24h+ multi-session BROWNFIELD `chikory run` on the real Chikory repo (host WP-214 multi-repo
-workspaces, now 🟢). All three gate axes: (a) **10 clean soak suspend/resumes** (150 min parks, journal-verified zero re-execution); (b) **live
-auto-calibrated pacing folds** — `compactions 6 (pacing 6)`, first fold step 5, peak window 133%; (c) **no context-rot-shaped failure** — 0 rollbacks,
-100% per-step reliability, every step a distinct green increment. **P2 is COMPLETE; P3 is the frontier.** New friction (none headline-worthy):
-🟡 F-129 (spec premise 6 days stale — verify a "today X only does Y" premise against the CAPABILITY on HEAD, `git log -S`, not symbol-absence; see §7;
-its `perRepoCommits` cleanup ✅ hand-landed 2026-07-11). **Track-B hand-landings 2026-07-11 (pre-097 smoothing):** ✅ F-128 (verify-script cwd) ·
-✅ F-130 (judge chunk-scope now judges the DIFF footprint, `prompt.ts`) · ✅ F-131 (structured `repo` on diff refs) · ✅ F-126 (stale-precheck skips
-`F-n/WP-n` lineage refs). **NEXT headline (meta cap still busted 2/3 → MUST be product): dogfood-097 on WP-307** (inference-endpoint capability
-model — first P3 intelligent-scaling WP; premise re-verified post-landings, scope unaffected). See §7, §1.5, §1.4, §3.
+Latest: dogfood-097 — **WP-307 (inference-endpoint capability model) DONE** (`run-d44ff996-d21a-482b-a326-99ae72930524`, `docs/reports/dogfood-097.md`,
+uncommitted working tree). 🟢 **SUCCESS · 7 steps · $10.98/$40 · 33m 50s** — the first P3 intelligent-scaling WP: one plain descriptor per way
+Chikory reaches inference (CLI-subscription / API-key / openai-compat) declaring auth mode, limit semantics, cost linkage, model family; per-stage
+resolution; invariant #2 family feed; replay-safe journal + `chikory trace` endpoints line. **First genuine product-run judge true-positive pre-land:**
+step 1 front-loaded PART 3 → the F-130 footprint rubric ROLLED BACK to base → step 2 redid PART 1 only → SUCCESS. Per-step reliability 98.7%
+(1 judge-catch / 76 steps — the thesis working, not a durability miss). New friction: ℹ️ F-132 (step-6 token spike 3.08M in/$3.96 — expected
+context-rot economics, WP-203/207) · ℹ️ F-133 (chunk directive is advisory; the judge rollback enforces no-front-load) — both no-WP.
+**NEXT headline (progression ✅ PROGRESSING, meta cap satisfied 1/3): dogfood-098 on WP-308** (work-conserving limit scheduler — sleep is the last
+resort on a limit signal; WP-307 unblocked it). P2 COMPLETE; P3 is the frontier. See §7, §1.5, §1.4, §3.
+(Earlier — dogfood-096 P2 exit gate PASSED, `run-f77c33db`, 25h 54m: `docs/reports/dogfood-096.md` + `PLAN-HISTORY.md`.)
 
 Related docs: [`docs/spec/task-spec.md`](spec/task-spec.md) (schema
 reference) · [`docs/TASK-PROTOCOL.md`](TASK-PROTOCOL.md) (WP etiquette, §7 is

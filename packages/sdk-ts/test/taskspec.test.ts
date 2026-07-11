@@ -132,6 +132,72 @@ soak:
     expect(warn).not.toHaveBeenCalled();
   });
 
+  it("rejects a same-family routed judge even when judge.family claims diversity", () => {
+    const yaml = `name: routed-judge-same-family
+goal: Catch paper-only family diversity.
+repos:
+  - url: .
+    writable: true
+acceptance_criteria:
+  - id: AC-1
+    description: Something checkable
+budget_usd: 5
+executor:
+  adapter: codex
+  family: openai
+judge:
+  family: gemini
+routing:
+  stages:
+    plan: { provider: openai, model: gpt-5.2-mini }
+    code: { provider: openai, model: gpt-5.2 }
+    review: { provider: openai, model: gpt-5.2 }
+    judge: { provider: openai, model: gpt-5.2 }
+`;
+
+    expect(() => parseTaskSpec(yaml, { env })).toThrow(TaskSpecValidationError);
+    try {
+      parseTaskSpec(yaml, { env });
+    } catch (err) {
+      expect((err as Error).message).toContain(
+        "judge.family 'openai' must differ from executor.family 'openai'",
+      );
+    }
+  });
+
+  it("rejects a same-family judge when executor.family claims diversity but adapter capability is OpenAI", () => {
+    const yaml = `name: executor-label-stale
+goal: Catch stale executor family labels.
+repos:
+  - url: .
+    writable: true
+acceptance_criteria:
+  - id: AC-1
+    description: Something checkable
+budget_usd: 5
+executor:
+  adapter: codex
+  family: gemini
+judge:
+  family: openai
+routing:
+  stages:
+    plan: { provider: gemini, model: gemini-2.5-flash }
+    code: { provider: gemini, model: gemini-2.5-pro }
+    review: { provider: gemini, model: gemini-2.5-pro }
+    judge: { provider: openai, model: gpt-5.2 }
+`;
+
+    expect(() => parseTaskSpec(yaml, { env })).toThrow(TaskSpecValidationError);
+    try {
+      parseTaskSpec(yaml, { env });
+    } catch (err) {
+      const message = (err as Error).message;
+      expect(message).toContain("judge.family 'openai' must differ from executor.family 'openai'");
+      expect(message).toContain("executor.adapter 'codex' must use executor.family 'openai'");
+    }
+  });
+
   it("rejects malformed YAML with a parse error", () => {
     expect(() => parseTaskSpec("{ not: [valid", { env })).toThrow(TaskSpecValidationError);
   });

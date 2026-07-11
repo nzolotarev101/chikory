@@ -2,6 +2,23 @@ export type * from "./types.js";
 export * from "./schemas.js";
 export { canonicalJson } from "./canonical-json.js";
 export {
+  describeEndpointCapability,
+  resolveEndpointCapabilities,
+  type EndpointAuthMode,
+  type EndpointCapability,
+  type EndpointCapabilityTarget,
+  type EndpointCostLinkage,
+  type EndpointLimitSemantics,
+  type ExecutorAdapterName,
+  type ExecutorCostLinkage,
+  type ExecutorEndpointCapability,
+  type ExecutorEndpointTarget,
+  type ExecutorLimitSemantics,
+  type ProviderEndpointCapability,
+  type ResolvedEndpointCapabilities,
+  type ResolveEndpointCapabilitiesInput,
+} from "./endpoint-capability.js";
+export {
   computeCostUsd,
   lookupPricing,
   PRICE_TABLE,

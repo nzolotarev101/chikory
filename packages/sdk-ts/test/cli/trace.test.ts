@@ -4,6 +4,7 @@
  */
 import { describe, expect, test } from "vitest";
 
+import { describeEndpointCapability } from "../../src/endpoint-capability.js";
 import {
   formatDuration,
   formatEntryLine,
@@ -221,6 +222,7 @@ describe("renderTrace (WP-142)", () => {
     expect(text.split("\n")).toContain(
       "        injections 1 · checkpoints 1 · feedback frequency 1/2 steps",
     );
+    expect(text).not.toContain("        endpoints ");
     expect(text).not.toContain("pressure-steps");
     expect(text).not.toContain("warning: pressure fired");
     expect(text).not.toContain("re-entries");
@@ -545,6 +547,26 @@ describe("renderTrace (WP-142)", () => {
     );
     expect(rendered).not.toContain("        repos ");
     expect(rendered).not.toContain(": diff 321 bytes · commit");
+  });
+
+  test("renders endpoint summary only when capability entry exists", () => {
+    const capabilityEntries: JournalEntry[] = [
+      entry(0, "capability", {
+        capabilityIndex: 0,
+        stages: {
+          plan: [describeEndpointCapability("anthropic")],
+          code: [describeEndpointCapability("codex")],
+          review: [describeEndpointCapability("openai-compat")],
+          judge: [describeEndpointCapability("gemini")],
+        },
+      }),
+      ...entries.map((existing) => ({ ...existing, idx: existing.idx + 1 })),
+    ];
+
+    expect(renderTrace(run, capabilityEntries, totals).split("\n")).toContain(
+      "        endpoints plan anthropic · code codex(openai) · review openai-compat · judge gemini",
+    );
+    expect(renderTrace(run, entries, totals)).not.toContain("        endpoints ");
   });
 
   test("reports components over time in journal order", () => {

@@ -343,6 +343,29 @@ id the backend CLI accepts.
 | `review` | **Unused** | Router calls review model |
 | `judge` | **Always router-called** — judge is never a CLI in P1 | Same |
 
+### Resolved endpoint capabilities
+
+At parse/run start, Chikory resolves the configured stages into endpoint
+capability descriptors. This is the model used by validation, journaling, and
+trace output.
+
+| Config surface | Effective capability source |
+|---|---|
+| `routing.stages.plan` | Provider descriptor for `plan` plus any `failover.plan` providers |
+| `routing.stages.code` with `executor.adapter: claude-code` or `codex` | Executor descriptor for the CLI adapter; `routing.stages.code.model` still feeds the CLI `-m`/model flag |
+| `routing.stages.code` with `executor.adapter: native` | Native executor descriptor; inner turns delegate to the router |
+| `routing.stages.review` | Provider descriptor for `review` plus any `failover.review` providers |
+| `routing.stages.judge` | Provider descriptor for `judge` plus any `failover.judge` providers |
+
+Descriptors record auth mode, token-limit semantics, cost linkage, and
+structural model family. Known CLI adapters resolve to their true family
+(`claude-code` → `anthropic`, `codex` → `openai`), so validation rejects
+same-family judge/executor pairings even if stale YAML labels claim otherwise.
+
+Run journals include one `capability` entry at start. `chikory trace` renders it
+as an `endpoints plan ... · code ... · review ... · judge ...` summary when
+present; older journals without the entry keep the previous trace shape.
+
 ## `bounded_work_unit` block (optional)
 
 Opt-in durable-loop pacing for a single `chikory run`. Absent = default

@@ -16,6 +16,12 @@ import { promisify } from "node:util";
 import { heartbeat } from "@temporalio/activity";
 
 import { createLocalArtifactStore } from "../artifacts/index.js";
+import {
+  describeEndpointCapability,
+  endpointCapabilityFamily,
+  type ResolvedEndpointCapabilities,
+  resolveEndpointCapabilities,
+} from "../endpoint-capability.js";
 import { buildVerdict, enforceFamilyDiversity, runJudgePass } from "../judge/index.js";
 import { Journal, reportFromJournal, runTotals } from "../journal/journal.js";
 import {
@@ -163,6 +169,11 @@ export interface RemediationPayload {
   brief: string;
   /** Last-good checkpoint the workspace was restored to (absent → no restore). */
   rollbackTo?: string;
+}
+
+export interface CapabilityPayload {
+  capabilityIndex: 0;
+  stages: ResolvedEndpointCapabilities;
 }
 
 /** journal-format.md §3 `judge` entry: evidence refs + form + model + cost. */
@@ -511,6 +522,18 @@ export function createRunnerActivities(deps: RunnerActivityDeps) {
         const setupJournal = openJournal(deps, input.runId);
         try {
           setupJournal.createRun(input.runId, input.spec);
+          setupJournal.appendOnce(
+            { field: "capabilityIndex", value: 0 },
+            {
+              kind: "capability",
+              payload: {
+                capabilityIndex: 0,
+                stages: resolveEndpointCapabilities(input.spec),
+              } satisfies CapabilityPayload,
+              costDeltaUsd: 0,
+              artifactRefs: [],
+            },
+          );
           recordRunStartSpan({ runId: input.runId });
         } finally {
           setupJournal.close();
@@ -804,11 +827,15 @@ export function createRunnerActivities(deps: RunnerActivityDeps) {
             provider: spec.routing.stages.judge.provider,
             model: spec.judge.model ?? spec.routing.stages.judge.model,
           };
+          const capabilities = resolveEndpointCapabilities(spec);
+          const executorFamily = endpointCapabilityFamily(capabilities.code[0]) ?? spec.executor.family;
+          const judgeFamily =
+            endpointCapabilityFamily(describeEndpointCapability(judgeModel.provider)) ?? spec.judge.family;
           // Invariant #2 (WP-133): refuse a same-family judge unless the
           // spec opted in — and then warn loudly on EVERY pass, journaled.
           const { warnings } = enforceFamilyDiversity({
-            executorFamily: spec.executor.family,
-            judgeFamily: spec.judge.family,
+            executorFamily,
+            judgeFamily,
             judgeProvider: judgeModel.provider,
             allowSameFamily: spec.judge.allowSameFamily,
           });

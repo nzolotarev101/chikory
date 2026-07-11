@@ -7,7 +7,8 @@
  * functions over journal rows — no Temporal, works fully offline (RT-9).
  */
 import type { RunRow, RunTotals } from "../journal/journal.js";
-import type { JudgePayload, StepPayload } from "../runner/activities.js";
+import type { EndpointCapability, ResolvedEndpointCapabilities } from "../endpoint-capability.js";
+import type { CapabilityPayload, JudgePayload, StepPayload } from "../runner/activities.js";
 import {
   describeCompactionPressure,
   pressureFoldGapWarning,
@@ -23,6 +24,8 @@ import type {
   JudgeForm,
   VerdictKind,
 } from "../types.js";
+
+const STAGES = ["plan", "code", "review", "judge"] as const;
 
 /** Judge- or runner-sourced verdict rows (journal-format.md §3 both shapes). */
 interface VerdictRowPayload {
@@ -66,6 +69,35 @@ interface SoakTraceSummary {
 
 const SUMMARY_WIDTH = 36;
 const RULE_WIDTH = 79;
+
+function capabilityLabel(capability: EndpointCapability): string {
+  switch (capability.kind) {
+    case "provider":
+      return capability.provider;
+    case "executor":
+      return `${capability.adapter}(${capability.family})`;
+    case "unknown":
+      return `${capability.target}(unknown)`;
+  }
+}
+
+function isResolvedEndpointCapabilities(value: unknown): value is ResolvedEndpointCapabilities {
+  if (typeof value !== "object" || value === null) return false;
+  return STAGES.every((stage) => Array.isArray((value as Partial<ResolvedEndpointCapabilities>)[stage]));
+}
+
+function endpointSummary(entries: JournalEntry[]): string | undefined {
+  const capabilityEntry = entries.find((entry) => entry.kind === "capability");
+  if (capabilityEntry === undefined) return undefined;
+  const payload = capabilityEntry.payload as Partial<CapabilityPayload>;
+  if (!isResolvedEndpointCapabilities(payload.stages)) return undefined;
+  const stages = payload.stages;
+  const parts = STAGES.map((stage) => {
+    const labels = stages[stage].map(capabilityLabel).join("→");
+    return `${stage} ${labels || "none"}`;
+  });
+  return `        endpoints ${parts.join(" · ")}`;
+}
 
 /** 950 → "950", 3120 → "3.1k", 12345 → "12k" (cli.md example format). */
 export function formatTokens(n: number): string {
@@ -233,6 +265,7 @@ export function renderTrace(run: RunRow, entries: JournalEntry[], totals: RunTot
   const compactionPressureWarning = pressureFoldGapWarning(compactionPressure);
   const soak = summarizeSoakTrace(entries);
   const repoTrace = summarizeRepoActivity(entries);
+  const endpoints = endpointSummary(entries);
   const issuesFound = entries.reduce((count, entry) => {
     if (entry.kind !== "judge") return count;
     const { form } = entry.payload as JudgePayload;
@@ -309,6 +342,9 @@ export function renderTrace(run: RunRow, entries: JournalEntry[], totals: RunTot
       const commit = repo.commit === undefined ? "?" : repo.commit.slice(0, 12);
       lines.push(`          ${repo.name}: diff ${repo.diffBytes} bytes · commit ${commit}`);
     }
+  }
+  if (endpoints !== undefined) {
+    lines.push(endpoints);
   }
   lines.push(`        components over time: ${timeline}`);
 
@@ -628,6 +664,8 @@ export function formatEntryLine(entry: JournalEntry): string {
         `${dim}(${formatTokens(payload.projectedTokens)} proj)${reset}`
       );
     }
+    case "capability":
+      return `[${ts}] endpoints resolved`;
     case "remediation": {
       const payload = entry.payload as RemediationTracePayload;
       return (
