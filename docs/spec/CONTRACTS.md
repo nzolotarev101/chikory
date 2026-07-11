@@ -212,10 +212,11 @@ export interface ArtifactRef {
   kind: ArtifactKind;
   bytes: number;
   summary: string;   // ≤200 chars; the only part that enters context by default (CM-3)
+  repo?: string;     // additive (F-131): resolved workspace repo, multi-repo diff refs (WP-214)
 }
 
 export interface ArtifactStore {
-  put(content: Uint8Array | string, meta: { kind: ArtifactKind; summary: string }): Promise<ArtifactRef>;
+  put(content: Uint8Array | string, meta: { kind: ArtifactKind; summary: string; repo?: string }): Promise<ArtifactRef>;
   get(ref: ArtifactRef): Promise<Uint8Array>;
   excerpt(ref: ArtifactRef, sel: { range?: [number, number]; query?: string }): Promise<string>;
 }
@@ -260,7 +261,7 @@ export interface JournalEntry {
 export interface Checkpoint {
   id: CheckpointId;
   journalIdx: number;
-  gitCommits: Record<string, string>;  // repo url → commit sha (multi-repo, WP-214)
+  gitCommits: Record<string, string>;  // commit sha per writable checkout: repo url (single-repo) or workspace name (multi-repo, WP-214); sole record — F-129 collapsed the duplicate perRepoCommits
   contextSnapshotRef: ArtifactRef;     // compacted context (CM-1 co-design)
   budgetSpentUsd: number;
   lastGood: boolean;                   // judge PROCEED marker

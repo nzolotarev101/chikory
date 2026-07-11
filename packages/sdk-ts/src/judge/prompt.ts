@@ -112,6 +112,16 @@ export function renderActiveWorkChunkScope(directive?: string): string {
     "Judge this pass against the active work chunk above. Later parts of the",
     "overall goal that are absent from THIS step's diff are DEFERRED BY DESIGN",
     "and must NOT be treated as omissions for this judge pass.",
+    "",
+    // F-130 (dogfood-096): the scope answer must come from the diff's own
+    // footprint — a front-loaded later part passed a self-description-based
+    // scope check.
+    "For `scope_matches_instruction`, compare the DIFF'S actual footprint (the",
+    "files and symbols it adds or changes) against the active work chunk — not",
+    "the executor's self-description. Work that implements a LATER part of the",
+    "overall goal appearing in THIS step's diff is FRONT-LOADING: fail",
+    "`scope_matches_instruction` and name the out-of-chunk files/symbols in the",
+    "justification.",
   ].join("\n");
 }
 

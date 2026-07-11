@@ -237,6 +237,8 @@ class ArtifactRef(ContractModel):
     kind: ArtifactKind
     bytes: int
     summary: str = Field(max_length=200)
+    # Additive (F-131): resolved workspace repo for multi-repo diff refs (WP-214).
+    repo: str | None = None
 
 
 class ContextBundle(ContractModel):

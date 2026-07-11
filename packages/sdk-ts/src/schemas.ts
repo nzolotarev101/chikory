@@ -293,6 +293,7 @@ export const ArtifactRefSchema = z
     kind: ArtifactKindSchema,
     bytes: z.number().int().nonnegative(),
     summary: z.string().max(200),
+    repo: z.string().min(1).optional(),
   })
   .strict();
 
@@ -442,7 +443,6 @@ export const CheckpointSchema = z
     id: z.string().min(1),
     journalIdx: z.number().int().nonnegative(),
     gitCommits: z.record(z.string(), z.string()),
-    perRepoCommits: z.record(z.string(), z.string()).optional(),
     contextSnapshotRef: ArtifactRefSchema,
     budgetSpentUsd: z.number().nonnegative(),
     lastGood: z.boolean(),

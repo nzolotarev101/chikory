@@ -25,6 +25,23 @@ describe("extractTargetWpId", () => {
   it("returns null when the goal has no WP id", () => {
     expect(extractTargetWpId("Implement the requested pure module")).toBeNull();
   });
+
+  it("F-126: skips an F-n/WP-n friction-lineage concept ref", () => {
+    // dogfood-094 false-fired: the greenfield goal's only WP mention was the
+    // "(the non-hollow horizon, F-100/WP-270)" citation, not a target.
+    const goalText =
+      "Build the reactive-signals module in SIX increments, each adding distinct " +
+      "working code (the non-hollow horizon, F-100/WP-270), sealing SUCCESS.";
+
+    expect(extractTargetWpId(goalText)).toBeNull();
+  });
+
+  it("F-126: a real target still wins over a later lineage ref", () => {
+    const goalText =
+      "Land WP-307, the capability model, in six increments (the non-hollow horizon, F-100/WP-270).";
+
+    expect(extractTargetWpId(goalText)).toBe("WP-307");
+  });
 });
 
 describe("evaluateSpecStalenessPrecheck", () => {

@@ -325,6 +325,11 @@ describe.skipIf(address === null)("multi-repo workspace setup", () => {
         expect.stringContaining("workspace diff for service-api"),
         expect.stringContaining("workspace diff for service-worker"),
       ]);
+      // F-131: repo attribution is structured data on the ref, not a summary parse.
+      expect(judgeEntries[0]!.evidenceRefs.map((ref) => ref.repo)).toEqual([
+        "service-api",
+        "service-worker",
+      ]);
 
       const store = createLocalArtifactStore(artifactsDir(dataDir, handle.runId));
       const [apiDiff, workerDiff] = await Promise.all(
@@ -342,7 +347,9 @@ describe.skipIf(address === null)("multi-repo workspace setup", () => {
       expect(Object.keys(checkpoints[0]!.gitCommits).sort()).toEqual(
         resolved.writable.map((repo) => repo.name).sort(),
       );
-      expect(checkpoints[0]!.perRepoCommits).toEqual(checkpoints[0]!.gitCommits);
+      // F-129: gitCommits is the sole per-repo commit record — the duplicate
+      // perRepoCommits field is no longer journaled.
+      expect("perRepoCommits" in checkpoints[0]!).toBe(false);
       for (const workspaceRepo of resolved.writable) {
         await expect(
           git(join(ws, workspaceRepo.relativePath), [
@@ -427,6 +434,8 @@ describe.skipIf(address === null)("multi-repo workspace setup", () => {
       expect(judgeEntries[0]!.evidenceRefs).toHaveLength(1);
       expect(judgeEntries[0]!.evidenceRefs[0]!.summary).toContain("workspace diff since");
       expect(judgeEntries[0]!.evidenceRefs[0]!.summary).not.toContain("workspace diff for");
+      // Single-repo refs carry no repo attribution — rendering stays unchanged.
+      expect(judgeEntries[0]!.evidenceRefs[0]!.repo).toBeUndefined();
 
       const checkpoints = journal.entries("checkpoint").map((entry) => entry.payload as Checkpoint);
       expect(checkpoints).toHaveLength(1);
@@ -771,7 +780,10 @@ describe.skipIf(address === null)("multi-repo workspace setup", () => {
       const checkpoints = failedJournal.entries("checkpoint").map((entry) => entry.payload as Checkpoint);
       expect(checkpoints).toHaveLength(4);
       sealedCheckpoint = checkpoints[checkpoints.length - 1]!;
-      expect(sealedCheckpoint.perRepoCommits).toEqual(sealedCheckpoint.gitCommits);
+      expect(Object.keys(sealedCheckpoint.gitCommits).sort()).toEqual([
+        "service-api",
+        "service-worker",
+      ]);
       expect(failedJournal.entries("terminal")).toHaveLength(1);
     } finally {
       failedJournal.close();
@@ -805,7 +817,7 @@ describe.skipIf(address === null)("multi-repo workspace setup", () => {
       expect(checkpoints).toHaveLength(6);
       for (const checkpoint of checkpoints) {
         expect(Object.keys(checkpoint.gitCommits).sort()).toEqual(["service-api", "service-worker"]);
-        expect(checkpoint.perRepoCommits).toEqual(checkpoint.gitCommits);
+        expect("perRepoCommits" in checkpoint).toBe(false);
       }
 
       const judgeEntries = journal.entries("judge").map((entry) => entry.payload as JudgePayload);

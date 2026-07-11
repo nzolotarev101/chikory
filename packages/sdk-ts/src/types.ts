@@ -377,12 +377,17 @@ export interface ArtifactRef {
   bytes: number;
   /** ≤200 chars; the only part that enters context by default (CM-3). */
   summary: string;
+  /**
+   * Resolved workspace repo the artifact belongs to (multi-repo diff refs,
+   * WP-214) — structured so consumers never parse it out of `summary` (F-131).
+   */
+  repo?: string;
 }
 
 export interface ArtifactStore {
   put(
     content: Uint8Array | string,
-    meta: { kind: ArtifactKind; summary: string },
+    meta: { kind: ArtifactKind; summary: string; repo?: string },
   ): Promise<ArtifactRef>;
   get(ref: ArtifactRef): Promise<Uint8Array>;
   excerpt(ref: ArtifactRef, sel: { range?: [number, number]; query?: string }): Promise<string>;
@@ -443,10 +448,13 @@ export interface JournalEntry {
 export interface Checkpoint {
   id: CheckpointId;
   journalIdx: number;
-  /** Repo url → commit sha (multi-repo, WP-214). */
+  /**
+   * Commit sha per writable checkout — keyed by repo url (single-repo, the
+   * historical shape) or resolved workspace repo name (multi-repo, WP-214).
+   * The sole per-repo commit record (F-129 collapsed the duplicate
+   * `perRepoCommits` field; legacy journals may still carry it — ignored).
+   */
   gitCommits: Record<string, string>;
-  /** Resolved workspace repo → commit sha for multi-repo checkpoint evidence. */
-  perRepoCommits?: Record<string, string>;
   /** Compacted context (CM-1 co-design). */
   contextSnapshotRef: ArtifactRef;
   budgetSpentUsd: number;

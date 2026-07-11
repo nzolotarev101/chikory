@@ -5,7 +5,7 @@ export interface SpecStalenessPrecheckResult {
   warning: string | null;
 }
 
-const WP_ID_RE = /\bWP-\d+\b/;
+const WP_ID_RE = /\bWP-\d+\b/g;
 
 /**
  * Extracts the first explicit work-package id from the spec GOAL text.
@@ -14,9 +14,17 @@ const WP_ID_RE = /\bWP-\d+\b/;
  * dogfood spec's comment preamble name-drops many WPs (ladder rungs, prior
  * runs, dependencies), so a first-match over the raw text picks the wrong
  * target. The goal names the actual target first.
+ *
+ * F-126 (dogfood-094): an `F-100/WP-270`-style pair cites friction lineage,
+ * not the spec's target — a WP id riding an `F-n/` prefix is skipped, so a
+ * goal whose only WP mention is such a concept ref resolves to no target.
  */
 export function extractTargetWpId(goalText: string): string | null {
-  return WP_ID_RE.exec(goalText)?.[0] ?? null;
+  for (const match of goalText.matchAll(WP_ID_RE)) {
+    if (/\bF-\d+\/$/.test(goalText.slice(0, match.index))) continue;
+    return match[0];
+  }
+  return null;
 }
 
 /**

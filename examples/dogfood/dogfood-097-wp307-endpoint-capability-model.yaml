@@ -36,6 +36,13 @@
 #   empty — the CAPABILITY (not just the symbols) is absent on HEAD; router.ts has per-stage failover but no
 #   endpoint descriptor model, executors/index.ts registers adapters with no capability metadata.
 #
+# TRACK-B LANDINGS 2026-07-11 (post-authoring, pre-launch — scope UNAFFECTED, no recast needed). Five dogfood-smoothing
+#   fixes hand-landed on the working tree: F-128 (verify-script cwd), F-129 cleanup (`perRepoCommits`→`gitCommits`),
+#   F-130 (judge chunk-scope now compares the DIFF footprint vs the active PART — this spec's front-loading constraint
+#   below is now ENFORCED by `prompt.ts`, not aspirational), F-131 (structured `ArtifactRef.repo`), F-126 (stale-precheck
+#   skips `F-n/WP-n` lineage refs). Premise re-verified after the landings: both greps above still 0 hits — WP-307's
+#   capability is still absent on HEAD; none of the six PARTs overlap the landed fixes.
+#
 # ⚠️ SCOPE / DETERMINISM. Writes ONLY inside `packages/sdk-ts/` (+ one doc PART). ADDITIVE — extends the existing
 #   `router.ts` provider config + `executors/` registry; NO new abstraction layer (CLAUDE.md "minimal abstraction");
 #   existing routing/executor behavior byte-identical when no capability is consulted. CLI-subscription endpoints are

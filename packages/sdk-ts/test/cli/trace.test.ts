@@ -453,6 +453,50 @@ describe("renderTrace (WP-142)", () => {
         judgeIndex: 0,
         atStep: 0,
         form,
+        // F-131: repo attribution is the structured field; summaries are free
+        // to be reworded without zeroing the per-repo byte counts.
+        evidenceRefs: [
+          { ...ref("diff", "diff evidence, arbitrary wording"), bytes: 44, repo: "service-api" },
+          { ...ref("diff", "diff evidence, arbitrary wording"), bytes: 55, repo: "service-worker" },
+        ],
+        evidenceBytes: 99,
+        judgeModel,
+        costUsd: 0.05,
+        tokens: { input: 100, output: 50 },
+        durationMs: 4000,
+      }),
+      entry(2, "checkpoint", {
+        id: "run-x@2",
+        journalIdx: 2,
+        stepIndex: 0,
+        gitCommits: {
+          "service-api": "1111111111112222222222223333333333333333",
+          "service-worker": "aaaaaaaaaaaabbbbbbbbbbbbcccccccccccccccc",
+        },
+        contextSnapshotRef: ref("context_snapshot", "ctx"),
+        budgetSpentUsd: 0.26,
+        lastGood: true,
+      }),
+    ];
+
+    const rendered = renderTrace(run, multiEntries, totals);
+
+    expect(rendered.split("\n")).toContain("        repos 2");
+    expect(rendered.split("\n")).toContain(
+      "          service-api: diff 44 bytes · commit 111111111111",
+    );
+    expect(rendered.split("\n")).toContain(
+      "          service-worker: diff 55 bytes · commit aaaaaaaaaaaa",
+    );
+  });
+
+  test("legacy journal (pre-F-131 summary-only refs, duplicate perRepoCommits) still renders per-repo totals", () => {
+    const legacyEntries: JournalEntry[] = [
+      step(0, 0, "changed two repos"),
+      entry(1, "judge", {
+        judgeIndex: 0,
+        atStep: 0,
+        form,
         evidenceRefs: [
           { ...ref("diff", "workspace diff for service-api since aaaaaaaa1111 (44 bytes)"), bytes: 44 },
           { ...ref("diff", "workspace diff for service-worker since bbbbbbbb2222 (55 bytes)"), bytes: 55 },
@@ -471,6 +515,7 @@ describe("renderTrace (WP-142)", () => {
           "service-api": "1111111111112222222222223333333333333333",
           "service-worker": "aaaaaaaaaaaabbbbbbbbbbbbcccccccccccccccc",
         },
+        // Pre-F-129 journals duplicated gitCommits here; readers must ignore it.
         perRepoCommits: {
           "service-api": "1111111111112222222222223333333333333333",
           "service-worker": "aaaaaaaaaaaabbbbbbbbbbbbcccccccccccccccc",
@@ -481,7 +526,7 @@ describe("renderTrace (WP-142)", () => {
       }),
     ];
 
-    const rendered = renderTrace(run, multiEntries, totals);
+    const rendered = renderTrace(run, legacyEntries, totals);
 
     expect(rendered.split("\n")).toContain("        repos 2");
     expect(rendered.split("\n")).toContain(

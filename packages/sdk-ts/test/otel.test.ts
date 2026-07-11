@@ -245,10 +245,6 @@ describe("OTel spans (WP-105)", () => {
         "service-api": "1111111111111111111111111111111111111111",
         "service-worker": "2222222222222222222222222222222222222222",
       },
-      perRepoCommits: {
-        "service-api": "1111111111111111111111111111111111111111",
-        "service-worker": "2222222222222222222222222222222222222222",
-      },
       contextSnapshotRef: {
         id: "snapshot-2",
         kind: "context_snapshot",

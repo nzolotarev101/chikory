@@ -27,17 +27,15 @@ import {
   type MissingProviderEnv,
 } from "../taskspec.js";
 import type {
-  Checkpoint,
-  JournalEntry,
   RunHandle,
   RunStatus,
   RunStatusReport,
   TaskSpec,
 } from "../types.js";
 import { parseBranchTarget, type BranchTarget } from "./branch-target.js";
+import { summarizeRepoActivity, type RepoActivitySummary } from "./repo-summary.js";
 import { evaluateSpecStalenessPrecheck } from "./spec-staleness-precheck.js";
 import { formatEntryLine, renderStepDetail, renderTrace, traceJson } from "./trace.js";
-import type { JudgePayload } from "../runner/activities.js";
 
 /** The executor adapters that ship in P1 (ADR-003; WP-112/113; WP-213). */
 export const ADAPTERS: AdapterRegistry = {
@@ -127,12 +125,12 @@ function journalReport(dataDir: string, runId: string): RunStatusReport | undefi
   }
 }
 
-function journalRepoStatus(dataDir: string, runId: string): RepoStatusSummary | undefined {
+function journalRepoStatus(dataDir: string, runId: string): RepoActivitySummary | undefined {
   const path = journalPath(dataDir, runId);
   if (!existsSync(path)) return undefined;
   const journal = new Journal(path);
   try {
-    return summarizeRepoStatus(journal.entries());
+    return summarizeRepoActivity(journal.entries());
   } finally {
     journal.close();
   }
@@ -541,54 +539,11 @@ export async function cmdBranch(
 
 type CliRunStatusReport = RunStatusReport & { suspendedReason?: string };
 
-interface RepoStatusSummary {
-  repoCount: number;
-  repos: Array<{ name: string; diffBytes: number; commit: string }>;
-}
-
-function repoNameFromDiffSummary(summary: string): string | undefined {
-  const prefix = "workspace diff for ";
-  if (!summary.startsWith(prefix)) return undefined;
-  const rest = summary.slice(prefix.length);
-  const sinceIndex = rest.lastIndexOf(" since ");
-  return sinceIndex > 0 ? rest.slice(0, sinceIndex) : undefined;
-}
-
-function summarizeRepoStatus(entries: JournalEntry[]): RepoStatusSummary | undefined {
-  const latestMultiRepoCheckpoint = [...entries]
-    .reverse()
-    .filter((entry) => entry.kind === "checkpoint")
-    .map((entry) => entry.payload as Checkpoint)
-    .find(
-      (checkpoint) =>
-        checkpoint.perRepoCommits !== undefined && Object.keys(checkpoint.perRepoCommits).length > 1,
-    );
-  if (latestMultiRepoCheckpoint?.perRepoCommits === undefined) return undefined;
-
-  const diffBytesByRepo = new Map<string, number>();
-  for (const entry of entries) {
-    if (entry.kind !== "judge") continue;
-    const judge = entry.payload as JudgePayload;
-    for (const ref of judge.evidenceRefs) {
-      if (ref.kind !== "diff") continue;
-      const repoName = repoNameFromDiffSummary(ref.summary);
-      if (repoName === undefined) continue;
-      diffBytesByRepo.set(repoName, (diffBytesByRepo.get(repoName) ?? 0) + ref.bytes);
-    }
-  }
-
-  const repos = Object.entries(latestMultiRepoCheckpoint.perRepoCommits).map(([name, commit]) => ({
-    name,
-    diffBytes: diffBytesByRepo.get(name) ?? 0,
-    commit,
-  }));
-  return { repoCount: repos.length, repos };
-}
 
 function renderReport(
   runId: string,
   report: CliRunStatusReport,
-  repoStatus?: RepoStatusSummary,
+  repoStatus?: RepoActivitySummary,
 ): string {
   const lines: string[] = [];
   lines.push(`run ${runId}`);

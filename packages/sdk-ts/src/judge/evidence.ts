@@ -228,6 +228,9 @@ export async function collectEvidence(input: CollectEvidenceInput): Promise<Coll
         summary: perRepoDiff
           ? `workspace diff for ${section.repoName} since ${section.sinceCommit.slice(0, 12)} (${section.diffText.length} bytes)`
           : `workspace diff since ${section.sinceCommit.slice(0, 12)} (${section.diffText.length} bytes)`,
+        // F-131: repo attribution rides the ref as data — consumers must not
+        // parse it back out of the human-readable summary.
+        ...(perRepoDiff ? { repo: section.repoName } : {}),
       }),
     ),
   );

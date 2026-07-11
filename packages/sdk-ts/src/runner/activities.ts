@@ -368,7 +368,7 @@ async function resolveCheckpointCommits(input: {
     }
 
     const checkpoint = entry.payload as Checkpoint;
-    const checkpointCommits = checkpoint.perRepoCommits ?? checkpoint.gitCommits;
+    const checkpointCommits = checkpoint.gitCommits;
     return Object.fromEntries(
       writableRepos.map((repo) => {
         const key = workspaceRepoCheckpointId(repo, repoCount);
@@ -1200,7 +1200,6 @@ export function createRunnerActivities(deps: RunnerActivityDeps) {
               payload: {
                 ...checkpoint,
                 stepIndex: input.stepIndex,
-                ...(workspaceRepos.all.length > 1 ? { perRepoCommits: gitCommits } : {}),
                 ...(input.memoryCounters !== undefined &&
                 (input.memoryCounters.recalls > 0 || input.memoryCounters.evicted > 0)
                   ? { memoryCounters: input.memoryCounters }

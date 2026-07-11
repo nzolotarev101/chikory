@@ -42,17 +42,26 @@ export -n RUN_ID
 JOURNAL=".chikory/runs/$RUN_ID/journal.db"
 WORKSPACE=".chikory/runs/$RUN_ID/workspace"
 
-# ── pull name / budget / acceptance checks straight from the run journal ─────
-# Prints: "NAME<TAB>...", "BUDGET<TAB>...", then "CHECK<TAB>id<TAB>cmd" per AC.
+# ── pull name / budget / repos / acceptance checks straight from the journal ─
+# Prints: "NAME<TAB>...", "BUDGET<TAB>...", "HOSTREPO<TAB>0|1", then
+# "CHECK<TAB>id<TAB>cmd" per AC. HOSTREPO=1 when a writable spec repo IS this
+# checkout (brownfield — delivery is harvested to the working tree).
 read_journal() {
-  JOURNAL_PATH="$JOURNAL" node - <<'NODE'
+  JOURNAL_PATH="$JOURNAL" REPO_ROOT="$REPO_ROOT" node - <<'NODE'
 const { DatabaseSync } = require("node:sqlite");
+const { realpathSync } = require("node:fs");
 const db = new DatabaseSync(process.env.JOURNAL_PATH);
 const row = db.prepare("select task_json from runs limit 1").get();
 const spec = JSON.parse(row.task_json);
 const out = [];
 out.push(`NAME\t${spec.name ?? "(unknown)"}`);
 out.push(`BUDGET\t${spec.budgetUsd ?? spec.budget_usd ?? "?"}`);
+const real = (p) => { try { return realpathSync(p); } catch { return p; } };
+const root = real(process.env.REPO_ROOT);
+const hostRepo = (spec.repos ?? []).some(
+  (repo) => repo.writable && real(repo.url) === root,
+);
+out.push(`HOSTREPO\t${hostRepo ? 1 : 0}`);
 const criteria = spec.acceptanceCriteria ?? spec.acceptance_criteria ?? [];
 for (const ac of criteria) {
   out.push(`CHECK\t${ac.id}\t${(ac.check ?? "").replace(/\s+/g, " ").trim()}`);
@@ -64,6 +73,18 @@ NODE
 JOURNAL_OUT="$(read_journal 2>/dev/null)"
 SPEC_NAME="$(printf '%s\n' "$JOURNAL_OUT" | awk -F'\t' '/^NAME/{print $2}')"
 SPEC_BUDGET="$(printf '%s\n' "$JOURNAL_OUT" | awk -F'\t' '/^BUDGET/{print $2}')"
+SPEC_HOSTREPO="$(printf '%s\n' "$JOURNAL_OUT" | awk -F'\t' '/^HOSTREPO/{print $2}')"
+
+# F-128: a scaffold-hosted run (no writable spec repo == this checkout) never
+# harvests into the host tree, so its ACs only hold inside the run's own
+# workspace. Brownfield runs re-verify the working tree (the harvest).
+if [ "${SPEC_HOSTREPO:-1}" = "1" ] || [ ! -d "$WORKSPACE" ]; then
+  AC_CWD="$REPO_ROOT"
+  AC_CWD_LABEL="working tree (brownfield — harvested delivery)"
+else
+  AC_CWD="$WORKSPACE"
+  AC_CWD_LABEL="run workspace (scaffold-hosted — delivery never harvested, F-128)"
+fi
 
 # strip the SQLite experimental-warning noise chikory trace emits
 trace() { pnpm chikory trace "$@" 2>/dev/null | grep -vE '^\(node:|ExperimentalWarning|--trace-warnings|Running script|^\$ chikory'; }
@@ -118,8 +139,10 @@ for ((n=1; n<=STEPS; n++)); do
 done
 echo
 
-# ── 3. acceptance checks — re-run against the working tree ───────────────────
-echo "## 3. Acceptance checks (the run's own, re-run against the working tree)"
+# ── 3. acceptance checks — re-run where the delivery lives (F-128) ───────────
+echo "## 3. Acceptance checks (the run's own, re-run in the $AC_CWD_LABEL)"
+echo
+echo "cwd: \`$AC_CWD\`"
 echo
 AC_FAILED=0
 CHECK_LINES="$(printf '%s\n' "$JOURNAL_OUT" | grep '^CHECK')"
@@ -129,7 +152,7 @@ fi
 while IFS=$'\t' read -r _tag ID CHECK; do
   [ -z "${ID:-}" ] && continue
   set +e
-  OUT="$(cd "$REPO_ROOT" && bash -c "$CHECK" 2>&1)"
+  OUT="$(cd "$AC_CWD" && bash -c "$CHECK" 2>&1)"
   RC=$?
   set -u
   if [ "$RC" -eq 0 ]; then STAT="PASS"; else STAT="FAIL"; AC_FAILED=1; fi

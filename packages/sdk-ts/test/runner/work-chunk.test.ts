@@ -168,6 +168,17 @@ describe("renderActiveWorkChunkScope", () => {
     }).find((message) => message.role === "user");
     expect(userMessage?.content).toContain(rendered);
   });
+
+  test("instructs the judge to catch front-loading from the diff footprint (F-130)", () => {
+    const rendered = renderActiveWorkChunkScope("Implement only the parser increment.");
+
+    expect(rendered).toContain("DIFF'S actual footprint");
+    expect(rendered).toContain("FRONT-LOADING");
+    expect(rendered).toContain("not");
+    expect(rendered).toContain("the executor's self-description");
+    expect(rendered).toContain("fail");
+    expect(rendered).toContain("`scope_matches_instruction`");
+  });
 });
 
 const address = inject("temporalAddress");

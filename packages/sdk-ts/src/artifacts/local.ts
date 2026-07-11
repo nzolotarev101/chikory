@@ -16,13 +16,14 @@ export const MAX_SUMMARY_CHARS = 200;
 
 function toRef(
   content: Uint8Array,
-  meta: { kind: ArtifactKind; summary: string },
+  meta: { kind: ArtifactKind; summary: string; repo?: string },
 ): ArtifactRef {
   return {
     id: createHash("sha256").update(content).digest("hex"),
     kind: meta.kind,
     bytes: content.byteLength,
     summary: meta.summary.slice(0, MAX_SUMMARY_CHARS),
+    ...(meta.repo !== undefined ? { repo: meta.repo } : {}),
   };
 }
 
