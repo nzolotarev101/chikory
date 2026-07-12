@@ -30,6 +30,8 @@ Canonical meanings. Docs and code comments use these terms exactly.
 | **Vertical pack** | Stage-3 layer: blueprint + criteria library + rubrics + playbooks + SLOs for one app class. Data, not new runtime. |
 | **Steward** | Stage-3 recurring maintenance schedule for a deployed app (upgrades, CVE patches, bug-fix runs). |
 | **Stop signal** | Month-6 test: beat OpenHands on 50-task DevAI-extended subset or revisit the thesis. |
+| **I-SR / D-SR** | Benchmark requirement-satisfaction rates (DevAI methodology): **I-SR** = independent (each requirement graded on its own); **D-SR** = dependency-adjusted (a requirement counts only if its prerequisites are satisfied too). Reported by the WP-301 harness. |
+| **Dataset record** | One run's journal normalized for the WP-306 failure/recovery dataset: JIF run + totals + entries plus derived recovery paths (rollback → recovered?). Produced only by explicit `chikory dataset export`; local-first, secret-scanned. |
 
 ## ID families
 

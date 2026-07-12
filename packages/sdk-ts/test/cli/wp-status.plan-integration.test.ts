@@ -31,8 +31,16 @@ describe("parseWpStatus against production plan.md (F-81)", () => {
   });
 
   it("reads an untouched P3 WP as red/fresh despite its 🟡/🟢 complexity Tag", () => {
-    // WP-301 (DevAI harness) is unstarted; its Tag emoji encodes complexity,
+    // WP-303 (leaderboard) is unstarted; its Tag emoji encodes complexity,
     // not completion — reading it as done would re-invert the gate.
-    expect(parseWpStatus(plan, "WP-301")).toBe("red");
+    // (Previous anchor WP-301 went genuinely DONE 2026-07-11 — see below.)
+    expect(parseWpStatus(plan, "WP-303")).toBe("red");
+  });
+
+  it("reads the hand-landed P3 track-B WPs as green/stale", () => {
+    // WP-301 (DevAI harness) + WP-306 (dataset export) landed 2026-07-11 with
+    // leading **DONE markers; the gate must now refuse specs re-targeting them.
+    expect(parseWpStatus(plan, "WP-301")).toBe("green");
+    expect(parseWpStatus(plan, "WP-306")).toBe("green");
   });
 });

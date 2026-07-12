@@ -140,8 +140,8 @@ Every requirement in [`project.md`](../project.md), assigned a stable ID, mapped
 
 | ID | Requirement | WP(s) | Phase | Status |
 |---|---|---|---|---|
-| ST-1 | DevAI-extended benchmark: 60–100 multi-hour tasks, greenfield + brownfield, open leaderboard | WP-301–304 | P3 | **in-progress 2026-07-02 — WP-301 started as a parallel track-B lane (course correction, plan.md §6); WP-302 authoring guide starts when the WP-301 skeleton exists; Stage-1 published-numbers deadline ~2026-09-08** |
-| ST-2 | Feedback-loop dataset: traces, eval outcomes, recovery paths, cost/routing patterns | WP-306 | P3 | planned |
+| ST-1 | DevAI-extended benchmark: 60–100 multi-hour tasks, greenfield + brownfield, open leaderboard | WP-301–304 | P3 | **in-progress — WP-301 harness DONE (hand-landed track-B 2026-07-11: 55/55 DevAI instances, I-SR/D-SR grading, `devbox run bench`); WP-302 guide landed (format v1 frozen, `benchmarks/tasks/AUTHORING.md`), corpus extension per-task 🟢; WP-303/304 open; Stage-1 published-numbers deadline ~2026-09-08** |
+| ST-2 | Feedback-loop dataset: traces, eval outcomes, recovery paths, cost/routing patterns | WP-306 | P3 | **capture pipeline DONE (hand-landed 2026-07-11): `chikory dataset export` — opt-in, local-first, secret-gated; dataset accumulates from every run onward** |
 | ST-3 | MIT open source; publish own DevAI-extended numbers within 90 days | WP-304, WP-305 | P3 | planned |
 | ST-4 | Unit/usage pricing, generous free tier, $29–199 mid-tiers, enterprise SSO/audit | WP-405–407 | P4 | planned |
 | ST-5 | Stage 3 vertical with measurable SLOs | WP-501–507 (design: components/vertical-agent.md; vertical choice = ADR-004, data-gated on Stage 2) | P5 | planned |
