@@ -14,7 +14,9 @@ The moat that single-vendor incumbents cannot credibly copy (spec §6): an open,
   - `brownfield/` — real OSS repos at pinned commits + feature/migration/maintenance tasks (weighted up, per the SWE-bench-saturation signal)
 - Task format = Chikory `task.yaml` + verification script (acceptance criteria machine-checkable wherever possible). An **authoring guide** makes adding a task a 🟢 contribution — community-extensible by design.
 
-## Harness (WP-301)
+## Harness (WP-301) — landed 2026-07-11
+
+Implementation: `@chikory/benchmarks` (`benchmarks/harness/`); entry `devbox run bench` (no-arg = $0 corpus validate) / `scripts/bench.sh` for full runs. 55/55 DevAI instances committed under `benchmarks/devai/instances/` with a pinned-sha manifest (365 requirements exactly); grading reports I-SR + D-SR (independent / dependency-adjusted satisfaction); judge-graded criteria run through a different-family judge, injectable as a keyless CLI command (`--judge-cmd`).
 
 - Runs a matrix: {Chikory + executor X + judge Y} × {baselines: raw Claude Code, OpenHands, native-loop-without-judge}.
 - The no-judge native-loop cell isolates Chikory's *contribution* (durability + judge) from underlying agent quality — this is the honest ablation skeptical developers will look for (spec §11 "agent washing" counter).
@@ -28,3 +30,5 @@ The moat that single-vendor incumbents cannot credibly copy (spec §6): an open,
 ## Dataset pipeline (WP-306 — the deeper moat)
 
 Opt-in capture (explicit flag, local-first default) of journals + verdicts + recovery paths + routing/cost patterns into a normalized dataset: how software agents actually fail and recover. Powers future judge tuning (ADR-002 option 3), safer resumption policies, smarter routing. Schema = journal interchange format; starts collecting from our own dogfood runs in P2 so P3 begins with data.
+
+**Landed 2026-07-11:** `chikory dataset export [--out <dir>]` (`src/dataset/export.ts`) — one record per run (JIF run/totals/entries + derived `RecoveryPath`s: rollback → recovered?, steps-to-recover) + `index.json`; export is command-only (never automatic), output stays local, and any record matching a real-secret pattern (`scanTextForRealSecrets`, WP-253 allowlist honored) is skipped and reported instead of written.

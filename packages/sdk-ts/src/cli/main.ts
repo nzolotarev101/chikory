@@ -11,6 +11,7 @@ import {
   cmdApprove,
   cmdBranch,
   cmdCancel,
+  cmdDataset,
   cmdInject,
   cmdResume,
   cmdRun,
@@ -53,6 +54,10 @@ commands:
                       checkpoint is written)
   trace <run-id>      trajectory forensics from the journal: per-step
                       tokens/cost, judge verdicts + rationales, totals
+  dataset export      opt-in trace-dataset capture (WP-306): every local run
+                      journal → one normalized failure/recovery record under
+                      --out (default <data-dir>/dataset); local-first, never
+                      uploaded; secret-shaped records are skipped
   land <run-id>       apply a finished run's workspace diff as one commit
 
 options (every command):
@@ -79,6 +84,9 @@ approve options:
 
 trace options:
   --step <n>            per-step drill-down: diff/transcript refs, judge form
+
+dataset options:
+  --out <dir>           export destination (default: <data-dir>/dataset)
 
 land options:
   --branch <name>       target branch (default: land-<run-id>)
@@ -172,6 +180,9 @@ export async function main(argv: string[], deps: LandDeps = {}): Promise<number>
         break;
       case "trace":
         parsed = parseCommand(rest, { step: { type: "string" } });
+        break;
+      case "dataset":
+        parsed = parseCommand(rest, { out: { type: "string" } });
         break;
       case "land":
         parsed = parseCommand(rest, {
@@ -300,6 +311,11 @@ export async function main(argv: string[], deps: LandDeps = {}): Promise<number>
         }
       }
       return cmdTrace({ runId, step, ...flags }, deps);
+    }
+    case "dataset": {
+      const sub = positionals[0];
+      const out = typeof values["out"] === "string" ? values["out"] : undefined;
+      return cmdDataset({ sub, out, ...flags }, deps);
     }
     case "land": {
       const runId = requireArg(positionals, "run-id", io);

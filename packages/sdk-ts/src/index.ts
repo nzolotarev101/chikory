@@ -2,6 +2,16 @@ export type * from "./types.js";
 export * from "./schemas.js";
 export { canonicalJson } from "./canonical-json.js";
 export {
+  buildDatasetRecord,
+  DATASET_RECORD_VERSION,
+  deriveRecoveryPaths,
+  exportDataset,
+  type DatasetIndexRow,
+  type DatasetRecord,
+  type ExportDatasetSummary,
+  type RecoveryPath,
+} from "./dataset/export.js";
+export {
   describeEndpointCapability,
   resolveEndpointCapabilities,
   type EndpointAuthMode,

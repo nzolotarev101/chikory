@@ -32,6 +32,7 @@ import type {
   RunStatusReport,
   TaskSpec,
 } from "../types.js";
+import { exportDataset } from "../dataset/export.js";
 import { parseBranchTarget, type BranchTarget } from "./branch-target.js";
 import { summarizeRepoActivity, type RepoActivitySummary } from "./repo-summary.js";
 import { evaluateSpecStalenessPrecheck } from "./spec-staleness-precheck.js";
@@ -791,4 +792,40 @@ export async function cmdTrace(
   } finally {
     journal.close();
   }
+}
+
+/**
+ * `chikory dataset export` (WP-306) — opt-in, local-first trace-dataset
+ * capture: journals → normalized failure/recovery records. Never automatic,
+ * never uploaded; records with real-secret-shaped content are skipped.
+ */
+export function cmdDataset(
+  args: { sub?: string; out?: string } & CommonFlags,
+  deps: CliDeps = {},
+): number {
+  const ioPair = io(deps);
+  if (args.sub !== "export") {
+    ioPair.err(`chikory: unknown dataset subcommand '${args.sub ?? ""}' (expected: export)`);
+    return 1;
+  }
+  const outDir = args.out ?? join(args.dataDir, "dataset");
+  const summary = exportDataset(args.dataDir, outDir);
+  if (args.json) {
+    ioPair.out(JSON.stringify(summary));
+    return 0;
+  }
+  ioPair.out(`exported ${summary.exported.length} run(s) → ${outDir}`);
+  for (const row of summary.exported) {
+    ioPair.out(
+      `  ${row.runId}  ${row.status}  steps ${row.steps}  rollbacks ${row.rollbacks}  ` +
+        `recovered ${row.recovered}/${row.recoveries}  $${row.costUsd.toFixed(2)}`,
+    );
+  }
+  for (const flagged of summary.secretFlagged) {
+    ioPair.out(`  SKIPPED ${flagged.runId}: real-secret-shaped content (${flagged.labels.join(", ")})`);
+  }
+  if (summary.skipped.length > 0) {
+    ioPair.out(`  skipped (no run row): ${summary.skipped.join(", ")}`);
+  }
+  return 0;
 }

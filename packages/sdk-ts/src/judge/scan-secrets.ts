@@ -28,6 +28,25 @@ export function scanDiffForSecrets(diff: string): string[] {
 }
 
 /**
+ * WP-306 dataset-export gate: same real-secret patterns/allowlist as the diff
+ * scan, over arbitrary text lines (journal payloads are not unified diffs).
+ */
+export function scanTextForRealSecrets(text: string): string[] {
+  const labels = new Set<string>();
+  for (const line of text.split("\n")) {
+    const awsAccessKeyMatch = line.match(AWS_ACCESS_KEY_PATTERN);
+    if (awsAccessKeyMatch !== null && !isExampleSecret(awsAccessKeyMatch[0])) {
+      labels.add("aws-access-key");
+    }
+    const openAiKeyMatch = line.match(OPENAI_KEY_PATTERN);
+    if (openAiKeyMatch !== null && !isExampleSecret(openAiKeyMatch[0])) {
+      labels.add("openai-key");
+    }
+  }
+  return [...labels].sort();
+}
+
+/**
  * WP-253 real-secret scan that excludes canonical example/dummy credentials
  * while preserving the WP-215 evidence scan above.
  */

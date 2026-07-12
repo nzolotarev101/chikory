@@ -19,6 +19,7 @@ The primary user surface for Stage 1. Everything the SDK can do must be reachabl
 | `chikory trace <run-id> [--json] [--step <n>]` | Trajectory forensics (below) |
 | `chikory inject <run-id> "<guidance>"` | (P2, WP-212) journaled mid-run correction |
 | `chikory branch <run-id>@<step>` | (P2, WP-205) fork a run from a checkpoint |
+| `chikory dataset export [--out <dir>]` | (P3, WP-306) opt-in trace-dataset capture: every local run journal → one normalized failure/recovery record + `index.json` (default `<data-dir>/dataset`); local-first, never uploaded; real-secret-shaped records skipped |
 
 Conventions: exit code 0/1 mirrors SUCCESS/FAILED; `--json` on every command for scripting; errors actionable ("missing GEMINI_API_KEY — judge stage routes to gemini").
 
