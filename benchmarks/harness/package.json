@@ -1,0 +1,32 @@
+{
+  "name": "@chikory/benchmarks",
+  "private": true,
+  "version": "0.0.1",
+  "description": "DevAI-extended benchmark harness (WP-301): task loading, runner adapters, requirement grading, results artifacts",
+  "type": "module",
+  "bin": {
+    "chikory-bench": "./dist/bin.js"
+  },
+  "scripts": {
+    "build": "tsc",
+    "test": "vitest run",
+    "lint": "eslint .",
+    "typecheck": "tsc --noEmit && tsc --noEmit -p tsconfig.test.json",
+    "bench": "tsx src/bin.ts"
+  },
+  "license": "MIT",
+  "dependencies": {
+    "@chikory/sdk": "workspace:*",
+    "yaml": "^2.4.0",
+    "zod": "^3.23.0"
+  },
+  "devDependencies": {
+    "@eslint/js": "^9.0.0",
+    "@types/node": "^22.0.0",
+    "eslint": "^9.0.0",
+    "tsx": "^4.19.0",
+    "typescript": "^5.4.0",
+    "typescript-eslint": "^8.0.0",
+    "vitest": "^3.0.0"
+  }
+}

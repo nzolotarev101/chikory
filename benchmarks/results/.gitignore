@@ -1,0 +1,4 @@
+# Raw per-suite-run artifacts (workspaces, adapter logs, journals) stay local;
+# committed summaries are copied out deliberately (benchmarks/README.md).
+*
+!.gitignore

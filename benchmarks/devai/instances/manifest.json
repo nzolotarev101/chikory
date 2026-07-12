@@ -1,0 +1,227 @@
+{
+  "source": "metauto-ai/agent-as-a-judge",
+  "ref": "main",
+  "fetchedAt": "2026-07-12T01:48:29.044Z",
+  "files": [
+    {
+      "name": "01_Image_Classification_ResNet18_Fashion_MNIST_DL.json",
+      "sha": "69892dd476daca422715bedf09b1f80d0883a7b5"
+    },
+    {
+      "name": "02_Maze_Solver_Q_Learning_Gridworld_RL.json",
+      "sha": "df62970dce35dcac2bb0b4c700fea6f676322f51"
+    },
+    {
+      "name": "03_Text_Classification_NaiveBayes_20Newsgroups_ML.json",
+      "sha": "1ddf39ba4b6dd8a595d24c98dbd35e63eb73b3f7"
+    },
+    {
+      "name": "04_Text_Generation_GPT2_Prompts_DL.json",
+      "sha": "9178bc01d5439c7a34f8b1cbee10819208ad034d"
+    },
+    {
+      "name": "05_Game_Simulation_DQN_CartPole_v1_RL.json",
+      "sha": "2fa5acfe41e6ba7d670212ed06fe486a40a844f4"
+    },
+    {
+      "name": "06_Sentiment_Analysis_SVM_Sentiment140_ML.json",
+      "sha": "f3c9cbba80b370a57e6d696bf2a3987a54cda755"
+    },
+    {
+      "name": "07_Image_Super_Resolution_SRCNN_Set5_DL.json",
+      "sha": "5b2271d706f37ebea3c3ad8af86783f1af8d8787"
+    },
+    {
+      "name": "08_Robot_Control_PPO_PyBullet_RL.json",
+      "sha": "35d554ec2f4be3b8266bb73e27dfd2b57e25380b"
+    },
+    {
+      "name": "09_Recommendation_System_NCF_MovieLens_ML.json",
+      "sha": "0dcaa68ea7cf6f7736602538c81a0f98b9d575ba"
+    },
+    {
+      "name": "10_Face_Recognition_FaceNet_LFW_DL.json",
+      "sha": "a3491da8752e414f0546ee62cc4ce39504a27828"
+    },
+    {
+      "name": "11_House_Price_Prediction_LinearRegression_BostonHousing_ML.json",
+      "sha": "c9ac7df6002764bd36129752362d8d4e06516e22"
+    },
+    {
+      "name": "12_Spam_Detection_SVM_Enron_ML.json",
+      "sha": "b99868178997e6a056fa762e12c183aeab898e31"
+    },
+    {
+      "name": "13_Style_Transfer_Perceptual_Loss_CustomImages_DL.json",
+      "sha": "f79b80b01c368eb48503f5140a319471556adec6"
+    },
+    {
+      "name": "14_Customer_Churn_Prediction_LogisticRegression_Telco_ML.json",
+      "sha": "4d71e035c7c57e67ca615e707cf3e51d84df243f"
+    },
+    {
+      "name": "15_Image_Captioning_ShowAndTell_Flickr8k_DL.json",
+      "sha": "63f5b06f4c73d805624174ff54c00147eee2b535"
+    },
+    {
+      "name": "16_Credit_Scoring_DecisionTree_GermanCredit_ML.json",
+      "sha": "97e29b7be4fed2dc5fd901b94b1f4d6ec5f3afd9"
+    },
+    {
+      "name": "17_Heart_Disease_Prediction_XGBoost_UCI_ML.json",
+      "sha": "ac75e04747443d4052586168b2394450ac8b8e9d"
+    },
+    {
+      "name": "18_Image_Enhancement_SRGAN_DIV2K_DL.json",
+      "sha": "faa0e0515f658b94ae1d60e22dbce1100f8962b8"
+    },
+    {
+      "name": "19_Time_Series_Forecasting_Seq2Seq_LSTM_Rossmann_ML.json",
+      "sha": "ce1a43bd41e3d97196cc5b1ab39349ebd5448b87"
+    },
+    {
+      "name": "20_Car_Price_Prediction_RandomForest_CarPrices_ML.json",
+      "sha": "0c20e749e097688b8e1dda1e6dc77ebdda10545c"
+    },
+    {
+      "name": "21_Iris_Classification_SVM_Iris_ML.json",
+      "sha": "6ea3355ff467baa885fd4b52e6c48ccfbd1c89ab"
+    },
+    {
+      "name": "22_Sentiment_Analysis_LSTM_IMDb_DL.json",
+      "sha": "3339bb597bfc6bfa90f9577b913e57da27b8f898"
+    },
+    {
+      "name": "23_Wine_Quality_Prediction_DecisionTree_WineQuality_ML.json",
+      "sha": "ddf65a5d9c4501b2ba1a615fc4e68d94e0a36fce"
+    },
+    {
+      "name": "24_Diabetes_Prediction_LogisticRegression_PimaIndians_ML.json",
+      "sha": "14658df6fad0d5bfe167136f16652c7e828f4ba4"
+    },
+    {
+      "name": "25_Speech_Emotion_Recognition_CNN_LSTM_RAVDESS_DL.json",
+      "sha": "8e216b2504a1edb7a31a6bd1e53cac4ba4e3d16a"
+    },
+    {
+      "name": "26_Mushroom_Classification_RandomForest_Mushroom_ML.json",
+      "sha": "56fd78917ff6a1d3d57c95922cd7ae3fd23567b5"
+    },
+    {
+      "name": "27_Image_Generation_DCGAN_MNIST_DL.json",
+      "sha": "585cb636fe012cce521eaa0b49e96e0710614e9f"
+    },
+    {
+      "name": "28_Stock_Price_Prediction_LSTM_YahooFinance_ML.json",
+      "sha": "bf365ee1e1200725f02b54ffb066f67bfd9c4483"
+    },
+    {
+      "name": "29_Financial_Time_Series_Prediction_LSTM_ML.json",
+      "sha": "e19f85ff3247da7e02309e1ee0df1e484d02e316"
+    },
+    {
+      "name": "30_Image_Segmentation_UNet_PascalVOC_DL.json",
+      "sha": "3ee8927dbcccb8e59d6c1a27c63618c397528384"
+    },
+    {
+      "name": "31_Cancer_Prediction_SVM_BreastCancer_ML.json",
+      "sha": "8f95ffc7d4531fdf43d8a057f99d385b3358b62d"
+    },
+    {
+      "name": "32_Weather_Data_Analysis_LinearRegression_Weather_ML.json",
+      "sha": "55fd7d2d597c67e237ce7457d8fc27a4cf552bb9"
+    },
+    {
+      "name": "33_Object_Detection_YOLOv3_COCO_DL.json",
+      "sha": "ed174a18f3b525f9586bf20e097d8e11e500427a"
+    },
+    {
+      "name": "34_Customer_Segmentation_KMeans_CustomerSegmentation_ML.json",
+      "sha": "5ad7055a859103cc7920e4d9294696a2dd8983cd"
+    },
+    {
+      "name": "35_Loan_Default_Prediction_RandomForest_LendingClub_ML.json",
+      "sha": "bcf4c80e9644f896a1fc9e80951ab97000768f36"
+    },
+    {
+      "name": "36_Music_Emotion_Classification_SVM_GTZAN_ML.json",
+      "sha": "a13eb298a8efe0ca5e1d72da62bffe4ff8783755"
+    },
+    {
+      "name": "37_Lane_Detection_ResNet50_TuSimple_DL.json",
+      "sha": "b48c1c9edc97788b082a1cdea22a5b51863dba16"
+    },
+    {
+      "name": "38_Object_Tracking_Siamese_OTB50_DL.json",
+      "sha": "d7aa6fc6062cfe688c3728d02731dcf251846761"
+    },
+    {
+      "name": "39_Drug_Response_Prediction_SVM_GDSC_ML.json",
+      "sha": "5bf406e42a039b9654371a61832a3e2148f56950"
+    },
+    {
+      "name": "40_Text_Summarization_BART_CNNDailyMail_DL.json",
+      "sha": "2c8c2d33a3dff1b75cf8a51f4720fed5b938f428"
+    },
+    {
+      "name": "41_Stock_Classification_KNN_YahooFinance_ML.json",
+      "sha": "d956b27f0664040bf5f6cecc68886f532cc26240"
+    },
+    {
+      "name": "42_Medical_Image_Classification_DenseNet121_ChestXray_DL.json",
+      "sha": "b9e4f8d9dc819fb1dad20cf9d1c08cc81aa3376f"
+    },
+    {
+      "name": "43_Social_Network_Analysis_GCN_Cora_ML.json",
+      "sha": "ad22fb8b2e59e021b1a191b7ddccb6afb60abcef"
+    },
+    {
+      "name": "44_Text_Classification_BERT_AGNews_DL.json",
+      "sha": "609534d08530ee898867060f03f29219d84507a2"
+    },
+    {
+      "name": "45_Product_Recommendation_MatrixFactorization_AmazonReviews_ML.json",
+      "sha": "877f8a83a5609bc351e27a0ddfd4e55f891b390a"
+    },
+    {
+      "name": "46_Speech_Recognition_DeepSpeech_LibriSpeech_DL.json",
+      "sha": "bfdce4a44d140ac3ec326c2b508bc832643edebc"
+    },
+    {
+      "name": "47_Network_Traffic_Analysis_KMeans_NetworkTraffic_ML.json",
+      "sha": "ef2be36adc2ac4b41c95f5812581374992897dc5"
+    },
+    {
+      "name": "48_Stock_Trading_Simulation_PPO_HistoricalData_RL.json",
+      "sha": "06e38e3fbeaf59fc0825e3abfba1b0b97cec5b0d"
+    },
+    {
+      "name": "49_Explainable_AI_LIME_Titanic_ML.json",
+      "sha": "b3940de9846cf8d375dd6f04663a0778df687d11"
+    },
+    {
+      "name": "50_Math_Problem_Solving_Transformer_DeepMindMath_DL.json",
+      "sha": "93d1afc5258e244bbdbf38b1bcda4951437aaf96"
+    },
+    {
+      "name": "51_Devin_AI_Software_Engineer_Plants_Secret_Messages_in_Images.json",
+      "sha": "e43ba69f4b808e60f2e4277898506d707fa3c7c6"
+    },
+    {
+      "name": "52_Devin_AI_Trains_an_AI.json",
+      "sha": "131e9c9df39f080668554c6afd0a99c140d6ffb8"
+    },
+    {
+      "name": "53_Devin_Upwork_Side_Hustle.json",
+      "sha": "a9baa3b7add6acc189cb7d55490a63346a498c24"
+    },
+    {
+      "name": "54_Mock_OpenAI_API_Response_Analyzer_App.json",
+      "sha": "015a8b45f0e1334443068a8029b0eaa7b9bb85c3"
+    },
+    {
+      "name": "55_SQLite_Database_Viewer_and_Analyzer_App.json",
+      "sha": "854272b8a1e5720a7b9fba4f425df451b7f0af7e"
+    }
+  ]
+}
