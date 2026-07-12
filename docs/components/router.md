@@ -88,9 +88,20 @@ Current consumers:
 - Task-spec validation compares judge and executor families from resolved
   capabilities, so stale `executor.family` / `judge.family` labels cannot hide a
   same-family pairing.
+- `decideLimitResponse` is the pure work-conserving scheduler for classified
+  limit signals. It reads the resolved WP-307 capabilities, orders legal
+  declared failover for the throttled stage first, then later-stage
+  limit-independent work, then `park-until-reset` as the final fallback. The
+  same-family judge/executor invariant still applies when considering headroom,
+  so a limit response never "solves" capacity by violating family separation.
 - `prepareRun` journals one replay-safe `capability` row at run start; `chikory
   trace` renders an `endpoints plan ... · code ... · review ... · judge ...`
   line only when that row exists. Older journals stay readable without the line.
+- `executeStep` consumes the scheduler when `CHIKORY_LIMIT_AT_STEP` injects a
+  code-stage limit in tests/dogfood. The activity journals a replay-safe
+  `limit_signal` row with the classified signal, full scheduler plan, and chosen
+  response. `chikory trace` derives `limit-slept` versus `conserved` only from
+  those rows; limit-free runs render exactly as before.
 
 ## Telemetry (WP-105)
 

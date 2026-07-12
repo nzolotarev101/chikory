@@ -65,6 +65,36 @@ describe("runTotals (journal-format.md §2 totals)", () => {
       journal.append({ kind: "verdict", payload: verdict("ROLLBACK"), costDeltaUsd: 0, artifactRefs: [] });
       journal.append({ kind: "verdict", payload: verdict("ESCALATE"), costDeltaUsd: 0, artifactRefs: [] });
       journal.append({ kind: "verdict", payload: verdict("PROCEED"), costDeltaUsd: 0, artifactRefs: [] });
+      journal.append({
+        kind: "limit_signal",
+        payload: {
+          limitSignalIndex: 0,
+          atStep: 2,
+          stage: "code",
+          signal: { source: "injected" },
+          chosenResponse: { action: "limit-independent-work" },
+          limitResponse: {
+            steps: [{ action: "park-until-reset", retryAfterMs: 5000 }],
+          },
+        },
+        costDeltaUsd: 0,
+        artifactRefs: [],
+      });
+      journal.append({
+        kind: "limit_signal",
+        payload: {
+          limitSignalIndex: 1,
+          atStep: 3,
+          stage: "code",
+          signal: { source: "injected" },
+          chosenResponse: { action: "park-until-reset", retryAfterMs: 2000 },
+          limitResponse: {
+            steps: [{ action: "park-until-reset", retryAfterMs: 2000 }],
+          },
+        },
+        costDeltaUsd: 0,
+        artifactRefs: [],
+      });
 
       const totals = runTotals(journal);
       expect(totals.steps).toBe(2);
@@ -75,6 +105,9 @@ describe("runTotals (journal-format.md §2 totals)", () => {
       expect(totals.judgeCostUsd).toBeCloseTo(0.005, 10);
       expect(totals.judgeCostShare).toBeCloseTo(0.2, 10);
       expect(totals.tokens).toEqual({ input: 400, output: 120 });
+      expect(totals.limitSignals).toBe(2);
+      expect(totals.limitSleptMs).toBe(2000);
+      expect(totals.limitSleepConservedMs).toBe(5000);
     } finally {
       journal.close();
       await rm(tmp, { recursive: true, force: true });

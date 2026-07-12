@@ -8,7 +8,12 @@
  */
 import type { RunRow, RunTotals } from "../journal/journal.js";
 import type { EndpointCapability, ResolvedEndpointCapabilities } from "../endpoint-capability.js";
-import type { CapabilityPayload, JudgePayload, StepPayload } from "../runner/activities.js";
+import type {
+  CapabilityPayload,
+  JudgePayload,
+  LimitSignalPayload,
+  StepPayload,
+} from "../runner/activities.js";
 import {
   describeCompactionPressure,
   pressureFoldGapWarning,
@@ -322,12 +327,17 @@ export function renderTrace(run: RunRow, entries: JournalEntry[], totals: RunTot
     memoryRecalls > 0 || memoryEvictions > 0
       ? ` · memory recalls ${memoryRecalls} · evicted ${memoryEvictions}`
       : "";
+  const limitSignals = totals.limitSignals ?? 0;
+  const limitSummary =
+    limitSignals > 0
+      ? ` · limit signals ${limitSignals} · limit-slept ${formatDuration(totals.limitSleptMs ?? 0)} · conserved ${formatDuration(totals.limitSleepConservedMs ?? 0)}`
+      : "";
   const soakSummary =
     soak.reentries > 0 || soak.sleptMs > 0
       ? ` · re-entries ${soak.reentries} · soak-slept ${formatDuration(soak.sleptMs)}`
       : "";
   lines.push(
-    `        injections ${injections} · checkpoints ${checkpoints}${seamSummary}${pacingSummary}${compactionSummary}${compactionPressureSummary}${memorySummary}${soakSummary}${feedback}`,
+    `        injections ${injections} · checkpoints ${checkpoints}${seamSummary}${pacingSummary}${compactionSummary}${compactionPressureSummary}${memorySummary}${limitSummary}${soakSummary}${feedback}`,
   );
   if (compactionPressureWarning !== null) {
     lines.push(`        warning: ${compactionPressureWarning}`);
@@ -666,6 +676,13 @@ export function formatEntryLine(entry: JournalEntry): string {
     }
     case "capability":
       return `[${ts}] endpoints resolved`;
+    case "limit_signal": {
+      const payload = entry.payload as LimitSignalPayload;
+      return (
+        `[${ts}] limit signal ${payload.signal.source} @ step ${payload.atStep + 1} — ` +
+        `${payload.chosenResponse.action}`
+      );
+    }
     case "remediation": {
       const payload = entry.payload as RemediationTracePayload;
       return (

@@ -24,6 +24,8 @@ import {
 } from "../endpoint-capability.js";
 import { buildVerdict, enforceFamilyDiversity, runJudgePass } from "../judge/index.js";
 import { Journal, reportFromJournal, runTotals } from "../journal/journal.js";
+import { decideLimitResponse, type LimitResponsePlan } from "../limit-response.js";
+import { classifyLimitSignal, type ClassifiedLimitSignal } from "../limit-signal.js";
 import {
   recordCheckpointSpan,
   recordJudgePassSpan,
@@ -107,12 +109,23 @@ export interface StepPayload {
   instruction: string;
   planItem: string;
   record: StepRecord;
+  /** Present only when the dogfood limit seam fires; absent keeps normal journals byte-identical. */
+  limitResponse?: LimitResponsePlan;
   /**
    * WP-515 (F-96): present when a blind-metered step's usage was estimated
    * from the run's observed per-tool-call rate — the record's tokens/cost
    * carry the estimate (with `costEstimated: true`), this notes the basis.
    */
   usageEstimate?: { basis: "per_tool_call_rate"; perToolCallTokens: number };
+}
+
+export interface LimitSignalPayload {
+  limitSignalIndex: number;
+  atStep: number;
+  stage: "code";
+  signal: ClassifiedLimitSignal;
+  limitResponse: LimitResponsePlan;
+  chosenResponse: LimitResponsePlan["steps"][number];
 }
 
 export interface VerdictPayload {
@@ -226,6 +239,12 @@ function requireSpec(journal: Journal, runId: string): TaskSpec {
   const run = journal.getRun();
   if (!run) throw new Error(`run ${runId} has no journal run row — was prepareRun skipped?`);
   return run.task;
+}
+
+function limitInjectedAtStep(raw: string | undefined, stepIndex: number): boolean {
+  if (raw === undefined) return false;
+  const parsed = Number(raw);
+  return Number.isInteger(parsed) && parsed === stepIndex;
 }
 
 function sharedHandoffStore(deps: RunnerActivityDeps): ArtifactStore {
@@ -655,6 +674,107 @@ export function createRunnerActivities(deps: RunnerActivityDeps) {
           }
           const store = createLocalArtifactStore(artifactsDir(deps.dataDir, input.runId));
           const codeModel = spec.routing.stages.code;
+          const capabilities = resolveEndpointCapabilities(spec);
+
+          if (limitInjectedAtStep(process.env["CHIKORY_LIMIT_AT_STEP"], input.stepIndex)) {
+            const signal = classifyLimitSignal({
+              capability: capabilities.code[0] ?? describeEndpointCapability({
+                adapter: spec.executor.adapter,
+                family: spec.executor.family,
+              }),
+              signal: {
+                kind: "injected",
+                reason: `CHIKORY_LIMIT_AT_STEP injected at step ${input.stepIndex}`,
+                retryAfterMs: 5000,
+              },
+            });
+            if (signal === undefined) {
+              throw new Error("CHIKORY_LIMIT_AT_STEP injection did not classify as a limit");
+            }
+            const limitResponse = decideLimitResponse({
+              stage: "code",
+              signal,
+              capabilities,
+            });
+            const selected =
+              limitResponse.steps.find((step) => step.action !== "park-until-reset") ??
+              limitResponse.steps[0];
+            if (selected === undefined) {
+              throw new Error("scheduler produced no limit response steps");
+            }
+            journal.appendOnce(
+              { field: "atStep", value: input.stepIndex },
+              {
+                kind: "limit_signal",
+                payload: {
+                  limitSignalIndex: input.stepIndex,
+                  atStep: input.stepIndex,
+                  stage: "code",
+                  signal,
+                  limitResponse,
+                  chosenResponse: selected,
+                } satisfies LimitSignalPayload,
+                costDeltaUsd: 0,
+                artifactRefs: [],
+              },
+            );
+            const [diffRef, transcriptRef] = await Promise.all([
+              store.put("", {
+                kind: "diff",
+                summary: `limit injection step ${input.stepIndex} produced no diff`,
+              }),
+              store.put(
+                [
+                  signal.reason,
+                  `scheduler selected ${selected.action}`,
+                ].join("\n"),
+                {
+                  kind: "transcript",
+                  summary: `limit injection step ${input.stepIndex}`,
+                },
+              ),
+            ]);
+            const record: StepRecord = {
+              status: selected?.action === "park-until-reset" ? "FAILED" : "SUCCESS",
+              diffRef,
+              summary:
+                `limit response: ${selected.action} after ${signal.reason}`,
+              toolCalls: 0,
+              tokens: { input: 0, output: 0 },
+              costUsd: 0,
+              costEstimated: false,
+              durationMs: 0,
+              transcriptRef,
+              ...(selected?.action === "park-until-reset"
+                ? { failure: { reason: signal.reason, retriable: true } }
+                : { claimsComplete: true }),
+            };
+            const payload: StepPayload = {
+              stepIndex: input.stepIndex,
+              instruction: input.instruction,
+              planItem: input.context.planItem,
+              record,
+              limitResponse,
+            };
+            journal.appendOnce(
+              { field: "stepIndex", value: input.stepIndex },
+              {
+                kind: "step",
+                payload,
+                costDeltaUsd: 0,
+                tokens: record.tokens,
+                artifactRefs: [record.diffRef, record.transcriptRef],
+              },
+            );
+            recordRunStepSpan({
+              runId: input.runId,
+              stepIndex: input.stepIndex,
+              planItem: input.context.planItem,
+              record,
+            });
+            return record;
+          }
+
           const codeRouting: RoutingPolicy = {
             stages: { plan: codeModel, code: codeModel, review: codeModel, judge: codeModel },
             ...(spec.routing.failover?.code

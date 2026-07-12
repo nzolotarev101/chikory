@@ -29,6 +29,24 @@ export {
   type ResolveEndpointCapabilitiesInput,
 } from "./endpoint-capability.js";
 export {
+  classifyLimitSignal,
+  type ClassifiedLimitSignal,
+  type ClassifyLimitSignalInput,
+  type LimitCapabilityDescriptor,
+  type LimitSignalSource,
+  type RawLimitSignal,
+} from "./limit-signal.js";
+export {
+  decideLimitResponse,
+  type BlockedHeadroomTarget,
+  type DecideLimitResponseInput,
+  type HeadroomBlockReason,
+  type LegalHeadroomTarget,
+  type LimitResponseAction,
+  type LimitResponseDecision,
+  type LimitResponsePlan,
+} from "./limit-response.js";
+export {
   computeCostUsd,
   lookupPricing,
   PRICE_TABLE,
@@ -265,6 +283,7 @@ export {
   type AdapterFactory,
   type AdapterRegistry,
   type JudgePayload,
+  type LimitSignalPayload,
   type RemediationPayload,
   type RunnerActivities,
   type RunnerActivityDeps,

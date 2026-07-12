@@ -8,16 +8,16 @@ recover a run, and how to land the result as a normal PR.
 **Status (2026-07-11, bounded — update discipline: REPLACE this block, ≤15 lines;
 displaced prose moves verbatim to [`PLAN-HISTORY.md`](PLAN-HISTORY.md); per-run detail:
 `docs/reports/dogfood-NNN.md`; queue + course correction: `plan.md` §6).**
-Latest: dogfood-097 — **WP-307 (inference-endpoint capability model) DONE** (`run-d44ff996-d21a-482b-a326-99ae72930524`, `docs/reports/dogfood-097.md`,
-uncommitted working tree). 🟢 **SUCCESS · 7 steps · $10.98/$40 · 33m 50s** — the first P3 intelligent-scaling WP: one plain descriptor per way
-Chikory reaches inference (CLI-subscription / API-key / openai-compat) declaring auth mode, limit semantics, cost linkage, model family; per-stage
-resolution; invariant #2 family feed; replay-safe journal + `chikory trace` endpoints line. **First genuine product-run judge true-positive pre-land:**
-step 1 front-loaded PART 3 → the F-130 footprint rubric ROLLED BACK to base → step 2 redid PART 1 only → SUCCESS. Per-step reliability 98.7%
-(1 judge-catch / 76 steps — the thesis working, not a durability miss). New friction: ℹ️ F-132 (step-6 token spike 3.08M in/$3.96 — expected
-context-rot economics, WP-203/207) · ℹ️ F-133 (chunk directive is advisory; the judge rollback enforces no-front-load) — both no-WP.
-**NEXT headline (progression ✅ PROGRESSING, meta cap satisfied 1/3): dogfood-098 on WP-308** (work-conserving limit scheduler — sleep is the last
-resort on a limit signal; WP-307 unblocked it). P2 COMPLETE; P3 is the frontier. See §7, §1.5, §1.4, §3.
-(Earlier — dogfood-096 P2 exit gate PASSED, `run-f77c33db`, 25h 54m: `docs/reports/dogfood-096.md` + `PLAN-HISTORY.md`.)
+Latest: dogfood-098 — **WP-308 (work-conserving limit scheduler) 🟡 CORE LANDED** (`run-6ef24fb7-04b3-4029-a0fb-388300b6e68b`,
+`docs/reports/dogfood-098.md`, uncommitted working tree). 🟢 **SUCCESS · 8 steps · $15.83/$45 · 47m 45s** — on a limit signal, sleep is now the
+LAST-ranked option: `classifyLimitSignal` (429 / CLI-stderr / injected seam) + `decideLimitResponse` ordered plan (declared failover →
+limit-independent work → park, invariant #2 preserved) + `CHIKORY_LIMIT_AT_STEP` seam + replay-safe `limit_signal` journal + `limit-slept vs
+conserved` trace totals. **Judge caught front-loading TWICE** (steps 2/4 rolled back to lastGood — ledger now 3 genuine pre-land catches; cost
+$6.34 = 40.1% of spend, F-134 escalation trigger). Residue 🟡 **F-136: the seam journals the decision but does not EXECUTE it** (injected-limit
+step claims complete with zero work — §8 known limitation). New friction: 🟡 F-134 (front-load recurrence ×2) · ℹ️ F-135 (judge rubric checks
+chunk scope, not spec write-scope — run edited `plan.md` unsanctioned) · 🟡 F-136 — no new WPs (F-130 owns 134/135 mechanism; 136 IS open WP-308).
+**NEXT headline (progression ✅ PROGRESSING, meta cap 0:3): dogfood-099 on WP-308 completion** — execute the decision, end-to-end forced-limit
+run slept measurably less than park-only baseline. See §7, §1.5, §1.4, §3. (Earlier — dogfood-097 WP-307 DONE → PLAN-HISTORY.md.)
 
 Related docs: [`docs/spec/task-spec.md`](spec/task-spec.md) (schema
 reference) · [`docs/TASK-PROTOCOL.md`](TASK-PROTOCOL.md) (WP etiquette, §7 is
@@ -687,6 +687,17 @@ broken (a false-green, not a follow-on fix).
 
 ## 8. Known P1 limitations (so you don't fight them)
 
+- **`CHIKORY_LIMIT_AT_STEP` records the scheduler's decision but does NOT execute
+  it** (F-136, dogfood-098, the open half of WP-308): when the seam fires,
+  `executeStep` (`src/runner/activities.ts:677+`) classifies the injected signal,
+  consults `decideLimitResponse`, journals the full plan + chosen response — then
+  returns a fabricated record: `status:"SUCCESS"`, `claimsComplete:true`,
+  `toolCalls:0`, empty diff. No failover re-dispatch happens and no
+  limit-independent work is performed; `conservedMs` in trace totals is the
+  retry-after the run *would* have slept, not measured savings. Off by default
+  (no env ⇒ byte-identical path). Do NOT use the seam in a run whose plan items
+  matter — the injected step's work is silently skipped while claiming complete.
+  Cure = dogfood-099 (WP-308 completion).
 - **`judge.cadence` is INERT on a chunked spec** (dogfood-096 observation, by design
   JD-2): every step that consumes a `work_chunks` entry is a judge milestone
   (`workChunkMilestone`, `src/workflow/agent-loop.ts:633`), so a `min_durable_steps`

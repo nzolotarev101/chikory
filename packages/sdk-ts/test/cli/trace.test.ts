@@ -17,6 +17,7 @@ import type {
   JournalEntry,
   JudgeForm,
   JudgePayload,
+  LimitSignalPayload,
   RunRow,
   RunTotals,
   StepPayload,
@@ -256,6 +257,62 @@ describe("renderTrace (WP-142)", () => {
 
     expect(renderTrace(run, entriesWithSoak, totals)).toContain("re-entries 2 · soak-slept 3s");
     expect(renderTrace(run, entries, totals)).not.toContain("soak-slept");
+  });
+
+  test("reports limit slept-vs-conserved totals only when limit signal rows exist", () => {
+    const throttledLimits = describeEndpointCapability("anthropic").limits;
+    const fallbackLimits = describeEndpointCapability("openai-compat").limits;
+    const throttled = {
+      endpointKind: "executor" as const,
+      target: "scripted",
+      family: "anthropic" as const,
+      limits: throttledLimits,
+    };
+    const fallback = {
+      stage: "judge" as const,
+      index: 0,
+      capability: {
+        endpointKind: "provider" as const,
+        target: "openai-compat",
+        family: "openai-compat" as const,
+        limits: fallbackLimits,
+      },
+    };
+    const limitPayload: LimitSignalPayload = {
+      limitSignalIndex: 0,
+      atStep: 2,
+      stage: "code",
+      signal: {
+        kind: "limit",
+        source: "injected",
+        capability: throttled,
+        reason: "injected limit",
+        retryAfterMs: 5000,
+      },
+      limitResponse: {
+        stage: "code",
+        throttled,
+        blocked: [],
+        steps: [
+          { action: "limit-independent-work", target: fallback },
+          { action: "park-until-reset", reason: "no-legal-headroom", retryAfterMs: 5000 },
+        ],
+      },
+      chosenResponse: { action: "limit-independent-work", target: fallback },
+    };
+    const limitTotals: RunTotals = {
+      ...totals,
+      limitSignals: 1,
+      limitSleptMs: 0,
+      limitSleepConservedMs: 5000,
+    };
+    const trace = renderTrace(run, [...entries, entry(9, "limit_signal", limitPayload)], limitTotals);
+
+    expect(trace).toContain("limit signals 1 · limit-slept 0s · conserved 5s");
+    expect(renderTrace(run, entries, totals)).not.toContain("limit signals");
+    expect(stripAnsi(formatEntryLine(entry(9, "limit_signal", limitPayload)))).toContain(
+      "limit signal injected @ step 3 — limit-independent-work",
+    );
   });
 
   test("reports memory counters only when recall or eviction occurred", () => {

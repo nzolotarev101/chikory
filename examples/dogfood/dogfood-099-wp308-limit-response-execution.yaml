@@ -1,0 +1,191 @@
+# Dogfood-099: WP-308 COMPLETION — EXECUTE THE LIMIT RESPONSE. dogfood-098 (`run-6ef24fb7`) landed the scheduler's
+#   BRAIN (`classifyLimitSignal` + `decideLimitResponse` ordered plan + `CHIKORY_LIMIT_AT_STEP` seam + replay-safe
+#   `limit_signal` journal + `limit-slept vs conserved` trace totals) but left F-136: the seam JOURNALS the decision
+#   and then fabricates the step record (`status:"SUCCESS"`, `claimsComplete:true`, `toolCalls:0`, empty diff —
+#   `activities.ts:677+`) — no failover re-dispatch happens, no limit-independent work is performed, `conservedMs`
+#   is bookkeeping. This run lands the HANDS: a net-new `applyLimitResponse` that EXECUTES the chosen decision, so
+#   a forced-limit run makes real progress instead of skipping the throttled step while claiming it complete.
+#
+# WHY NOW (dogfood-098 review, 2026-07-11). WP-308 (work-conserving limit scheduler) is 🟡 — its own plan.md §7 row
+#   names the residue: "the seam journals the decision but does not EXECUTE it". The WP's acceptance ("run seals
+#   SUCCESS with measurably less slept wall-clock than the park-only baseline") is unreachable until the decision is
+#   acted on. Nothing outranks finishing the open frontier WP; WP-309 (limit telemetry + reset learning) depends on
+#   this execution path existing.
+#
+# GATE VERDICTS (dogfood-098 review phase 5). Progression ✅ PROGRESSING (judge-catch axis moved: 2 genuine pre-land
+#   true-positives, ledger total 3); meta cap ✅ 0/3 (096/097/098 all product). §1.1 ✅ (re-dispatching a throttled
+#   stage mid-loop, deferring-not-skipping a plan item, and a durable park honoring retryAfterMs are each
+#   independently failable — dogfood-098 itself proves an agent WILL fabricate completion here). §1.2 ✅ (advances
+#   real open plan.md §7 WP-308 on live Chikory source — vendor-neutral routing pillar). §1.3 ✅ PROCEED (not busy
+#   work, not scaffold — the mechanism lands in the real run loop). §1.5 ✅ (class=product).
+#
+# CLASS / LADDER. class=product. Ladder retired at rung 5 (P2 exit passed, dogfood-096); rung-4-shape consolidation.
+# Ladder-rung: 4
+# Thesis-KPI: VENDOR-NEUTRALITY + work-conserving scaling, END-TO-END this time — a forced usage-limit injection on
+#   one endpoint yields a SUCCESS run whose trace totals show conserved > 0 with the throttled step's work ACTUALLY
+#   done (real diff, no fabricated claimsComplete), i.e. the run slept measurably less than the park-only baseline
+#   while per-step reliability holds and the run seals with zero operator input.
+#
+# Format: LOOSE (outcome goal + 6 ordered increments; layout/file/test names are the executor's, F-82/F-83). ACs pin
+#   "done" via the net-new FUNCTION symbol the goal NAMES that is ABSENT on HEAD (`applyLimitResponse` — verified
+#   0 hits, `git log -S` empty, 2026-07-11) + a test co-referencing `decideLimitResponse` (the landed brain) so the
+#   hands are proven against the real plan shape + the FULL suite green. F-114-SAFE (function symbol, not a type);
+#   F-119-SAFE (occurrence count via `grep -roh … | wc -l`); F-115-SAFE (no AC asserts wall-clock).
+#
+# F-129 PREMISE CHECK (2026-07-11): `grep -rn 'applyLimitResponse' packages/sdk-ts/src packages/sdk-ts/test` → 0
+#   hits; `git log -S applyLimitResponse` → empty. The CAPABILITY is absent on HEAD: `activities.ts:677+` seam path
+#   returns a fabricated record without dispatching anything (asserted by the landed test
+#   `test/runner/limit-response-activity.test.ts:117-124` — `claimsComplete: true`, `toolCalls: 0`); `classifyLimitSignal`'s
+#   http/cli-stderr branches have no production caller; no code re-routes a stage off a limit signal.
+#
+# ⚠️ F-134 WATCH (dogfood-097 ×1, dogfood-098 ×2): the executor front-loads later PARTs despite directives; the
+#   F-130 judge footprint rubric WILL roll back any step whose diff exceeds its active PART. Cheapest path is to
+#   respect the chunk boundaries — front-loading costs a full discarded step.
+#
+# ⚠️ SCOPE / DETERMINISM. Writes ONLY inside `packages/sdk-ts/` (+ the one PART-6 doc edit in
+#   `docs/components/router.md` — NO other doc, NOT plan.md: F-135). ADDITIVE — no frozen-contract reshape; a run
+#   that never receives a limit signal behaves and renders BYTE-IDENTICALLY; the existing `limit_signal` journal
+#   shape stays readable (additive fields only). The forced-limit injection remains the deterministic
+#   `CHIKORY_LIMIT_AT_STEP` seam (off by default). NO new dependency. NO key material or secret-shaped fields.
+#   A failover swap MUST preserve invariant #2 (judge family ≠ executor family).
+#
+# ⚠️ LAUNCH: commit everything first (the workspace clones HEAD — dogfood-098's uncommitted delivery MUST be
+#   committed or there is no scheduler to execute), then `devbox run run-dogfood` (verify the spec-pick glob
+#   resolves to THIS file). `CHIKORY_PREFLIGHT_ONLY=1 devbox run run-dogfood` dry-runs the launch guards at $0.
+
+name: dogfood-099-wp308-limit-response-execution
+goal: >
+  Complete WP-308 in the Chikory TypeScript SDK: EXECUTE the work-conserving limit response instead of only
+  journaling it. dogfood-098 landed `decideLimitResponse` (the ordered plan: declared failover → limit-independent
+  work → park last) and the `CHIKORY_LIMIT_AT_STEP` seam, but the seam path in the run activity currently fabricates
+  a completed step (`claimsComplete: true`, zero tool calls, empty diff) without acting on the plan (F-136). Land a
+  net-new `applyLimitResponse` that takes the chosen decision and ACTS: deliver in SIX ordered increments, ONE per
+  durable step, each adding DISTINCT non-trivial working code + tests (non-hollow horizon, F-100/WP-270):
+
+    * PART 1 — HONEST STEP RECORD: the seam path stops fabricating completion. An injected limit no longer yields
+      `claimsComplete: true` with zero work — the throttled step's plan item is DEFERRED (the loop will still do it),
+      never silently skipped. The `limit_signal` journal row stays (additive fields allowed, no reshape). Tested:
+      an injected limit at step N does not mark step N's plan item complete.
+
+    * PART 2 — FAILOVER EXECUTION: net-new `applyLimitResponse` — when the chosen decision is `declared-failover`,
+      the run activity RE-DISPATCHES the throttled stage against the failover target's endpoint (reusing the
+      existing per-stage routing/failover machinery; invariant #2 already guaranteed by the plan) and the step
+      produces a REAL record (real adapter call, real diff/transcript refs). Tested with the scripted adapter
+      registry: an injected limit with a legal failover target yields a step that actually ran.
+
+    * PART 3 — LIMIT-INDEPENDENT WORK EXECUTION: when the chosen decision is `limit-independent-work`, the loop
+      actually performs conserving work it can do without the throttled endpoint (the decision's target names it —
+      e.g. a judge pass on the other family, a compaction fold, a checkpoint) BEFORE the throttled item resumes.
+      Tested: the conserving action observably happened (journal entry) and the throttled plan item was deferred,
+      not dropped.
+
+    * PART 4 — DURABLE PARK: when the chosen decision is `park-until-reset`, the park honors the classified
+      signal's `retryAfterMs`/`retryAtMs` via the EXISTING durable delay machinery (soak/park path — a workflow-side
+      durable timer, never an activity sleep), journaled replay-safe. Tested deterministically (no real waiting in
+      unit tests; F-115 — no wall-clock asserts).
+
+    * PART 5 — MEASURED TOTALS: `limitSleptMs` / `limitSleepConservedMs` derive from what actually happened
+      (executed failover / conserving work / actual park) rather than plan bookkeeping; `chikory trace` renders as
+      today; a no-signal run renders byte-identically. Tested both ways.
+
+    * PART 6 — END-TO-END LIVE PROOF + DOCS + REGRESSION: ONE live in-memory/Temporal proof that a forced
+      `CHIKORY_LIMIT_AT_STEP` run seals SUCCESS with `conserved > 0` in totals AND every plan item genuinely done
+      (no fabricated claims); update `docs/components/router.md` (the one sanctioned doc edit); prove the ENTIRE
+      `packages/sdk-ts` suite (tsc + eslint + vitest) green.
+
+  CONSTRAINTS: additive — NO frozen-contract shape change; a run that never receives a limit signal behaves and
+  renders EXACTLY as before; existing `limit_signal` journals stay readable. NO new dependency. Injection stays the
+  deterministic `CHIKORY_LIMIT_AT_STEP` seam only (off by default). NO key material or secret-shaped fields. A
+  failover swap MUST preserve invariant #2 (judge family ≠ executor family). Writes ONLY inside `packages/sdk-ts/`
+  plus the single PART-6 `docs/components/router.md` edit — nothing else (not plan.md). Each PART lands its own
+  tests and does NOT break an earlier PART's tests; do NOT front-load a later PART (the judge compares the diff
+  footprint against the active PART and WILL roll back). If a verification step reports a failing suite, READ the
+  failure and fix the IMPLEMENTATION — never weaken or delete an assertion, and never assert a wall-clock duration
+  to prove a structural fact (F-115).
+
+repos:
+  - url: /Users/nikitazolotarev/repos/chikory
+    writable: true
+
+bounded_work_unit:
+  min_durable_steps: 6
+  directive: >
+    Advance EXACTLY the ONE numbered PART named by this step's chunk — implement it and its tests, then stop and let
+    the durable checkpoint seal. Do NOT front-load a later PART. Do NOT declare the whole run complete until every
+    PART has landed with passing tests.
+  work_chunks:
+    - name: part-1-honest-step-record
+      directive: "PART 1 ONLY: the CHIKORY_LIMIT_AT_STEP seam path stops fabricating completion — no claimsComplete:true with zero work; the throttled plan item is deferred, never skipped; limit_signal row preserved (additive only). Tests."
+    - name: part-2-failover-execution
+      directive: "PART 2 ONLY: net-new applyLimitResponse executes a declared-failover decision — re-dispatch the throttled stage against the failover target via existing routing machinery; real adapter call, real record. Tests on the scripted registry."
+    - name: part-3-limit-independent-execution
+      directive: "PART 3 ONLY: a limit-independent-work decision performs real conserving work (per the decision's target) before the throttled item resumes; deferred, not dropped. Tests via journal evidence."
+    - name: part-4-durable-park
+      directive: "PART 4 ONLY: a park-until-reset decision honors retryAfterMs/retryAtMs via the existing durable delay machinery (workflow-side timer, never an activity sleep), replay-safe. Deterministic tests, no wall-clock asserts."
+    - name: part-5-measured-totals
+      directive: "PART 5 ONLY: limitSleptMs/limitSleepConservedMs derive from executed actions, not plan bookkeeping; no-signal runs render byte-identically. Tests both ways."
+    - name: part-6-liveproof-docs-regression
+      directive: "PART 6 ONLY: one live proof — a forced CHIKORY_LIMIT_AT_STEP run seals SUCCESS with conserved > 0 and every plan item genuinely done; update docs/components/router.md; FULL packages/sdk-ts suite (tsc + eslint + vitest) green; fix implementations, never weaken tests."
+
+acceptance_criteria:
+  - id: AC-1
+    description: >
+      The net-new limit-response EXECUTOR function exists in the SDK source. (OUTCOME symbol the goal NAMES —
+      `applyLimitResponse` — absent on HEAD so a recursive grep cannot false-green, F-90. F-114-SAFE: a FUNCTION
+      symbol, not a type name. Layout is the executor's, F-82/F-83.)
+    check: >
+      cd packages/sdk-ts &&
+      grep -rq 'applyLimitResponse' src/
+  - id: AC-2
+    description: >
+      The executor is CONSUMED, not just defined — `applyLimitResponse` appears at least twice across the source
+      (definition + a consumption site in the run loop). (F-119-SAFE: occurrence count via `grep -roh … | wc -l`.)
+    check: >
+      cd packages/sdk-ts &&
+      test "$(grep -roh 'applyLimitResponse' src/ | wc -l)" -ge 2
+  - id: AC-3
+    description: >
+      A test proves the hands against the landed brain — a `test/` file references BOTH the net-new
+      `applyLimitResponse` AND dogfood-098's `decideLimitResponse`, so execution is verified against the real
+      ordered-plan shape, not a toy. (F-97-SAFE co-reference. Filename is the executor's.)
+    check: >
+      cd packages/sdk-ts &&
+      for f in $(grep -rl 'applyLimitResponse' test/ 2>/dev/null); do
+        grep -q 'decideLimitResponse' "$f" && { echo ok; break; };
+      done | grep -q ok
+  - id: AC-4
+    description: >
+      The SDK stays type- and lint-clean and the FULL existing suite is green, proving the change is additive and
+      nothing regressed (no frozen-contract shape change; limit-signal-free runs behave exactly as before).
+    check: cd packages/sdk-ts && pnpm exec tsc --noEmit && pnpm exec eslint . && pnpm exec vitest run
+
+budget_usd: 45
+max_steps: 30
+
+# CONTEXT-ROT (WP-203/WP-207): auto-calibrated window (F-125 mechanism, live-proven dogfood-095/096/097/098) — the
+#   window derives from this run's OWN first-step assembled-context tokens; real accumulation over 6 chunks crosses
+#   the compact band and folds under genuine pacing pressure.
+pacing:
+  mode: auto
+  autoCalibrate: true
+
+# UNATTENDED (WP-271): operator-free; a genuine ESCALATE seals a resumable FAILED (WP-520); the run-level self-heal
+#   (WP-519) gets one bounded remediation before any terminal seal. No soak — a normal ~6-step product run.
+unattended:
+  escalation: seal_resumable_failed
+
+executor:
+  adapter: codex
+  family: openai
+
+judge:
+  family: openai-compat
+  cadence: 2
+  max_cost_share: 0.5
+
+routing:
+  stages:
+    plan: { provider: openai-compat, model: gpt-5.5 }
+    code: { provider: openai-compat, model: gpt-5.5 }
+    review: { provider: openai-compat, model: gpt-5.5 }
+    judge: { provider: openai-compat, model: gemini-3.1-pro-preview }

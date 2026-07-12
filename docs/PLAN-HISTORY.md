@@ -4,6 +4,24 @@
 > per-run detail lives in [`docs/reports/`](reports/). Content below was moved
 > verbatim out of the living docs on 2026-07-02 (course correction — plan.md §6).
 
+## Archived 2026-07-11 — displaced by dogfood-098 (`run-6ef24fb7`, WP-308 core landed)
+
+Prior plan.md Queue line (dogfood-097 detail), displaced verbatim:
+
+> - **Queue (P2 ladder retired 2026-07-11; P3 intelligent-scaling track §7 active):** ✅ **WP-307 (inference-endpoint capability model) DONE — dogfood-097 `run-d44ff996`, SUCCESS 7 steps $10.98, uncommitted working tree.** First genuine product-run judge true-positive pre-land: step 1 front-loaded PART 3, the F-130 footprint rubric rolled it back to base, run recovered and sealed SUCCESS (per-step reliability 98.7% = 1 judge-catch/76 steps, the thesis working). **NEXT HEADLINE (progression ✅ PROGRESSING, meta cap satisfied 1/3 → class=product): dogfood-098 on WP-308 (work-conserving limit scheduler)** — WP-307 unblocked it: on a forced hourly-limit injection, sleep is the LAST resort (fail over to a headroom endpoint / progress limit-independent work / park last), run seals SUCCESS with measurably less slept wall-clock than park-only baseline. Real product code, thesis-pillar, genuinely failable. Parallel lane (track-B PRs, never headlines): **WP-301 ✅ + WP-302 guide ✅ + WP-306 ✅ hand-landed 2026-07-11** (harness + 55-instance corpus + AUTHORING.md format-v1 freeze + `chikory dataset export`); WP-302 residue = pin 3 drafts + grow corpus (per-task 🟢). (F-132 token-economics + F-133 chunk-directive-advisory = both ℹ️ no-WP, dogfood-097.)
+
+Prior DOGFOODING status head (dogfood-097), displaced verbatim:
+
+> Latest: dogfood-097 — **WP-307 (inference-endpoint capability model) DONE** (`run-d44ff996-d21a-482b-a326-99ae72930524`, `docs/reports/dogfood-097.md`,
+> uncommitted working tree). 🟢 **SUCCESS · 7 steps · $10.98/$40 · 33m 50s** — the first P3 intelligent-scaling WP: one plain descriptor per way
+> Chikory reaches inference (CLI-subscription / API-key / openai-compat) declaring auth mode, limit semantics, cost linkage, model family; per-stage
+> resolution; invariant #2 family feed; replay-safe journal + `chikory trace` endpoints line. **First genuine product-run judge true-positive pre-land:**
+> step 1 front-loaded PART 3 → the F-130 footprint rubric ROLLED BACK to base → step 2 redid PART 1 only → SUCCESS. Per-step reliability 98.7%
+> (1 judge-catch / 76 steps — the thesis working, not a durability miss). New friction: ℹ️ F-132 (step-6 token spike 3.08M in/$3.96 — expected
+> context-rot economics, WP-203/207) · ℹ️ F-133 (chunk directive is advisory; the judge rollback enforces no-front-load) — both no-WP.
+> **NEXT headline (progression ✅ PROGRESSING, meta cap satisfied 1/3): dogfood-098 on WP-308** (work-conserving limit scheduler — sleep is the last
+> resort on a limit signal; WP-307 unblocked it). P2 COMPLETE; P3 is the frontier. See §7, §1.5, §1.4, §3.
+
 ## Archived 2026-07-11 — displaced by dogfood-096 (`run-f77c33db`, THE P2 EXIT-GATE RUN, PASSED)
 
 Prior plan.md status lines (Phase / Last-3-runs / Queue), displaced verbatim:
