@@ -259,6 +259,13 @@ export const TaskSpecSchema = z
     boundedWorkUnit: BoundedWorkUnitPolicySchema.optional(),
     notifications: NotificationPolicySchema.optional(),
     chainLink: ChainLinkSchema.optional(),
+    horizon: z
+      .object({
+        deadlineMs: z.number().int().positive().optional(),
+        expectedDurationMs: z.number().int().positive().optional(),
+      })
+      .strict()
+      .optional(),
   })
   .strict();
 
@@ -416,6 +423,7 @@ export const JournalEntryKindSchema = z.enum([
   "budget_event",
   "compaction",
   "pacing",
+  "limit_pace",
   "capability",
   "limit_signal",
   "terminal",

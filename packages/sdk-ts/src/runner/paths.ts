@@ -39,3 +39,12 @@ export function chainDir(dataDir: string, chainId: string): string {
 export function chainJournalPath(dataDir: string, chainId: string): string {
   return join(chainDir(dataDir, chainId), "chain.db");
 }
+
+/**
+ * Cross-run endpoint consumption ledger (WP-310): a weekly quota window
+ * outlives any single run and is shared by concurrent runs on the same
+ * subscription, so its record sits beside `runs/`, not inside a run dir.
+ */
+export function endpointLedgerPath(dataDir: string): string {
+  return join(dataDir, "ledger", "endpoints.db");
+}

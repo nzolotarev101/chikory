@@ -419,6 +419,21 @@ export async function cmdRun(
       debug: { ...spec.debug, killAtStep: Number(killAtStep) },
     };
   }
+  // WP-310 compressed-quota-window seam, armed host-side (same convention).
+  // `CHIKORY_QUOTA_WINDOWS` (JSON `[{window, durationMs, capacityTokens}]`)
+  // replaces the endpoint's declared quota windows with short ones of known
+  // capacity, so weekly-window throttle and predict-limit are provable inside
+  // one run — a seven-day window proof cannot wait seven days.
+  const quotaWindows = process.env["CHIKORY_QUOTA_WINDOWS"];
+  if (quotaWindows !== undefined && quotaWindows.length > 0) {
+    spec = {
+      ...spec,
+      debug: {
+        ...spec.debug,
+        quotaWindows: JSON.parse(quotaWindows) as NonNullable<TaskSpec["debug"]>["quotaWindows"],
+      },
+    };
+  }
   try {
     return await hostAndFollow(args, args.watch, deps, ioPair, (runner) => runner.start(spec));
   } catch (err) {

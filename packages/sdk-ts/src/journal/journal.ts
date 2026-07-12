@@ -323,6 +323,12 @@ export interface RunTotals {
   limitSleptMs?: number;
   /** Reset-window time avoided by choosing non-park work after a limit signal. */
   limitSleepConservedMs?: number;
+  /** WP-310 pacing-governor throttle sleeps taken (`limit_pace` throttle entries). */
+  limitPaceThrottles?: number;
+  /** Total durable inter-step throttle time (`control_event` source:"pace" resumes). */
+  limitPaceThrottledMs?: number;
+  /** Limits predicted and routed to the WP-308 path before the provider fired. */
+  limitPacePredicted?: number;
   costUsd: number;
   /** Judge spend, absolute (Σ `judge` entry cost deltas). */
   judgeCostUsd: number;
@@ -381,17 +387,23 @@ function limitSleepConservedMsFromStepPayload(payload: unknown): number {
   return retryAfterMsFromLimitResponse(limitResponse);
 }
 
-function limitSleptMsFromControlPayload(payload: unknown): number {
+function limitSleptMsFromControlPayload(payload: unknown, wantedSource: "limit" | "pace"): number {
   if (typeof payload !== "object" || payload === null) {
     return 0;
   }
   const event = (payload as { event?: unknown }).event;
   const source = (payload as { source?: unknown }).source;
   const details = (payload as { details?: unknown }).details;
-  if (event !== "resume" || source !== "limit" || typeof details !== "object" || details === null) {
+  if (event !== "resume" || source !== wantedSource || typeof details !== "object" || details === null) {
     return 0;
   }
   return finiteMs((details as { sleepMs?: unknown }).sleepMs) ?? 0;
+}
+
+function limitPaceAction(payload: unknown): string | undefined {
+  if (typeof payload !== "object" || payload === null) return undefined;
+  const action = (payload as { action?: unknown }).action;
+  return typeof action === "string" ? action : undefined;
 }
 
 /** Aggregates derived purely from journal entries (WP-134, OB-6). */
@@ -413,12 +425,21 @@ export function runTotals(journal: Journal): RunTotals {
       ? { recalls: 0, evicted: 0 }
       : memoryCountersFromPayload(counterEntries[counterEntries.length - 1]!.payload);
   const limitSignalEntries = journal.entries("limit_signal");
-  const limitSleptMs = journal
-    .entries("control_event")
-    .reduce((sum, entry) => sum + limitSleptMsFromControlPayload(entry.payload), 0);
+  const controlEntries = journal.entries("control_event");
+  const limitSleptMs = controlEntries.reduce(
+    (sum, entry) => sum + limitSleptMsFromControlPayload(entry.payload, "limit"),
+    0,
+  );
   const limitSleepConservedMs = journal
     .entries("step")
     .reduce((sum, entry) => sum + limitSleepConservedMsFromStepPayload(entry.payload), 0);
+  const limitPaceActions = journal
+    .entries("limit_pace")
+    .map((entry) => limitPaceAction(entry.payload));
+  const limitPaceThrottledMs = controlEntries.reduce(
+    (sum, entry) => sum + limitSleptMsFromControlPayload(entry.payload, "pace"),
+    0,
+  );
   return {
     steps: journal.entries("step").length,
     judgePasses: judgeEntries.length,
@@ -430,6 +451,9 @@ export function runTotals(journal: Journal): RunTotals {
     limitSignals: limitSignalEntries.length,
     limitSleptMs,
     limitSleepConservedMs,
+    limitPaceThrottles: limitPaceActions.filter((action) => action === "throttle").length,
+    limitPaceThrottledMs,
+    limitPacePredicted: limitPaceActions.filter((action) => action === "predict-limit").length,
     costUsd,
     judgeCostUsd,
     judgeCostShare: costUsd > 0 ? judgeCostUsd / costUsd : 0,

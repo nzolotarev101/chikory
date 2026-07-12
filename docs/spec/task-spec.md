@@ -399,6 +399,34 @@ or `Checkpoint` shape changes are made for chunking.
 
 ---
 
+## `horizon` block (optional — WP-310 pacing governor)
+
+Wall-clock pace budgeting for the limit-pacing governor. Plain terms: tells
+the run how long its work is allowed to take, so quota throttling never slows
+it past its own deadline. Absent = no deadline pressure — the governor only
+prevents mid-window quota exhaustion (rolling-5h / weekly subscription
+windows) and otherwise permits full-headroom spend.
+
+```yaml
+horizon:
+  deadline: "2026-07-20T00:00:00Z"    # ISO-8601 finish-by target
+  expected_duration_ms: 432000000     # optional coarse operator estimate
+```
+
+| Field | Required | Notes |
+|---|---|---|
+| `deadline` | no | ISO-8601 datetime; sets the required pace floor — the governor never throttles the run below the pace this deadline demands (`paceConflict` is journaled loudly when deadline > quota) |
+| `expected_duration_ms` | no | Coarse estimate; refines the required pace before step history exists |
+
+Related host-side test seams (never in the YAML, the `CHIKORY_PARK_*`
+convention): `CHIKORY_QUOTA_WINDOWS` (JSON `[{window, durationMs,
+capacityTokens}]`) replaces the endpoint's declared quota windows with
+compressed ones of known capacity, so weekly-window throttle/predict-limit are
+provable inside one run; `CHIKORY_QUOTA_STATE` forces a complete burn state
+into `readQuotaState` for integration tests.
+
+---
+
 ## P2-reserved blocks (parse but do nothing yet)
 
 ```yaml

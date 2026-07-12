@@ -242,6 +242,9 @@ export type JournalEntryKind =
   | "step" | "judge" | "checkpoint" | "verdict" | "injection"
   | "control_event" | "budget_event" | "compaction" | "pacing" | "terminal"
   | "seam"
+  // P3 (WP-307/308/310) — intelligent-scaling kinds: resolved endpoint
+  // capabilities, one classified limit signal, one pacing-governor decision
+  | "capability" | "limit_signal" | "limit_pace"
   // P2 (WP-519, ADR-009 D3) — one journaled heal attempt (rule-3 HALT
   // intercepted: brief + rollback + bounded retry)
   | "remediation"

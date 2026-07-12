@@ -103,6 +103,10 @@ describe("describeEndpointCapability", () => {
         reset: "provider-managed",
         boundedBy: "max-turns",
         defaultMaxTurns: 25,
+        quotaWindows: [
+          { window: "rolling-5h", durationMs: 18_000_000 },
+          { window: "weekly", durationMs: 604_800_000 },
+        ],
       },
       cost: {
         pricing: "subscription-linked",
@@ -129,6 +133,10 @@ describe("describeEndpointCapability", () => {
         window: "subscription-session",
         reset: "provider-managed",
         boundedBy: "max-seconds-and-prompt-scope",
+        quotaWindows: [
+          { window: "rolling-5h", durationMs: 18_000_000 },
+          { window: "weekly", durationMs: 604_800_000 },
+        ],
       },
       cost: {
         pricing: "subscription-linked",

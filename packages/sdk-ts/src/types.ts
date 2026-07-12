@@ -102,6 +102,17 @@ export interface TaskSpec {
   /** P2 (WP-219, ADR-005) — present when this run is a node in a chain. */
   chainLink?: ChainLink;
   /**
+   * P3 (WP-310) — wall-clock pace budgeting for the limit-pacing governor.
+   * Absent = no deadline pressure: the governor only prevents mid-window
+   * quota exhaustion and otherwise permits full-headroom spend.
+   */
+  horizon?: {
+    /** Finish-by target (epoch ms; ISO-8601 in YAML). */
+    deadlineMs?: number;
+    /** Coarse operator estimate; refines the required pace before step history exists. */
+    expectedDurationMs?: number;
+  };
+  /**
    * WP-243 dogfood/test-only: force a deterministic SUSPEND park before the
    * given step index, so WP-241's chain surfacing + `chikory chain resume` are
    * provable without a non-deterministic budget/ESCALATE trigger (F-44). Off
@@ -148,6 +159,20 @@ export interface TaskSpec {
      * re-crash loop on replay.
      */
     killAtStep?: number;
+    /**
+     * WP-310 dogfood/test-only compressed quota windows: override the declared
+     * quota windows (and inject a known capacity) so weekly-window throttle and
+     * predict-limit behavior are provable inside one short run — a 10-minute
+     * "weekly" window with capacity below the run's natural burn forces the
+     * governor's hand without waiting seven days. Off the happy path; armed
+     * host-side from `CHIKORY_QUOTA_WINDOWS` env, never read from env in the
+     * workflow (replay-safe — rides the frozen workflow input).
+     */
+    quotaWindows?: Array<{
+      window: "rolling-5h" | "weekly";
+      durationMs: number;
+      capacityTokens: number;
+    }>;
   };
 }
 
@@ -418,6 +443,9 @@ export type JournalEntryKind =
   | "budget_event"
   | "compaction"
   | "pacing"
+  // P3 (WP-310) — one limit-pacing governor decision worth journaling:
+  // throttle sleeps, predicted limits, and periodic burn-state snapshots.
+  | "limit_pace"
   | "capability"
   | "limit_signal"
   | "terminal"

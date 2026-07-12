@@ -96,6 +96,10 @@ describe("classifyLimitSignal", () => {
           window: "subscription-session",
           reset: "provider-managed",
           boundedBy: "max-seconds-and-prompt-scope",
+          quotaWindows: [
+            { window: "rolling-5h", durationMs: 18_000_000 },
+            { window: "weekly", durationMs: 604_800_000 },
+          ],
         },
       },
       reason: "You've hit your usage limit. Please try again in 1h 30m.",
@@ -128,6 +132,10 @@ describe("classifyLimitSignal", () => {
           reset: "provider-managed",
           boundedBy: "max-turns",
           defaultMaxTurns: 25,
+          quotaWindows: [
+            { window: "rolling-5h", durationMs: 18_000_000 },
+            { window: "weekly", durationMs: 604_800_000 },
+          ],
         },
       },
       reason: "debug limit seam",

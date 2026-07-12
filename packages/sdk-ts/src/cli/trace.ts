@@ -11,6 +11,7 @@ import type { EndpointCapability, ResolvedEndpointCapabilities } from "../endpoi
 import type {
   CapabilityPayload,
   JudgePayload,
+  LimitPacePayload,
   LimitSignalPayload,
   StepPayload,
 } from "../runner/activities.js";
@@ -332,12 +333,45 @@ export function renderTrace(run: RunRow, entries: JournalEntry[], totals: RunTot
     limitSignals > 0
       ? ` · limit signals ${limitSignals} · limit-slept ${formatDuration(totals.limitSleptMs ?? 0)} · conserved ${formatDuration(totals.limitSleepConservedMs ?? 0)}`
       : "";
+  // WP-310 pacing-governor burn state — the LAST journaled decision's window
+  // snapshot. A run with no `limit_pace` entries renders byte-identically to
+  // one built before the governor existed.
+  const paceEntries = entries.filter((entry) => entry.kind === "limit_pace");
+  const lastPace = paceEntries[paceEntries.length - 1];
+  let paceSummary = "";
+  if (lastPace !== undefined) {
+    const payload = lastPace.payload as LimitPacePayload;
+    const decidedAtMs = Date.parse(lastPace.ts);
+    const windowParts = payload.windows
+      .filter((w) => typeof w.capacityTokens === "number" && w.capacityTokens > 0)
+      .map((w) => {
+        const pctLeft = Math.max(
+          0,
+          Math.round((1 - w.consumedTokens / (w.capacityTokens ?? 1)) * 100),
+        );
+        const resets =
+          w.resetAtMs !== undefined && w.resetAtMs > decidedAtMs
+            ? ` (resets ${formatDuration(w.resetAtMs - decidedAtMs)})`
+            : "";
+        return ` · ${w.window === "rolling-5h" ? "5h" : w.window} ${pctLeft}% left${resets}`;
+      })
+      .join("");
+    const throttledMs = totals.limitPaceThrottledMs ?? 0;
+    const predicted = totals.limitPacePredicted ?? 0;
+    paceSummary =
+      ` · pace ${payload.action} (burn ${formatTokens(Math.round(payload.observedTokensPerHour))} tok/h)` +
+      windowParts +
+      (throttledMs > 0
+        ? ` · pace-throttled ${formatDuration(throttledMs)} (${totals.limitPaceThrottles ?? 0}×)`
+        : "") +
+      (predicted > 0 ? ` · limits predicted ${predicted}` : "");
+  }
   const soakSummary =
     soak.reentries > 0 || soak.sleptMs > 0
       ? ` · re-entries ${soak.reentries} · soak-slept ${formatDuration(soak.sleptMs)}`
       : "";
   lines.push(
-    `        injections ${injections} · checkpoints ${checkpoints}${seamSummary}${pacingSummary}${compactionSummary}${compactionPressureSummary}${memorySummary}${limitSummary}${soakSummary}${feedback}`,
+    `        injections ${injections} · checkpoints ${checkpoints}${seamSummary}${pacingSummary}${compactionSummary}${compactionPressureSummary}${memorySummary}${limitSummary}${paceSummary}${soakSummary}${feedback}`,
   );
   if (compactionPressureWarning !== null) {
     lines.push(`        warning: ${compactionPressureWarning}`);
@@ -681,6 +715,25 @@ export function formatEntryLine(entry: JournalEntry): string {
       return (
         `[${ts}] limit signal ${payload.signal.source} @ step ${payload.atStep + 1} — ` +
         `${payload.chosenResponse.action}`
+      );
+    }
+    case "limit_pace": {
+      const payload = entry.payload as LimitPacePayload;
+      const detail =
+        payload.action === "throttle"
+          ? ` — slept ${formatDuration(payload.interStepDelayMs)}`
+          : payload.action === "predict-limit"
+            ? ` — routed to limit response before the provider fired`
+            : "";
+      const conflict = payload.paceConflict ? " · PACE CONFLICT (deadline > quota)" : "";
+      return (
+        `[${ts}] pace ${payload.action} @ step ${payload.atStep + 1} — ` +
+        `burn ${formatTokens(Math.round(payload.observedTokensPerHour))} tok/h` +
+        (payload.sustainableTokensPerHour !== undefined
+          ? ` / sustainable ${formatTokens(Math.round(payload.sustainableTokensPerHour))} tok/h (${payload.limitingWindow ?? "?"})`
+          : "") +
+        detail +
+        conflict
       );
     }
     case "remediation": {

@@ -203,6 +203,13 @@ const RawTaskSpecYaml = z
       })
       .strict()
       .optional(),
+    horizon: z
+      .object({
+        deadline: z.string().datetime().optional(),
+        expected_duration_ms: z.number().int().positive().optional(),
+      })
+      .strict()
+      .optional(),
   })
   .strict();
 
@@ -283,6 +290,18 @@ export function parseTaskSpec(yamlText: string, opts: ParseTaskSpecOptions = {})
     notifications: raw.notifications
       ? { on: raw.notifications.on, slackWebhookEnv: raw.notifications.slack_webhook_env }
       : undefined,
+    ...(raw.horizon
+      ? {
+          horizon: {
+            ...(raw.horizon.deadline !== undefined
+              ? { deadlineMs: Date.parse(raw.horizon.deadline) }
+              : {}),
+            ...(raw.horizon.expected_duration_ms !== undefined
+              ? { expectedDurationMs: raw.horizon.expected_duration_ms }
+              : {}),
+          },
+        }
+      : {}),
   };
 
   const issues: string[] = [];

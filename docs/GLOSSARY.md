@@ -32,6 +32,9 @@ Canonical meanings. Docs and code comments use these terms exactly.
 | **Stop signal** | Month-6 test: beat OpenHands on 50-task DevAI-extended subset or revisit the thesis. |
 | **I-SR / D-SR** | Benchmark requirement-satisfaction rates (DevAI methodology): **I-SR** = independent (each requirement graded on its own); **D-SR** = dependency-adjusted (a requirement counts only if its prerequisites are satisfied too). Reported by the WP-301 harness. |
 | **Dataset record** | One run's journal normalized for the WP-306 failure/recovery dataset: JIF run + totals + entries plus derived recovery paths (rollback → recovered?). Produced only by explicit `chikory dataset export`; local-first, secret-scanned. |
+| **Quota window** | A provider-imposed usage window on a subscription endpoint (rolling-5h, weekly), declared on the WP-307 endpoint descriptor. Capacity is never vendor-declared — it is learned from observed limit hits. |
+| **Consumption ledger** | Cross-run SQLite record (`<dataDir>/ledger/endpoints.db`, WP-310) of per-step token/cost burn per endpoint plus observed limit hits. Lives beside `runs/` because a weekly quota window outlives any single run and is shared by concurrent runs on one subscription. |
+| **Pacing governor** | The WP-310 pre-step decision (`decideLimitPacing`): observed burn vs sustainable quota pace vs the task-horizon required pace → push / steady / throttle (durable `source:"pace"` sleep) / predict-limit (hands the step to the WP-308 response path before the provider fires a real 429). Distinct from context-window pacing (see **Pacing / window-fit**). |
 
 ## ID families
 

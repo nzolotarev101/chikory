@@ -74,6 +74,7 @@ import { decideSoakDelay } from "./soak.js";
 import { decideStepForcing } from "./step-forcing.js";
 import { decideWorkChunk } from "./work-chunk.js";
 import { decideLimitParkDelay } from "./limit-park.js";
+import { decideLimitPacing } from "../runner/limit-pacing.js";
 
 /** Step bound when the TaskSpec doesn't say otherwise (executors.md). */
 export const DEFAULT_STEP_LIMITS: StepLimits = { maxSeconds: 600 };
@@ -167,6 +168,7 @@ export async function agentLoop(spec: TaskSpec): Promise<RunStatus> {
   let budgetEventIndex = 0;
   let seamEventIndex = 0;
   let pacingEventIndex = 0;
+  let limitPaceEventIndex = 0;
   let escalationIndex = 0;
   let controlEventIndex = 0;
   let soakReentries = 0;
@@ -187,6 +189,9 @@ export async function agentLoop(spec: TaskSpec): Promise<RunStatus> {
   const recentSummaries: string[] = [];
   const stepCosts: number[] = [];
   const stepTokens: number[] = [];
+  // WP-310: executor wall-clock per step — the limit-pacing governor's burn
+  // denominator (tokens ÷ duration = observed pace).
+  const stepDurationsMs: number[] = [];
   // Memory Pointer carrier (WP-202/203, CM-3): pointers to large prior-step
   // outputs and the latest compaction digest, surfaced into each step's
   // context so externalized material is recoverable without rotting context.
@@ -361,12 +366,14 @@ export async function agentLoop(spec: TaskSpec): Promise<RunStatus> {
   budgetEventIndex = restored.budgetEventIndex;
   seamEventIndex = restored.seamEventIndex;
   pacingEventIndex = restored.pacingEventIndex;
+  limitPaceEventIndex = restored.limitPaceEventIndex;
   escalationIndex = restored.escalationIndex;
   controlEventIndex = restored.controlEventIndex;
   consecutiveFailures = restored.consecutiveFailures;
   recentSummaries.push(...restored.recentSummaries);
   stepCosts.push(...restored.stepCosts);
   stepTokens.push(...restored.stepTokens);
+  stepDurationsMs.push(...restored.stepDurationsMs);
   if (restored.lastVerdict !== undefined) lastVerdict = restored.lastVerdict;
   if (restored.lastGoodCheckpointId !== undefined) {
     lastGoodCheckpointId = restored.lastGoodCheckpointId;
@@ -481,6 +488,79 @@ export async function agentLoop(spec: TaskSpec): Promise<RunStatus> {
       }
     }
 
+    // Limit-pacing governor gate (WP-310, RT-12): the budget gates above cap
+    // TOTAL spend; this gate paces spend RATE against every declared quota
+    // window (rolling-5h, weekly) and the task horizon, so a run never burns
+    // the week's subscription quota mid-task. Fresh ledger read each step —
+    // sibling concurrent runs on the same subscription move the numbers
+    // between our steps. Unknown capacity ⇒ observe-only (never throttle).
+    const quota = await activities.readQuotaState({ runId });
+    const pace = decideLimitPacing({
+      nowMs: quota.nowMs,
+      windows: quota.windows,
+      ...(spec.horizon?.deadlineMs !== undefined
+        ? { horizonDeadlineMs: spec.horizon.deadlineMs }
+        : {}),
+      estimatedRemainingSteps: Math.max(0, maxSteps - stepIndex),
+      recentStepTokens: stepTokens,
+      recentStepDurationsMs: stepDurationsMs,
+    });
+    // Journal throttle/predict-limit decisions always; push/steady burn
+    // snapshots only on the judge cadence (a per-step entry is noise), and
+    // only once a window's capacity is actually known — a run that never
+    // learns a constraint keeps its journal byte-identical to today.
+    if (
+      pace.action === "throttle" ||
+      pace.action === "predict-limit" ||
+      (pace.limitingWindow !== undefined && stepIndex % spec.judge.cadence === 0)
+    ) {
+      await activities.recordLimitPaceEvent({
+        runId,
+        limitPaceEventIndex: limitPaceEventIndex++,
+        atStep: stepIndex,
+        action: pace.action,
+        interStepDelayMs: pace.interStepDelayMs,
+        ...(pace.limitingWindow !== undefined ? { limitingWindow: pace.limitingWindow } : {}),
+        observedTokensPerHour: pace.observedTokensPerHour,
+        ...(Number.isFinite(pace.sustainableTokensPerHour)
+          ? { sustainableTokensPerHour: pace.sustainableTokensPerHour }
+          : {}),
+        requiredTokensPerHour: pace.requiredTokensPerHour,
+        paceConflict: pace.paceConflict,
+        windows: quota.windows,
+      });
+    }
+    if (pace.action === "throttle" && pace.interStepDelayMs > 0) {
+      // Durable inter-step throttle sleep — the parkForLimitReset shape:
+      // SUSPENDED for the sleep, control_event on resume, zero compute parked.
+      status = "SUSPENDED";
+      await sleep(pace.interStepDelayMs);
+      await activities.recordControlEvent({
+        runId,
+        controlEventIndex: controlEventIndex++,
+        event: "resume",
+        atStep: stepIndex,
+        source: "pace",
+        details: { sleepMs: pace.interStepDelayMs },
+      });
+      if (cancelRequested) return seal("CANCELLED", "cancelled during pace throttle delay");
+      status = "RUNNING";
+    }
+    // predict-limit: the next step would blow the tightest window — route it
+    // through the WP-308 response path (failover → independent work → park)
+    // BEFORE the provider ever fires a real 429.
+    const predictLimit =
+      pace.action === "predict-limit"
+        ? {
+            reason:
+              `pacing: projected ${pace.limitingWindow ?? "quota"} window exhaustion ` +
+              `(observed ${Math.round(pace.observedTokensPerHour)} tok/h)`,
+            ...(pace.predictedResetAtMs !== undefined
+              ? { retryAtMs: pace.predictedResetAtMs }
+              : {}),
+          }
+        : undefined;
+
     // Drain pending mid-run corrections into this step's context (WP-212).
     const injections = pendingInjections.splice(0);
     for (const text of injections) {
@@ -521,6 +601,7 @@ export async function agentLoop(spec: TaskSpec): Promise<RunStatus> {
       instruction: stepInstruction,
       context,
       limits: DEFAULT_STEP_LIMITS,
+      ...(predictLimit !== undefined ? { predictLimit } : {}),
     });
     const limitParkTerminal = await parkForLimitReset(record.limitParkResponse);
     if (limitParkTerminal !== undefined) return limitParkTerminal;
@@ -557,6 +638,7 @@ export async function agentLoop(spec: TaskSpec): Promise<RunStatus> {
     const recordTokens = record.tokens.input + record.tokens.output;
     spentTokens += recordTokens;
     stepTokens.push(recordTokens);
+    stepDurationsMs.push(record.durationMs);
     // WP-254: the pacing numerator must measure the LIVE resident occupancy of the
     // orchestration window WE assemble for the next step — the fixed preamble (goal,
     // acceptance criteria, judge feedback, injections) plus the last

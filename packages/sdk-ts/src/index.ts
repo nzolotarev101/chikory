@@ -14,6 +14,9 @@ export {
 export {
   describeEndpointCapability,
   resolveEndpointCapabilities,
+  ROLLING_5H_WINDOW_MS,
+  WEEKLY_WINDOW_MS,
+  type DeclaredQuotaWindow,
   type EndpointAuthMode,
   type EndpointCapability,
   type EndpointCapabilityTarget,
@@ -285,11 +288,27 @@ export {
   type RunTotals,
 } from "./journal/journal.js";
 export {
+  EndpointLedger,
+  type ConsumptionAppend,
+  type LedgerWindowState,
+  type LimitObservationAppend,
+} from "./journal/endpoint-ledger.js";
+export {
+  decideLimitPacing,
+  MAX_THROTTLE_DELAY_MS,
+  PUSH_HEADROOM_FACTOR,
+  type LimitPaceAction,
+  type LimitPacingDecision,
+  type LimitPacingInput,
+  type WindowQuotaState,
+} from "./runner/limit-pacing.js";
+export {
   commitAllRepos,
   createRunnerActivities,
   type AdapterFactory,
   type AdapterRegistry,
   type JudgePayload,
+  type LimitPacePayload,
   type LimitSignalPayload,
   type RemediationPayload,
   type RunnerActivities,
@@ -313,6 +332,7 @@ export {
   chainDir,
   chainJournalPath,
   DEFAULT_DATA_DIR,
+  endpointLedgerPath,
   journalPath,
   runDir,
   workspaceDir,

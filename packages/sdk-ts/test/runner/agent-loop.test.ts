@@ -44,12 +44,18 @@ const bundlePath = inject("workflowBundlePath");
 describe.skipIf(address === null)("agent loop (WP-121)", () => {
   const cleanups: Array<() => Promise<void>> = [];
   const originalLimitAtStep = process.env["CHIKORY_LIMIT_AT_STEP"];
+  const originalQuotaState = process.env["CHIKORY_QUOTA_STATE"];
 
   afterEach(async () => {
     if (originalLimitAtStep === undefined) {
       delete process.env["CHIKORY_LIMIT_AT_STEP"];
     } else {
       process.env["CHIKORY_LIMIT_AT_STEP"] = originalLimitAtStep;
+    }
+    if (originalQuotaState === undefined) {
+      delete process.env["CHIKORY_QUOTA_STATE"];
+    } else {
+      process.env["CHIKORY_QUOTA_STATE"] = originalQuotaState;
     }
     while (cleanups.length > 0) await cleanups.pop()!();
   });
@@ -408,6 +414,71 @@ describe.skipIf(address === null)("agent loop (WP-121)", () => {
     );
     await expect(readFile(join(ws, "step-2.txt"), "utf8")).resolves.toBe(chunks[0]!.directive);
     await expect(readFile(join(ws, "step-3.txt"), "utf8")).resolves.toBe(chunks[1]!.directive);
+  });
+
+  test("WP-310: forced quota pressure throttles the loop with a durable pace sleep before the step", async () => {
+    // Forced burn state (the CHIKORY_LIMIT_AT_STEP pattern, read host-side in
+    // readQuotaState): a weekly window with learned capacity whose sustainable
+    // pace (900k tokens over 1h ⇒ 0.25 tok/ms) sits far below the scripted
+    // burn (150 tokens per 100ms step ⇒ 1.5 tok/ms) — the governor must
+    // throttle. Step 0 has no burn history (push); step 1 throttles ~500ms.
+    const HOUR = 3_600_000;
+    process.env["CHIKORY_QUOTA_STATE"] = JSON.stringify([
+      {
+        window: "weekly",
+        windowMs: 7 * 24 * HOUR,
+        capacityTokens: 1_000_000,
+        consumedTokens: 100_000,
+        resetAtMs: Date.now() + HOUR,
+      },
+    ]);
+    const wire = await startFakeJudgeWire([judgeForm({ criteria: { "AC-1": true } })]);
+    cleanups.push(() => wire.close());
+    const { repoUrl, dataDir, runner } = await setup({
+      judgeWireUrl: wire.url,
+      scriptedConfig: { delayMs: 100, claimsCompleteSteps: [2] },
+    });
+    const spec = makeJudgedSpec({ repoUrl, maxSteps: 2, cadence: 10 });
+
+    const handle = await runner.start(spec);
+    const report = await awaitTerminal(handle);
+
+    expect(report.status).toBe("SUCCESS");
+    expect(report.currentStep).toBe(2);
+
+    const journal = new Journal(journalPath(dataDir, handle.runId));
+    try {
+      const paceEntries = journal.entries("limit_pace").map(
+        (entry) =>
+          entry.payload as {
+            atStep: number;
+            action: string;
+            interStepDelayMs: number;
+            limitingWindow?: string;
+            paceConflict: boolean;
+          },
+      );
+      // Step 0: no burn history yet — push, journaled on the cadence snapshot.
+      expect(paceEntries[0]).toMatchObject({ atStep: 0, action: "push", interStepDelayMs: 0 });
+      // Step 1: burn over sustainable pace — throttle bound by the weekly window.
+      const throttle = paceEntries.find((entry) => entry.action === "throttle");
+      expect(throttle).toMatchObject({ atStep: 1, limitingWindow: "weekly", paceConflict: false });
+      expect(throttle!.interStepDelayMs).toBeGreaterThan(0);
+      expect(throttle!.interStepDelayMs).toBeLessThanOrEqual(1000);
+
+      const paceResumes = journal
+        .entries("control_event")
+        .map((entry) => entry.payload as { event?: string; source?: string; details?: { sleepMs?: number } })
+        .filter((payload) => payload.event === "resume" && payload.source === "pace");
+      expect(paceResumes).toHaveLength(1);
+      expect(paceResumes[0]!.details?.sleepMs).toBe(throttle!.interStepDelayMs);
+
+      const totals = runTotals(journal);
+      expect(totals).toMatchObject({ limitPaceThrottles: 1, limitPacePredicted: 0, limitSignals: 0 });
+      expect(totals.limitPaceThrottledMs).toBe(throttle!.interStepDelayMs);
+    } finally {
+      journal.close();
+    }
   });
 
   test("F-11 retired: a productive (non-empty) step that claimsComplete is judged directly — no probe step", async () => {

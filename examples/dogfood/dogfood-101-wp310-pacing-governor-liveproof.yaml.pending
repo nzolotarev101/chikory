@@ -1,0 +1,165 @@
+# Dogfood-101: WP-310 (proactive limit-pacing governor) LIVE PROOF + F-124 fix. WP-310's core is HAND-LANDED
+#   track-B 2026-07-12 (plan.md §7 row): declared rolling-5h + weekly quota windows, cross-run consumption ledger
+#   (`<dataDir>/ledger/endpoints.db`), pure `decideLimitPacing` (push/steady/throttle/predict-limit), durable
+#   `source:"pace"` throttle sleeps, `limit_pace` journal + `pace` trace totals, `CHIKORY_QUOTA_WINDOWS` compressed-
+#   window seam, TaskSpec `horizon`. The Temporal test proof exists (`agent-loop.test.ts` "WP-310"); what is NOT yet
+#   proven is the governor on a REAL codex run: this launch arms compressed quota windows so a 7-day weekly limit's
+#   behavior plays out inside one run — push early, throttle when burn outruns the window, seal SUCCESS under
+#   capacity, `pace` line in the trace. The governor proof is read from the JOURNAL at review time (launch-env-
+#   dependent — NOT an AC the executor can satisfy).
+#
+# WHY NOW (WP-310 landing, 2026-07-12). The last 2 dogfood runs burned considerably more codex credits — WP-308
+#   made limit handling spend-first with zero weekly-quota awareness; WP-310 is the governor that paces that spend.
+#   Its live proof needs a real multi-step codex run under a compressed window, and the run should carry a real
+#   deliverable: 🟡 F-124 (dogfood-093, track-B under WP-251) — the `compaction` journal payload carries NO step
+#   index, so (a) `Journal.appendOnce({field:"stepIndex"})` NEVER matches an existing compaction row (the
+#   idempotency key points at a field the payload lacks — a crash between journal write and activity ack would
+#   double-journal a fold), and (b) `describeCompactionPressure` (`compaction-pressure.ts:32-37`) reads
+#   `payload.stepIndex` that nobody writes, so `firstPacingFoldStep` is inferred, never exact.
+#
+# F-129 PREMISE CHECK (2026-07-12): `activities.ts:1583-1589` compaction payload = `{...compaction, foldedCount,
+#   trigger}` — NO stepIndex field; `journal.ts:205` `findByKey` does `json_extract(payload_json, '$.stepIndex')`
+#   → always NULL for compaction rows; `compaction-pressure.ts:36` `typeof payload.stepIndex === "number"` can
+#   never be true. The capability is genuinely absent on HEAD.
+#
+# CLASS / LADDER. class=product. Ladder retired at rung 5; rung-4-shape run. Deliverable = F-124 fix (additive);
+#   KPI axis = WP-310 governor observed live (pace line, throttle sleeps, SUCCESS under injected capacity).
+# Ladder-rung: 4
+# Thesis-KPI: LONG-HORIZON PACING — a run under a compressed weekly quota window paces itself instead of draining
+#   the window: journal shows `limit_pace` push→throttle transitions, `control_event source:"pace"` durable sleeps,
+#   run seals SUCCESS with total consumption under the injected capacity, trace footer renders the `pace` burn line
+#   (`pace <action> (burn N tok/h) · weekly X% left …`). Zero real provider limits hit (`limit signals` line absent
+#   unless the predict variant is launched).
+#
+# Format: LOOSE (outcome goal + 4 ordered increments; layout/test names are the executor's, F-82/F-83). ACs pin
+#   "done" via the consumed FIELD on the write site + a co-reference test (F-97), never a bare type name (F-114);
+#   occurrence counts via `grep -roh … | wc -l` (F-119); no wall-clock asserts (F-115).
+#
+# ⚠️ SCOPE / DETERMINISM. Writes ONLY inside `packages/sdk-ts/`. ADDITIVE — the compaction payload gains a field;
+#   existing journals (no stepIndex on old compaction rows) MUST still parse and render (`describeCompactionPressure`
+#   already tolerates absence); no frozen-contract reshape; NO new dependency; NO key material.
+#
+# ⚠️ QUEUE ORDER: this file is parked as `.yaml.pending` so the dogfood.sh spec-pick glob
+#   (`dogfood-[0-9][0-9][0-9]*.yaml`, picks the HIGHEST sort) keeps resolving to the queued dogfood-100 (WP-309).
+#   After dogfood-100 lands, rename: `mv examples/dogfood/dogfood-101-…yaml.pending examples/dogfood/dogfood-101-…yaml`.
+#
+# ⚠️ LAUNCH (commit the WP-310 working tree FIRST — the workspace clones HEAD; an uncommitted governor means
+#   nothing to prove). Verify the spec-pick glob resolves to THIS file. `CHIKORY_PREFLIGHT_ONLY=1 devbox run
+#   run-dogfood` dry-runs the guards at $0. Then, numbers calibrated from dogfood-099's real burn (~1.3M
+#   tokens/step, ~6 min/step ≈ 13M tok/h):
+#
+#   THROTTLE variant (this headline): sustainable ≈ 6.7M tok/h — observed 13M tok/h must throttle ~5-6 min/step,
+#   never predict-limit (remaining ≫ one step):
+#     CHIKORY_QUOTA_WINDOWS='[{"window":"weekly","durationMs":10800000,"capacityTokens":20000000}]' \
+#       devbox run run-dogfood
+#
+#   PREDICT variant (optional second launch, fresh ledger dir): capacity ~2.3 steps of burn — remaining drops
+#   below one mean step by ~step 2 → predict-limit routes through the WP-308 response path with ZERO real 429s
+#   (`limitPacePredicted ≥ 1`; the synthesized signal journals ONE `limit_signal` row, source "injected"):
+#     CHIKORY_QUOTA_WINDOWS='[{"window":"weekly","durationMs":10800000,"capacityTokens":3000000}]' \
+#       devbox run run-dogfood
+#
+#   REVIEW (dogfood-review, from the journal): `limit_pace` entries present; ≥1 throttle with
+#   `limitingWindow:"weekly"`; `control_event` resume `source:"pace"` sleepMs matches the throttle's
+#   interStepDelayMs; `run.totals` `limit_pace_throttles ≥ 1`; trace footer `pace` line renders; total
+#   `consumption` in `<dataDir>/ledger/endpoints.db` < injected capacityTokens.
+
+name: dogfood-101-wp310-pacing-governor-liveproof
+goal: >
+  Fix F-124 in the Chikory TypeScript SDK: the `compaction` journal entry carries no step index. The write site
+  (`compactContext` in `packages/sdk-ts/src/runner/activities.ts`) journals the fold with
+  `appendOnce({ field: "stepIndex", value: input.stepIndex })` but the PAYLOAD it writes has no `stepIndex` field —
+  so the idempotency key can never match (a crash between the journal write and the activity ack double-journals
+  the fold), and `describeCompactionPressure` (`packages/sdk-ts/src/runner/compaction-pressure.ts`) reads a
+  `payload.stepIndex` nobody writes, leaving `firstPacingFoldStep` inferred instead of exact. Deliver in FOUR
+  ordered increments, ONE per durable step, each adding DISTINCT non-trivial working code + tests:
+
+    * PART 1 — PAYLOAD FIELD: the compaction journal payload carries the fold's `stepIndex` (additive — old
+      journals without it MUST still parse and render). Tested: a journaled fold's payload round-trips the step.
+
+    * PART 2 — IDEMPOTENCY PROOF: a test proves `appendOnce` now actually dedupes a re-executed compaction
+      activity — appending the same fold twice yields ONE compaction row (this is broken on HEAD; the test must
+      fail against the old payload shape).
+
+    * PART 3 — EXACT FIRST-FOLD STEP: `describeCompactionPressure` derives `firstPacingFoldStep` from the REAL
+      journaled `stepIndex` when present (legacy inference kept as fallback for old journals). Tested both ways.
+
+    * PART 4 — REGRESSION: the FULL `packages/sdk-ts` suite (tsc + eslint + vitest) green; no frozen-contract
+      shape change; a journal with pre-fix compaction rows still renders in `chikory trace`.
+
+  CONSTRAINTS: additive only; writes ONLY inside `packages/sdk-ts/`; NO new dependency; NO key material. Each PART
+  lands its own tests and does NOT break an earlier PART's tests; do NOT front-load a later PART (the judge
+  compares the diff footprint against the active PART and WILL roll back). If a verification step reports a
+  failing suite, READ the failure and fix the IMPLEMENTATION — never weaken or delete an assertion.
+
+repos:
+  - url: /Users/nikitazolotarev/repos/chikory
+    writable: true
+
+bounded_work_unit:
+  min_durable_steps: 4
+  directive: >
+    Advance EXACTLY the ONE numbered PART named by this step's chunk — implement it and its tests, then stop and
+    let the durable checkpoint seal. Do NOT front-load a later PART.
+  work_chunks:
+    - name: part-1-payload-field
+      directive: "PART 1 ONLY: the compaction journal payload carries the fold's stepIndex (additive; old journals still parse). Tests."
+    - name: part-2-idempotency-proof
+      directive: "PART 2 ONLY: a test proving appendOnce dedupes a re-executed compaction — same fold appended twice yields ONE row."
+    - name: part-3-exact-first-fold
+      directive: "PART 3 ONLY: describeCompactionPressure derives firstPacingFoldStep from the journaled stepIndex when present, legacy inference as fallback. Tests both ways."
+    - name: part-4-regression
+      directive: "PART 4 ONLY: full packages/sdk-ts suite (tsc + eslint + vitest) green; pre-fix compaction rows still render in chikory trace; fix implementations, never weaken tests."
+
+acceptance_criteria:
+  - id: AC-1
+    description: >
+      The compaction write site journals the fold's step index — the payload the `compactContext` activity appends
+      carries a `stepIndex` sourced from its input. (F-114-SAFE: greps the consumed FIELD expression on the write
+      site, not a type name; absent on HEAD per the F-129 premise check.)
+    check: >
+      cd packages/sdk-ts &&
+      sed -n '/kind: "compaction"/,/appendOnce\|artifactRefs/p' src/runner/activities.ts | grep -q 'stepIndex'
+  - id: AC-2
+    description: >
+      A test co-references the fixed pieces — some `test/` file exercises BOTH the compaction journaling path
+      (`compactContext`) AND `firstPacingFoldStep`, proving the exact-step derivation runs against a real journaled
+      fold, not a hand-built payload. (F-97-SAFE co-reference; filename is the executor's.)
+    check: >
+      cd packages/sdk-ts &&
+      for f in $(grep -rl 'firstPacingFoldStep' test/ 2>/dev/null); do
+        grep -q 'compactContext\|kind: "compaction"\|"compaction"' "$f" && { echo ok; break; };
+      done | grep -q ok
+  - id: AC-3
+    description: >
+      The SDK stays type- and lint-clean and the FULL existing suite is green, proving the change is additive
+      (old journals without a compaction stepIndex still parse and render).
+    check: cd packages/sdk-ts && pnpm exec tsc --noEmit && pnpm exec eslint . && pnpm exec vitest run
+
+budget_usd: 45
+max_steps: 30
+
+# CONTEXT-ROT (WP-203/WP-207): auto-calibrated window (F-125 mechanism, live-proven 095/096/097/098/099).
+pacing:
+  mode: auto
+  autoCalibrate: true
+
+# UNATTENDED (WP-271): operator-free; a genuine ESCALATE seals a resumable FAILED (WP-520).
+unattended:
+  escalation: seal_resumable_failed
+
+executor:
+  adapter: codex
+  family: openai
+
+judge:
+  family: openai-compat
+  cadence: 2
+  max_cost_share: 0.5
+
+routing:
+  stages:
+    plan: { provider: openai-compat, model: gpt-5.5 }
+    code: { provider: openai-compat, model: gpt-5.5 }
+    review: { provider: openai-compat, model: gpt-5.5 }
+    judge: { provider: openai-compat, model: gemini-3.1-pro-preview }

@@ -20,10 +20,12 @@ import { applyLimitResponse } from "../executors/limit-response.js";
 import {
   describeEndpointCapability,
   endpointCapabilityFamily,
+  type DeclaredQuotaWindow,
   type ResolvedEndpointCapabilities,
   resolveEndpointCapabilities,
 } from "../endpoint-capability.js";
 import { buildVerdict, enforceFamilyDiversity, runJudgePass } from "../judge/index.js";
+import { EndpointLedger } from "../journal/endpoint-ledger.js";
 import { Journal, reportFromJournal, runTotals } from "../journal/journal.js";
 import { decideLimitResponse, type LimitResponsePlan } from "../limit-response.js";
 import { classifyLimitSignal, type ClassifiedLimitSignal } from "../limit-signal.js";
@@ -65,7 +67,15 @@ import {
   isBlindMeteredStep,
   type KilledStepUsageEstimate,
 } from "./killed-step-usage.js";
-import { artifactsDir, journalPath, runDir, sharedArtifactsDir, workspaceDir } from "./paths.js";
+import type { LimitPaceAction, WindowQuotaState } from "./limit-pacing.js";
+import {
+  artifactsDir,
+  endpointLedgerPath,
+  journalPath,
+  runDir,
+  sharedArtifactsDir,
+  workspaceDir,
+} from "./paths.js";
 import {
   collectWorkspaceRepos,
   workspaceRepoCheckpointId,
@@ -158,12 +168,14 @@ export interface RestoredWorkflowState {
   budgetEventIndex: number;
   seamEventIndex: number;
   pacingEventIndex: number;
+  limitPaceEventIndex: number;
   escalationIndex: number;
   controlEventIndex: number;
   consecutiveFailures: number;
   recentSummaries: string[];
   stepCosts: number[];
   stepTokens: number[];
+  stepDurationsMs: number[];
   lastVerdict?: { kind: JudgeVerdict["kind"]; atStep: number };
   lastGoodCheckpointId?: string;
   judgeFeedback?: string;
@@ -196,6 +208,22 @@ export interface RemediationPayload {
 export interface CapabilityPayload {
   capabilityIndex: 0;
   stages: ResolvedEndpointCapabilities;
+}
+
+/** journal-format.md §3 `limit_pace` entry (WP-310) — one governor decision. */
+export interface LimitPacePayload {
+  limitPaceEventIndex: number;
+  atStep: number;
+  action: LimitPaceAction;
+  interStepDelayMs: number;
+  limitingWindow?: DeclaredQuotaWindow["window"];
+  observedTokensPerHour: number;
+  /** Omitted when no window has a known capacity (sustainable pace = ∞). */
+  sustainableTokensPerHour?: number;
+  requiredTokensPerHour: number;
+  paceConflict: boolean;
+  /** Per-window burn snapshot at decision time. */
+  windows: WindowQuotaState[];
 }
 
 /** journal-format.md §3 `judge` entry: evidence refs + form + model + cost. */
@@ -258,6 +286,40 @@ function limitInjectedAtStep(raw: string | undefined, stepIndex: number): boolea
 
 function sharedHandoffStore(deps: RunnerActivityDeps): ArtifactStore {
   return deps.handoffStore ?? createLocalArtifactStore(sharedArtifactsDir(deps.dataDir));
+}
+
+/**
+ * Cross-run consumption index (WP-310): every executed step lands one row in
+ * the shared endpoint ledger so quota-window pacing can see burn across ALL
+ * runs on the subscription. Idempotent per (runId, stepIndex) — a retried or
+ * memoized activity never double-counts. Ledger failure never fails the step:
+ * pacing degrades to observe-only, the run record stays authoritative.
+ */
+function appendStepConsumption(
+  deps: RunnerActivityDeps,
+  spec: TaskSpec,
+  input: { runId: string; stepIndex: number },
+  record: StepRecord,
+): void {
+  try {
+    const ledger = new EndpointLedger(endpointLedgerPath(deps.dataDir));
+    try {
+      ledger.appendConsumption({
+        endpointTarget: spec.executor.adapter,
+        family: spec.executor.family,
+        runId: input.runId,
+        stepIndex: input.stepIndex,
+        tsMs: Date.now(),
+        tokensIn: record.tokens?.input ?? 0,
+        tokensOut: record.tokens?.output ?? 0,
+        costUsd: record.costUsd,
+      });
+    } finally {
+      ledger.close();
+    }
+  } catch {
+    // observe-only degradation: a broken ledger must not fail real work
+  }
 }
 
 /** Git tag marking the workspace state right after prepareRun (= `<runId>@base`). */
@@ -667,6 +729,12 @@ export function createRunnerActivities(deps: RunnerActivityDeps) {
       instruction: string;
       context: ContextBundle;
       limits: StepLimits;
+      /**
+       * WP-310 predicted limit from the pacing governor: the next step would
+       * blow a quota window, so route through the WP-308 response path
+       * (failover → independent work → park) BEFORE the provider fires 429.
+       */
+      predictLimit?: { reason: string; retryAtMs?: number };
     }): Promise<
       StepRecord & {
         limitParkResponse?: LimitParkResponse;
@@ -679,6 +747,9 @@ export function createRunnerActivities(deps: RunnerActivityDeps) {
           const existing = journal.findByKey("step", "stepIndex", input.stepIndex);
           if (existing) {
             const payload = existing.payload as StepPayload;
+            // Re-assert the ledger row: a crash between the journal write and
+            // the ledger append would otherwise lose this step's consumption.
+            appendStepConsumption(deps, requireSpec(journal, input.runId), input, payload.record);
             return {
               ...payload.record,
               ...(payload.limitParkResponse === undefined
@@ -701,7 +772,10 @@ export function createRunnerActivities(deps: RunnerActivityDeps) {
           const codeModel = spec.routing.stages.code;
           const capabilities = resolveEndpointCapabilities(spec);
 
-          if (limitInjectedAtStep(process.env["CHIKORY_LIMIT_AT_STEP"], input.stepIndex)) {
+          if (
+            input.predictLimit !== undefined ||
+            limitInjectedAtStep(process.env["CHIKORY_LIMIT_AT_STEP"], input.stepIndex)
+          ) {
             const limitCapabilities = resolveEndpointCapabilities(spec.routing);
             const signal = classifyLimitSignal({
               capability:
@@ -711,14 +785,23 @@ export function createRunnerActivities(deps: RunnerActivityDeps) {
                   adapter: spec.executor.adapter,
                   family: spec.executor.family,
                 }),
-              signal: {
-                kind: "injected",
-                reason: `CHIKORY_LIMIT_AT_STEP injected at step ${input.stepIndex}`,
-                retryAfterMs: 5000,
-              },
+              signal:
+                input.predictLimit !== undefined
+                  ? {
+                      kind: "injected",
+                      reason: input.predictLimit.reason,
+                      ...(input.predictLimit.retryAtMs !== undefined
+                        ? { retryAtMs: input.predictLimit.retryAtMs }
+                        : {}),
+                    }
+                  : {
+                      kind: "injected",
+                      reason: `CHIKORY_LIMIT_AT_STEP injected at step ${input.stepIndex}`,
+                      retryAfterMs: 5000,
+                    },
             });
             if (signal === undefined) {
-              throw new Error("CHIKORY_LIMIT_AT_STEP injection did not classify as a limit");
+              throw new Error("limit injection did not classify as a limit");
             }
             const limitResponse = decideLimitResponse({
               stage: "code",
@@ -794,6 +877,7 @@ export function createRunnerActivities(deps: RunnerActivityDeps) {
                 artifactRefs: [record.diffRef, record.transcriptRef],
               },
             );
+            appendStepConsumption(deps, spec, input, record);
             recordRunStepSpan({
               runId: input.runId,
               stepIndex: input.stepIndex,
@@ -875,6 +959,7 @@ export function createRunnerActivities(deps: RunnerActivityDeps) {
               artifactRefs: [record.diffRef, record.transcriptRef],
             },
           );
+          appendStepConsumption(deps, spec, input, record);
           recordRunStepSpan({
             runId: input.runId,
             stepIndex: input.stepIndex,
@@ -1154,6 +1239,7 @@ export function createRunnerActivities(deps: RunnerActivityDeps) {
           steps.length === 0 ? 0 : Math.max(...steps.map((step) => step.stepIndex)) + 1;
         const stepCosts = steps.map((step) => step.record.costUsd);
         const stepTokens = steps.map((step) => step.record.tokens.input + step.record.tokens.output);
+        const stepDurationsMs = steps.map((step) => step.record.durationMs);
 
         // WP-520 (ADR-009 D4) — resumable-FAILED reopen: re-starting the
         // agentLoop workflow over a journal whose LAST terminal entry is a
@@ -1292,12 +1378,14 @@ export function createRunnerActivities(deps: RunnerActivityDeps) {
           budgetEventIndex: nextPayloadIndex("budget_event", "budgetEventIndex"),
           seamEventIndex: nextPayloadIndex("seam", "seamEventIndex"),
           pacingEventIndex: nextPayloadIndex("pacing", "pacingEventIndex"),
+          limitPaceEventIndex: nextPayloadIndex("limit_pace", "limitPaceEventIndex"),
           escalationIndex: nextPayloadIndex("verdict", "escalationIndex"),
           controlEventIndex: nextPayloadIndex("control_event", "controlEventIndex"),
           consecutiveFailures: lastStep?.record.status === "FAILED" ? failedTail : 0,
           recentSummaries: steps.map((step) => step.record.summary),
           stepCosts,
           stepTokens,
+          stepDurationsMs,
           ...(lastVerdict !== undefined ? { lastVerdict } : {}),
           ...(lastGoodCheckpoint !== undefined ? { lastGoodCheckpointId: lastGoodCheckpoint.id } : {}),
           // A reopened seal's failure evidence outranks the stale verdict
@@ -1545,7 +1633,7 @@ export function createRunnerActivities(deps: RunnerActivityDeps) {
       controlEventIndex: number;
       event: "suspend" | "resume";
       atStep: number;
-      source?: "operator" | "soak" | "limit";
+      source?: "operator" | "soak" | "limit" | "pace";
       details?: Record<string, number>;
     }): Promise<void> {
       const journal = openJournal(deps, input.runId);
@@ -1676,6 +1764,105 @@ export function createRunnerActivities(deps: RunnerActivityDeps) {
               remainingTokens: input.remainingTokens,
               utilization: input.utilization,
             },
+            costDeltaUsd: 0,
+            artifactRefs: [],
+          },
+        );
+      } finally {
+        journal.close();
+      }
+    },
+
+    /**
+     * Quota-window burn state for the limit-pacing governor (WP-310, RT-12).
+     * Merges the endpoint's declared windows (or the `debug.quotaWindows`
+     * compressed-window override) with the cross-run consumption ledger. Read
+     * fresh each step: sibling concurrent runs on the same subscription move
+     * the ledger between our steps. `CHIKORY_QUOTA_STATE` (JSON
+     * `WindowQuotaState[]`) is the forced-state test seam — read here, in an
+     * activity, never in the workflow (the `CHIKORY_LIMIT_AT_STEP` pattern).
+     */
+    async readQuotaState(input: { runId: string }): Promise<{
+      nowMs: number;
+      windows: WindowQuotaState[];
+    }> {
+      const nowMs = Date.now();
+      const forced = process.env["CHIKORY_QUOTA_STATE"];
+      if (forced !== undefined && forced !== "") {
+        return { nowMs, windows: JSON.parse(forced) as WindowQuotaState[] };
+      }
+
+      const journal = openJournal(deps, input.runId);
+      let spec: TaskSpec;
+      try {
+        spec = requireSpec(journal, input.runId);
+      } finally {
+        journal.close();
+      }
+
+      const debugWindows = spec.debug?.quotaWindows;
+      const capability = describeEndpointCapability({
+        adapter: spec.executor.adapter,
+        family: spec.executor.family,
+      });
+      const declared: readonly DeclaredQuotaWindow[] =
+        debugWindows ?? (capability.kind === "executor" ? (capability.limits.quotaWindows ?? []) : []);
+      if (declared.length === 0) return { nowMs, windows: [] };
+
+      const ledger = new EndpointLedger(endpointLedgerPath(deps.dataDir));
+      try {
+        const windows = declared.map((window, i) => {
+          const state = ledger.windowState(spec.executor.adapter, window, nowMs);
+          const debugCapacity = debugWindows?.[i]?.capacityTokens;
+          return {
+            ...state,
+            ...(debugCapacity !== undefined ? { capacityTokens: debugCapacity } : {}),
+          };
+        });
+        return { nowMs, windows };
+      } finally {
+        ledger.close();
+      }
+    },
+
+    /**
+     * Limit-pacing governor ledger events (WP-310, RT-12): durable,
+     * replay-safe telemetry for throttle sleeps, predicted limits, and
+     * periodic burn-state snapshots.
+     */
+    async recordLimitPaceEvent(input: {
+      runId: string;
+      limitPaceEventIndex: number;
+      atStep: number;
+      action: LimitPaceAction;
+      interStepDelayMs: number;
+      limitingWindow?: DeclaredQuotaWindow["window"];
+      observedTokensPerHour: number;
+      sustainableTokensPerHour?: number;
+      requiredTokensPerHour: number;
+      paceConflict: boolean;
+      windows: WindowQuotaState[];
+    }): Promise<void> {
+      const journal = openJournal(deps, input.runId);
+      try {
+        journal.appendOnce(
+          { field: "limitPaceEventIndex", value: input.limitPaceEventIndex },
+          {
+            kind: "limit_pace",
+            payload: {
+              limitPaceEventIndex: input.limitPaceEventIndex,
+              atStep: input.atStep,
+              action: input.action,
+              interStepDelayMs: input.interStepDelayMs,
+              ...(input.limitingWindow !== undefined ? { limitingWindow: input.limitingWindow } : {}),
+              observedTokensPerHour: input.observedTokensPerHour,
+              ...(input.sustainableTokensPerHour !== undefined
+                ? { sustainableTokensPerHour: input.sustainableTokensPerHour }
+                : {}),
+              requiredTokensPerHour: input.requiredTokensPerHour,
+              paceConflict: input.paceConflict,
+              windows: input.windows,
+            } satisfies LimitPacePayload,
             costDeltaUsd: 0,
             artifactRefs: [],
           },

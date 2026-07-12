@@ -37,12 +37,32 @@ export interface EndpointLimitSemantics {
   readonly defaultMaxTokens: number;
 }
 
+/**
+ * A provider-imposed usage window on a subscription endpoint (WP-310).
+ * Capacity is deliberately absent: providers do not publish subscription
+ * token quotas, so capacity is learned from limit observations recorded in
+ * the endpoint ledger — descriptors stay pure static data.
+ */
+export interface DeclaredQuotaWindow {
+  readonly window: "rolling-5h" | "weekly";
+  readonly durationMs: number;
+}
+
+export const ROLLING_5H_WINDOW_MS = 5 * 60 * 60 * 1000;
+export const WEEKLY_WINDOW_MS = 7 * 24 * 60 * 60 * 1000;
+
+const SUBSCRIPTION_QUOTA_WINDOWS: readonly DeclaredQuotaWindow[] = [
+  { window: "rolling-5h", durationMs: ROLLING_5H_WINDOW_MS },
+  { window: "weekly", durationMs: WEEKLY_WINDOW_MS },
+];
+
 export interface ExecutorLimitSemantics {
   readonly kind: "rolling-window";
   readonly window: "subscription-session" | "router-turn-loop";
   readonly reset: "provider-managed";
   readonly boundedBy: "max-turns" | "max-seconds-and-prompt-scope" | "native-turn-loop";
   readonly defaultMaxTurns?: number;
+  readonly quotaWindows?: readonly DeclaredQuotaWindow[];
 }
 
 export interface EndpointCostLinkage {
@@ -198,6 +218,7 @@ function describeExecutorCapability(target: KnownExecutorEndpointTarget): Execut
           reset: "provider-managed",
           boundedBy: "max-turns",
           defaultMaxTurns: 25,
+          quotaWindows: SUBSCRIPTION_QUOTA_WINDOWS,
         },
         cost: {
           pricing: "subscription-linked",
@@ -222,6 +243,7 @@ function describeExecutorCapability(target: KnownExecutorEndpointTarget): Execut
           window: "subscription-session",
           reset: "provider-managed",
           boundedBy: "max-seconds-and-prompt-scope",
+          quotaWindows: SUBSCRIPTION_QUOTA_WINDOWS,
         },
         cost: {
           pricing: "subscription-linked",

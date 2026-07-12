@@ -113,6 +113,20 @@ Current consumers:
   `chikory trace` derives `limit-slept` from workflow-side limit resume events
   and derives `conserved` only from executed non-park limit-response step
   payloads. Limit-free runs render exactly as before.
+- `decideLimitPacing` (WP-310) is the proactive twin: before each step the
+  workflow reads quota-window burn state (`readQuotaState` merges the
+  descriptor's declared `quotaWindows` — rolling-5h and weekly on the
+  subscription CLI executors — with the cross-run consumption ledger at
+  `<dataDir>/ledger/endpoints.db`) and decides push / steady / throttle
+  (durable `source:"pace"` sleep, clamped, never below the TaskSpec `horizon`
+  deadline pace) / predict-limit. A predicted limit synthesizes an injected
+  signal into the same `classifyLimitSignal → decideLimitResponse →
+  applyLimitResponse` path above, so proactive responses inherit failover
+  ordering and the family invariant for free. Window capacity is never
+  vendor-declared: it is learned from `limit_observations` the WP-309 call
+  sites append at real limit hits. Unknown capacity means observe-only —
+  the governor never throttles on a guess, and pace-free runs render exactly
+  as before.
 
 ## Telemetry (WP-105)
 
