@@ -73,6 +73,7 @@ import {
 import { decideSoakDelay } from "./soak.js";
 import { decideStepForcing } from "./step-forcing.js";
 import { decideWorkChunk } from "./work-chunk.js";
+import { decideLimitParkDelay } from "./limit-park.js";
 
 /** Step bound when the TaskSpec doesn't say otherwise (executors.md). */
 export const DEFAULT_STEP_LIMITS: StepLimits = { maxSeconds: 600 };
@@ -323,6 +324,28 @@ export async function agentLoop(spec: TaskSpec): Promise<RunStatus> {
     return undefined;
   }
 
+  async function parkForLimitReset(
+    response: Awaited<ReturnType<RunnerActivities["executeStep"]>>["limitParkResponse"],
+  ): Promise<RunStatus | undefined> {
+    if (response === undefined) return undefined;
+    const limitDelay = decideLimitParkDelay({ nowMs: Date.now() }, response);
+    if (limitDelay === null) return undefined;
+
+    status = "SUSPENDED";
+    await sleep(limitDelay.sleepMs);
+    await activities.recordControlEvent({
+      runId,
+      controlEventIndex: controlEventIndex++,
+      event: "resume",
+      atStep: stepIndex,
+      source: "limit",
+      details: { sleepMs: limitDelay.sleepMs },
+    });
+    if (cancelRequested) return seal("CANCELLED", "cancelled during limit reset delay");
+    status = "RUNNING";
+    return undefined;
+  }
+
   const prepared = await activities.prepareRun({ runId, spec });
   if (prepared.status === "FAILED") return seal("FAILED", prepared.reason);
   const { baseCommit } = prepared;
@@ -499,6 +522,8 @@ export async function agentLoop(spec: TaskSpec): Promise<RunStatus> {
       context,
       limits: DEFAULT_STEP_LIMITS,
     });
+    const limitParkTerminal = await parkForLimitReset(record.limitParkResponse);
+    if (limitParkTerminal !== undefined) return limitParkTerminal;
 
     // WP-244 deterministic judge-catch seam (dogfood/test-only). Right after
     // the chosen step's executor runs, overwrite a workspace file with
@@ -623,7 +648,8 @@ export async function agentLoop(spec: TaskSpec): Promise<RunStatus> {
     // Judge on cadence or a completion milestone (JD-2); each pass is one
     // activity (WP-121/131).
     const completionMilestone = isCompletionMilestone(record);
-    const workChunkMilestone = activeWorkChunk.action === "use_chunk";
+    const workChunkMilestone =
+      activeWorkChunk.action === "use_chunk" && record.limitDeferredPlanItem === undefined;
     // A remediation attempt (WP-519) is re-judged off-cadence: the heal is
     // only real if the judge re-checks the stuck criterion right away.
     const remediationMilestone = remediationPending;

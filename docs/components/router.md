@@ -100,8 +100,19 @@ Current consumers:
 - `executeStep` consumes the scheduler when `CHIKORY_LIMIT_AT_STEP` injects a
   code-stage limit in tests/dogfood. The activity journals a replay-safe
   `limit_signal` row with the classified signal, full scheduler plan, and chosen
-  response. `chikory trace` derives `limit-slept` versus `conserved` only from
-  those rows; limit-free runs render exactly as before.
+  response, then applies that chosen response through the executor-side
+  `applyLimitResponse` helper. Declared failover re-dispatches the real executor
+  through the selected failover target; limit-independent work runs a later legal
+  target and journals both `executedPlanItem` and `deferredPlanItem`; park
+  responses return an internal workflow timer request instead of sleeping inside
+  the activity.
+- The workflow treats a `deferredPlanItem` as real conservation, not completion
+  of the throttled item. In bounded work-unit runs, a limit-independent step does
+  not consume the active chunk or trigger chunk-success judging; the original
+  chunk must still run and be judged before the run can seal `SUCCESS`.
+  `chikory trace` derives `limit-slept` from workflow-side limit resume events
+  and derives `conserved` only from executed non-park limit-response step
+  payloads. Limit-free runs render exactly as before.
 
 ## Telemetry (WP-105)
 

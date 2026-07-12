@@ -16,6 +16,7 @@ import { promisify } from "node:util";
 import { heartbeat } from "@temporalio/activity";
 
 import { createLocalArtifactStore } from "../artifacts/index.js";
+import { applyLimitResponse } from "../executors/limit-response.js";
 import {
   describeEndpointCapability,
   endpointCapabilityFamily,
@@ -104,6 +105,8 @@ export interface RunnerActivityDeps {
   handoffStore?: ArtifactStore;
 }
 
+type LimitParkResponse = Extract<LimitResponsePlan["steps"][number], { action: "park-until-reset" }>;
+
 export interface StepPayload {
   stepIndex: number;
   instruction: string;
@@ -111,6 +114,12 @@ export interface StepPayload {
   record: StepRecord;
   /** Present only when the dogfood limit seam fires; absent keeps normal journals byte-identical. */
   limitResponse?: LimitResponsePlan;
+  /** Present when the scheduler runs later independent work before retrying this throttled item. */
+  deferredPlanItem?: string;
+  /** Present when the journaled step record is for scheduler-selected independent work. */
+  executedPlanItem?: string;
+  /** Internal workflow timer request for a park-until-reset limit response. */
+  limitParkResponse?: LimitParkResponse;
   /**
    * WP-515 (F-96): present when a blind-metered step's usage was estimated
    * from the run's observed per-tool-call rate — the record's tokens/cost
@@ -658,12 +667,28 @@ export function createRunnerActivities(deps: RunnerActivityDeps) {
       instruction: string;
       context: ContextBundle;
       limits: StepLimits;
-    }): Promise<StepRecord> {
+    }): Promise<
+      StepRecord & {
+        limitParkResponse?: LimitParkResponse;
+        limitDeferredPlanItem?: string;
+      }
+    > {
       return withHeartbeat(async () => {
         const journal = openJournal(deps, input.runId);
         try {
           const existing = journal.findByKey("step", "stepIndex", input.stepIndex);
-          if (existing) return (existing.payload as StepPayload).record;
+          if (existing) {
+            const payload = existing.payload as StepPayload;
+            return {
+              ...payload.record,
+              ...(payload.limitParkResponse === undefined
+                ? {}
+                : { limitParkResponse: payload.limitParkResponse }),
+              ...(payload.deferredPlanItem === undefined
+                ? {}
+                : { limitDeferredPlanItem: payload.deferredPlanItem }),
+            };
+          }
 
           const spec = requireSpec(journal, input.runId);
           const factory = deps.adapters[spec.executor.adapter];
@@ -677,11 +702,15 @@ export function createRunnerActivities(deps: RunnerActivityDeps) {
           const capabilities = resolveEndpointCapabilities(spec);
 
           if (limitInjectedAtStep(process.env["CHIKORY_LIMIT_AT_STEP"], input.stepIndex)) {
+            const limitCapabilities = resolveEndpointCapabilities(spec.routing);
             const signal = classifyLimitSignal({
-              capability: capabilities.code[0] ?? describeEndpointCapability({
-                adapter: spec.executor.adapter,
-                family: spec.executor.family,
-              }),
+              capability:
+                limitCapabilities.code[0] ??
+                capabilities.code[0] ??
+                describeEndpointCapability({
+                  adapter: spec.executor.adapter,
+                  family: spec.executor.family,
+                }),
               signal: {
                 kind: "injected",
                 reason: `CHIKORY_LIMIT_AT_STEP injected at step ${input.stepIndex}`,
@@ -694,9 +723,10 @@ export function createRunnerActivities(deps: RunnerActivityDeps) {
             const limitResponse = decideLimitResponse({
               stage: "code",
               signal,
-              capabilities,
+              capabilities: limitCapabilities,
             });
             const selected =
+              limitResponse.steps.find((step) => step.action === "declared-failover") ??
               limitResponse.steps.find((step) => step.action !== "park-until-reset") ??
               limitResponse.steps[0];
             if (selected === undefined) {
@@ -718,43 +748,41 @@ export function createRunnerActivities(deps: RunnerActivityDeps) {
                 artifactRefs: [],
               },
             );
-            const [diffRef, transcriptRef] = await Promise.all([
-              store.put("", {
-                kind: "diff",
-                summary: `limit injection step ${input.stepIndex} produced no diff`,
-              }),
-              store.put(
-                [
-                  signal.reason,
-                  `scheduler selected ${selected.action}`,
-                ].join("\n"),
-                {
-                  kind: "transcript",
-                  summary: `limit injection step ${input.stepIndex}`,
-                },
-              ),
-            ]);
-            const record: StepRecord = {
-              status: selected?.action === "park-until-reset" ? "FAILED" : "SUCCESS",
-              diffRef,
-              summary:
-                `limit response: ${selected.action} after ${signal.reason}`,
-              toolCalls: 0,
-              tokens: { input: 0, output: 0 },
-              costUsd: 0,
-              costEstimated: false,
-              durationMs: 0,
-              transcriptRef,
-              ...(selected?.action === "park-until-reset"
-                ? { failure: { reason: signal.reason, retriable: true } }
-                : { claimsComplete: true }),
-            };
+            const record = await applyLimitResponse({
+              store,
+              stepIndex: input.stepIndex,
+              planItem: input.context.planItem,
+              signal,
+              selected,
+              adapterFactory: factory,
+              baseRouting: spec.routing,
+              modelFamily: spec.executor.family,
+              routerOptions: deps.routerOptions,
+              stepInput: {
+                workspaceDir: workspaceDir(deps.dataDir, input.runId),
+                instruction: input.instruction,
+                context: input.context,
+                limits: input.limits,
+              },
+            });
+            const executedPlanItem =
+              selected.action === "limit-independent-work"
+                ? `limit-independent ${selected.target.stage} work before retrying: ${input.context.planItem}`
+                : input.context.planItem;
+            const limitParkResponse = selected.action === "park-until-reset" ? selected : undefined;
             const payload: StepPayload = {
               stepIndex: input.stepIndex,
               instruction: input.instruction,
-              planItem: input.context.planItem,
+              planItem: executedPlanItem,
               record,
               limitResponse,
+              ...(limitParkResponse === undefined ? {} : { limitParkResponse }),
+              ...(selected.action === "limit-independent-work"
+                ? {
+                    deferredPlanItem: input.context.planItem,
+                    executedPlanItem,
+                  }
+                : {}),
             };
             journal.appendOnce(
               { field: "stepIndex", value: input.stepIndex },
@@ -772,7 +800,13 @@ export function createRunnerActivities(deps: RunnerActivityDeps) {
               planItem: input.context.planItem,
               record,
             });
-            return record;
+            return {
+              ...record,
+              ...(limitParkResponse === undefined ? {} : { limitParkResponse }),
+              ...(selected.action === "limit-independent-work"
+                ? { limitDeferredPlanItem: input.context.planItem }
+                : {}),
+            };
           }
 
           const codeRouting: RoutingPolicy = {
@@ -1511,7 +1545,7 @@ export function createRunnerActivities(deps: RunnerActivityDeps) {
       controlEventIndex: number;
       event: "suspend" | "resume";
       atStep: number;
-      source?: "operator" | "soak";
+      source?: "operator" | "soak" | "limit";
       details?: Record<string, number>;
     }): Promise<void> {
       const journal = openJournal(deps, input.runId);

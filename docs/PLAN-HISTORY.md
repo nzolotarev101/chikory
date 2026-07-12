@@ -4,6 +4,12 @@
 > per-run detail lives in [`docs/reports/`](reports/). Content below was moved
 > verbatim out of the living docs on 2026-07-02 (course correction — plan.md §6).
 
+## Archived 2026-07-12 — displaced by dogfood-099 (`run-03cd4c21`, WP-308 DONE)
+
+Prior plan.md Queue line (dogfood-098 detail), displaced verbatim:
+
+> - **Queue (P3 intelligent-scaling track §7 active; 097 detail → PLAN-HISTORY.md 2026-07-11):** ✅ WP-307 DONE (dogfood-097 `run-d44ff996`, `docs/reports/dogfood-097.md`). 🟡 **WP-308 (work-conserving limit scheduler) CORE LANDED — dogfood-098 `run-6ef24fb7`, SUCCESS 8 steps $15.83/$45, 47m 45s, uncommitted working tree (`docs/reports/dogfood-098.md`).** `classifyLimitSignal` + `decideLimitResponse` (ordered plan: declared failover → limit-independent work → park last, invariant #2 preserved) + `CHIKORY_LIMIT_AT_STEP` seam + replay-safe `limit_signal` journal + `limit-slept vs conserved` trace totals. **Judge caught front-loading TWICE** (steps 2/4, F-130 footprint rubric — ledger now 3 genuine pre-land catches; enforcement cost $6.34 = 40.1% of spend → F-134 escalation trigger recorded). Residue = 🟡 **F-136: the seam journals the decision but does not EXECUTE it** (injected-limit step claims complete with zero work, `activities.ts:677+`) — the open half of WP-308. **NEXT HEADLINE (progression ✅ PROGRESSING, meta cap 0:3 → class=product): dogfood-099 on WP-308 completion** — make the scheduler ACT (failover re-dispatch of the throttled stage / real limit-independent work / durable-timer park) and seal an end-to-end forced-limit run that slept measurably less than the park-only baseline; feeds WP-309 (real 429/CLI-stderr call sites). Parallel lane (track-B): WP-301 ✅ + WP-302 guide ✅ + WP-306 ✅ (2026-07-11); WP-302 residue = pin 3 drafts + grow corpus. (ℹ️ F-135 judge write-scope rubric gap = track-B note, dogfood-098.)
+
 ## Archived 2026-07-11 — displaced by dogfood-098 (`run-6ef24fb7`, WP-308 core landed)
 
 Prior plan.md Queue line (dogfood-097 detail), displaced verbatim:

@@ -236,6 +236,12 @@ describe("renderTrace (WP-142)", () => {
     );
   });
 
+  test("no-limit-signal run keeps trace output byte-identical with zero limit counters", () => {
+    expect(
+      renderTrace(run, entries, { ...totals, limitSleptMs: 0, limitSleepConservedMs: 0 }),
+    ).toBe(renderTrace(run, entries, totals));
+  });
+
   test("reports soak re-entry counters only when soak control events exist", () => {
     const entriesWithSoak: JournalEntry[] = [
       ...entries,

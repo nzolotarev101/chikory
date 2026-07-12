@@ -5,7 +5,7 @@
  * complete event history.
  */
 import { randomUUID } from "node:crypto";
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -19,6 +19,8 @@ import {
   decideStepForcing,
   Journal,
   journalPath,
+  runTotals,
+  workspaceDir,
   type JudgeVerdict,
   type RunnerActivities,
   type RunStatusReport,
@@ -41,7 +43,14 @@ const bundlePath = inject("workflowBundlePath");
 
 describe.skipIf(address === null)("agent loop (WP-121)", () => {
   const cleanups: Array<() => Promise<void>> = [];
+  const originalLimitAtStep = process.env["CHIKORY_LIMIT_AT_STEP"];
+
   afterEach(async () => {
+    if (originalLimitAtStep === undefined) {
+      delete process.env["CHIKORY_LIMIT_AT_STEP"];
+    } else {
+      process.env["CHIKORY_LIMIT_AT_STEP"] = originalLimitAtStep;
+    }
     while (cleanups.length > 0) await cleanups.pop()!();
   });
 
@@ -49,6 +58,7 @@ describe.skipIf(address === null)("agent loop (WP-121)", () => {
     judgeOverride?: RunnerActivities["judgeStep"];
     judgeWireUrl?: string;
     scriptedConfig?: Partial<ScriptedConfig>;
+    activitiesOverride?: Partial<RunnerActivities>;
   }) {
     const tmp = await mkdtemp(join(tmpdir(), "chikory-runner-"));
     cleanups.push(() => rm(tmp, { recursive: true, force: true }));
@@ -66,6 +76,7 @@ describe.skipIf(address === null)("agent loop (WP-121)", () => {
         ? { routerOptions: { baseUrls: { "openai-compat": opts.judgeWireUrl } } }
         : {}),
       ...(opts.judgeOverride ? { activitiesOverride: { judgeStep: opts.judgeOverride } } : {}),
+      ...(opts.activitiesOverride ? { activitiesOverride: opts.activitiesOverride } : {}),
     });
     const workerDone = worker.run();
     const runner = createTemporalRunner({ address: address!, taskQueue, dataDir });
@@ -233,6 +244,170 @@ describe.skipIf(address === null)("agent loop (WP-121)", () => {
     } finally {
       journal.close();
     }
+  });
+
+  test("parks a limit response on the workflow timer before continuing", async () => {
+    let dataDirRef = "";
+    const executeStep: RunnerActivities["executeStep"] = async (input) => {
+      const diffRef = {
+        id: "limit-diff",
+        kind: "diff" as const,
+        bytes: 0,
+        summary: "limit park produced no diff",
+      };
+      const transcriptRef = {
+        id: "limit-transcript",
+        kind: "transcript" as const,
+        bytes: 32,
+        summary: "limit park transcript",
+      };
+      const limitParkResponse = {
+        action: "park-until-reset" as const,
+        reason: "no-legal-headroom" as const,
+        retryAfterMs: 1,
+      };
+      const record = {
+        status: "FAILED" as const,
+        diffRef,
+        summary: "limit response deferred: park-until-reset after test throttle",
+        toolCalls: 0,
+        tokens: { input: 0, output: 0 },
+        costUsd: 0,
+        costEstimated: false,
+        durationMs: 0,
+        transcriptRef,
+        failure: { reason: "park until reset", retriable: true },
+      };
+      const journal = new Journal(journalPath(dataDirRef, input.runId));
+      try {
+        journal.appendOnce(
+          { field: "stepIndex", value: input.stepIndex },
+          {
+            kind: "step",
+            payload: {
+              stepIndex: input.stepIndex,
+              instruction: input.instruction,
+              planItem: input.context.planItem,
+              record,
+              limitParkResponse,
+            } satisfies StepPayload,
+            costDeltaUsd: 0,
+            tokens: record.tokens,
+            artifactRefs: [diffRef, transcriptRef],
+          },
+        );
+      } finally {
+        journal.close();
+      }
+      return { ...record, limitParkResponse };
+    };
+
+    const { repoUrl, dataDir, runner } = await setup({ activitiesOverride: { executeStep } });
+    dataDirRef = dataDir;
+    const spec = makeSpec({ repoUrl, maxSteps: 1, judge: { family: "gemini", cadence: 10 } });
+
+    const handle = await runner.start(spec);
+    const report = await awaitTerminal(handle);
+
+    expect(report.status).toBe("FAILED");
+    expect(report.currentStep).toBe(1);
+    expect(report.failure?.reason).toContain("maxSteps");
+
+    const journal = new Journal(journalPath(dataDir, handle.runId));
+    try {
+      const controlEvents = journal.entries("control_event");
+      expect(controlEvents).toHaveLength(1);
+      expect(controlEvents[0]!.payload).toMatchObject({
+        event: "resume",
+        source: "limit",
+        atStep: 0,
+        details: { sleepMs: 1 },
+      });
+      expect(journal.entries("step")).toHaveLength(1);
+      expect(journal.entries("terminal")).toHaveLength(1);
+      expect(runTotals(journal)).toMatchObject({
+        limitSleptMs: 1,
+        limitSleepConservedMs: 0,
+      });
+    } finally {
+      journal.close();
+    }
+  });
+
+  test("forced limit response conserves work and seals SUCCESS only after every chunk runs", async () => {
+    process.env["CHIKORY_LIMIT_AT_STEP"] = "0";
+    const chunks = [
+      { name: "parser", directive: "Implement only the parser increment." },
+      { name: "cli", directive: "Wire only the CLI increment." },
+    ];
+    const wire = await startFakeJudgeWire([judgeForm({ criteria: { "AC-1": true } })]);
+    cleanups.push(() => wire.close());
+    const { repoUrl, dataDir, runner } = await setup({
+      judgeWireUrl: wire.url,
+      scriptedConfig: { claimsCompleteSteps: [2, 3] },
+    });
+    const spec = makeJudgedSpec({
+      repoUrl,
+      goal: "Complete the parser and CLI increments in order.",
+      maxSteps: 4,
+      cadence: 10,
+      routing: {
+        stages: {
+          plan: { provider: "anthropic", model: "claude-fable-5" },
+          code: { provider: "anthropic", model: "claude-fable-5" },
+          review: { provider: "openai", model: "gpt-5-mini" },
+          judge: { provider: "openai-compat", model: "fake-judge" },
+        },
+      },
+      boundedWorkUnit: { minDurableSteps: chunks.length, workChunks: chunks },
+    });
+
+    const handle = await runner.start(spec);
+    const report = await awaitTerminal(handle);
+
+    expect(report.status).toBe("SUCCESS");
+    expect(report.currentStep).toBe(3);
+    expect(report.checkpoints).toHaveLength(3);
+    expect(report.lastVerdict).toEqual({ kind: "PROCEED", atStep: 2 });
+    expect(wire.hits).toBe(2);
+
+    const journal = new Journal(journalPath(dataDir, handle.runId));
+    try {
+      const steps = journal.entries("step").map((entry) => entry.payload as StepPayload);
+      expect(steps).toHaveLength(3);
+      expect(steps[0]).toMatchObject({
+        stepIndex: 0,
+        instruction: chunks[0]!.directive,
+        deferredPlanItem: chunks[0]!.directive,
+        executedPlanItem: `limit-independent review work before retrying: ${chunks[0]!.directive}`,
+      });
+      expect(steps[0]!.limitResponse?.steps[0]).toMatchObject({
+        action: "limit-independent-work",
+        target: { stage: "review", index: 0 },
+      });
+      expect(steps.slice(1).map((step) => step.planItem)).toEqual([
+        chunks[0]!.directive,
+        chunks[1]!.directive,
+      ]);
+      expect(steps.slice(1).every((step) => step.deferredPlanItem === undefined)).toBe(true);
+      expect(runTotals(journal)).toMatchObject({
+        limitSignals: 1,
+        limitSleptMs: 0,
+        limitSleepConservedMs: 5000,
+      });
+      expect((journal.entries("terminal")[0]!.payload as { status: string }).status).toBe(
+        "SUCCESS",
+      );
+    } finally {
+      journal.close();
+    }
+
+    const ws = workspaceDir(dataDir, handle.runId);
+    await expect(readFile(join(ws, "step-1.txt"), "utf8")).resolves.toBe(
+      `limit-independent review work before retrying: ${chunks[0]!.directive}`,
+    );
+    await expect(readFile(join(ws, "step-2.txt"), "utf8")).resolves.toBe(chunks[0]!.directive);
+    await expect(readFile(join(ws, "step-3.txt"), "utf8")).resolves.toBe(chunks[1]!.directive);
   });
 
   test("F-11 retired: a productive (non-empty) step that claimsComplete is judged directly — no probe step", async () => {

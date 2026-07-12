@@ -43,7 +43,15 @@ describe("runTotals (journal-format.md §2 totals)", () => {
       const verdict = (kind: string) => ({ judgeIndex: 0, atStep: 0, verdict: { kind } });
       journal.append({
         kind: "step",
-        payload: { stepIndex: 0 },
+        payload: {
+          stepIndex: 0,
+          limitResponse: {
+            steps: [
+              { action: "limit-independent-work" },
+              { action: "park-until-reset", retryAfterMs: 5000 },
+            ],
+          },
+        },
         costDeltaUsd: 0.01,
         tokens: { input: 100, output: 50 },
         artifactRefs: [],
@@ -91,6 +99,18 @@ describe("runTotals (journal-format.md §2 totals)", () => {
           limitResponse: {
             steps: [{ action: "park-until-reset", retryAfterMs: 2000 }],
           },
+        },
+        costDeltaUsd: 0,
+        artifactRefs: [],
+      });
+      journal.append({
+        kind: "control_event",
+        payload: {
+          controlEventIndex: 0,
+          event: "resume",
+          atStep: 3,
+          source: "limit",
+          details: { sleepMs: 2000 },
         },
         costDeltaUsd: 0,
         artifactRefs: [],

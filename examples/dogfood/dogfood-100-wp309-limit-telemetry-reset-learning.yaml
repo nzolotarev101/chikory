@@ -1,0 +1,211 @@
+# Dogfood-100: WP-309 — LIMIT TELEMETRY + RESET LEARNING. dogfood-098/099 (`run-6ef24fb7`/`run-03cd4c21`) landed the
+#   work-conserving limit scheduler END-TO-END: `classifyLimitSignal` (429 / CLI-stderr / injected seam) →
+#   `decideLimitResponse` (ordered plan) → `applyLimitResponse` (EXECUTES failover / limit-independent work / park).
+#   But two gaps remain before the scheduler earns its keep on a REAL provider: (1) `classifyLimitSignal`'s
+#   `http-429` and `cli-usage-limit` branches have NO production caller — only the deterministic injected-limit
+#   step-index seam (the env-armed dogfood seam) feeds it (`activities.ts:706`); a real 429 response or a real CLI
+#   usage-limit stderr line is never classified. (2) A park lasts exactly the vendor-provided `retry-after` when one
+#   exists and GUESSES otherwise — nothing LEARNS a per-endpoint reset schedule from OBSERVED resets. This run lands
+#   WP-309: real (non-injected) call sites feed `classifyLimitSignal`, every signal is journaled as a replay-safe
+#   per-endpoint OBSERVATION, and net-new `learnEndpointReset` derives the reset schedule from those observations —
+#   so a park lasts the LEARNED reset, not a guess. It ALSO closes ℹ️ F-137 (dogfood-099): the forced-PARK path gets
+#   the end-to-end live proof the durable-park branch still lacks.
+#
+# WHY NOW (dogfood-099 review, 2026-07-12). WP-308 is ✅ DONE; WP-309 is its named 🔴 dependant (plan.md §7) and the
+#   last open row on the P3 intelligent-scaling track. The scheduler's park duration is only as good as its reset
+#   knowledge, and its classifier is inert on real signals until real call sites feed it. Nothing outranks finishing
+#   the P3 frontier track.
+#
+# GATE VERDICTS (dogfood-099 review phase 5). Progression ⛔ STALLED (ledger rung flat at 4 across 097/098/099) — but
+#   the WP-265 ladder RETIRED at rung 5 (P2 exit, dogfood-096); a normal ~6-step product run cannot climb the rung
+#   column (rung 5 needed the 24h+ soak endurance gate), so flat-4 is EXPECTED, not a safe-slice stall. The real
+#   thesis axis IS moving: P3 WP completion 307→308→309, all class=product, meta 0/3, genuine judge-catches 097/098.
+#   STALLED is BINDING = "next headline is the plan §6/§7 queue item" — and WP-309 IS that item, so this spec honors
+#   the binding directly (no deviation). meta cap ✅ 0/3 (097/098/099 all product). §1.1 ✅ (a real 429 call site, a real
+#   CLI-stderr call site, a reset-learning function over observed history, and a learned-duration park are each
+#   independently failable — parsing real signal shapes and inferring a schedule are classic get-it-wrong surfaces).
+#   §1.2 ✅ (advances real open plan.md §7 WP-309 on live Chikory source — vendor-neutral routing pillar). §1.3 ✅
+#   PROCEED (not busy/scaffold — the telemetry + learning land in the real run loop and feed the real park). §1.5 ✅
+#   (class=product).
+#
+# CLASS / LADDER. class=product. Ladder retired at rung 5 (P2 exit passed, dogfood-096); rung-4-shape consolidation.
+# Ladder-rung: 4
+# Thesis-KPI: VENDOR-NEUTRALITY + work-conserving scaling — a real-shaped usage-limit signal (429 or CLI-stderr,
+#   deterministically injected via the scripted registry, NO keys) is CLASSIFIED at a real call site, journaled as a
+#   per-endpoint observation, and a subsequent forced park lasts the LEARNED reset (from `learnEndpointReset` over
+#   observed resets) rather than a guess — proven end-to-end with the run sealing correctly, zero operator input, and
+#   per-step reliability held.
+#
+# Format: LOOSE (outcome goal + 6 ordered increments; layout/file/test names are the executor's, F-82/F-83). ACs pin
+#   "done" via the net-new FUNCTION symbol the goal NAMES that is ABSENT on HEAD (`learnEndpointReset` — verified 0
+#   hits in src/ + test/, `git log -S` empty, 2026-07-12) + a test co-referencing `classifyLimitSignal` (the landed
+#   classifier) so the learning is proven against the real signal shape + the FULL suite green. F-114-SAFE (function
+#   symbol, not a type); F-119-SAFE (occurrence count via `grep -roh … | wc -l`); F-115-SAFE (no AC asserts
+#   wall-clock — the learned-park proof is structural/journal-based, never a timed duration).
+#
+# F-129 PREMISE CHECK (2026-07-12): `grep -rn 'classifyLimitSignal' src/` → 3 hits, ALL the injected seam
+#   (`index.ts` re-export, `activities.ts:29` import, `activities.ts:706` the sole call — inside the
+#   injected-seam block); the `http-429` and `cli-usage-limit` branches in `limit-signal.ts` PARSE but have
+#   NO production caller. `grep -rn 'learnEndpointReset'` → 0 hits, `git log -S learnEndpointReset` → empty: the
+#   reset-learning capability is absent on HEAD. Park duration today reads `retryAfterMs`/`retryAtMs` off the
+#   classified signal (`limit-park.ts` `decideLimitParkDelay`) — nothing learns a schedule from observed resets.
+#
+# ⚠️ F-134 WATCH (dogfood-097 ×1, dogfood-098 ×2; dogfood-099 ×0 — respecting boundaries paid off): the executor may
+#   front-load later PARTs; the F-130 judge footprint rubric WILL roll back any step whose diff exceeds its active
+#   PART. Cheapest path is to respect the chunk boundaries — front-loading costs a full discarded step.
+#
+# ⚠️ SCOPE / DETERMINISM. Writes ONLY inside `packages/sdk-ts/` (+ the one PART-6 doc edit in
+#   `docs/components/router.md` — NO other doc, NOT plan.md: F-135). ADDITIVE — no frozen-contract reshape; a run
+#   that never receives a limit signal behaves and renders BYTE-IDENTICALLY; the existing `limit_signal` journal
+#   shape stays readable (new `limit_observation` rows + additive fields only). Real 429 / CLI-stderr signals are
+#   delivered DETERMINISTICALLY via the scripted adapter registry (a 429-shaped response / a usage-limit stderr
+#   string) — NO real provider, NO key material, NO network. The learned-park proof is structural (journal +
+#   observed-vs-learned), never a wall-clock assert (F-115). NO new dependency. A failover swap MUST preserve
+#   invariant #2 (judge family ≠ executor family).
+#
+# ⚠️ LAUNCH: commit everything first (the workspace clones HEAD — dogfood-099's uncommitted WP-308 delivery MUST be
+#   committed or there is no scheduler/classifier to extend), then `devbox run run-dogfood` (the spec-pick glob
+#   `dogfood-[0-9][0-9][0-9]*.yaml | sort | tail -1` resolves to THIS file — dogfood-100 sorts after dogfood-099).
+#   `CHIKORY_PREFLIGHT_ONLY=1 devbox run run-dogfood` dry-runs the launch guards at $0.
+
+name: dogfood-100-wp309-limit-telemetry-reset-learning
+goal: >
+  Land WP-309 (limit telemetry + reset learning) in the Chikory TypeScript SDK: give the work-conserving limit
+  scheduler (dogfood-098/099) REAL eyes and a LEARNED sense of when a throttled endpoint recovers. Today
+  `classifyLimitSignal` is only ever called from the deterministic injected-limit step-index seam (the dogfood seam) — its
+  `http-429` and `cli-usage-limit` branches parse but have no production caller — and a park lasts the vendor's
+  `retry-after` or a guess, because nothing learns a per-endpoint reset schedule from observed resets. Land net-new
+  `learnEndpointReset` (a reset schedule derived from OBSERVED per-endpoint resets, not vendor docs) and wire the
+  real call sites + observation ledger that feed it. Deliver in SIX ordered increments, ONE per durable step, each
+  adding DISTINCT non-trivial working code + tests (non-hollow horizon, F-100/WP-270):
+
+    * PART 1 — REAL HTTP-429 CALL SITE: a NON-injected path surfaces a real-shaped HTTP 429 (from the scripted
+      adapter registry — a 429 status + `retry-after` header, NO real provider, NO key) into `classifyLimitSignal`
+      and journals a replay-safe per-endpoint OBSERVATION (endpoint capability id + parsed signal + observed
+      wall-clock). The injected-limit step-index seam is untouched and still works. Tested: a scripted 429 yields a
+      classified `http-429` signal and a journaled observation for that endpoint.
+
+    * PART 2 — REAL CLI USAGE-LIMIT STDERR CALL SITE: the executor adapter path routes a real-shaped CLI
+      usage-limit stderr line (scripted, NO real CLI) into `classifyLimitSignal` (`cli-usage-limit` source) and
+      journals the observation for that endpoint. Tested with scripted stderr: the stderr is classified and
+      observed, not swallowed.
+
+    * PART 3 — PER-ENDPOINT OBSERVATION LEDGER: a replay-safe `limit_observation` journal kind keyed by endpoint
+      capability id, holding each classified signal + its observed reset (when a later successful call proves the
+      window reopened). Additive, readable, idempotent (appendOnce), no reshape of the existing `limit_signal` row.
+      Tested replay-safe: replaying the same observation does not duplicate it.
+
+    * PART 4 — LEARN THE RESET: net-new `learnEndpointReset` — a pure function that derives a per-endpoint reset
+      schedule (e.g. the effective window / next-reset estimate) from that endpoint's OBSERVED reset history in the
+      ledger, NOT from vendor docs; returns a principled estimate (and abstains when it has too little data). Tested
+      against a scripted observation history: it infers the reset from observed resets and abstains on thin data.
+
+    * PART 5 — FEED THE SCHEDULER + FORCED-PARK LIVE PROOF: when a park-until-reset decision carries no explicit
+      `retryAfterMs`/`retryAtMs`, the park duration comes from `learnEndpointReset` for that endpoint instead of a
+      guess (existing signal-provided reset still wins when present). ONE end-to-end live proof: a forced park with
+      NO explicit retry-after parks for the LEARNED duration and then resumes with the throttled item completed —
+      this closes ℹ️ F-137 (the durable-park branch's missing end-to-end proof). Deterministic — no real waiting, NO
+      wall-clock asserts (F-115); prove it structurally (journal control-event + learned-vs-parked equality).
+
+    * PART 6 — TRACE + DOCS + REGRESSION: `chikory trace` surfaces the per-endpoint learned reset alongside the
+      existing `slept vs conserved` totals; a no-signal run renders byte-identically. Update
+      `docs/components/router.md` (the one sanctioned doc edit). Prove the ENTIRE `packages/sdk-ts` suite (tsc +
+      eslint + vitest) green.
+
+  CONSTRAINTS: additive — NO frozen-contract shape change; a run that never receives a limit signal behaves and
+  renders EXACTLY as before; existing `limit_signal` journals stay readable. NO new dependency. Real 429 / CLI-stderr
+  signals are delivered DETERMINISTICALLY via the scripted adapter registry (NO real provider, NO network, NO key
+  material or secret-shaped fields). A failover swap MUST preserve invariant #2 (judge family ≠ executor family).
+  Writes ONLY inside `packages/sdk-ts/` plus the single PART-6 `docs/components/router.md` edit — nothing else (not
+  plan.md). Each PART lands its own tests and does NOT break an earlier PART's tests; do NOT front-load a later PART
+  (the judge compares the diff footprint against the active PART and WILL roll back). If a verification step reports
+  a failing suite, READ the failure and fix the IMPLEMENTATION — never weaken or delete an assertion, and never
+  assert a wall-clock duration to prove a structural fact (F-115).
+
+repos:
+  - url: /Users/nikitazolotarev/repos/chikory
+    writable: true
+
+bounded_work_unit:
+  min_durable_steps: 6
+  directive: >
+    Advance EXACTLY the ONE numbered PART named by this step's chunk — implement it and its tests, then stop and let
+    the durable checkpoint seal. Do NOT front-load a later PART. Do NOT declare the whole run complete until every
+    PART has landed with passing tests.
+  work_chunks:
+    - name: part-1-real-http429-call-site
+      directive: "PART 1 ONLY: a non-injected path feeds a scripted-registry HTTP 429 (status + retry-after header, no real provider/key) into classifyLimitSignal and journals a replay-safe per-endpoint observation; the injected-limit step-index seam is untouched. Tests on the scripted registry."
+    - name: part-2-real-cli-stderr-call-site
+      directive: "PART 2 ONLY: the executor adapter path routes a scripted CLI usage-limit stderr line into classifyLimitSignal (cli-usage-limit source) and journals the observation. Tests with scripted stderr."
+    - name: part-3-observation-ledger
+      directive: "PART 3 ONLY: a replay-safe limit_observation journal kind keyed by endpoint capability id (classified signal + observed reset), idempotent appendOnce, additive — no reshape of limit_signal. Replay-safe tests."
+    - name: part-4-learn-reset
+      directive: "PART 4 ONLY: net-new pure learnEndpointReset derives a per-endpoint reset schedule from that endpoint's observed reset history (not vendor docs), abstaining on thin data. Tests against a scripted observation history."
+    - name: part-5-feed-scheduler-forced-park-proof
+      directive: "PART 5 ONLY: a park with no explicit retryAfterMs/retryAtMs draws its duration from learnEndpointReset; one end-to-end forced-park live proof (parks the learned duration, resumes, throttled item completed — closes F-137). Deterministic, no wall-clock asserts."
+    - name: part-6-trace-docs-regression
+      directive: "PART 6 ONLY: chikory trace surfaces the per-endpoint learned reset with the slept/conserved totals; no-signal run byte-identical; update docs/components/router.md; FULL packages/sdk-ts suite (tsc + eslint + vitest) green; fix implementations, never weaken tests."
+
+acceptance_criteria:
+  - id: AC-1
+    description: >
+      The net-new reset-learning function exists in the SDK source. (OUTCOME symbol the goal NAMES —
+      `learnEndpointReset` — absent on HEAD so a recursive grep cannot false-green, F-90. F-114-SAFE: a FUNCTION
+      symbol, not a type name. Layout is the executor's, F-82/F-83.)
+    check: >
+      cd packages/sdk-ts &&
+      grep -rq 'learnEndpointReset' src/
+  - id: AC-2
+    description: >
+      The learner is CONSUMED, not just defined — `learnEndpointReset` appears at least twice across the source
+      (definition + a consumption site feeding the park decision). (F-119-SAFE: occurrence count via
+      `grep -roh … | wc -l`.)
+    check: >
+      cd packages/sdk-ts &&
+      test "$(grep -roh 'learnEndpointReset' src/ | wc -l)" -ge 2
+  - id: AC-3
+    description: >
+      A test proves the learning against the landed classifier — a `test/` file references BOTH the net-new
+      `learnEndpointReset` AND dogfood-098's `classifyLimitSignal`, so the reset schedule is learned from real
+      classified-signal observations, not a toy. (F-97-SAFE co-reference. Filename is the executor's.)
+    check: >
+      cd packages/sdk-ts &&
+      for f in $(grep -rl 'learnEndpointReset' test/ 2>/dev/null); do
+        grep -q 'classifyLimitSignal' "$f" && { echo ok; break; };
+      done | grep -q ok
+  - id: AC-4
+    description: >
+      The SDK stays type- and lint-clean and the FULL existing suite is green, proving the change is additive and
+      nothing regressed (no frozen-contract shape change; limit-signal-free runs behave exactly as before).
+    check: cd packages/sdk-ts && pnpm exec tsc --noEmit && pnpm exec eslint . && pnpm exec vitest run
+
+budget_usd: 45
+max_steps: 30
+
+# CONTEXT-ROT (WP-203/WP-207): auto-calibrated window (F-125 mechanism, live-proven dogfood-095…099) — the window
+#   derives from this run's OWN first-step assembled-context tokens; real accumulation over 6 chunks crosses the
+#   compact band and folds under genuine pacing pressure.
+pacing:
+  mode: auto
+  autoCalibrate: true
+
+# UNATTENDED (WP-271): operator-free; a genuine ESCALATE seals a resumable FAILED (WP-520); the run-level self-heal
+#   (WP-519) gets one bounded remediation before any terminal seal. No soak — a normal ~6-step product run.
+unattended:
+  escalation: seal_resumable_failed
+
+executor:
+  adapter: codex
+  family: openai
+
+judge:
+  family: openai-compat
+  cadence: 2
+  max_cost_share: 0.5
+
+routing:
+  stages:
+    plan: { provider: openai-compat, model: gpt-5.5 }
+    code: { provider: openai-compat, model: gpt-5.5 }
+    review: { provider: openai-compat, model: gpt-5.5 }
+    judge: { provider: openai-compat, model: gemini-3.1-pro-preview }

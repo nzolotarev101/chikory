@@ -351,37 +351,47 @@ function finiteMs(value: unknown): number | undefined {
   return typeof value === "number" && Number.isFinite(value) && value > 0 ? value : undefined;
 }
 
-function limitSleepCountersFromPayload(payload: unknown): { sleptMs: number; conservedMs: number } {
-  if (typeof payload !== "object" || payload === null) {
-    return { sleptMs: 0, conservedMs: 0 };
+function retryAfterMsFromLimitResponse(value: unknown): number {
+  if (typeof value !== "object" || value === null) {
+    return 0;
   }
-  const chosenResponse = (payload as { chosenResponse?: unknown }).chosenResponse;
+  const steps = (value as { steps?: unknown }).steps;
+  if (!Array.isArray(steps)) {
+    return 0;
+  }
+  return (
+    steps
+      .map((step) =>
+        typeof step === "object" && step !== null
+          ? finiteMs((step as { retryAfterMs?: unknown }).retryAfterMs)
+          : undefined,
+      )
+      .find((ms) => ms !== undefined) ?? 0
+  );
+}
+
+function limitSleepConservedMsFromStepPayload(payload: unknown): number {
+  if (typeof payload !== "object" || payload === null) {
+    return 0;
+  }
   const limitResponse = (payload as { limitResponse?: unknown }).limitResponse;
-  const chosenAction =
-    typeof chosenResponse === "object" && chosenResponse !== null
-      ? (chosenResponse as { action?: unknown }).action
-      : undefined;
-  const chosenRetryAfterMs =
-    typeof chosenResponse === "object" && chosenResponse !== null
-      ? finiteMs((chosenResponse as { retryAfterMs?: unknown }).retryAfterMs)
-      : undefined;
-  const steps =
-    typeof limitResponse === "object" && limitResponse !== null
-      ? (limitResponse as { steps?: unknown }).steps
-      : undefined;
-  const planRetryAfterMs = Array.isArray(steps)
-    ? steps
-        .map((step) =>
-          typeof step === "object" && step !== null
-            ? finiteMs((step as { retryAfterMs?: unknown }).retryAfterMs)
-            : undefined,
-        )
-        .find((ms) => ms !== undefined)
-    : undefined;
-  const retryAfterMs = chosenRetryAfterMs ?? planRetryAfterMs ?? 0;
-  return chosenAction === "park-until-reset"
-    ? { sleptMs: retryAfterMs, conservedMs: 0 }
-    : { sleptMs: 0, conservedMs: retryAfterMs };
+  if (limitResponse === undefined || (payload as { limitParkResponse?: unknown }).limitParkResponse !== undefined) {
+    return 0;
+  }
+  return retryAfterMsFromLimitResponse(limitResponse);
+}
+
+function limitSleptMsFromControlPayload(payload: unknown): number {
+  if (typeof payload !== "object" || payload === null) {
+    return 0;
+  }
+  const event = (payload as { event?: unknown }).event;
+  const source = (payload as { source?: unknown }).source;
+  const details = (payload as { details?: unknown }).details;
+  if (event !== "resume" || source !== "limit" || typeof details !== "object" || details === null) {
+    return 0;
+  }
+  return finiteMs((details as { sleepMs?: unknown }).sleepMs) ?? 0;
 }
 
 /** Aggregates derived purely from journal entries (WP-134, OB-6). */
@@ -403,16 +413,12 @@ export function runTotals(journal: Journal): RunTotals {
       ? { recalls: 0, evicted: 0 }
       : memoryCountersFromPayload(counterEntries[counterEntries.length - 1]!.payload);
   const limitSignalEntries = journal.entries("limit_signal");
-  const limitSleepCounters = limitSignalEntries.reduce(
-    (sum, entry) => {
-      const counters = limitSleepCountersFromPayload(entry.payload);
-      return {
-        sleptMs: sum.sleptMs + counters.sleptMs,
-        conservedMs: sum.conservedMs + counters.conservedMs,
-      };
-    },
-    { sleptMs: 0, conservedMs: 0 },
-  );
+  const limitSleptMs = journal
+    .entries("control_event")
+    .reduce((sum, entry) => sum + limitSleptMsFromControlPayload(entry.payload), 0);
+  const limitSleepConservedMs = journal
+    .entries("step")
+    .reduce((sum, entry) => sum + limitSleepConservedMsFromStepPayload(entry.payload), 0);
   return {
     steps: journal.entries("step").length,
     judgePasses: judgeEntries.length,
@@ -422,8 +428,8 @@ export function runTotals(journal: Journal): RunTotals {
     memoryRecalls: memoryCounters.recalls,
     memoryEvictions: memoryCounters.evicted,
     limitSignals: limitSignalEntries.length,
-    limitSleptMs: limitSleepCounters.sleptMs,
-    limitSleepConservedMs: limitSleepCounters.conservedMs,
+    limitSleptMs,
+    limitSleepConservedMs,
     costUsd,
     judgeCostUsd,
     judgeCostShare: costUsd > 0 ? judgeCostUsd / costUsd : 0,

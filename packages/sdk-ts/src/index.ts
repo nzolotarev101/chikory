@@ -99,6 +99,7 @@ export {
 export * from "./memory/index.js";
 export {
   assertGitWorkspace,
+  applyLimitResponse,
   captureWorkspaceDiff,
   CLAUDE_CODE_DEFAULT_ALLOWED_TOOLS,
   CLAUDE_CODE_DEFAULT_MAX_TURNS,
@@ -110,6 +111,7 @@ export {
   renderStepPrompt,
   runCliStep,
   SPAN_STEP,
+  type ApplyLimitResponseInput,
   type ClaudeCodeAdapterOptions,
   type CliStepOptions,
   type CodexAdapterOptions,
@@ -252,6 +254,11 @@ export {
   type RemediationDecision,
   type RemediationState,
 } from "./workflow/remediation.js";
+export {
+  decideLimitParkDelay,
+  type LimitParkDelayDecision,
+  type LimitParkDelayState,
+} from "./workflow/limit-park.js";
 export {
   decideSoakDelay,
   type SoakDelayDecision,

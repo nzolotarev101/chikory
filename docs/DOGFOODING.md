@@ -8,16 +8,17 @@ recover a run, and how to land the result as a normal PR.
 **Status (2026-07-11, bounded — update discipline: REPLACE this block, ≤15 lines;
 displaced prose moves verbatim to [`PLAN-HISTORY.md`](PLAN-HISTORY.md); per-run detail:
 `docs/reports/dogfood-NNN.md`; queue + course correction: `plan.md` §6).**
-Latest: dogfood-098 — **WP-308 (work-conserving limit scheduler) 🟡 CORE LANDED** (`run-6ef24fb7-04b3-4029-a0fb-388300b6e68b`,
-`docs/reports/dogfood-098.md`, uncommitted working tree). 🟢 **SUCCESS · 8 steps · $15.83/$45 · 47m 45s** — on a limit signal, sleep is now the
-LAST-ranked option: `classifyLimitSignal` (429 / CLI-stderr / injected seam) + `decideLimitResponse` ordered plan (declared failover →
-limit-independent work → park, invariant #2 preserved) + `CHIKORY_LIMIT_AT_STEP` seam + replay-safe `limit_signal` journal + `limit-slept vs
-conserved` trace totals. **Judge caught front-loading TWICE** (steps 2/4 rolled back to lastGood — ledger now 3 genuine pre-land catches; cost
-$6.34 = 40.1% of spend, F-134 escalation trigger). Residue 🟡 **F-136: the seam journals the decision but does not EXECUTE it** (injected-limit
-step claims complete with zero work — §8 known limitation). New friction: 🟡 F-134 (front-load recurrence ×2) · ℹ️ F-135 (judge rubric checks
-chunk scope, not spec write-scope — run edited `plan.md` unsanctioned) · 🟡 F-136 — no new WPs (F-130 owns 134/135 mechanism; 136 IS open WP-308).
-**NEXT headline (progression ✅ PROGRESSING, meta cap 0:3): dogfood-099 on WP-308 completion** — execute the decision, end-to-end forced-limit
-run slept measurably less than park-only baseline. See §7, §1.5, §1.4, §3. (Earlier — dogfood-097 WP-307 DONE → PLAN-HISTORY.md.)
+Latest: dogfood-099 — **WP-308 (work-conserving limit scheduler) ✅ DONE** (`run-03cd4c21-68f9-4aa8-8a9a-6157868b0843`,
+`docs/reports/dogfood-099.md`, uncommitted working tree). 🟢 **SUCCESS · 6 steps · $13.85/$45 · 36m 54s** — the seam now EXECUTES the decision, not
+just records it (**F-136 FIXED**): net-new `applyLimitResponse` (`src/executors/limit-response.ts`) + `decideLimitParkDelay`
+(`src/workflow/limit-park.ts`) — declared-failover re-dispatches the throttled stage, limit-independent-work runs real conserving work then DEFERS
+(not skips) the throttled item, park honors `retryAfterMs`/`retryAtMs` via a workflow-side durable timer; the fabricated `claimsComplete:true` block
+is deleted (regression asserts `false`). **Live proof:** forced `CHIKORY_LIMIT_AT_STEP` run seals SUCCESS with `conserved 5000ms > 0`, `slept 0`,
+every plan item genuinely done. 6/6 PROCEED · 0 rollbacks · 850 TS green · all 11 harvested files byte-IDENTICAL. New friction: ℹ️ **F-137** —
+durable-park loop-proven only via a mocked `executeStep` (§8 known limitation); track-B under WP-309, no new WP.
+**NEXT headline (progression ⛔ STALLED — rung flat 4 ×3, but ladder RETIRED at rung 5 (dogfood-096), so flat is expected not a stall; real axis = P3 WP completion 307→308→309, all product, meta 0:3; STALLED binding = plan §7 queue item = this): dogfood-100 on WP-309 (limit telemetry + reset learning)** — real 429/CLI-stderr call
+sites feeding `classifyLimitSignal`, learn per-endpoint resets, and fold the F-137 forced-park end-to-end proof in. See §7, §1.5, §1.4, §3.
+(Earlier — dogfood-098 WP-308 brain landed → PLAN-HISTORY.md.)
 
 Related docs: [`docs/spec/task-spec.md`](spec/task-spec.md) (schema
 reference) · [`docs/TASK-PROTOCOL.md`](TASK-PROTOCOL.md) (WP etiquette, §7 is
@@ -687,17 +688,26 @@ broken (a false-green, not a follow-on fix).
 
 ## 8. Known P1 limitations (so you don't fight them)
 
-- **`CHIKORY_LIMIT_AT_STEP` records the scheduler's decision but does NOT execute
-  it** (F-136, dogfood-098, the open half of WP-308): when the seam fires,
-  `executeStep` (`src/runner/activities.ts:677+`) classifies the injected signal,
-  consults `decideLimitResponse`, journals the full plan + chosen response — then
-  returns a fabricated record: `status:"SUCCESS"`, `claimsComplete:true`,
-  `toolCalls:0`, empty diff. No failover re-dispatch happens and no
-  limit-independent work is performed; `conservedMs` in trace totals is the
-  retry-after the run *would* have slept, not measured savings. Off by default
-  (no env ⇒ byte-identical path). Do NOT use the seam in a run whose plan items
-  matter — the injected step's work is silently skipped while claiming complete.
-  Cure = dogfood-099 (WP-308 completion).
+- **`CHIKORY_LIMIT_AT_STEP` now EXECUTES the scheduler's decision** (F-136 FIXED,
+  dogfood-099 `run-03cd4c21`, WP-308 complete): when the seam fires, `executeStep`
+  (`src/runner/activities.ts`) classifies the injected signal, consults
+  `decideLimitResponse`, then calls net-new `applyLimitResponse`
+  (`src/executors/limit-response.ts`) which ACTS — declared-failover re-dispatches
+  the throttled stage via existing routing (real adapter call, real record),
+  limit-independent-work runs real conserving work then defers (not skips) the
+  throttled item, park honors `retryAfterMs`/`retryAtMs` via a workflow-side durable
+  timer (`decideLimitParkDelay`). The old fabricated `claimsComplete:true` record is
+  gone. `conserved`/`slept` totals derive from executed actions; a no-signal run is
+  byte-identical. The seam is now safe to use in a run whose plan items matter — the
+  throttled item is deferred and completed, not silently skipped.
+- **The durable-PARK branch of the limit seam is loop-proven only via a mocked
+  `executeStep`** (ℹ️ F-137, dogfood-099): the end-to-end live proof
+  (`agent-loop.test.ts:337`) exercises limit-independent-work; the park branch's
+  loop coverage injects a fabricated park record and the run then ends on `maxSteps`,
+  not a demonstrated park→resume→throttled-item-completes sequence. Unit coverage of
+  `decideLimitParkDelay` + `applyLimitResponse` park output is solid. Low severity
+  (the seam deliberately prefers failover, then any non-park, before park). A real
+  forced-park end-to-end proof folds into WP-309 (real 429/CLI-stderr call sites).
 - **`judge.cadence` is INERT on a chunked spec** (dogfood-096 observation, by design
   JD-2): every step that consumes a `work_chunks` entry is a judge milestone
   (`workChunkMilestone`, `src/workflow/agent-loop.ts:633`), so a `min_durable_steps`
