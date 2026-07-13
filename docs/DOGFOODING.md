@@ -5,20 +5,20 @@ This is the complete operating manual for executing Phase 2+ work packages
 task spec for a WP (every field explained), how to launch, supervise, and
 recover a run, and how to land the result as a normal PR.
 
-**Status (2026-07-11, bounded — update discipline: REPLACE this block, ≤15 lines;
+**Status (2026-07-13, bounded — update discipline: REPLACE this block, ≤15 lines;
 displaced prose moves verbatim to [`PLAN-HISTORY.md`](PLAN-HISTORY.md); per-run detail:
 `docs/reports/dogfood-NNN.md`; queue + course correction: `plan.md` §6).**
-Latest: dogfood-099 — **WP-308 (work-conserving limit scheduler) ✅ DONE** (`run-03cd4c21-68f9-4aa8-8a9a-6157868b0843`,
-`docs/reports/dogfood-099.md`, uncommitted working tree). 🟢 **SUCCESS · 6 steps · $13.85/$45 · 36m 54s** — the seam now EXECUTES the decision, not
-just records it (**F-136 FIXED**): net-new `applyLimitResponse` (`src/executors/limit-response.ts`) + `decideLimitParkDelay`
-(`src/workflow/limit-park.ts`) — declared-failover re-dispatches the throttled stage, limit-independent-work runs real conserving work then DEFERS
-(not skips) the throttled item, park honors `retryAfterMs`/`retryAtMs` via a workflow-side durable timer; the fabricated `claimsComplete:true` block
-is deleted (regression asserts `false`). **Live proof:** forced `CHIKORY_LIMIT_AT_STEP` run seals SUCCESS with `conserved 5000ms > 0`, `slept 0`,
-every plan item genuinely done. 6/6 PROCEED · 0 rollbacks · 850 TS green · all 11 harvested files byte-IDENTICAL. New friction: ℹ️ **F-137** —
-durable-park loop-proven only via a mocked `executeStep` (§8 known limitation); track-B under WP-309, no new WP.
-**NEXT headline (progression ⛔ STALLED — rung flat 4 ×3, but ladder RETIRED at rung 5 (dogfood-096), so flat is expected not a stall; real axis = P3 WP completion 307→308→309, all product, meta 0:3; STALLED binding = plan §7 queue item = this): dogfood-100 on WP-309 (limit telemetry + reset learning)** — real 429/CLI-stderr call
-sites feeding `classifyLimitSignal`, learn per-endpoint resets, and fold the F-137 forced-park end-to-end proof in. See §7, §1.5, §1.4, §3.
-(Earlier — dogfood-098 WP-308 brain landed → PLAN-HISTORY.md.)
+Latest: dogfood-100 — **WP-309 (limit telemetry + reset learning) 🟡 PER-RUN HALF DONE** (`run-1caffe21-3779-47d8-b7bd-89f7a04f1c51`,
+`docs/reports/dogfood-100.md`, committed `8a330a4`). 🟢 **SUCCESS · 6 steps · $15.57/$45 · 41m 59s · 6/6 PROCEED** — a REAL non-injected call site
+(`activities.ts:1007-1011`, `rawLimitSignalFromStepRecord` on a FAILED step record: 429 + CLI-stderr) feeds `classifyLimitSignal`; replay-safe
+`limit_observation` journal kind; net-new pure `learnEndpointReset` (median of observed resets, abstains <2 samples) drives a LEARNED-duration park;
+forced-park end-to-end proof (real `runner.start`, step-4 retry-after-less 429 parks the learned 1000ms) — **closes ℹ️ F-137**. 898 TS green.
+New friction: 🔴 **F-138** — cross-run ledger seam DEAD (`EndpointLedger.appendLimitObservation`/`learnedCapacityTokens` no `src/` caller); the
+spec was journal-only and missed the plan.md WP-309 scope amendment, so the governor still can't learn window capacity cross-run → **WP-309 stays 🟡**,
+completion slice owed (§8). ℹ️ **F-139** — F-135 recurrence: run wrote `docs/spec/*` outside sanctioned scope (edits were *correct* doc-syncs; judge
+footprint rubric can't see spec write-scope). **NEXT headline (progression ⛔ STALLED — rung flat 4 ×3, expected: ladder retired at rung 5 (dogfood-096),
+a ~6-step product run can't climb it; STALLED binding = plan §7 queue item): dogfood-101 (WP-310 governor live proof + F-124 fix) — UNPARKED.** F-138
+(WP-309 residue) is 🟡 product-completeness, queued behind. See §7, §8, §1.5, §3. (Earlier — dogfood-099 WP-308 DONE → PLAN-HISTORY.md.)
 
 Related docs: [`docs/spec/task-spec.md`](spec/task-spec.md) (schema
 reference) · [`docs/TASK-PROTOCOL.md`](TASK-PROTOCOL.md) (WP etiquette, §7 is
@@ -700,14 +700,25 @@ broken (a false-green, not a follow-on fix).
   gone. `conserved`/`slept` totals derive from executed actions; a no-signal run is
   byte-identical. The seam is now safe to use in a run whose plan items matter — the
   throttled item is deferred and completed, not silently skipped.
-- **The durable-PARK branch of the limit seam is loop-proven only via a mocked
-  `executeStep`** (ℹ️ F-137, dogfood-099): the end-to-end live proof
-  (`agent-loop.test.ts:337`) exercises limit-independent-work; the park branch's
-  loop coverage injects a fabricated park record and the run then ends on `maxSteps`,
-  not a demonstrated park→resume→throttled-item-completes sequence. Unit coverage of
-  `decideLimitParkDelay` + `applyLimitResponse` park output is solid. Low severity
-  (the seam deliberately prefers failover, then any non-park, before park). A real
-  forced-park end-to-end proof folds into WP-309 (real 429/CLI-stderr call sites).
+- **The durable-PARK branch of the limit seam — ✅ CLOSED (was ℹ️ F-137, dogfood-099;
+  resolved dogfood-100).** dogfood-100 landed a real end-to-end forced-park proof
+  (`agent-loop.test.ts:345`): a real `runner.start`→`awaitTerminal` run where step-4's
+  429 carries NO `retry-after`, so the park lasts the LEARNED 1000ms (median of steps
+  1/3 observed resets), then resumes and completes the throttled item. No longer a
+  mocked/`maxSteps` proof.
+- **The cross-run learned-capacity seam is DEAD — WP-309 is only half done** (🔴 F-138,
+  dogfood-100): dogfood-100 journals limit observations to the PER-RUN journal and
+  learns resets from a single run's history, but never wires
+  `EndpointLedger.appendLimitObservation` (`endpoint-ledger.ts:110`, no `src/` caller)
+  or a reader of `learnedCapacityTokens`. The plan.md WP-309 scope amendment requires
+  observations to persist to the cross-run ledger `<dataDir>/ledger/endpoints.db` so
+  the WP-310 governor can learn subscription-window capacity across runs — that is
+  still owed. Root cause: the dogfood-100 spec was authored journal-only and missed
+  the amendment; the judge only gates the spec's ACs, so a partial WP-309 greened.
+  **Operating rule:** before writing a dogfood spec for a WP, diff that WP's plan.md
+  row for amendments landed since the last run — the ACs must cover the CURRENT scope.
+  WP-309 stays 🟡; the completion slice (wire `appendLimitObservation` + read learned
+  capacity into `decideLimitPacing`) is queued behind the STALLED-binding headline.
 - **`judge.cadence` is INERT on a chunked spec** (dogfood-096 observation, by design
   JD-2): every step that consumes a `work_chunks` entry is a judge milestone
   (`workChunkMilestone`, `src/workflow/agent-loop.ts:633`), so a `min_durable_steps`

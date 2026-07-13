@@ -39,9 +39,10 @@
 #   existing journals (no stepIndex on old compaction rows) MUST still parse and render (`describeCompactionPressure`
 #   already tolerates absence); no frozen-contract reshape; NO new dependency; NO key material.
 #
-# ⚠️ QUEUE ORDER: this file is parked as `.yaml.pending` so the dogfood.sh spec-pick glob
-#   (`dogfood-[0-9][0-9][0-9]*.yaml`, picks the HIGHEST sort) keeps resolving to the queued dogfood-100 (WP-309).
-#   After dogfood-100 lands, rename: `mv examples/dogfood/dogfood-101-…yaml.pending examples/dogfood/dogfood-101-…yaml`.
+# ⚠️ QUEUE ORDER: UNPARKED 2026-07-13 (dogfood-100 / WP-309 landed, committed `8a330a4`). This file is now the
+#   HIGHEST-sort match for the dogfood.sh spec-pick glob (`dogfood-[0-9][0-9][0-9]*.yaml`) — dogfood-101 sorts after
+#   dogfood-100, so a plain `devbox run run-dogfood` resolves to THIS file. (The stale `.yaml.pending` sibling, if
+#   still present, does NOT match the glob and is harmless clutter — delete it.)
 #
 # ⚠️ LAUNCH (commit the WP-310 working tree FIRST — the workspace clones HEAD; an uncommitted governor means
 #   nothing to prove). Verify the spec-pick glob resolves to THIS file. `CHIKORY_PREFLIGHT_ONLY=1 devbox run

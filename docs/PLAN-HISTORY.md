@@ -4,6 +4,12 @@
 > per-run detail lives in [`docs/reports/`](reports/). Content below was moved
 > verbatim out of the living docs on 2026-07-02 (course correction — plan.md §6).
 
+## Archived 2026-07-13 — displaced by dogfood-100 (`run-1caffe21`, WP-309 per-run half done)
+
+Prior plan.md Queue line WP-308-DONE + dogfood-100-next detail, displaced verbatim:
+
+> ✅ **WP-308 (work-conserving limit scheduler) DONE — dogfood-099 `run-03cd4c21`, SUCCESS 6 steps $13.85/$45, 36m 54s, uncommitted working tree (`docs/reports/dogfood-099.md`).** dogfood-098 landed the brain (`classifyLimitSignal`/`decideLimitResponse`/seam/journal/trace); dogfood-099 landed the HANDS: net-new `applyLimitResponse` (`src/executors/limit-response.ts`) + `decideLimitParkDelay` (`src/workflow/limit-park.ts`) so the seam EXECUTES the decision — **F-136 fixed** (fabricated `claimsComplete:true` block deleted; regression asserts `claimsComplete:false`). Live proof (`agent-loop.test.ts:337`): forced `CHIKORY_LIMIT_AT_STEP` run seals SUCCESS with `conserved 5000ms > 0`, `slept 0`, throttled item deferred-then-done. 6/6 PROCEED, 0 rollbacks, 850 TS green, all 11 harvested files byte-IDENTICAL. **NEXT HEADLINE ... dogfood-100 on WP-309 (limit telemetry + reset learning)** — real 429 `retry-after` / CLI usage-limit stderr call sites feeding `classifyLimitSignal`, learn per-endpoint reset from observations, and (F-137) fold a forced-PARK end-to-end live proof here.
+
 ## Archived 2026-07-12 — displaced by dogfood-099 (`run-03cd4c21`, WP-308 DONE)
 
 Prior plan.md Queue line (dogfood-098 detail), displaced verbatim:

@@ -37,3 +37,4 @@ run,wp,mode,outcome,steps,cost_usd,spec_format,class,resumes,judge_catches,rung,
 097,WP-307,run,SUCCESS,7,10.98,loose,product,0,1,4,1
 098,WP-308,run,SUCCESS,8,15.81,loose,product,0,2,4,2
 099,WP-308,run,SUCCESS,6,13.85,loose,product,0,0,4,0
+100,WP-309,run,SUCCESS,6,15.57,loose,product,0,0,4,0
