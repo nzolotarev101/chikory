@@ -35,6 +35,8 @@ export interface AppendInput {
   artifactRefs: ArtifactRef[];
 }
 
+type AppendOnceKey = { field: string; value: number | string };
+
 export interface RunRow {
   runId: string;
   task: TaskSpec;
@@ -199,7 +201,7 @@ export class Journal {
    * duplicate journal rows (and callers can skip duplicate LLM spend).
    */
   appendOnce(
-    key: { field: string; value: number },
+    key: AppendOnceKey,
     input: AppendInput,
   ): { entry: JournalEntry; existed: boolean } {
     const existing = this.findByKey(input.kind, key.field, key.value);
@@ -207,7 +209,7 @@ export class Journal {
     return { entry: this.append(input), existed: false };
   }
 
-  findByKey(kind: JournalEntryKind, field: string, value: number): JournalEntry | undefined {
+  findByKey(kind: JournalEntryKind, field: string, value: number | string): JournalEntry | undefined {
     const row = this.db
       .prepare(
         `SELECT * FROM journal_entries

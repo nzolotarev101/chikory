@@ -48,6 +48,30 @@ export interface LimitResponsePlan {
   readonly blocked: readonly BlockedHeadroomTarget[];
 }
 
+export interface EndpointResetObservation {
+  readonly endpointCapabilityId: string;
+  readonly endpointTarget: string;
+  readonly family: string;
+  readonly source: ClassifiedLimitSignal["source"];
+  readonly observedAtMs: number;
+  readonly resetAtMs?: number;
+  readonly retryAfterMs?: number;
+}
+
+export interface EndpointResetLearning {
+  readonly signal: ClassifiedLimitSignal;
+  readonly observationCount: number;
+  readonly retryAfterMs: number;
+  readonly resetAtMs: number;
+}
+
+export interface LearnEndpointResetInput {
+  readonly signal: ClassifiedLimitSignal;
+  readonly observedAtMs: number;
+  readonly observations: readonly EndpointResetObservation[];
+  readonly minObservations?: number;
+}
+
 export interface DecideLimitResponseInput {
   readonly stage: Stage;
   readonly signal: ClassifiedLimitSignal;
@@ -80,6 +104,32 @@ function sameCapability(left: LimitCapabilityDescriptor, right: LimitCapabilityD
     left.target === right.target &&
     left.family === right.family
   );
+}
+
+function endpointCapabilityId(capability: LimitCapabilityDescriptor): string {
+  return `${capability.endpointKind}:${capability.target}:${capability.family}`;
+}
+
+export function observeEndpointReset(
+  signal: ClassifiedLimitSignal,
+  observedAtMs: number,
+): EndpointResetObservation {
+  const resetAtMs =
+    signal.retryAtMs ??
+    (signal.retryAfterMs === undefined ? undefined : observedAtMs + signal.retryAfterMs);
+  const retryAfterMs =
+    signal.retryAfterMs ??
+    (resetAtMs === undefined ? undefined : Math.max(0, resetAtMs - observedAtMs));
+
+  return {
+    endpointCapabilityId: endpointCapabilityId(signal.capability),
+    endpointTarget: signal.capability.target,
+    family: signal.capability.family,
+    source: signal.source,
+    observedAtMs,
+    ...(resetAtMs === undefined ? {} : { resetAtMs }),
+    ...(retryAfterMs === undefined ? {} : { retryAfterMs }),
+  };
 }
 
 function peerFamily(
@@ -121,6 +171,44 @@ function timingStep(signal: ClassifiedLimitSignal): LimitResponseDecision {
     reason: "no-legal-headroom",
     ...(signal.retryAfterMs === undefined ? {} : { retryAfterMs: signal.retryAfterMs }),
     ...(signal.retryAtMs === undefined ? {} : { retryAtMs: signal.retryAtMs }),
+  };
+}
+
+function resetDelayMs(observation: EndpointResetObservation): number | undefined {
+  if (observation.retryAfterMs !== undefined) return observation.retryAfterMs;
+  if (observation.resetAtMs === undefined) return undefined;
+  const delayMs = observation.resetAtMs - observation.observedAtMs;
+  return delayMs >= 0 ? delayMs : undefined;
+}
+
+function median(values: readonly number[]): number {
+  const sorted = [...values].sort((left, right) => left - right);
+  const middle = Math.floor(sorted.length / 2);
+  if (sorted.length % 2 === 1) return sorted[middle]!;
+  return Math.round((sorted[middle - 1]! + sorted[middle]!) / 2);
+}
+
+export function learnEndpointReset(input: LearnEndpointResetInput): EndpointResetLearning | undefined {
+  const currentEndpointCapabilityId = endpointCapabilityId(input.signal.capability);
+  const samples = input.observations
+    .filter((observation) => observation.endpointCapabilityId === currentEndpointCapabilityId)
+    .map(resetDelayMs)
+    .filter((delayMs): delayMs is number => delayMs !== undefined && Number.isFinite(delayMs));
+  const minObservations = input.minObservations ?? 2;
+  if (samples.length < minObservations) return undefined;
+
+  const retryAfterMs = median(samples);
+  const resetAtMs = input.observedAtMs + retryAfterMs;
+  const signal: ClassifiedLimitSignal = {
+    ...input.signal,
+    retryAfterMs,
+    retryAtMs: resetAtMs,
+  };
+  return {
+    signal,
+    observationCount: samples.length,
+    retryAfterMs,
+    resetAtMs,
   };
 }
 

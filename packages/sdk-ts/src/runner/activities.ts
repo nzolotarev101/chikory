@@ -33,8 +33,18 @@ import {
 } from "../judge/index.js";
 import { EndpointLedger } from "../journal/endpoint-ledger.js";
 import { Journal, reportFromJournal, runTotals } from "../journal/journal.js";
-import { decideLimitResponse, type LimitResponsePlan } from "../limit-response.js";
-import { classifyLimitSignal, type ClassifiedLimitSignal } from "../limit-signal.js";
+import {
+  decideLimitResponse,
+  learnEndpointReset,
+  observeEndpointReset,
+  type EndpointResetObservation,
+  type LimitResponsePlan,
+} from "../limit-response.js";
+import {
+  classifyLimitSignal,
+  type ClassifiedLimitSignal,
+  type RawLimitSignal,
+} from "../limit-signal.js";
 import {
   recordCheckpointSpan,
   recordJudgePassSpan,
@@ -153,6 +163,14 @@ export interface LimitSignalPayload {
   chosenResponse: LimitResponsePlan["steps"][number];
 }
 
+export interface LimitObservationPayload {
+  endpointCapabilityId: string;
+  atStep: number;
+  stage: "code";
+  signal: ClassifiedLimitSignal;
+  observation: EndpointResetObservation;
+}
+
 export interface VerdictPayload {
   judgeIndex: number;
   atStep: number;
@@ -198,7 +216,6 @@ export interface RestoredWorkflowState {
   remediationAttempts: number;
   /** WP-519: total journaled heal attempts ever — the next remediationIndex (idempotency key). */
   remediationIndexBase: number;
-  /** Completion reviews already journaled since the last terminal seal. */
   completionReviewAttempts: number;
   sinceCommit?: string;
 }
@@ -292,6 +309,79 @@ function limitInjectedAtStep(raw: string | undefined, stepIndex: number): boolea
   if (raw === undefined) return false;
   const parsed = Number(raw);
   return Number.isInteger(parsed) && parsed === stepIndex;
+}
+
+function rawLimitSignalFromStepRecord(record: StepRecord): RawLimitSignal | undefined {
+  const limitSignal = (record as { limitSignal?: unknown }).limitSignal;
+  if (typeof limitSignal !== "object" || limitSignal === null) return undefined;
+  const signal = limitSignal as {
+    kind?: unknown;
+    statusCode?: unknown;
+    headers?: unknown;
+    body?: unknown;
+    stderr?: unknown;
+    exitCode?: unknown;
+    reason?: unknown;
+    retryAfterMs?: unknown;
+    retryAtMs?: unknown;
+  };
+  if (signal.kind === "http" && typeof signal.statusCode === "number") {
+    return {
+      kind: "http",
+      statusCode: signal.statusCode,
+      ...(isStringHeaders(signal.headers) ? { headers: signal.headers } : {}),
+      ...(typeof signal.body === "string" ? { body: signal.body } : {}),
+    };
+  }
+  if (signal.kind === "cli-stderr" && typeof signal.stderr === "string") {
+    return {
+      kind: "cli-stderr",
+      stderr: signal.stderr,
+      ...(typeof signal.exitCode === "number" || signal.exitCode === null
+        ? { exitCode: signal.exitCode }
+        : {}),
+    };
+  }
+  if (signal.kind === "injected" && typeof signal.reason === "string") {
+    return {
+      kind: "injected",
+      reason: signal.reason,
+      ...(typeof signal.retryAfterMs === "number" ? { retryAfterMs: signal.retryAfterMs } : {}),
+      ...(typeof signal.retryAtMs === "number" ? { retryAtMs: signal.retryAtMs } : {}),
+    };
+  }
+  return undefined;
+}
+
+function signalWithoutResetTiming(signal: ClassifiedLimitSignal): ClassifiedLimitSignal {
+  const { retryAfterMs: _retryAfterMs, retryAtMs: _retryAtMs, ...withoutTiming } = signal;
+  return withoutTiming;
+}
+
+function endpointResetObservations(
+  journal: Journal,
+  endpointCapabilityId: string,
+): readonly EndpointResetObservation[] {
+  return journal
+    .entries("limit_observation")
+    .map((entry) => (entry.payload as Partial<LimitObservationPayload>).observation)
+    .filter(
+      (observation): observation is EndpointResetObservation =>
+        observation !== undefined &&
+        observation.endpointCapabilityId === endpointCapabilityId,
+    );
+}
+
+function isStringHeaders(
+  value: unknown,
+): value is Readonly<Record<string, string | readonly string[] | undefined>> {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) return false;
+  return Object.values(value).every(
+    (entry) =>
+      entry === undefined ||
+      typeof entry === "string" ||
+      (Array.isArray(entry) && entry.every((part) => typeof part === "string")),
+  );
 }
 
 function sharedHandoffStore(deps: RunnerActivityDeps): ArtifactStore {
@@ -541,9 +631,7 @@ function summariesSinceLastVerdict(journal: Journal, atStep: number): string[] {
   let lastJudgedStep = -1;
   for (const entry of journal.entries("verdict")) {
     const payload = entry.payload as VerdictPayload & { source?: string };
-    // "completion-review" verdicts re-judge the CUMULATIVE diff at the seal
-    // moment — they must not advance the incremental coverage watermark.
-    if (payload.source === "runner" || payload.source === "completion-review") continue;
+    if (payload.source === "runner") continue;
     lastJudgedStep = Math.max(lastJudgedStep, payload.atStep);
   }
   return journal
@@ -561,7 +649,7 @@ function repoDiffBasesSinceLastVerdict(
   let lastJudgedStep = -1;
   for (const entry of journal.entries("verdict")) {
     const payload = entry.payload as VerdictPayload & { source?: string };
-    if (payload.source === "runner" || payload.source === "completion-review") continue;
+    if (payload.source === "runner") continue;
     if (payload.atStep < atStep) lastJudgedStep = Math.max(lastJudgedStep, payload.atStep);
   }
 
@@ -584,7 +672,6 @@ function repoDiffBasesSinceLastVerdict(
   );
 }
 
-/** Cumulative diff bases for the run-completion review: every writable repo → run base. */
 function repoDiffBasesAtRunBase(workspaceRepos: WorkspaceRepo[]): Record<string, string> {
   return Object.fromEntries(
     workspaceRepos.filter((repo) => repo.writable).map((repo) => [repo.name, BASE_TAG]),
@@ -931,6 +1018,150 @@ export function createRunnerActivities(deps: RunnerActivityDeps) {
             context: input.context,
             limits: input.limits,
           });
+
+          const rawLimitSignal = rawLimitSignalFromStepRecord(record);
+          if (record.status === "FAILED" && rawLimitSignal !== undefined) {
+            const observedAtMs = Date.now();
+            const limitCapabilities = resolveEndpointCapabilities(spec.routing);
+            const classified = classifyLimitSignal({
+              capability:
+                limitCapabilities.code[0] ??
+                capabilities.code[0] ??
+                describeEndpointCapability({
+                  adapter: spec.executor.adapter,
+                  family: spec.executor.family,
+                }),
+              signal: rawLimitSignal,
+              nowMs: observedAtMs,
+            });
+            if (classified !== undefined) {
+              const observation =
+                classified.source === "injected"
+                  ? undefined
+                  : observeEndpointReset(classified, observedAtMs);
+              const learning =
+                observation === undefined
+                  ? undefined
+                  : learnEndpointReset({
+                      signal: classified,
+                      observedAtMs,
+                      observations: [
+                        ...endpointResetObservations(journal, observation.endpointCapabilityId),
+                        observation,
+                      ],
+                    });
+              const signal =
+                classified.source === "injected"
+                  ? classified
+                  : (learning?.signal ?? signalWithoutResetTiming(classified));
+              const limitResponse = decideLimitResponse({
+                stage: "code",
+                signal,
+                capabilities: limitCapabilities,
+              });
+              const selected =
+                limitResponse.steps.find((step) => step.action === "declared-failover") ??
+                limitResponse.steps.find((step) => step.action !== "park-until-reset") ??
+                limitResponse.steps[0];
+              if (selected === undefined) {
+                throw new Error("scheduler produced no limit response steps");
+              }
+              if (observation !== undefined) {
+                journal.appendOnce(
+                  { field: "atStep", value: input.stepIndex },
+                  {
+                    kind: "limit_observation",
+                    payload: {
+                      endpointCapabilityId: observation.endpointCapabilityId,
+                      atStep: input.stepIndex,
+                      stage: "code",
+                      signal,
+                      observation,
+                    } satisfies LimitObservationPayload,
+                    costDeltaUsd: 0,
+                    artifactRefs: [],
+                  },
+                );
+              }
+              journal.appendOnce(
+                { field: "atStep", value: input.stepIndex },
+                {
+                  kind: "limit_signal",
+                  payload: {
+                    limitSignalIndex: input.stepIndex,
+                    atStep: input.stepIndex,
+                    stage: "code",
+                    signal,
+                    limitResponse,
+                    chosenResponse: selected,
+                  } satisfies LimitSignalPayload,
+                  costDeltaUsd: 0,
+                  artifactRefs: [],
+                },
+              );
+              record = await applyLimitResponse({
+                store,
+                stepIndex: input.stepIndex,
+                planItem: input.context.planItem,
+                signal,
+                selected,
+                adapterFactory: factory,
+                baseRouting: spec.routing,
+                modelFamily: spec.executor.family,
+                routerOptions: deps.routerOptions,
+                stepInput: {
+                  workspaceDir: workspaceDir(deps.dataDir, input.runId),
+                  instruction: input.instruction,
+                  context: input.context,
+                  limits: input.limits,
+                },
+              });
+              const executedPlanItem =
+                selected.action === "limit-independent-work"
+                  ? `limit-independent ${selected.target.stage} work before retrying: ${input.context.planItem}`
+                  : input.context.planItem;
+              const limitParkResponse =
+                selected.action === "park-until-reset" ? selected : undefined;
+              const payload: StepPayload = {
+                stepIndex: input.stepIndex,
+                instruction: input.instruction,
+                planItem: executedPlanItem,
+                record,
+                limitResponse,
+                ...(limitParkResponse === undefined ? {} : { limitParkResponse }),
+                ...(selected.action === "limit-independent-work"
+                  ? {
+                      deferredPlanItem: input.context.planItem,
+                      executedPlanItem,
+                    }
+                  : {}),
+              };
+              journal.appendOnce(
+                { field: "stepIndex", value: input.stepIndex },
+                {
+                  kind: "step",
+                  payload,
+                  costDeltaUsd: 0,
+                  tokens: record.tokens,
+                  artifactRefs: [record.diffRef, record.transcriptRef],
+                },
+              );
+              appendStepConsumption(deps, spec, input, record);
+              recordRunStepSpan({
+                runId: input.runId,
+                stepIndex: input.stepIndex,
+                planItem: input.context.planItem,
+                record,
+              });
+              return {
+                ...record,
+                ...(limitParkResponse === undefined ? {} : { limitParkResponse }),
+                ...(selected.action === "limit-independent-work"
+                  ? { limitDeferredPlanItem: input.context.planItem }
+                  : {}),
+              };
+            }
+          }
 
           // WP-515 (F-96): a step killed at the cap (or failed before its
           // usage event) meters $0/0 tokens despite real tool-call work —

@@ -11,6 +11,7 @@ import type { EndpointCapability, ResolvedEndpointCapabilities } from "../endpoi
 import type {
   CapabilityPayload,
   JudgePayload,
+  LimitObservationPayload,
   LimitPacePayload,
   LimitSignalPayload,
   StepPayload,
@@ -71,6 +72,11 @@ interface ControlEventPayload {
 interface SoakTraceSummary {
   reentries: number;
   sleptMs: number;
+}
+
+interface LearnedEndpointResetSummary {
+  endpointCapabilityId: string;
+  retryAfterMs: number;
 }
 
 const SUMMARY_WIDTH = 36;
@@ -221,6 +227,24 @@ function summarizeSoakTrace(entries: JournalEntry[]): SoakTraceSummary {
   return { reentries, sleptMs };
 }
 
+function learnedEndpointResetSummary(entries: JournalEntry[]): readonly LearnedEndpointResetSummary[] {
+  const byEndpoint = new Map<string, LearnedEndpointResetSummary>();
+  for (const entry of entries) {
+    if (entry.kind !== "limit_observation") continue;
+    const payload = entry.payload as Partial<LimitObservationPayload>;
+    if (typeof payload.endpointCapabilityId !== "string") continue;
+    const retryAfterMs = payload.signal?.retryAfterMs;
+    if (typeof retryAfterMs !== "number" || !Number.isFinite(retryAfterMs)) continue;
+    byEndpoint.set(payload.endpointCapabilityId, {
+      endpointCapabilityId: payload.endpointCapabilityId,
+      retryAfterMs,
+    });
+  }
+  return [...byEndpoint.values()].sort((left, right) =>
+    left.endpointCapabilityId.localeCompare(right.endpointCapabilityId),
+  );
+}
+
 
 /** The `chikory trace <run-id>` body (cli.md WP-142 format). */
 export function renderTrace(run: RunRow, entries: JournalEntry[], totals: RunTotals): string {
@@ -329,9 +353,14 @@ export function renderTrace(run: RunRow, entries: JournalEntry[], totals: RunTot
       ? ` · memory recalls ${memoryRecalls} · evicted ${memoryEvictions}`
       : "";
   const limitSignals = totals.limitSignals ?? 0;
+  const learnedResets = learnedEndpointResetSummary(entries);
+  const learnedResetSummary =
+    learnedResets.length > 0
+      ? ` · learned resets ${learnedResets.map((reset) => `${reset.endpointCapabilityId} ${formatDuration(reset.retryAfterMs)}`).join(", ")}`
+      : "";
   const limitSummary =
     limitSignals > 0
-      ? ` · limit signals ${limitSignals} · limit-slept ${formatDuration(totals.limitSleptMs ?? 0)} · conserved ${formatDuration(totals.limitSleepConservedMs ?? 0)}`
+      ? ` · limit signals ${limitSignals} · limit-slept ${formatDuration(totals.limitSleptMs ?? 0)} · conserved ${formatDuration(totals.limitSleepConservedMs ?? 0)}${learnedResetSummary}`
       : "";
   // WP-310 pacing-governor burn state — the LAST journaled decision's window
   // snapshot. A run with no `limit_pace` entries renders byte-identically to

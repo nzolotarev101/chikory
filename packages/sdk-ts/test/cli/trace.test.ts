@@ -17,6 +17,7 @@ import type {
   JournalEntry,
   JudgeForm,
   JudgePayload,
+  LimitObservationPayload,
   LimitSignalPayload,
   RunRow,
   RunTotals,
@@ -242,6 +243,40 @@ describe("renderTrace (WP-142)", () => {
     ).toBe(renderTrace(run, entries, totals));
   });
 
+  test("no-limit-signal run ignores observation-only rows to keep trace output byte-identical", () => {
+    const observationOnly: LimitObservationPayload = {
+      endpointCapabilityId: "executor:scripted:anthropic",
+      atStep: 2,
+      stage: "code",
+      signal: {
+        kind: "limit",
+        source: "http-429",
+        capability: {
+          endpointKind: "executor",
+          target: "scripted",
+          family: "anthropic",
+          limits: describeEndpointCapability("anthropic").limits,
+        },
+        reason: "rate limited",
+        retryAfterMs: 5000,
+        retryAtMs: Date.parse("2026-06-11T10:07:05.000Z"),
+      },
+      observation: {
+        endpointCapabilityId: "executor:scripted:anthropic",
+        endpointTarget: "scripted",
+        family: "anthropic",
+        source: "http-429",
+        observedAtMs: Date.parse("2026-06-11T10:07:00.000Z"),
+        retryAfterMs: 5000,
+        resetAtMs: Date.parse("2026-06-11T10:07:05.000Z"),
+      },
+    };
+
+    expect(renderTrace(run, [...entries, entry(9, "limit_observation", observationOnly)], totals)).toBe(
+      renderTrace(run, entries, totals),
+    );
+  });
+
   test("reports soak re-entry counters only when soak control events exist", () => {
     const entriesWithSoak: JournalEntry[] = [
       ...entries,
@@ -306,16 +341,45 @@ describe("renderTrace (WP-142)", () => {
       },
       chosenResponse: { action: "limit-independent-work", target: fallback },
     };
+    const learnedObservation: LimitObservationPayload = {
+      endpointCapabilityId: "executor:scripted:anthropic",
+      atStep: 2,
+      stage: "code",
+      signal: {
+        kind: "limit",
+        source: "http-429",
+        capability: throttled,
+        reason: "rate limited",
+        retryAfterMs: 5000,
+        retryAtMs: Date.parse("2026-06-11T10:07:05.000Z"),
+      },
+      observation: {
+        endpointCapabilityId: "executor:scripted:anthropic",
+        endpointTarget: "scripted",
+        family: "anthropic",
+        source: "http-429",
+        observedAtMs: Date.parse("2026-06-11T10:07:00.000Z"),
+        retryAfterMs: 5000,
+        resetAtMs: Date.parse("2026-06-11T10:07:05.000Z"),
+      },
+    };
     const limitTotals: RunTotals = {
       ...totals,
       limitSignals: 1,
       limitSleptMs: 0,
       limitSleepConservedMs: 5000,
     };
-    const trace = renderTrace(run, [...entries, entry(9, "limit_signal", limitPayload)], limitTotals);
+    const trace = renderTrace(
+      run,
+      [...entries, entry(9, "limit_observation", learnedObservation), entry(10, "limit_signal", limitPayload)],
+      limitTotals,
+    );
 
-    expect(trace).toContain("limit signals 1 · limit-slept 0s · conserved 5s");
+    expect(trace).toContain(
+      "limit signals 1 · limit-slept 0s · conserved 5s · learned resets executor:scripted:anthropic 5s",
+    );
     expect(renderTrace(run, entries, totals)).not.toContain("limit signals");
+    expect(renderTrace(run, entries, totals)).not.toContain("learned resets");
     expect(stripAnsi(formatEntryLine(entry(9, "limit_signal", limitPayload)))).toContain(
       "limit signal injected @ step 3 — limit-independent-work",
     );

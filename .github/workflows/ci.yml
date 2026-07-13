@@ -68,6 +68,9 @@ jobs:
       - name: Lint (eslint + ruff check/format)
         run: devbox run lint
 
+      - name: Build
+        run: devbox run build
+
       - name: Typecheck (tsc + pyright)
         run: devbox run typecheck
 

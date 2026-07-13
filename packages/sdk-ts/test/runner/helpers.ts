@@ -47,6 +47,18 @@ export interface ScriptedConfig {
   delayMs: number;
   /** 1-based attempt numbers that FAIL. */
   failSteps: number[];
+  /** 1-based attempt numbers that return a structured HTTP 429 limit signal. */
+  httpLimitSteps?: number[];
+  /** Retry-After seconds used by `httpLimitSteps`; default keeps tests fast. */
+  httpLimitRetryAfterSeconds?: number;
+  /** 1-based attempt numbers whose HTTP 429 omits Retry-After timing. */
+  httpLimitWithoutRetryAfterSteps?: number[];
+  /** 1-based attempt numbers that return a structured CLI usage-limit stderr signal. */
+  cliLimitSteps?: number[];
+  /** Stderr used by `cliLimitSteps`; must look like a real CLI usage-limit line. */
+  cliLimitStderr?: string;
+  /** Exit code used by `cliLimitSteps`; default matches ordinary CLI failure. */
+  cliLimitExitCode?: number;
   /** 1-based attempt numbers that report a zero-byte diff. */
   emptyDiffSteps: number[];
   /** Include received judge feedback in the step summary for assertions. */
@@ -112,7 +124,9 @@ export function createScriptedAdapter(ctx: { store: ArtifactStore }): ExecutorAd
 
       if (cfg.delayMs > 0) await new Promise((r) => setTimeout(r, cfg.delayMs));
 
-      const fail = cfg.failAll === true || cfg.failSteps.includes(attempt);
+      const httpLimited = cfg.httpLimitSteps?.includes(attempt) === true;
+      const cliLimited = cfg.cliLimitSteps?.includes(attempt) === true;
+      const fail = httpLimited || cliLimited || cfg.failAll === true || cfg.failSteps.includes(attempt);
       const emptyDiff = cfg.emptyDiffSteps.includes(attempt);
       const claimsComplete = (cfg.claimsCompleteSteps ?? []).includes(attempt);
       if (!fail) {
@@ -156,6 +170,45 @@ export function createScriptedAdapter(ctx: { store: ArtifactStore }): ExecutorAd
         costEstimated: false,
         durationMs: cfg.delayMs,
       };
+      if (httpLimited) {
+        const retryAfterSeconds = cfg.httpLimitRetryAfterSeconds ?? 7;
+        const withoutRetryAfter =
+          cfg.httpLimitWithoutRetryAfterSteps?.includes(attempt) === true;
+        const limitedRecord = {
+          ...base,
+          status: "FAILED" as const,
+          failure: {
+            reason: `scripted HTTP 429 at attempt ${attempt}`,
+            retriable: true,
+          },
+          limitSignal: {
+            kind: "http",
+            statusCode: 429,
+            headers: withoutRetryAfter ? {} : { "retry-after": String(retryAfterSeconds) },
+            body: `scripted HTTP 429 at attempt ${attempt}`,
+          },
+        };
+        return limitedRecord;
+      }
+      if (cliLimited) {
+        const stderr =
+          cfg.cliLimitStderr ??
+          `You've hit your usage limit. Please try again in 45 seconds.`;
+        const limitedRecord = {
+          ...base,
+          status: "FAILED" as const,
+          failure: {
+            reason: stderr,
+            retriable: true,
+          },
+          limitSignal: {
+            kind: "cli-stderr",
+            stderr,
+            exitCode: cfg.cliLimitExitCode ?? 1,
+          },
+        };
+        return limitedRecord;
+      }
       return fail
         ? {
             ...base,

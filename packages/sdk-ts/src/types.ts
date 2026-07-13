@@ -447,6 +447,7 @@ export type JournalEntryKind =
   // throttle sleeps, predicted limits, and periodic burn-state snapshots.
   | "limit_pace"
   | "capability"
+  | "limit_observation"
   | "limit_signal"
   | "terminal"
   | "seam"

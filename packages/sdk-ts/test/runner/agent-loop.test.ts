@@ -22,6 +22,8 @@ import {
   runTotals,
   workspaceDir,
   type JudgeVerdict,
+  type LimitObservationPayload,
+  type LimitSignalPayload,
   type RunnerActivities,
   type RunStatusReport,
   type StepPayload,
@@ -338,6 +340,164 @@ describe.skipIf(address === null)("agent loop (WP-121)", () => {
     } finally {
       journal.close();
     }
+  });
+
+  test("parks an untimed limit response from learned endpoint reset history, resumes, and completes", async () => {
+    delete process.env["CHIKORY_LIMIT_AT_STEP"];
+    let dataDirRef = "";
+    const decidingJudge: RunnerActivities["judgeStep"] = async (input) => {
+      const verdict: JudgeVerdict = {
+        kind: "PROCEED",
+        form: {
+          criterionResults: input.criteria.map((c) => ({
+            id: c.id,
+            pass: true,
+            justification: "test judge: throttled item completed",
+          })),
+          rubricResults: [],
+          concerns: [],
+        },
+        rationale: "test judge: completed after learned reset park",
+        costUsd: 0,
+        tokens: { input: 0, output: 0 },
+        judgeModel: { provider: "gemini", model: "test-judge" },
+      };
+      const journal = new Journal(journalPath(dataDirRef, input.runId));
+      try {
+        journal.appendOnce(
+          { field: "judgeIndex", value: input.judgeIndex },
+          {
+            kind: "verdict",
+            payload: { judgeIndex: input.judgeIndex, atStep: input.atStep, verdict },
+            costDeltaUsd: 0,
+            tokens: verdict.tokens,
+            artifactRefs: [],
+          },
+        );
+      } finally {
+        journal.close();
+      }
+      return verdict;
+    };
+
+    const { repoUrl, dataDir, runner } = await setup({
+      judgeOverride: decidingJudge,
+      scriptedConfig: {
+        httpLimitSteps: [1, 3, 4],
+        httpLimitRetryAfterSeconds: 1,
+        httpLimitWithoutRetryAfterSteps: [4],
+        claimsCompleteSteps: [5],
+      },
+    });
+    dataDirRef = dataDir;
+    const spec = makeSpec({
+      repoUrl,
+      goal: "Complete the throttled item after the learned reset window.",
+      maxSteps: 6,
+      judge: { family: "anthropic", cadence: 10, allowSameFamily: true },
+      routing: {
+        stages: {
+          plan: { provider: "anthropic", model: "claude-fable-5" },
+          code: { provider: "anthropic", model: "claude-fable-5" },
+          review: { provider: "anthropic", model: "claude-fable-5" },
+          judge: { provider: "anthropic", model: "claude-fable-5" },
+        },
+      },
+    });
+
+    const handle = await runner.start(spec);
+    const report = await awaitTerminal(handle);
+
+    expect(report.status).toBe("SUCCESS");
+    expect(report.currentStep).toBe(5);
+    expect(report.lastVerdict).toEqual({ kind: "PROCEED", atStep: 4 });
+
+    const journal = new Journal(journalPath(dataDir, handle.runId));
+    try {
+      const limitSignals = journal.entries("limit_signal").map(
+        (entry) => entry.payload as LimitSignalPayload,
+      );
+      expect(limitSignals).toHaveLength(3);
+      expect(limitSignals[0]!.chosenResponse).toEqual({
+        action: "park-until-reset",
+        reason: "no-legal-headroom",
+      });
+      expect(limitSignals[2]!.signal.reason).toBe("scripted HTTP 429 at attempt 4");
+      expect(limitSignals[2]!.signal).toMatchObject({
+        source: "http-429",
+        retryAfterMs: 1000,
+      });
+      expect(limitSignals[2]!.chosenResponse).toEqual({
+        action: "park-until-reset",
+        reason: "no-legal-headroom",
+        retryAfterMs: 1000,
+        retryAtMs: limitSignals[2]!.signal.retryAtMs,
+      });
+
+      const observations = journal.entries("limit_observation").map(
+        (entry) => entry.payload as LimitObservationPayload,
+      );
+      expect(observations).toHaveLength(3);
+      expect(observations[2]!.observation).toEqual({
+        endpointCapabilityId: "provider:anthropic:anthropic",
+        endpointTarget: "anthropic",
+        family: "anthropic",
+        source: "http-429",
+        observedAtMs: expect.any(Number),
+      });
+      expect(observations[2]!.observation).not.toHaveProperty("retryAfterMs");
+      expect(observations[2]!.observation).not.toHaveProperty("resetAtMs");
+
+      const limitResumes = journal
+        .entries("control_event")
+        .map(
+          (entry) =>
+            entry.payload as {
+              event?: string;
+              source?: string;
+              atStep?: number;
+              details?: { sleepMs?: number };
+            },
+        )
+        .filter((payload) => payload.event === "resume" && payload.source === "limit");
+      expect(
+        limitResumes.map(({ event, source, atStep, details }) => ({
+          event,
+          source,
+          atStep,
+          details,
+        })),
+      ).toEqual([
+        { event: "resume", source: "limit", atStep: 2, details: { sleepMs: 1000 } },
+        { event: "resume", source: "limit", atStep: 3, details: { sleepMs: 1000 } },
+      ]);
+
+      const steps = journal.entries("step").map((entry) => entry.payload as StepPayload);
+      expect(steps).toHaveLength(5);
+      expect(steps.map((step) => step.record.status)).toEqual([
+        "FAILED",
+        "SUCCESS",
+        "FAILED",
+        "FAILED",
+        "SUCCESS",
+      ]);
+      expect(steps[4]!.record.claimsComplete).toBe(true);
+      expect(steps[4]!.limitParkResponse).toBeUndefined();
+      expect(runTotals(journal)).toMatchObject({
+        limitSignals: 3,
+        limitSleptMs: 2000,
+        limitSleepConservedMs: 0,
+      });
+      expect((journal.entries("terminal")[0]!.payload as { status: string }).status).toBe(
+        "SUCCESS",
+      );
+    } finally {
+      journal.close();
+    }
+
+    const ws = workspaceDir(dataDir, handle.runId);
+    await expect(readFile(join(ws, "scripted-count.txt"), "utf8")).resolves.toBe("5");
+    await expect(readFile(join(ws, "step-5.txt"), "utf8")).resolves.toBe(spec.goal);
   });
 
   test("forced limit response conserves work and seals SUCCESS only after every chunk runs", async () => {

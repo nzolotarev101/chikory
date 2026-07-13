@@ -427,6 +427,7 @@ export const JournalEntryKindSchema = z.enum([
   "pacing",
   "limit_pace",
   "capability",
+  "limit_observation",
   "limit_signal",
   "terminal",
   "seam",

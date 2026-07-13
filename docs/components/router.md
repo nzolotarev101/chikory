@@ -112,7 +112,10 @@ Current consumers:
   chunk must still run and be judged before the run can seal `SUCCESS`.
   `chikory trace` derives `limit-slept` from workflow-side limit resume events
   and derives `conserved` only from executed non-park limit-response step
-  payloads. Limit-free runs render exactly as before.
+  payloads. When reset learning has enough per-endpoint observations, the same
+  limit summary also renders `learned resets <endpointCapabilityId> <duration>`
+  so operators can see which endpoint supplied the park timing without opening
+  the raw journal. Limit-free runs render exactly as before.
 - `decideLimitPacing` (WP-310) is the proactive twin: before each step the
   workflow reads quota-window burn state (`readQuotaState` merges the
   descriptor's declared `quotaWindows` — rolling-5h and weekly on the

@@ -13,9 +13,12 @@ import {
   decideLimitResponse,
   Journal,
   journalPath,
+  learnEndpointReset,
+  observeEndpointReset,
   resolveEndpointCapabilities,
   runTotals,
   workspaceDir,
+  type LimitObservationPayload,
   type LimitSignalPayload,
   type StepPayload,
   type TaskSpec,
@@ -418,6 +421,290 @@ describe("executeStep limit response seam", () => {
       const returnedRecord = { ...record };
       delete returnedRecord.limitParkResponse;
       expect(payload.record).toEqual(returnedRecord);
+      expect(runTotals(journal)).toMatchObject({
+        limitSignals: 1,
+        limitSleptMs: 0,
+        limitSleepConservedMs: 0,
+      });
+    } finally {
+      journal.close();
+    }
+  });
+
+  test("learns a park reset from scripted HTTP 429 observation history without the injected seam", async () => {
+    delete process.env["CHIKORY_LIMIT_AT_STEP"];
+    const runId = "run-limit-response-http-429";
+    const { activities, dataDir, spec } = await preparedRun(
+      runId,
+      {
+        judge: { family: "anthropic", cadence: 2, allowSameFamily: true },
+        routing: {
+          stages: {
+            plan: { provider: "anthropic", model: "claude-fable-5" },
+            code: { provider: "anthropic", model: "claude-fable-5" },
+            review: { provider: "anthropic", model: "claude-fable-5" },
+            judge: { provider: "anthropic", model: "claude-fable-5" },
+          },
+        },
+      },
+      { httpLimitSteps: [1, 2], httpLimitRetryAfterSeconds: 12 },
+    );
+
+    const firstRecord = await activities.executeStep({
+      runId,
+      stepIndex: 0,
+      instruction: spec.goal,
+      context: {
+        goal: spec.goal,
+        acceptanceCriteria: spec.acceptanceCriteria,
+        planItem: spec.goal,
+        notes: {},
+        recentSteps: [],
+        injections: [],
+        memoryRefs: [],
+      },
+      limits: { maxSeconds: 600 },
+    });
+    expect(firstRecord.status).toBe("FAILED");
+    expect(firstRecord.limitParkResponse).toEqual({
+      action: "park-until-reset",
+      reason: "no-legal-headroom",
+    });
+
+    const record = await activities.executeStep({
+      runId,
+      stepIndex: 1,
+      instruction: spec.goal,
+      context: {
+        goal: spec.goal,
+        acceptanceCriteria: spec.acceptanceCriteria,
+        planItem: spec.goal,
+        notes: {},
+        recentSteps: [],
+        injections: [],
+        memoryRefs: [],
+      },
+      limits: { maxSeconds: 600 },
+    });
+
+    expect(typeof learnEndpointReset).toBe("function");
+    const firstClassified = classifyLimitSignal({
+      capability: resolveEndpointCapabilities(spec.routing).code[0]!,
+      signal: {
+        kind: "http",
+        statusCode: 429,
+        headers: { "retry-after": "12" },
+        body: "scripted HTTP 429 at attempt 1",
+      },
+      nowMs: 1_000,
+    });
+    const secondClassified = classifyLimitSignal({
+      capability: resolveEndpointCapabilities(spec.routing).code[0]!,
+      signal: {
+        kind: "http",
+        statusCode: 429,
+        headers: { "retry-after": "12" },
+        body: "scripted HTTP 429 at attempt 2",
+      },
+      nowMs: 20_000,
+    });
+    expect(firstClassified).toBeDefined();
+    expect(secondClassified).toBeDefined();
+    const firstObservation = observeEndpointReset(firstClassified!, 1_000);
+    const secondObservation = observeEndpointReset(secondClassified!, 20_000);
+    expect(
+      learnEndpointReset({
+        signal: firstClassified!,
+        observedAtMs: 1_000,
+        observations: [firstObservation],
+      }),
+    ).toBeUndefined();
+    expect(
+      learnEndpointReset({
+        signal: secondClassified!,
+        observedAtMs: 20_000,
+        observations: [firstObservation, secondObservation],
+      }),
+    ).toMatchObject({
+      signal: {
+        source: "http-429",
+        retryAfterMs: 12_000,
+        retryAtMs: 32_000,
+      },
+      observationCount: 2,
+      retryAfterMs: 12_000,
+      resetAtMs: 32_000,
+    });
+
+    expect(record.status).toBe("FAILED");
+    expect(record.limitParkResponse).toMatchObject({
+      action: "park-until-reset",
+      reason: "no-legal-headroom",
+      retryAfterMs: 12_000,
+    });
+    expect(existsSync(join(workspaceDir(dataDir, runId), "scripted-count.txt"))).toBe(true);
+    expect(existsSync(join(workspaceDir(dataDir, runId), "step-1.txt"))).toBe(false);
+
+    const journal = new Journal(journalPath(dataDir, runId));
+    try {
+      const limitSignals = journal.entries("limit_signal");
+      expect(limitSignals).toHaveLength(2);
+      const firstLimitPayload = limitSignals[0]!.payload as LimitSignalPayload;
+      expect(firstLimitPayload.signal).not.toHaveProperty("retryAfterMs");
+      expect(firstLimitPayload.chosenResponse).toEqual({
+        action: "park-until-reset",
+        reason: "no-legal-headroom",
+      });
+      const limitPayload = limitSignals[1]!.payload as LimitSignalPayload;
+      expect(limitPayload.signal).toMatchObject({
+        source: "http-429",
+        reason: "scripted HTTP 429 at attempt 2",
+        retryAfterMs: 12_000,
+      });
+      expect(limitPayload.signal.retryAtMs).toBeGreaterThan(0);
+      expect(limitPayload).not.toHaveProperty("endpointResetObservation");
+      const observations = journal.entries("limit_observation");
+      expect(observations).toHaveLength(2);
+      const observationPayload = observations[1]!.payload as LimitObservationPayload;
+      expect(observationPayload.endpointCapabilityId).toBe("provider:anthropic:anthropic");
+      expect(observationPayload.signal).toEqual(limitPayload.signal);
+      expect(observationPayload.observation).toEqual({
+        endpointCapabilityId: "provider:anthropic:anthropic",
+        endpointTarget: "anthropic",
+        family: "anthropic",
+        source: "http-429",
+        observedAtMs: limitPayload.signal.retryAtMs! - 12_000,
+        resetAtMs: limitPayload.signal.retryAtMs,
+        retryAfterMs: 12_000,
+      });
+      const duplicate = journal.appendOnce(
+        { field: "atStep", value: observationPayload.atStep },
+        {
+          kind: "limit_observation",
+          payload: observationPayload,
+          costDeltaUsd: 0,
+          artifactRefs: [],
+        },
+      );
+      expect(duplicate.existed).toBe(true);
+      expect(duplicate.entry.idx).toBe(observations[1]!.idx);
+      expect(journal.entries("limit_observation")).toHaveLength(2);
+      expect(limitPayload.chosenResponse).toEqual({
+        action: "park-until-reset",
+        reason: "no-legal-headroom",
+        retryAfterMs: 12_000,
+        retryAtMs: limitPayload.signal.retryAtMs,
+      });
+      const stepPayload = journal.entries("step")[1]!.payload as StepPayload;
+      expect(stepPayload.limitResponse).toEqual(limitPayload.limitResponse);
+      expect(stepPayload.limitParkResponse).toEqual(limitPayload.chosenResponse);
+      expect(runTotals(journal)).toMatchObject({
+        limitSignals: 2,
+        limitSleptMs: 0,
+        limitSleepConservedMs: 0,
+      });
+    } finally {
+      journal.close();
+    }
+  });
+
+  test("journals and abstains on thin scripted CLI usage-limit stderr history", async () => {
+    delete process.env["CHIKORY_LIMIT_AT_STEP"];
+    const runId = "run-limit-response-cli-stderr";
+    const stderr = "You've hit your usage limit. Please try again in 45 seconds.";
+    const { activities, dataDir, spec } = await preparedRun(
+      runId,
+      {
+        judge: { family: "anthropic", cadence: 2, allowSameFamily: true },
+        routing: {
+          stages: {
+            plan: { provider: "anthropic", model: "claude-fable-5" },
+            code: { provider: "anthropic", model: "claude-fable-5" },
+            review: { provider: "anthropic", model: "claude-fable-5" },
+            judge: { provider: "anthropic", model: "claude-fable-5" },
+          },
+        },
+      },
+      { cliLimitSteps: [1], cliLimitStderr: stderr },
+    );
+
+    const record = await activities.executeStep({
+      runId,
+      stepIndex: 0,
+      instruction: spec.goal,
+      context: {
+        goal: spec.goal,
+        acceptanceCriteria: spec.acceptanceCriteria,
+        planItem: spec.goal,
+        notes: {},
+        recentSteps: [],
+        injections: [],
+        memoryRefs: [],
+      },
+      limits: { maxSeconds: 600 },
+    });
+
+    expect(typeof learnEndpointReset).toBe("function");
+    const classified = classifyLimitSignal({
+      capability: resolveEndpointCapabilities(spec.routing).code[0]!,
+      signal: {
+        kind: "cli-stderr",
+        exitCode: 1,
+        stderr,
+      },
+      nowMs: 1_000,
+    });
+    expect(classified).toBeDefined();
+    const observation = observeEndpointReset(classified!, 1_000);
+    expect(
+      learnEndpointReset({
+        signal: classified!,
+        observedAtMs: 1_000,
+        observations: [observation],
+      }),
+    ).toBeUndefined();
+
+    expect(record.status).toBe("FAILED");
+    expect(record.limitParkResponse).toEqual({
+      action: "park-until-reset",
+      reason: "no-legal-headroom",
+    });
+    expect(existsSync(join(workspaceDir(dataDir, runId), "scripted-count.txt"))).toBe(true);
+    expect(existsSync(join(workspaceDir(dataDir, runId), "step-1.txt"))).toBe(false);
+
+    const journal = new Journal(journalPath(dataDir, runId));
+    try {
+      const limitSignals = journal.entries("limit_signal");
+      expect(limitSignals).toHaveLength(1);
+      const limitPayload = limitSignals[0]!.payload as LimitSignalPayload;
+      expect(limitPayload.signal).toMatchObject({
+        source: "cli-usage-limit",
+        reason: stderr,
+      });
+      expect(limitPayload.signal).not.toHaveProperty("retryAfterMs");
+      expect(limitPayload.signal).not.toHaveProperty("retryAtMs");
+      expect(limitPayload).not.toHaveProperty("endpointResetObservation");
+      const observations = journal.entries("limit_observation");
+      expect(observations).toHaveLength(1);
+      const observationPayload = observations[0]!.payload as LimitObservationPayload;
+      expect(observationPayload.endpointCapabilityId).toBe("provider:anthropic:anthropic");
+      expect(observationPayload.signal).toEqual(limitPayload.signal);
+      expect(observationPayload.observation).toEqual({
+        endpointCapabilityId: "provider:anthropic:anthropic",
+        endpointTarget: "anthropic",
+        family: "anthropic",
+        source: "cli-usage-limit",
+        observedAtMs: expect.any(Number),
+        resetAtMs: expect.any(Number),
+        retryAfterMs: 45_000,
+      });
+      expect(limitPayload.chosenResponse).toEqual({
+        action: "park-until-reset",
+        reason: "no-legal-headroom",
+      });
+      const stepPayload = journal.entries("step")[0]!.payload as StepPayload;
+      expect(stepPayload.limitResponse).toEqual(limitPayload.limitResponse);
+      expect(stepPayload.limitParkResponse).toEqual(limitPayload.chosenResponse);
       expect(runTotals(journal)).toMatchObject({
         limitSignals: 1,
         limitSleptMs: 0,

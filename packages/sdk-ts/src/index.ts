@@ -41,9 +41,14 @@ export {
 } from "./limit-signal.js";
 export {
   decideLimitResponse,
+  learnEndpointReset,
+  observeEndpointReset,
   type BlockedHeadroomTarget,
   type DecideLimitResponseInput,
+  type EndpointResetLearning,
+  type EndpointResetObservation,
   type HeadroomBlockReason,
+  type LearnEndpointResetInput,
   type LegalHeadroomTarget,
   type LimitResponseAction,
   type LimitResponseDecision,
@@ -258,13 +263,6 @@ export {
   type RemediationState,
 } from "./workflow/remediation.js";
 export {
-  buildCompletionReviewBrief,
-  decideCompletionReview,
-  MAX_COMPLETION_REVIEWS,
-  type CompletionReviewDecision,
-  type CompletionReviewState,
-} from "./workflow/completion-review.js";
-export {
   decideLimitParkDelay,
   type LimitParkDelayDecision,
   type LimitParkDelayState,
@@ -315,6 +313,7 @@ export {
   type AdapterFactory,
   type AdapterRegistry,
   type JudgePayload,
+  type LimitObservationPayload,
   type LimitPacePayload,
   type LimitSignalPayload,
   type RemediationPayload,

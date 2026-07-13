@@ -46,6 +46,7 @@ The persisted/exported form of a run's journal. Single format consumed by: `chik
 | `compaction` | `{ tokensBefore, tokensAfter, digestRef }` (WP-203 — emitted at the checkpoint boundary; see CONTRACTS.md §6a) |
 | `pacing` | `{ decision, batchSize, reasoning }` (P2) |
 | `capability` | `{ capabilityIndex: 0, stages: ResolvedEndpointCapabilities }` (WP-307) — per-stage resolved endpoint descriptors journaled once at run start |
+| `limit_observation` | `{ endpointCapabilityId, atStep, stage, signal: ClassifiedLimitSignal, observation: EndpointResetObservation }` (WP-308) — replay-safe reset-learning row keyed by endpoint capability id; additive alongside `limit_signal` |
 | `limit_signal` | `{ limitSignalIndex, atStep, stage, signal: ClassifiedLimitSignal, limitResponse, chosenResponse }` (WP-308) — one classified provider/executor limit and the ordered work-conserving response chosen |
 | `limit_pace` | `{ limitPaceEventIndex, atStep, action: "push"\|"steady"\|"throttle"\|"predict-limit", interStepDelayMs, limitingWindow?, observedTokensPerHour, sustainableTokensPerHour?, requiredTokensPerHour, paceConflict, windows }` (WP-310) — one pacing-governor decision against the declared quota windows (rolling-5h, weekly); throttle/predict-limit always journaled, push/steady snapshots on the judge cadence |
 | `remediation` | `{ remediationIndex, atStep, trigger, brief, rollbackTo? }` (WP-519, ADR-009 D3) — one bounded heal attempt: the rule-3 HALT `trigger`, the judge-diagnosis `brief` the retry works against, and the last-good checkpoint restored |
