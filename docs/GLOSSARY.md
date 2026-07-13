@@ -23,6 +23,8 @@ Canonical meanings. Docs and code comments use these terms exactly.
 | **Budget ledger** | Per-run spend accumulator (executor + judge), checkpoint-aware; powers gates, status, pricing meters. |
 | **Pacing / window-fit** | Pre-step reasoning sizing the next batch against context window + remaining budget; journaled decision (P2). |
 | **Escalate / HITL** | Run pauses for human approval (signal); P2 sleeps durably for hours/days at zero compute. |
+| **Overall goal (judge)** | Big-picture context a judge pass sees beside the run/chunk goal — for chain nodes, the plan's goal + node outline (`ChainLink.planGoal`/`planOutline`); feeds only the `design_serves_overall_goal` rubric item. |
+| **Completion review** | One extra judge pass at the SUCCESS seal moment over the run's CUMULATIVE diff (base → final) with a non-destructive design rubric; journaled `source:"completion-review"`; a finding grants one bounded design-fix retry, then the run seals SUCCESS with findings recorded. |
 | **Lane** | A set of WPs that never share files with another lane; the parallelism unit for multi-worker execution. |
 | **WP (work package)** | One PR-sized unit in plan.md with acceptance criteria + verification command. Tags: 🔴 architect / 🟡 builder / 🟢 mechanical. |
 | **Dogfood run** | A Chikory WP implemented *by* Chikory; journal kept; report feeds plan reprioritization. |

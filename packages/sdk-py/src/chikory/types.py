@@ -197,6 +197,8 @@ class ChainLink(ContractModel):
     write_set: list[str] | None = None
     parent_run_id: str | None = None
     parent_handoffs: list[ChainNodeHandoff] | None = None
+    plan_goal: str | None = None
+    plan_outline: list[str] | None = None
 
 
 class TaskSpec(ContractModel):

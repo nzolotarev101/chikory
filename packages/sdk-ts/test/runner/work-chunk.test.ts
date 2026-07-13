@@ -238,9 +238,13 @@ describe.skipIf(address === null)("work-chunk live Temporal proof", () => {
   function verdictKinds(dataDir: string, runId: string): string[] {
     const journal = new Journal(journalPath(dataDir, runId));
     try {
+      // Per-step judge sequence only — the seal-time completion review rides
+      // its own `source: "completion-review"` verdict entry.
       return journal
         .entries("verdict")
-        .map((entry) => (entry.payload as VerdictPayload).verdict.kind);
+        .map((entry) => entry.payload as VerdictPayload)
+        .filter((payload) => payload.source !== "completion-review")
+        .map((payload) => payload.verdict.kind);
     } finally {
       journal.close();
     }
@@ -280,7 +284,9 @@ describe.skipIf(address === null)("work-chunk live Temporal proof", () => {
     expect(chunkedReport.checkpoints.length).toBeGreaterThanOrEqual(chunks.length);
     expect(chunkedReport.lastVerdict).toEqual({ kind: "PROCEED", atStep: chunks.length - 1 });
     expect(chunkedWire.hits).toBe(chunks.length);
-    expect(chunkedWire.requests).toHaveLength(chunks.length);
+    // Per-step judge requests plus the one seal-time completion review.
+    expect(chunkedWire.reviewHits).toBe(1);
+    expect(chunkedWire.requests).toHaveLength(chunks.length + 1);
     const firstJudgePrompt = judgeUserContent(chunkedWire.requests[0]!);
     expect(firstJudgePrompt).toContain(renderActiveWorkChunkScope(chunks[0]!.directive));
     expect(firstJudgePrompt).toContain("DEFERRED BY DESIGN");

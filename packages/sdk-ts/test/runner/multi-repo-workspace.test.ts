@@ -820,8 +820,10 @@ describe.skipIf(address === null)("multi-repo workspace setup", () => {
         expect("perRepoCommits" in checkpoint).toBe(false);
       }
 
+      // 6 per-step judge passes + the seal-time completion review (which also
+      // collects per-writable-repo evidence, over the cumulative diff).
       const judgeEntries = journal.entries("judge").map((entry) => entry.payload as JudgePayload);
-      expect(judgeEntries).toHaveLength(6);
+      expect(judgeEntries).toHaveLength(7);
       for (const judgeEntry of judgeEntries) {
         expect(judgeEntry.evidenceRefs.map((ref) => ref.summary)).toEqual([
           expect.stringContaining("workspace diff for service-api"),
@@ -841,7 +843,9 @@ describe.skipIf(address === null)("multi-repo workspace setup", () => {
 
       const verdictKinds = journal
         .entries("verdict")
-        .map((entry) => (entry.payload as VerdictPayload).verdict.kind);
+        .map((entry) => entry.payload as VerdictPayload)
+        .filter((payload) => payload.source !== "completion-review")
+        .map((payload) => payload.verdict.kind);
       expect(verdictKinds).toEqual(["PROCEED", "PROCEED", "HALT", "HALT", "HALT", "PROCEED"]);
       const terminals = journal.entries("terminal");
       expect(terminals).toHaveLength(2);

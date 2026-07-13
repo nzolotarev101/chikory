@@ -5,7 +5,11 @@
  */
 import { describe, expect, it } from "vitest";
 
-import { computeVerdict, STANDING_RUBRIC } from "../../src/judge/index.js";
+import {
+  computeVerdict,
+  RUBRIC_DESIGN_SERVES_OVERALL_GOAL,
+  STANDING_RUBRIC,
+} from "../../src/judge/index.js";
 import type { JudgeForm } from "../../src/types.js";
 
 type Item = { id: string; pass: boolean; justification: string };
@@ -39,6 +43,26 @@ describe("computeVerdict (CONTRACTS.md §4)", () => {
     const decision = computeVerdict(form({ rubricResults: rubric }), {});
     expect(decision.kind).toBe("PROCEED");
     expect(decision.rationale).toContain("tests_pass");
+  });
+
+  it("rule 1: design_serves_overall_goal failure alone is non-destructive → PROCEED with note", () => {
+    const rubric = STANDING_RUBRIC.map((r) =>
+      r.id === RUBRIC_DESIGN_SERVES_OVERALL_GOAL ? fail(r.id) : pass(r.id),
+    );
+    const decision = computeVerdict(form({ rubricResults: rubric }), {});
+    expect(decision.kind).toBe("PROCEED");
+    expect(decision.rationale).toContain(RUBRIC_DESIGN_SERVES_OVERALL_GOAL);
+  });
+
+  it("rule 1: design failure + destructive failure still ROLLBACKs (rule 1 unchanged)", () => {
+    const rubric = STANDING_RUBRIC.map((r) =>
+      r.id === RUBRIC_DESIGN_SERVES_OVERALL_GOAL || r.id === "no_secrets_introduced"
+        ? fail(r.id)
+        : pass(r.id),
+    );
+    const decision = computeVerdict(form({ rubricResults: rubric }), {});
+    expect(decision.kind).toBe("ROLLBACK");
+    expect(decision.rationale).toContain("no_secrets_introduced");
   });
 
   it("rule 2: all criteria pass + clean rubric → PROCEED", () => {

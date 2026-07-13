@@ -135,6 +135,10 @@ export async function chainLoop(input: ChainLoopInput): Promise<ChainStatus> {
       chainId,
       parentHandoffs,
       dispatchIndex,
+      {
+        goal: plan.goal,
+        outline: plan.nodes.map((planNode) => `${planNode.id}: ${planNode.goal}`),
+      },
     );
     const runStatus: RunStatus = await executeChild(agentLoop, {
       workflowId: runId,

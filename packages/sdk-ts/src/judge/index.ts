@@ -29,9 +29,18 @@ export {
   JUDGE_FORM_RESPONSE_SCHEMA,
   JUDGE_SYSTEM_PROMPT,
   renderActiveWorkChunkScope,
+  renderOverallGoal,
+  renderOverallGoalContext,
   type JudgePromptInput,
 } from "./prompt.js";
-export { RUBRIC_TESTS_PASS, STANDING_RUBRIC, type RubricItem } from "./rubric.js";
+export {
+  COMPLETION_REVIEW_RUBRIC,
+  RUBRIC_CUMULATIVE_DESIGN_COHERENT,
+  RUBRIC_DESIGN_SERVES_OVERALL_GOAL,
+  RUBRIC_TESTS_PASS,
+  STANDING_RUBRIC,
+  type RubricItem,
+} from "./rubric.js";
 export {
   computeVerdict,
   FLIP_FLOPS_TO_ESCALATE,

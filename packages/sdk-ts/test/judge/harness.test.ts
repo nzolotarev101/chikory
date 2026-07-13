@@ -170,6 +170,25 @@ describe("runJudgePass (WP-131)", () => {
     expect(sent).toContain("step 1: edited app.txt");
   });
 
+  it("overallGoal rides into the wire request as the OVERALL GOAL section (and only when given)", async () => {
+    fake.setHandler((_req, res) => {
+      res.setHeader("content-type", "application/json");
+      res.end(chatCompletion(JSON.stringify(allPassForm)));
+    });
+
+    await runJudgePass(input({ overallGoal: "ship the whole importer, not just this step" }));
+    await runJudgePass(input());
+
+    const withGoal = JSON.parse(fake.requests[0]) as { messages: Array<{ content: string }> };
+    const sentWith = withGoal.messages.map((m) => m.content).join("\n");
+    expect(sentWith).toContain("## OVERALL GOAL (big picture)");
+    expect(sentWith).toContain("ship the whole importer, not just this step");
+
+    const withoutGoal = JSON.parse(fake.requests[1]) as { messages: Array<{ content: string }> };
+    const sentWithout = withoutGoal.messages.map((m) => m.content).join("\n");
+    expect(sentWithout).not.toContain("## OVERALL GOAL (big picture)");
+  });
+
   it("collects one diff artifact and prompt section per writable workspace repo", async () => {
     fake.setHandler((_req, res) => {
       res.setHeader("content-type", "application/json");

@@ -122,6 +122,36 @@ export function renderActiveWorkChunkScope(directive?: string): string {
     "overall goal appearing in THIS step's diff is FRONT-LOADING: fail",
     "`scope_matches_instruction` and name the out-of-chunk files/symbols in the",
     "justification.",
+    "",
+    "For `design_serves_overall_goal`, judge the DESIGN QUALITY of the work",
+    "present in this diff against the overall goal; later parts deferred to",
+    "future chunks are NOT design flaws. This item is about how the present",
+    "work is built, not whether it is complete.",
+  ].join("\n");
+}
+
+/** Joins a chain plan's goal (+ optional node outline) into one overall-goal string. */
+export function renderOverallGoalContext(planGoal: string, planOutline?: string[]): string {
+  if (planOutline === undefined || planOutline.length === 0) return planGoal;
+  return [
+    planGoal,
+    "",
+    "Plan outline (sibling nodes):",
+    ...planOutline.map((line) => `- ${line}`),
+  ].join("\n");
+}
+
+export function renderOverallGoal(overallGoal?: string): string {
+  if (overallGoal === undefined) return "";
+  return [
+    "## OVERALL GOAL (big picture)",
+    overallGoal,
+    "",
+    "This run implements ONE PART of the overall goal above. Use it only to",
+    "judge `design_serves_overall_goal`: whether the diff's design choices",
+    "(placement, abstractions, interfaces, duplication vs reuse) add coherently",
+    "to this bigger picture. Parts of the overall goal outside this run's own",
+    "GOAL are other runs' work — their absence is NEVER a failure of any item.",
   ].join("\n");
 }
 
@@ -133,16 +163,34 @@ function renderHistory(history: Record<string, boolean[]>): string {
     .join("\n");
 }
 
-function renderDiffEvidence(diffText: string, diffSections: DiffSection[]): string[] {
+const COMPLETION_REVIEW_SCOPE = [
+  "## REVIEW SCOPE — run-completion architecture review",
+  "Every acceptance criterion has already been confirmed by a previous pass.",
+  "This pass judges ONLY whether the run's cumulative changes form a coherent",
+  "design in service of the goal. Express every finding through the rubric",
+  "items; leave `concerns` empty — process concerns were already handled by",
+  "the per-step passes.",
+].join("\n");
+
+function renderDiffEvidence(
+  diffText: string,
+  diffSections: DiffSection[],
+  reviewScope?: "incremental" | "cumulative",
+): string[] {
+  const cumulative = reviewScope === "cumulative";
   if (diffSections.length === 0) {
     return [
-      "## EVIDENCE — workspace diff since last verdict",
+      cumulative
+        ? "## EVIDENCE — CUMULATIVE workspace diff for the ENTIRE run (base → final state)"
+        : "## EVIDENCE — workspace diff since last verdict",
       diffText.length > 0 ? `\`\`\`diff\n${diffText}\n\`\`\`` : "(empty diff — no changes)",
     ];
   }
 
   return [
-    "## EVIDENCE — workspace diffs since last verdict (per writable repo)",
+    cumulative
+      ? "## EVIDENCE — CUMULATIVE workspace diffs for the ENTIRE run (base → final state, per writable repo)"
+      : "## EVIDENCE — workspace diffs since last verdict (per writable repo)",
     ...diffSections.flatMap((section) => [
       "",
       `### repo \`${section.repoName}\` (${section.relativePath})`,
@@ -155,6 +203,8 @@ function renderDiffEvidence(diffText: string, diffSections: DiffSection[]): stri
 
 export interface JudgePromptInput {
   goal: string;
+  /** Big-picture context (e.g. the chain plan's goal) distinct from `goal`. */
+  overallGoal?: string;
   evidence: JudgeEvidence;
   rubric: RubricItem[];
   diffText: string;
@@ -164,14 +214,19 @@ export interface JudgePromptInput {
   architectureLabels: string[];
   checkRuns: CheckRun[];
   activeWorkChunkDirective?: string;
+  /** "cumulative" marks the run-completion review over the whole-run diff. */
+  reviewScope?: "incremental" | "cumulative";
 }
 
 export function buildJudgeMessages(input: JudgePromptInput): Message[] {
+  const overallGoal = renderOverallGoal(input.overallGoal);
   const activeWorkChunkScope = renderActiveWorkChunkScope(input.activeWorkChunkDirective);
   const user = [
     "## GOAL the executor was given",
     input.goal,
+    ...(overallGoal.length > 0 ? ["", overallGoal] : []),
     ...(activeWorkChunkScope.length > 0 ? ["", activeWorkChunkScope] : []),
+    ...(input.reviewScope === "cumulative" ? ["", COMPLETION_REVIEW_SCOPE] : []),
     "",
     "## ACCEPTANCE CRITERIA (fill `criterionResults`, one entry per id)",
     renderCriteria(input.evidence.criteria),
@@ -179,7 +234,7 @@ export function buildJudgeMessages(input: JudgePromptInput): Message[] {
     "## RUBRIC (fill `rubricResults`, one entry per id)",
     renderRubric(input.rubric),
     "",
-    ...renderDiffEvidence(input.diffText, input.diffSections ?? []),
+    ...renderDiffEvidence(input.diffText, input.diffSections ?? [], input.reviewScope),
     "",
     "## EVIDENCE — deterministic secret scan (added diff lines)",
     renderSecretScanLabels(input.secretScanLabels),

@@ -120,7 +120,9 @@ describe.skipIf(address === null)("remediation-before-HALT + resumable FAILED (W
     journalRead(dataDir, handle.runId, (journal) => {
       const kinds = journal
         .entries("verdict")
-        .map((e) => (e.payload as VerdictPayload).verdict.kind);
+        .map((e) => e.payload as VerdictPayload)
+        .filter((p) => p.source !== "completion-review")
+        .map((p) => p.verdict.kind);
       expect(kinds).toEqual(["PROCEED", "PROCEED", "HALT", "PROCEED"]);
 
       // Exactly one journaled heal attempt, carrying trigger + brief +

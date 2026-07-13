@@ -77,6 +77,7 @@ export function planNodeToTaskSpec(
   chainId?: string,
   parentHandoffs?: ChainNodeHandoff[],
   dispatchIndex?: number,
+  planContext?: { goal: string; outline?: string[] },
 ): TaskSpec {
   const chainLink: ChainLink = { planId, nodeId: node.id };
   if (chainId !== undefined) chainLink.chainId = chainId;
@@ -84,6 +85,14 @@ export function planNodeToTaskSpec(
   if (parentRunId !== undefined) chainLink.parentRunId = parentRunId;
   if (parentHandoffs !== undefined && parentHandoffs.length > 0) {
     chainLink.parentHandoffs = parentHandoffs;
+  }
+  // Big-picture carrier: the node's judge reads these off the journaled spec
+  // to fill the OVERALL GOAL prompt section (design_serves_overall_goal).
+  if (planContext !== undefined) {
+    chainLink.planGoal = planContext.goal;
+    if (planContext.outline !== undefined && planContext.outline.length > 0) {
+      chainLink.planOutline = planContext.outline;
+    }
   }
 
   const spec: TaskSpec = {

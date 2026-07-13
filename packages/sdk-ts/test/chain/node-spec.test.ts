@@ -109,6 +109,45 @@ describe("planNodeToTaskSpec", () => {
     });
   });
 
+  it("carries the plan's big-picture context on chainLink when supplied", () => {
+    const spec = planNodeToTaskSpec(
+      node,
+      template,
+      "plan-1",
+      undefined,
+      undefined,
+      "chain-1",
+      undefined,
+      undefined,
+      {
+        goal: "Build the whole importer end to end",
+        outline: ["N-1: Implement the first slice", "N-2: Implement the second slice"],
+      },
+    );
+
+    expect(spec.chainLink).toMatchObject({
+      planGoal: "Build the whole importer end to end",
+      planOutline: ["N-1: Implement the first slice", "N-2: Implement the second slice"],
+    });
+  });
+
+  it("omits planOutline when the plan context has an empty outline", () => {
+    const spec = planNodeToTaskSpec(
+      node,
+      template,
+      "plan-1",
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      { goal: "Build the whole importer end to end", outline: [] },
+    );
+
+    expect(spec.chainLink?.planGoal).toBe("Build the whole importer end to end");
+    expect(spec.chainLink?.planOutline).toBeUndefined();
+  });
+
   it("does not alter the node goal when no handoff note is supplied", () => {
     expect(planNodeToTaskSpec(node, template, "plan-1", "run-parent").goal).toBe(
       node.goal,

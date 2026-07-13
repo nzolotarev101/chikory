@@ -83,9 +83,13 @@ describe.skipIf(address === null)("verdict gating (WP-132)", () => {
   function verdictKinds(dataDir: string, runId: string): string[] {
     const journal = new Journal(journalPath(dataDir, runId));
     try {
+      // Per-step judge sequence only — the seal-time completion review rides
+      // its own `source: "completion-review"` verdict entry.
       return journal
         .entries("verdict")
-        .map((e) => (e.payload as VerdictPayload).verdict.kind);
+        .map((e) => e.payload as VerdictPayload)
+        .filter((p) => p.source !== "completion-review")
+        .map((p) => p.verdict.kind);
     } finally {
       journal.close();
     }

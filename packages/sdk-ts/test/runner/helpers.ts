@@ -14,7 +14,7 @@ import { promisify } from "node:util";
 
 import { DefaultLogger, Runtime } from "@temporalio/worker";
 
-import { STANDING_RUBRIC } from "../../src/index.js";
+import { COMPLETION_REVIEW_RUBRIC, STANDING_RUBRIC } from "../../src/index.js";
 import type {
   AdapterRegistry,
   ArtifactStore,
@@ -204,17 +204,22 @@ export const TERMINAL_STATUSES: RunStatus[] = ["SUCCESS", "FAILED", "CANCELLED"]
 
 export interface FakeJudgeWire {
   url: string;
-  /** Completed judge LLM calls so far. */
+  /** Completed judge LLM calls so far (completion reviews not included). */
   hits: number;
-  /** Raw completed request bodies, including judge and digest calls. */
+  /** Raw completed request bodies, including judge, review, and digest calls. */
   requests: string[];
   /** Completed compaction-digest LLM calls so far (WP-203 S2 wiring). */
   digestHits: number;
+  /** Completed run-completion review LLM calls so far. */
+  reviewHits: number;
   close(): Promise<void>;
 }
 
 /** The compaction digest prompt's user-block header (`buildDigestMessages`). */
 const DIGEST_MARKER = "Older step summaries to fold";
+
+/** The completion review prompt's scope header (`COMPLETION_REVIEW_SCOPE`). */
+const COMPLETION_REVIEW_MARKER = "## REVIEW SCOPE — run-completion architecture review";
 
 /**
  * Serves `forms[hit-1]` per judge call (last form repeats once exhausted). A
@@ -222,22 +227,32 @@ const DIGEST_MARKER = "Older step summaries to fold";
  * is answered with `digestContent` prose instead — so the REAL compactContext
  * activity (router call, store.put, journal write) runs end-to-end while the
  * judge path is unaffected. Route the spec's `review` stage at this same wire.
+ *
+ * A request carrying the run-completion review scope is answered from
+ * `reviewForms` (all-pass `completionReviewForm()` when not supplied) on its
+ * own counter, so the per-step judge form sequencing and `hits` semantics are
+ * unaffected by the seal-time review pass.
  */
 export async function startFakeJudgeWire(
   forms: JudgeForm[],
-  opts: { digestContent?: string } = {},
+  opts: { digestContent?: string; reviewForms?: JudgeForm[] } = {},
 ): Promise<FakeJudgeWire> {
   const digestContent = opts.digestContent ?? "compacted digest of older steps";
+  const reviewForms = opts.reviewForms ?? [completionReviewForm()];
   const server: Server = createServer((req, res) => {
     let body = "";
     req.on("data", (chunk: Buffer) => (body += chunk.toString()));
     req.on("end", () => {
       wire.requests.push(body);
       const isDigest = body.includes(DIGEST_MARKER);
+      const isReview = !isDigest && body.includes(COMPLETION_REVIEW_MARKER);
       const content = isDigest
         ? digestContent
-        : JSON.stringify(forms[Math.min(wire.hits, forms.length - 1)]);
+        : isReview
+          ? JSON.stringify(reviewForms[Math.min(wire.reviewHits, reviewForms.length - 1)])
+          : JSON.stringify(forms[Math.min(wire.hits, forms.length - 1)]);
       if (isDigest) wire.digestHits++;
+      else if (isReview) wire.reviewHits++;
       else wire.hits++;
       res.setHeader("content-type", "application/json");
       res.end(
@@ -255,6 +270,7 @@ export async function startFakeJudgeWire(
     hits: 0,
     requests: [],
     digestHits: 0,
+    reviewHits: 0,
     close: () =>
       new Promise<void>((resolve) => {
         server.closeAllConnections();
@@ -282,6 +298,19 @@ export function judgeForm(opts: {
       justification: "scripted judge",
     })),
     concerns: opts.concerns ?? [],
+  };
+}
+
+/** Scripted completion-review `JudgeForm` (COMPLETION_REVIEW_RUBRIC ids). */
+export function completionReviewForm(opts: { rubricFails?: string[] } = {}): JudgeForm {
+  return {
+    criterionResults: [],
+    rubricResults: COMPLETION_REVIEW_RUBRIC.map((r) => ({
+      id: r.id,
+      pass: !(opts.rubricFails ?? []).includes(r.id),
+      justification: "scripted completion review",
+    })),
+    concerns: [],
   };
 }
 

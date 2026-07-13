@@ -25,7 +25,12 @@
     }
   ],
   "parentRunId": "run-7f3a-n1",
+  "planGoal": "Land the fan-in chain surface end to end",
   "planId": "plan-7f3a",
+  "planOutline": [
+    "N-1: land the left half",
+    "N-2: land the right half"
+  ],
   "writeSet": [
     "packages/sdk-ts/src/chain/right.ts"
   ]

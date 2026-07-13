@@ -70,6 +70,10 @@ import {
   buildRemediationBrief,
   decideRemediation,
 } from "./remediation.js";
+import {
+  buildCompletionReviewBrief,
+  decideCompletionReview,
+} from "./completion-review.js";
 import { decideSoakDelay } from "./soak.js";
 import { decideStepForcing } from "./step-forcing.js";
 import { decideWorkChunk } from "./work-chunk.js";
@@ -212,6 +216,9 @@ export async function agentLoop(spec: TaskSpec): Promise<RunStatus> {
   let remediationIndexBase = 0;
   let remediationPending = false;
   let lastRemediationBrief: string | undefined;
+  // Run-completion holistic review: cumulative-diff design passes already
+  // taken (bounded — initial review + one re-review after the design fix).
+  let completionReviewAttempts = 0;
 
   setHandler(cancelSignal, () => {
     cancelRequested = true;
@@ -387,6 +394,7 @@ export async function agentLoop(spec: TaskSpec): Promise<RunStatus> {
   consumedWorkChunks = restored.consumedWorkChunks;
   remediationAttempts = restored.remediationAttempts;
   remediationIndexBase = restored.remediationIndexBase;
+  completionReviewAttempts = restored.completionReviewAttempts;
   sinceCommit = restored.sinceCommit ?? baseCommit;
 
   for (;;) {
@@ -817,6 +825,10 @@ export async function agentLoop(spec: TaskSpec): Promise<RunStatus> {
     // rollback anchor; HALT seals a resumable FAILED; ESCALATE parks the run
     // for `chikory approve` (CONTRACTS.md §4, durable-runner.md).
     if (verdict !== undefined) {
+      // The diff base the verdict above was judged against — the completion
+      // review uses it to detect a first-verdict seal (cumulative already
+      // covered) before `sinceCommit` advances to this checkpoint.
+      const sealingDiffBase = sinceCommit;
       sinceCommit = Object.values(checkpoint.gitCommits)[0] ?? sinceCommit;
       if (verdict.kind === "PROCEED") {
         lastGoodCheckpointId = checkpoint.id;
@@ -849,7 +861,55 @@ export async function agentLoop(spec: TaskSpec): Promise<RunStatus> {
           if (soakTerminal !== undefined) return soakTerminal;
           continue;
         }
-        if (acceptanceCriteriaMet) return seal("SUCCESS");
+        if (acceptanceCriteriaMet) {
+          // Run-completion holistic review: one judge pass over the CUMULATIVE
+          // diff (run base → final state) before sealing. Advisory-with-one-heal:
+          // a design finding grants ONE bounded fix step (re-reviewed after);
+          // still failing — or any review-pass ESCALATE/failure — seals SUCCESS
+          // with the finding recorded, never parking a run whose criteria all
+          // pass (the F-107 discipline).
+          const review = decideCompletionReview({
+            sealingDiffBase,
+            baseCommit,
+            reviewAttemptsUsed: completionReviewAttempts,
+          });
+          if (review.action === "review") {
+            completionReviewAttempts += 1;
+            const reviewVerdict = await activities.judgeStep({
+              runId,
+              judgeIndex: judgeIndex++,
+              atStep: stepIndex - 1,
+              criteria: [],
+              sinceCommit: baseCommit,
+              completionReview: true,
+              lastGoodCheckpointId,
+            });
+            spentUsd += reviewVerdict.costUsd;
+            const designFails = reviewVerdict.form.rubricResults.filter((r) => !r.pass);
+            if (designFails.length > 0) {
+              const canRetry =
+                decideCompletionReview({
+                  sealingDiffBase,
+                  baseCommit,
+                  reviewAttemptsUsed: completionReviewAttempts,
+                }).action === "review" && stepIndex < maxSteps;
+              if (canRetry) {
+                judgeFeedback = buildCompletionReviewBrief(reviewVerdict.form);
+                remediationPending = true; // re-judge the fix off-cadence
+                const soakTerminal = await soakBeforeNextStep();
+                if (soakTerminal !== undefined) return soakTerminal;
+                continue;
+              }
+              return seal(
+                "SUCCESS",
+                `completion review: design findings recorded — ${designFails
+                  .map((fail) => fail.id)
+                  .join(", ")}`,
+              );
+            }
+          }
+          return seal("SUCCESS");
+        }
         // WP-519 slice (a) (ADR-009 D3): failing-criterion rationale rides
         // into the next step on EVERY judge pass, not only at completion
         // milestones — the executor never retries blind against evidence the

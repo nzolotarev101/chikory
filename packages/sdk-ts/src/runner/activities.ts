@@ -24,7 +24,13 @@ import {
   type ResolvedEndpointCapabilities,
   resolveEndpointCapabilities,
 } from "../endpoint-capability.js";
-import { buildVerdict, enforceFamilyDiversity, runJudgePass } from "../judge/index.js";
+import {
+  buildVerdict,
+  COMPLETION_REVIEW_RUBRIC,
+  enforceFamilyDiversity,
+  renderOverallGoalContext,
+  runJudgePass,
+} from "../judge/index.js";
 import { EndpointLedger } from "../journal/endpoint-ledger.js";
 import { Journal, reportFromJournal, runTotals } from "../journal/journal.js";
 import { decideLimitResponse, type LimitResponsePlan } from "../limit-response.js";
@@ -151,6 +157,8 @@ export interface VerdictPayload {
   judgeIndex: number;
   atStep: number;
   verdict: JudgeVerdict;
+  /** Absent = judge pass; "runner" = loop-breaker; "completion-review" = seal-time design review. */
+  source?: string;
 }
 
 export interface MemoryCounters {
@@ -190,6 +198,8 @@ export interface RestoredWorkflowState {
   remediationAttempts: number;
   /** WP-519: total journaled heal attempts ever — the next remediationIndex (idempotency key). */
   remediationIndexBase: number;
+  /** Completion reviews already journaled since the last terminal seal. */
+  completionReviewAttempts: number;
   sinceCommit?: string;
 }
 
@@ -531,7 +541,9 @@ function summariesSinceLastVerdict(journal: Journal, atStep: number): string[] {
   let lastJudgedStep = -1;
   for (const entry of journal.entries("verdict")) {
     const payload = entry.payload as VerdictPayload & { source?: string };
-    if (payload.source === "runner") continue;
+    // "completion-review" verdicts re-judge the CUMULATIVE diff at the seal
+    // moment — they must not advance the incremental coverage watermark.
+    if (payload.source === "runner" || payload.source === "completion-review") continue;
     lastJudgedStep = Math.max(lastJudgedStep, payload.atStep);
   }
   return journal
@@ -549,7 +561,7 @@ function repoDiffBasesSinceLastVerdict(
   let lastJudgedStep = -1;
   for (const entry of journal.entries("verdict")) {
     const payload = entry.payload as VerdictPayload & { source?: string };
-    if (payload.source === "runner") continue;
+    if (payload.source === "runner" || payload.source === "completion-review") continue;
     if (payload.atStep < atStep) lastJudgedStep = Math.max(lastJudgedStep, payload.atStep);
   }
 
@@ -569,6 +581,13 @@ function repoDiffBasesSinceLastVerdict(
         const key = workspaceRepoCheckpointId(repo, repoCount);
         return [repo.name, checkpoint?.gitCommits[key] ?? BASE_TAG];
       }),
+  );
+}
+
+/** Cumulative diff bases for the run-completion review: every writable repo → run base. */
+function repoDiffBasesAtRunBase(workspaceRepos: WorkspaceRepo[]): Record<string, string> {
+  return Object.fromEntries(
+    workspaceRepos.filter((repo) => repo.writable).map((repo) => [repo.name, BASE_TAG]),
   );
 }
 
@@ -1020,6 +1039,13 @@ export function createRunnerActivities(deps: RunnerActivityDeps) {
       activeWorkChunkDirective?: string;
       /** True while consuming a non-final work chunk — suppresses the Rule 3 HALT (F-112). */
       workChunkInProgress?: boolean;
+      /**
+       * Run-completion review: judge the CUMULATIVE diff (run base → now)
+       * against the completion rubric, no criteria/check re-runs. The verdict
+       * is journaled with `source: "completion-review"` so incremental diff
+       * bases and summaries skip it.
+       */
+      completionReview?: boolean;
       /** ROLLBACK target; absent → `<runId>@base`. */
       lastGoodCheckpointId?: CheckpointId;
     }): Promise<JudgeVerdict> {
@@ -1038,7 +1064,9 @@ export function createRunnerActivities(deps: RunnerActivityDeps) {
           if (existing) return (existing.payload as VerdictPayload).verdict;
           spec = requireSpec(reader, input.runId);
           workspaceRepos = collectWorkspaceRepos(spec.repos).all;
-          repoDiffBases = repoDiffBasesSinceLastVerdict(reader, input.atStep, workspaceRepos);
+          repoDiffBases = input.completionReview
+            ? repoDiffBasesAtRunBase(workspaceRepos)
+            : repoDiffBasesSinceLastVerdict(reader, input.atStep, workspaceRepos);
           criteriaHistory = criteriaHistoryFromJournal(reader);
           stepSummaries = summariesSinceLastVerdict(reader, input.atStep);
           journaledForm = reader.findByKey("judge", "judgeIndex", input.judgeIndex)?.payload as
@@ -1060,6 +1088,7 @@ export function createRunnerActivities(deps: RunnerActivityDeps) {
             costUsd: journaledForm.costUsd,
             tokens: journaledForm.tokens,
             lastGoodCheckpointId: input.lastGoodCheckpointId,
+            ...(input.completionReview ? { rubric: COMPLETION_REVIEW_RUBRIC } : {}),
           });
         } else {
           const judgeModel: ModelChoice = {
@@ -1094,6 +1123,16 @@ export function createRunnerActivities(deps: RunnerActivityDeps) {
             workspaceDir: workspaceDir(deps.dataDir, input.runId),
             store: createLocalArtifactStore(artifactsDir(deps.dataDir, input.runId)),
             goal: spec.goal,
+            // Chain nodes judge design against the plan's big picture, not
+            // just the node goal (design_serves_overall_goal).
+            ...(spec.chainLink?.planGoal !== undefined
+              ? {
+                  overallGoal: renderOverallGoalContext(
+                    spec.chainLink.planGoal,
+                    spec.chainLink.planOutline,
+                  ),
+                }
+              : {}),
             criteria: input.criteria,
             sinceCommit: input.sinceCommit,
             workspaceRepos,
@@ -1104,6 +1143,9 @@ export function createRunnerActivities(deps: RunnerActivityDeps) {
               ? { activeWorkChunkDirective: input.activeWorkChunkDirective }
               : {}),
             workChunkInProgress: input.workChunkInProgress ?? false,
+            ...(input.completionReview
+              ? { rubric: COMPLETION_REVIEW_RUBRIC, reviewScope: "cumulative" as const }
+              : {}),
             lastGoodCheckpointId: input.lastGoodCheckpointId,
           });
           verdict = pass.verdict;
@@ -1144,6 +1186,7 @@ export function createRunnerActivities(deps: RunnerActivityDeps) {
             judgeIndex: input.judgeIndex,
             atStep: input.atStep,
             verdict,
+            ...(input.completionReview ? { source: "completion-review" } : {}),
           };
           writer.appendOnce(
             { field: "judgeIndex", value: input.judgeIndex },
@@ -1310,6 +1353,17 @@ export function createRunnerActivities(deps: RunnerActivityDeps) {
         ).length;
         const remediationIndexBase = remediationEntries.length;
 
+        // Completion reviews already journaled this incarnation — the resumed
+        // workflow must not re-run a review the journal already holds.
+        const completionReviewAttempts = journal
+          .entries("verdict")
+          .filter((entry) => {
+            const payload = entry.payload as VerdictPayload;
+            return (
+              payload.source === "completion-review" && entry.idx > (lastTerminal?.idx ?? -1)
+            );
+          }).length;
+
         const workChunks = journal.getRun()?.task.boundedWorkUnit?.workChunks ?? [];
         const stepsByIndex = new Map(steps.map((step) => [step.stepIndex, step]));
         let restoredConsumedWorkChunks = 0;
@@ -1404,6 +1458,7 @@ export function createRunnerActivities(deps: RunnerActivityDeps) {
           consumedWorkChunks: restoredConsumedWorkChunks,
           remediationAttempts,
           remediationIndexBase,
+          completionReviewAttempts,
           sinceCommit,
         };
       } finally {

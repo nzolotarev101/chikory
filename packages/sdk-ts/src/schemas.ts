@@ -232,6 +232,8 @@ export const ChainLinkSchema = z
     writeSet: z.array(z.string().min(1)).optional(),
     parentRunId: z.string().min(1).optional(),
     parentHandoffs: z.array(ChainNodeHandoffSchema).optional(),
+    planGoal: z.string().min(1).optional(),
+    planOutline: z.array(z.string().min(1)).optional(),
   })
   .strict();
 

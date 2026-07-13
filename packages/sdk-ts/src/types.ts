@@ -653,6 +653,10 @@ export interface ChainLink {
   parentRunId?: string;
   /** Ordered exactly like the node's dependsOn list. */
   parentHandoffs?: ChainNodeHandoff[];
+  /** The chain plan's overall goal — big-picture context for the node's judge. */
+  planGoal?: string;
+  /** One-line `id: goal` outline of the plan's nodes (sibling context). */
+  planOutline?: string[];
 }
 
 /** One repository snapshot published by a sealed chain node. */

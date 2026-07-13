@@ -189,6 +189,8 @@ export interface RunJudgePassInput {
   workspaceDir: string;
   store: ArtifactStore;
   goal: string;
+  /** Big-picture context (e.g. the chain plan's goal) distinct from `goal`. */
+  overallGoal?: string;
   criteria: AcceptanceCriterion[];
   /** Diff base: commit of the checkpoint covering the previous verdict (or run base). */
   sinceCommit: string;
@@ -209,6 +211,8 @@ export interface RunJudgePassInput {
   workChunkInProgress?: boolean;
   lastGoodCheckpointId?: CheckpointId;
   rubric?: RubricItem[];
+  /** "cumulative" marks the run-completion review over the whole-run diff. */
+  reviewScope?: "incremental" | "cumulative";
   checkTimeoutMs?: number;
 }
 
@@ -237,6 +241,7 @@ export async function runJudgePass(input: RunJudgePassInput): Promise<JudgePassR
     stage: "judge",
     messages: buildJudgeMessages({
       goal: input.goal,
+      ...(input.overallGoal !== undefined ? { overallGoal: input.overallGoal } : {}),
       evidence: collected.evidence,
       rubric,
       diffText: collected.diffText,
@@ -248,6 +253,7 @@ export async function runJudgePass(input: RunJudgePassInput): Promise<JudgePassR
       ...(input.activeWorkChunkDirective !== undefined
         ? { activeWorkChunkDirective: input.activeWorkChunkDirective }
         : {}),
+      ...(input.reviewScope !== undefined ? { reviewScope: input.reviewScope } : {}),
     }),
     temperature: 0,
     responseSchema: JUDGE_FORM_RESPONSE_SCHEMA,
