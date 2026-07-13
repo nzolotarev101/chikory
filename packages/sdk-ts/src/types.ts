@@ -518,6 +518,8 @@ export interface CompactionPlan {
 
 /** Journaled outcome of a compaction (the `compaction` JIF kind). */
 export interface CompactionResult {
+  /** Workflow step whose checkpoint boundary produced this fold; absent on old journals. */
+  stepIndex?: number;
   tokensBefore: number;
   tokensAfter: number;
   /** Memory Pointer (WP-202) to the folded digest; absent if nothing folded. */

@@ -1,0 +1,158 @@
+# Dogfood-102: WP-309 COMPLETION — CROSS-RUN CAPACITY LEARNING (the F-138 fix; P3 intelligent-scaling
+#   track, plan.md §7). dogfood-100 landed WP-309's per-run half (real non-injected 429/CLI-stderr call site →
+#   `classifyLimitSignal`, replay-safe `limit_observation` journal kind, pure `learnEndpointReset`); its 🔴 residue
+#   F-138 is that the CROSS-RUN half is dead: `EndpointLedger.appendLimitObservation`
+#   (`packages/sdk-ts/src/journal/endpoint-ledger.ts:110`) has NO `src/` caller, so a real limit hit is never
+#   persisted to the shared ledger (`<dataDir>/ledger/endpoints.db`), so `windowState` never surfaces a learned
+#   `capacityTokens`, so the WP-310 governor paces ONLY against declared/injected windows — never a capacity it
+#   learned from an actual hit. This run closes that: the real-limit path also WRITES the observation to the ledger,
+#   and a LATER run paces against the learned capacity.
+#
+# F-129 PREMISE CHECK (2026-07-13, verified on HEAD `2c519bf`): the read side is ALREADY wired — `activities.ts:2101`
+#   builds each pacing window from `ledger.windowState(...)` (which fills `capacityTokens` from the newest
+#   `limit_observations` row, `endpoint-ledger.ts:153-155`), and `decideLimitPacing` (`limit-pacing.ts:89-92`)
+#   throttles/predicts against `window.capacityTokens`. The DEAD link is the WRITE: `grep -rn appendLimitObservation
+#   src` → ONLY the definition (`endpoint-ledger.ts:110`); the real-limit journal site (`activities.ts:1071-1084`,
+#   which already writes the per-run `limit_observation` JOURNAL entry when `observation !== undefined`) does NOT
+#   also call `ledger.appendLimitObservation`. So on HEAD the ledger's `limit_observations` table is only ever
+#   written by its own unit test — the capability is genuinely absent in a real run.
+#
+# CLASS / LADDER. class=product. Ladder retired at rung 5 (P2 exit, dogfood-096); this is a rung-4-shape product
+#   completion. Deliverable = the F-138 wire (additive). KPI axis = cross-run learning (a hit in run A paces run B).
+# Ladder-rung: 4
+# Thesis-KPI: CROSS-RUN CAPACITY LEARNING — a real observed limit hit in one run persists to the shared endpoint
+#   ledger as a learned window capacity, and a LATER run's pacing governor reads it: `windowState(...).capacityTokens`
+#   equals the learned value and `decideLimitPacing` paces (throttle / predict-limit) against it, with ZERO declared
+#   or injected capacity on that window. Proof is a deterministic test over the ledger + the pacing decision — no
+#   real provider limit, no key material.
+#
+# Format: LOOSE (outcome goal + 4 ordered increments; file/test layout is the executor's, F-82/F-83). ACs pin
+#   "done" via the consumed CALL EXPRESSION on the write site (`appendLimitObservation` gains a real `src/` caller,
+#   0 on HEAD — F-90/F-114-safe, never a bare type name) + an F-97 co-reference test tying the write to the
+#   `decideLimitPacing`/`windowState` read + full-suite green. Occurrence counts via `grep -rl … | grep -v` (F-119);
+#   no wall-clock asserts (F-115).
+#
+# ⚠️ SCOPE / DETERMINISM. Writes ONLY inside `packages/sdk-ts/` (+ `docs/components/router.md` if a doc-sync is
+#   needed — F-135 lesson: keep it inside the sanctioned set). ADDITIVE — the injected-seam path
+#   (`classified.source === "injected"`) MUST stay unchanged (it already skips `observation`); a no-limit run stays
+#   byte-identical; no frozen-contract reshape; NO new dependency; NO key material.
+#
+# ⚠️ QUEUE ORDER: this is the highest-sort match for the dogfood.sh spec-pick glob after dogfood-101 harvests
+#   (`dogfood-102` sorts after `dogfood-101`). A plain `devbox run run-dogfood` resolves to THIS file once
+#   dogfood-101's working tree is committed.
+#
+# ⚠️ LAUNCH (commit the dogfood-101 working tree FIRST — the workspace clones HEAD; the F-124 fix + governor proof
+#   must be on HEAD or this run builds on stale code). Verify the spec-pick glob resolves to THIS file.
+#   `CHIKORY_PREFLIGHT_ONLY=1 devbox run run-dogfood` dry-runs the guards at $0. Then the plain launch (no compressed
+#   -window seam needed — this run's KPI is proven by the delivered TEST, not a live governor read):
+#     devbox run run-dogfood
+
+name: dogfood-102-wp309-cross-run-capacity-learning
+goal: >
+  Complete WP-309 in the Chikory TypeScript SDK by closing F-138: a REAL (non-injected) usage-limit hit must
+  persist its learned window capacity to the CROSS-RUN endpoint ledger so a LATER run's pacing governor paces
+  against it. Today `EndpointLedger.appendLimitObservation`
+  (`packages/sdk-ts/src/journal/endpoint-ledger.ts`) has no `src/` caller: the real-limit site in
+  `packages/sdk-ts/src/runner/activities.ts` (the branch that already journals a per-run `limit_observation` when
+  `observation !== undefined`) writes NOTHING to the shared ledger, so `windowState(...).capacityTokens` stays
+  undefined across runs and the WP-310 governor (`decideLimitPacing`) can only pace declared/injected windows.
+  Deliver in FOUR ordered increments, ONE per durable step, each adding DISTINCT non-trivial working code + tests:
+
+    * PART 1 — LEDGER WRITE ON A REAL HIT: at the real (non-injected) limit-signal path, for each declared quota
+      window on the hit endpoint, persist a learned-capacity observation via `EndpointLedger.appendLimitObservation`
+      (the consumed-tokens-at-hit = the ledger's in-window consumption sum at that moment; carry the observed reset
+      timing when known). The INJECTED seam path (`classified.source === "injected"`) MUST remain unchanged (no
+      ledger write). Tested: a real-shaped signal drives exactly one ledger observation per declared window; an
+      injected signal drives none.
+
+    * PART 2 — LEARNED CAPACITY IS READABLE CROSS-RUN: a test proves that after PART 1 persists an observation,
+      a SEPARATE `EndpointLedger` instance opened on the SAME db path returns that value as
+      `windowState(...).capacityTokens` for a declared window that carries NO `capacityTokens` of its own — i.e.
+      the learning survives across ledger lifetimes (the cross-run boundary).
+
+    * PART 3 — THE GOVERNOR PACES AGAINST THE LEARNED CAPACITY: a co-reference test feeds a declared window whose
+      capacity is ONLY the learned value (zero declared/injected capacity) into `decideLimitPacing` and proves the
+      decision is capacity-aware (throttle or predict-limit against the learned number), whereas the same window
+      with no observation is `observe, never throttle`. This ties the PART-1 write to the WP-310 read.
+
+    * PART 4 — REGRESSION: the FULL `packages/sdk-ts` suite (tsc + eslint + vitest) green; a run with no limit
+      signal is byte-identical (no new ledger rows, no new journal entries); no frozen-contract shape change.
+
+  CONSTRAINTS: additive only; writes ONLY inside `packages/sdk-ts/` (a `docs/components/router.md` doc-sync is
+  permitted if the ledger contract changed); NO new dependency; NO key material. Each PART lands its own tests and
+  does NOT break an earlier PART's tests; do NOT front-load a later PART (the judge compares the diff footprint
+  against the active PART and WILL roll back). If a verification step reports a failing suite, READ the failure and
+  fix the IMPLEMENTATION — never weaken or delete an assertion.
+
+repos:
+  - url: /Users/nikitazolotarev/repos/chikory
+    writable: true
+
+bounded_work_unit:
+  min_durable_steps: 4
+  directive: >
+    Advance EXACTLY the ONE numbered PART named by this step's chunk — implement it and its tests, then stop and
+    let the durable checkpoint seal. Do NOT front-load a later PART.
+  work_chunks:
+    - name: part-1-ledger-write-on-real-hit
+      directive: "PART 1 ONLY: the real (non-injected) limit path calls EndpointLedger.appendLimitObservation once per declared window; injected seam writes none. Tests."
+    - name: part-2-learned-capacity-readable-cross-run
+      directive: "PART 2 ONLY: a fresh EndpointLedger on the same db path returns the persisted observation as windowState().capacityTokens. Test."
+    - name: part-3-governor-paces-learned-capacity
+      directive: "PART 3 ONLY: decideLimitPacing is capacity-aware against a window whose capacity is ONLY the learned value; observe-only without it. Co-reference test."
+    - name: part-4-regression
+      directive: "PART 4 ONLY: full packages/sdk-ts suite (tsc + eslint + vitest) green; no-limit run byte-identical; fix implementations, never weaken tests."
+
+acceptance_criteria:
+  - id: AC-1
+    description: >
+      The real-limit path gained a cross-run ledger writer — some `src/` file OTHER than the ledger definition now
+      calls `appendLimitObservation`. (F-114-SAFE: greps the consumed CALL EXPRESSION, not a type name; absent on
+      HEAD per the F-129 premise check — only `endpoint-ledger.ts` references it in `src/`.)
+    check: >
+      cd packages/sdk-ts &&
+      grep -rlE 'appendLimitObservation\(' src | grep -v 'journal/endpoint-ledger.ts' | head -1 | grep -q .
+  - id: AC-2
+    description: >
+      A test co-references the write and the WP-310 pacing DECISION — some `test/` file exercises BOTH
+      `appendLimitObservation` (the cross-run write) AND `decideLimitPacing`, proving the learned capacity flows
+      into the governor's decision, not a hand-built window. (F-97-SAFE co-reference; RED on HEAD — the existing
+      `endpoint-ledger.test.ts` refs `windowState` but never `decideLimitPacing`; filename is the executor's.)
+    check: >
+      cd packages/sdk-ts &&
+      for f in $(grep -rl 'appendLimitObservation' test/ 2>/dev/null); do
+        grep -q 'decideLimitPacing' "$f" && { echo ok; break; };
+      done | grep -q ok
+  - id: AC-3
+    description: >
+      The SDK stays type- and lint-clean and the FULL existing suite is green, proving the change is additive
+      (a no-limit run writes no new ledger rows and stays byte-identical).
+    check: cd packages/sdk-ts && pnpm exec tsc --noEmit && pnpm exec eslint . && pnpm exec vitest run
+
+budget_usd: 45
+max_steps: 30
+
+# CONTEXT-ROT (WP-203/WP-207): auto-calibrated window (F-125 mechanism, live-proven 095-099, 101).
+pacing:
+  mode: auto
+  autoCalibrate: true
+
+# UNATTENDED (WP-271): operator-free; a genuine ESCALATE seals a resumable FAILED (WP-520).
+unattended:
+  escalation: seal_resumable_failed
+
+executor:
+  adapter: codex
+  family: openai
+
+judge:
+  family: openai-compat
+  cadence: 2
+  max_cost_share: 0.5
+
+routing:
+  stages:
+    plan: { provider: openai-compat, model: gpt-5.5 }
+    code: { provider: openai-compat, model: gpt-5.5 }
+    review: { provider: openai-compat, model: gpt-5.5 }
+    judge: { provider: openai-compat, model: gemini-3.1-pro-preview }

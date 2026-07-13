@@ -8,17 +8,17 @@ recover a run, and how to land the result as a normal PR.
 **Status (2026-07-13, bounded — update discipline: REPLACE this block, ≤15 lines;
 displaced prose moves verbatim to [`PLAN-HISTORY.md`](PLAN-HISTORY.md); per-run detail:
 `docs/reports/dogfood-NNN.md`; queue + course correction: `plan.md` §6).**
-Latest: dogfood-100 — **WP-309 (limit telemetry + reset learning) 🟡 PER-RUN HALF DONE** (`run-1caffe21-3779-47d8-b7bd-89f7a04f1c51`,
-`docs/reports/dogfood-100.md`, committed `8a330a4`). 🟢 **SUCCESS · 6 steps · $15.57/$45 · 41m 59s · 6/6 PROCEED** — a REAL non-injected call site
-(`activities.ts:1007-1011`, `rawLimitSignalFromStepRecord` on a FAILED step record: 429 + CLI-stderr) feeds `classifyLimitSignal`; replay-safe
-`limit_observation` journal kind; net-new pure `learnEndpointReset` (median of observed resets, abstains <2 samples) drives a LEARNED-duration park;
-forced-park end-to-end proof (real `runner.start`, step-4 retry-after-less 429 parks the learned 1000ms) — **closes ℹ️ F-137**. 898 TS green.
-New friction: 🔴 **F-138** — cross-run ledger seam DEAD (`EndpointLedger.appendLimitObservation`/`learnedCapacityTokens` no `src/` caller); the
-spec was journal-only and missed the plan.md WP-309 scope amendment, so the governor still can't learn window capacity cross-run → **WP-309 stays 🟡**,
-completion slice owed (§8). ℹ️ **F-139** — F-135 recurrence: run wrote `docs/spec/*` outside sanctioned scope (edits were *correct* doc-syncs; judge
-footprint rubric can't see spec write-scope). **NEXT headline (progression ⛔ STALLED — rung flat 4 ×3, expected: ladder retired at rung 5 (dogfood-096),
-a ~6-step product run can't climb it; STALLED binding = plan §7 queue item): dogfood-101 (WP-310 governor live proof + F-124 fix) — UNPARKED.** F-138
-(WP-309 residue) is 🟡 product-completeness, queued behind. See §7, §8, §1.5, §3. (Earlier — dogfood-099 WP-308 DONE → PLAN-HISTORY.md.)
+Latest: dogfood-101 — **WP-310 (proactive limit-pacing governor) ✅ LIVE-PROVEN + 🟡 F-124 CLOSED** (`run-6c9873e3-aae0-472c-b080-43d97787995b`,
+`docs/reports/dogfood-101.md`, uncommitted working tree, harvest byte-IDENTICAL). 🟢 **SUCCESS · 4 steps · $2.90/$45 · 29m 43s · 4/4 PROCEED** — under a
+compressed weekly quota window (`CHIKORY_QUOTA_WINDOWS`, 20M cap) the governor PUSHED@0 then THROTTLED@1/2/3 (`limitingWindow:"weekly"`), inserting 3×
+`control_event source:"pace"` durable sleeps (450571/256662/199037ms, match `limit_pace interStepDelayMs` to the ms), pace-throttled 15m 6s, sealed SUCCESS
+at 1.92M ≪ 20M consumed (weekly 90% left), `pace` trace footer renders — the FIRST live observation of the governor pacing a real codex agent (KPI is
+read from the journal, not an AC). Deliverable **closes F-124**: `stepIndex` on `CompactionResult` + compaction write site (`activities.ts:1871`) → the
+`appendOnce` key now matches (crash-safe de-dup) and `describeCompactionPressure` derives the EXACT first-fold step; additive, 900 TS green.
+New friction: ℹ️ **F-140** — a "must-fail-on-HEAD" increment (PART 2) shipped a test that GREENS on HEAD (hand-built payload bypasses the write-site bug);
+the real regression is caught by the Temporal wiring test, so aggregate coverage is sound → track-B note, no WP. **NEXT headline (progression ⛔ STALLED —
+rung flat 4 ×4; ladder retired at rung 5 (dogfood-096); STALLED binding = plan §7 queue item): dogfood-102 (WP-309 COMPLETION — wire the F-138 cross-run
+ledger observation seam so the governor learns window capacity across runs).** See §7, §8, §1.5, §3. (Earlier — dogfood-100 WP-309 → PLAN-HISTORY.md.)
 
 Related docs: [`docs/spec/task-spec.md`](spec/task-spec.md) (schema
 reference) · [`docs/TASK-PROTOCOL.md`](TASK-PROTOCOL.md) (WP etiquette, §7 is

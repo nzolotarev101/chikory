@@ -71,7 +71,21 @@ describe("describeCompactionPressure", () => {
     expect(pressureFoldGapWarning(description)).not.toBeNull();
   });
 
-  test("uses the paired pacing event step for live compaction payloads", () => {
+  test("derives first pacing fold step from the journaled compaction stepIndex", () => {
+    const entries: JournalEntry[] = [
+      entry(0, "pacing", { atStep: 4, action: "compact" }),
+      entry(1, "compaction", { stepIndex: 6, foldedCount: 1, trigger: "pacing" }),
+    ];
+
+    expect(describeCompactionPressure(entries)).toEqual({
+      pressureSteps: 1,
+      pacingFolds: 1,
+      unfoldedPressureSteps: 0,
+      firstPacingFoldStep: 6,
+    });
+  });
+
+  test("falls back to paired pacing event step for legacy compaction payloads", () => {
     const entries: JournalEntry[] = [
       entry(0, "pacing", { atStep: 4, action: "compact" }),
       entry(1, "compaction", { foldedCount: 1, trigger: "pacing" }),

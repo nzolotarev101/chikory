@@ -150,8 +150,8 @@ describe.skipIf(address === null)("compaction digest wiring (WP-203 S2)", () => 
     }
   });
 
-  // WP-207 act half / WP-203 S2: the live pacing decision DRIVES compaction.
-  test("context-window pressure folds before the count trigger (pacing-driven cadence)", async () => {
+  // WP-207 act half / WP-203 S2: the live pacing decision DRIVES compactContext.
+  test("context-window pressure folds before the count trigger (pacing-driven compactContext cadence)", async () => {
     const tmp = await mkdtemp(join(tmpdir(), "chikory-pressure-"));
     cleanups.push(() => rm(tmp, { recursive: true, force: true }));
     const repoUrl = await initSourceRepo(join(tmp, "src"));
@@ -225,11 +225,17 @@ describe.skipIf(address === null)("compaction digest wiring (WP-203 S2)", () => 
       expect(
         compactions.some((e) => (e.payload as { trigger?: string }).trigger === "pacing"),
       ).toBe(true);
+      const firstPacingCompactionStep = (
+        compactions.find((e) => (e.payload as { trigger?: string }).trigger === "pacing")!
+          .payload as { stepIndex?: number }
+      ).stepIndex;
+      expect(firstPacingCompactionStep).toBeTypeOf("number");
 
       // Every fold here was driven by the pacing pressure signal, not the count.
       for (const e of compactions) {
         const payload = e.payload as CompactionResult & { trigger?: string; foldedCount?: number };
         expect(payload.trigger).toBe("pacing");
+        expect(payload.stepIndex).toBeTypeOf("number");
         expect(payload.foldedCount).toBeGreaterThan(0);
         expect(payload.digestRef).toBeDefined();
       }
@@ -243,7 +249,7 @@ describe.skipIf(address === null)("compaction digest wiring (WP-203 S2)", () => 
 
       const pressure = describeCompactionPressure(entries);
       expect(pressure.pacingFolds).toBeGreaterThanOrEqual(1);
-      expect(pressure.firstPacingFoldStep).not.toBeNull();
+      expect(pressure.firstPacingFoldStep).toBe(firstPacingCompactionStep);
       expect(pressureFoldGapWarning(pressure)).toBeNull();
     } finally {
       journal.close();

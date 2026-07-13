@@ -1868,6 +1868,7 @@ export function createRunnerActivities(deps: RunnerActivityDeps) {
               kind: "compaction",
               payload: {
                 ...compaction,
+                stepIndex: input.stepIndex,
                 foldedCount: plan.toDigest.length,
                 // WP-207: which cadence fired this fold — `pacing` (token-window
                 // pressure) or `count` (the recall-tier reached triggerAfterSteps).
