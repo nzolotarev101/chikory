@@ -118,11 +118,30 @@ async function geminiComplete(prompt, model) {
   };
 }
 
+function mapAgyModel(model) {
+  if (model === "default") return model;
+  const lower = model.toLowerCase();
+  if (lower.includes("gemini-3.5-flash") || lower.includes("gemini-1.5-flash") || lower.includes("gemini-3.1-flash")) {
+    return "Gemini 3.5 Flash (High)";
+  }
+  if (lower.includes("gemini-3.1-pro") || lower.includes("gemini-1.5-pro")) {
+    return "Gemini 3.1 Pro (High)";
+  }
+  if (lower.includes("sonnet")) {
+    return "Claude Sonnet 4.6 (Thinking)";
+  }
+  if (lower.includes("opus")) {
+    return "Claude Opus 4.6 (Thinking)";
+  }
+  return model;
+}
+
 async function agyComplete(prompt, model) {
   // Antigravity CLI: pure-text print mode. No structured token stats, so
   // usage is reported as zero (the judge is keyless/free anyway).
+  const mappedModel = mapAgyModel(model);
   const args = ["--print", prompt];
-  if (model !== "default") args.push("--model", model);
+  if (mappedModel !== "default") args.push("--model", mappedModel);
   const stdout = await run("agy", args, { cwd: sandbox });
   const text = stdout.trim();
   if (!text) throw new Error(`agy produced no response: ${stdout.slice(-500)}`);
