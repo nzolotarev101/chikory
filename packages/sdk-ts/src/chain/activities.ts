@@ -6,17 +6,68 @@
  * idempotent (keyed by nodeId) so a re-executed activity never double-journals
  * a node event (the WP-123 crash-recovery discipline, chain scope).
  */
+import { execFile } from "node:child_process";
+import { join } from "node:path";
+import { promisify } from "node:util";
+
+import { createLocalArtifactStore } from "../artifacts/local.js";
+import { COMPLETION_REVIEW_RUBRIC } from "../judge/rubric.js";
+import { runJudgePass } from "../judge/harness.js";
+import { renderOverallGoalContext } from "../judge/prompt.js";
 import { Journal, reportFromJournal } from "../journal/journal.js";
-import { chainJournalPath, journalPath } from "../runner/paths.js";
-import type { ChainNodeHandoff, NodeOutcome, Plan } from "../types.js";
+import { createRouter, type RouterOptions } from "../router.js";
+import { BASE_TAG } from "../runner/activities.js";
+import { artifactsDir, chainJournalPath, journalPath, workspaceDir } from "../runner/paths.js";
+import { collectWorkspaceRepos } from "../runner/workspace-repos.js";
+import type {
+  ChainNodeHandoff,
+  JudgePolicy,
+  ModelChoice,
+  NodeOutcome,
+  Plan,
+  RepoSpec,
+  RoutingPolicy,
+} from "../types.js";
 import { deriveNodeOutcome } from "./node-spec.js";
 import type { ReplanDecision } from "./replan.js";
-import { ChainJournal } from "./store.js";
+import { ChainJournal, type ChainCompletionReviewFinding } from "./store.js";
+
+const execFileAsync = promisify(execFile);
+
+async function git(dir: string, args: string[]): Promise<string> {
+  const { stdout } = await execFileAsync("git", ["-C", dir, ...args], {
+    maxBuffer: 256 * 1024 * 1024,
+  });
+  return stdout.trim();
+}
+
+/** Workspace-repo checkout dir (mirrors the private `workspaceRepoDir` in runner/activities). */
+function repoDirIn(ws: string, relativePath: string): string {
+  return relativePath === "." ? ws : join(ws, relativePath);
+}
 
 export interface ChainActivityDeps {
   dataDir: string;
   replanRemaining?: (input: ReplanRemainingInput) => Promise<ReplanRemainingResult>;
+  /** Judge/router construction options — threaded so `reviewChainCompletion` fires in the real worker. */
+  routerOptions?: RouterOptions;
 }
+
+export interface ReviewChainCompletionInput {
+  chainId: string;
+  plan: Plan;
+  /** node id → child run id (`ChainRecord.nodeRuns`). */
+  nodeRuns: Record<string, string>;
+  /** node id → sealed outcome (`ChainRecord.nodeOutcomes`). */
+  nodeOutcomes: Record<string, NodeOutcome>;
+  repos: RepoSpec[];
+  judge: JudgePolicy;
+  routing: RoutingPolicy;
+}
+
+export type ReviewChainCompletionResult =
+  | { reviewed: false; reason: string }
+  | { reviewed: true; verdict: string; findings: number; diffBase: string };
 
 export interface ReplanRemainingInput {
   chainId: string;
@@ -152,6 +203,137 @@ export function createChainActivities(deps: ChainActivityDeps) {
       } finally {
         journal.close();
       }
+    },
+
+    /**
+     * WP-311 chain-completion aggregate design review: ONE judge pass over the
+     * chain's cumulative cross-node diff + `plan.goal` + every sealed
+     * `NodeOutcome`, run at the SUCCESS seal. Non-destructive — it journals a
+     * `chain_completion_review` entry (idempotent per chain) and NEVER re-judges
+     * a sealed node or changes the chain status (the F-107 discipline at chain
+     * scope). Self-contained (builds its own judge via `createRouter`) so it
+     * fires in the real worker, not only test-injected paths.
+     *
+     * Cumulative diff = the LAST sealed-SUCCESS node's workspace vs the CHAIN
+     * base (the FIRST node's `chikory-base`). In a linear chain each node builds
+     * on its predecessor's sealed tree, so that diff is the whole-chain delta.
+     * If the chain base cannot be resolved in the last node's workspace (e.g. a
+     * non-linear handoff), fall back to the last node's own base (its delta) so
+     * the review still fires — a degraded, never-fatal path.
+     */
+    async reviewChainCompletion(
+      input: ReviewChainCompletionInput,
+    ): Promise<ReviewChainCompletionResult> {
+      const journal = openChain(deps, input.chainId);
+      try {
+        if (journal.entries("chain_completion_review").length > 0) {
+          return { reviewed: false, reason: "already reviewed" };
+        }
+      } finally {
+        journal.close();
+      }
+
+      // Sealed-SUCCESS nodes in plan order → first (chain base) and last (cumulative head).
+      const succeeded = input.plan.nodes.filter(
+        (node) => input.nodeOutcomes[node.id]?.status === "SUCCESS",
+      );
+      if (succeeded.length < 2) {
+        return { reviewed: false, reason: "fewer than two sealed-SUCCESS nodes" };
+      }
+      const firstRunId = input.nodeRuns[succeeded[0]!.id];
+      const lastRunId = input.nodeRuns[succeeded[succeeded.length - 1]!.id];
+      if (firstRunId === undefined || lastRunId === undefined) {
+        return { reviewed: false, reason: "missing node→run linkage" };
+      }
+
+      const workspaceRepos = collectWorkspaceRepos(input.repos).all;
+      const writable = workspaceRepos.filter((repo) => repo.writable);
+      if (writable.length === 0) {
+        return { reviewed: false, reason: "no writable repo to diff" };
+      }
+      const firstWs = workspaceDir(deps.dataDir, firstRunId);
+      const lastWs = workspaceDir(deps.dataDir, lastRunId);
+
+      // Resolve the chain base per writable repo from the FIRST node's workspace,
+      // then confirm it is reachable in the LAST node's workspace (git bundles
+      // preserve history across the handoff). Any failure → node-local fallback.
+      const repoDiffBases: Record<string, string> = {};
+      let diffBase = "chain-base";
+      try {
+        for (const repo of writable) {
+          const base = await git(repoDirIn(firstWs, repo.relativePath), [
+            "rev-parse",
+            `${BASE_TAG}^{commit}`,
+          ]);
+          await git(repoDirIn(lastWs, repo.relativePath), ["cat-file", "-e", `${base}^{commit}`]);
+          repoDiffBases[repo.name] = base;
+        }
+      } catch {
+        diffBase = BASE_TAG;
+        for (const repo of writable) repoDiffBases[repo.name] = BASE_TAG;
+      }
+      const sinceCommit = repoDiffBases[writable[0]!.name] ?? BASE_TAG;
+
+      const judgeModel: ModelChoice = {
+        provider: input.routing.stages.judge.provider,
+        model: input.judge.model ?? input.routing.stages.judge.model,
+      };
+      const routing: RoutingPolicy = {
+        stages: { plan: judgeModel, code: judgeModel, review: judgeModel, judge: judgeModel },
+        ...(input.routing.failover?.judge
+          ? { failover: { judge: input.routing.failover.judge } }
+          : {}),
+      };
+
+      const pass = await runJudgePass({
+        runId: lastRunId,
+        router: createRouter(routing, deps.routerOptions),
+        judgeModel,
+        workspaceDir: lastWs,
+        store: createLocalArtifactStore(artifactsDir(deps.dataDir, lastRunId)),
+        goal: input.plan.goal,
+        overallGoal: renderOverallGoalContext(
+          input.plan.goal,
+          input.plan.nodes.map((node) => `${node.id}: ${node.goal}`),
+        ),
+        criteria: [],
+        sinceCommit,
+        workspaceRepos,
+        repoDiffBases,
+        criteriaHistory: {},
+        stepSummaries: [],
+        rubric: COMPLETION_REVIEW_RUBRIC,
+        reviewScope: "cumulative",
+      });
+
+      const findings: ChainCompletionReviewFinding[] = pass.verdict.form.rubricResults.map(
+        (result) => ({ id: result.id, pass: result.pass, justification: result.justification }),
+      );
+      const reviewedNodeIds = succeeded.map((node) => node.id);
+
+      const writer = openChain(deps, input.chainId);
+      try {
+        writer.appendOnce(
+          "chain_completion_review",
+          { field: "chainId", value: input.chainId },
+          {
+            chainId: input.chainId,
+            verdict: pass.verdict.kind,
+            rationale: pass.verdict.rationale,
+            findings,
+            reviewedNodeIds,
+            diffBase,
+          },
+        );
+      } finally {
+        writer.close();
+      }
+      return {
+        reviewed: true,
+        verdict: pass.verdict.kind,
+        findings: findings.filter((finding) => !finding.pass).length,
+        diffBase,
+      };
     },
 
     /** Seal the chain at a terminal status: a `terminal` entry + the chain row. */

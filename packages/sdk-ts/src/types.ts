@@ -460,7 +460,9 @@ export type JournalEntryKind =
   | "plan_verdict"
   | "node_started"
   | "node_replanned"
-  | "node_sealed";
+  | "node_sealed"
+  // P3 (WP-311) — chain-completion aggregate design review at the SUCCESS seal.
+  | "chain_completion_review";
 
 /** Persisted form specified in `docs/spec/journal-format.md` (JIF). */
 export interface JournalEntry {

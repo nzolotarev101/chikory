@@ -189,9 +189,27 @@ const server = createServer((req, res) => {
     const startedAt = Date.now();
     try {
       const { messages = [], model = "default" } = JSON.parse(body);
-      const { text, tokens } = await complete(renderPrompt(messages), model);
+
+      // Dynamic dispatch based on requested model name (F-138/dogfood-102 fix)
+      let completeFn = complete;
+      let activeBackend = backend;
+      const lowerModel = model.toLowerCase();
+      if (lowerModel.includes("gpt") || lowerModel.includes("codex")) {
+        completeFn = codexComplete;
+        activeBackend = "codex";
+      } else if (
+        lowerModel.includes("gemini") ||
+        lowerModel.includes("claude") ||
+        lowerModel.includes("sonnet") ||
+        lowerModel.includes("opus")
+      ) {
+        completeFn = agyComplete;
+        activeBackend = "agy";
+      }
+
+      const { text, tokens } = await completeFn(renderPrompt(messages), model);
       console.log(
-        `[cli-judge:${backend}] ${model} · ${Date.now() - startedAt}ms · ` +
+        `[cli-judge:${activeBackend}] ${model} · ${Date.now() - startedAt}ms · ` +
           `${tokens.input}/${tokens.output} tokens${tokens.estimated ? " (estimated)" : ""}`,
       );
       res.setHeader("content-type", "application/json");

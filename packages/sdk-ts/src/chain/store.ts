@@ -23,6 +23,7 @@ import type {
   NodeOutcome,
   Plan,
   PlanVerdict,
+  VerdictKind,
 } from "../types.js";
 
 /** Chain-scope JIF kinds this store accepts (subset of `JournalEntryKind`). */
@@ -32,6 +33,7 @@ export type ChainEntryKind =
   | "node_started"
   | "node_sealed"
   | "node_replanned"
+  | "chain_completion_review"
   | "terminal";
 
 export interface ChainEntry {
@@ -59,6 +61,32 @@ export interface NodeReplannedPayload {
   failedNodeId: string;
   reason: string;
   revisedPlan: Plan;
+}
+
+/** One rubric result from the chain-completion aggregate design review. */
+export interface ChainCompletionReviewFinding {
+  id: string;
+  pass: boolean;
+  justification: string;
+}
+
+/**
+ * `chain_completion_review` payload (WP-311): the ONE aggregate design-judge
+ * pass over the whole chain's cumulative cross-node diff, run at the SUCCESS
+ * seal. Non-destructive — findings are recorded, the chain still seals SUCCESS
+ * ("a chain never re-judges its sealed nodes").
+ */
+export interface ChainCompletionReviewPayload {
+  chainId: string;
+  /** The review verdict kind (advisory — the chain status is unaffected). */
+  verdict: VerdictKind;
+  rationale: string;
+  /** Every rubric result (design findings are the `pass:false` entries). */
+  findings: ChainCompletionReviewFinding[];
+  /** The sealed-SUCCESS node ids whose cumulative work was reviewed, plan order. */
+  reviewedNodeIds: string[];
+  /** The commit the cumulative diff was taken against (the chain base). */
+  diffBase: string;
 }
 
 interface ChainEntryRow {

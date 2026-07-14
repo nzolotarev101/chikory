@@ -8,17 +8,17 @@ recover a run, and how to land the result as a normal PR.
 **Status (2026-07-13, bounded — update discipline: REPLACE this block, ≤15 lines;
 displaced prose moves verbatim to [`PLAN-HISTORY.md`](PLAN-HISTORY.md); per-run detail:
 `docs/reports/dogfood-NNN.md`; queue + course correction: `plan.md` §6).**
-Latest: dogfood-101 — **WP-310 (proactive limit-pacing governor) ✅ LIVE-PROVEN + 🟡 F-124 CLOSED** (`run-6c9873e3-aae0-472c-b080-43d97787995b`,
-`docs/reports/dogfood-101.md`, uncommitted working tree, harvest byte-IDENTICAL). 🟢 **SUCCESS · 4 steps · $2.90/$45 · 29m 43s · 4/4 PROCEED** — under a
-compressed weekly quota window (`CHIKORY_QUOTA_WINDOWS`, 20M cap) the governor PUSHED@0 then THROTTLED@1/2/3 (`limitingWindow:"weekly"`), inserting 3×
-`control_event source:"pace"` durable sleeps (450571/256662/199037ms, match `limit_pace interStepDelayMs` to the ms), pace-throttled 15m 6s, sealed SUCCESS
-at 1.92M ≪ 20M consumed (weekly 90% left), `pace` trace footer renders — the FIRST live observation of the governor pacing a real codex agent (KPI is
-read from the journal, not an AC). Deliverable **closes F-124**: `stepIndex` on `CompactionResult` + compaction write site (`activities.ts:1871`) → the
-`appendOnce` key now matches (crash-safe de-dup) and `describeCompactionPressure` derives the EXACT first-fold step; additive, 900 TS green.
-New friction: ℹ️ **F-140** — a "must-fail-on-HEAD" increment (PART 2) shipped a test that GREENS on HEAD (hand-built payload bypasses the write-site bug);
-the real regression is caught by the Temporal wiring test, so aggregate coverage is sound → track-B note, no WP. **NEXT headline (progression ⛔ STALLED —
-rung flat 4 ×4; ladder retired at rung 5 (dogfood-096); STALLED binding = plan §7 queue item): dogfood-102 (WP-309 COMPLETION — wire the F-138 cross-run
-ledger observation seam so the governor learns window capacity across runs).** See §7, §8, §1.5, §3. (Earlier — dogfood-100 WP-309 → PLAN-HISTORY.md.)
+Latest: dogfood-102 — **WP-309 (limit telemetry + reset learning) ✅ DONE (test-complete) + 🔴 F-138 CLOSED** (`run-cd98de3e-7c33-48a1-8e62-d2fbe8e46c45`,
+`docs/reports/dogfood-102.md`, uncommitted working tree, harvest byte-IDENTICAL). 🟢 **SUCCESS · 7 steps · $11.25/$45 · 1h 55m · 5 PROCEED / 2 ROLLBACK** —
+the cross-run half of limit learning is now wired: a real (non-injected) limit hit calls net-new `appendEndpointLimitObservations` (`activities.ts`, inside
+`if (observation !== undefined)`) → per declared window persists the learned capacity to the shared ledger `<dataDir>/ledger/endpoints.db`; a fresh
+`EndpointLedger` on the same db reads it as `windowState().capacityTokens` and `decideLimitPacing` throttles against it with ZERO declared/injected capacity
+(F-97 co-reference test). Injected seam provably writes nothing (byte-identical held); 904 TS green. Cross-run KPI proven DETERMINISTICALLY, NOT yet live
+across two real runs. New friction: 🟡 **F-141** (AC-3 full-suite `tsc+eslint+vitest` twice exceeded the judge per-check cap → DID-NOT-COMPLETE, classed
+infra so no false red — §7; author headline AC-3 as a scoped vitest run) · 🟡 **F-134 recurrence** (front-load ROLLBACK ×1, enforcement tax $2.19 = 19.5%,
+4th product run) · ℹ️ **F-142** (no LIVE cross-run proof path — the only deterministic hit seam is injected, which by design never writes; §8). **NEXT
+headline (progression ⛔ STALLED — rung flat 4 ×5; ladder retired at rung 5 (dogfood-096); STALLED axis-mover = a real chain run): dogfood-103 (WP-311
+COMPLETION — chain-completion aggregate design review, launched as a real `chikory chain` dogfood).** See §7, §8, §1.5, §3. (Earlier — dogfood-101 WP-310 → PLAN-HISTORY.md.)
 
 Related docs: [`docs/spec/task-spec.md`](spec/task-spec.md) (schema
 reference) · [`docs/TASK-PROTOCOL.md`](TASK-PROTOCOL.md) (WP etiquette, §7 is
@@ -685,6 +685,7 @@ broken (a false-green, not a follow-on fix).
 | Codex steps run far past their `maxSeconds` cap (e.g. ~2×) before being killed, recording 0 tokens / $0 / FAILED | Codex ignores the wall-clock deadline / SIGTERM until it is SIGKILLed (dogfood-076 **F-85 → WP-268**, family of F-76/F-80): steps 3 & 4 ran 1057s (1.76×) and 1188s (1.98×) past the 600s step cap. The cap is enforced LATE (~2×). Treat a run whose wall-clock is dominated by hung dead steps as this, not real work — check per-step `dur` in the trace. Durable fix = WP-268 (escalate to SIGKILL of the executor process group at ~1× the cap). Do NOT raise `budget_usd`/`max_steps` mid-run to rescue it. |
 | A `chikory resume <run-id>` appears to hang — the journal is frozen for many minutes and nothing errors, even though the worker is up | **The resumed run lost its judge/router provider config** — `chikory resume` from a shell that did NOT export `OPENAI_COMPAT_BASE_URL` (only `dogfood.sh`'s own shell exports it) starts a judge/router activity with no base URL, and Temporal's activity-retry policy (~65 attempts over ~30 min) loops SILENTLY instead of failing loud (dogfood-082 **F-99**: a step-4 seal stalled ~37 min across the kill→resume boundary purely from this). **`OPENAI_COMPAT_BASE_URL` (and any provider env the spec's `routing` block names) is a RESUME PRECONDITION** — export it before `chikory resume`, or resume from the same shell/`dogfood.sh` context that launched the run. Diagnose a suspected stall: `echo $OPENAI_COMPAT_BASE_URL` (empty = this), and check the worker logs for repeated router-fetch failures. **F-99 CLOSED 2026-07-04 (track-B PR per the §6.1 routing rule): `cmdResume` now runs `resumeProviderEnvGaps` (`src/cli/commands.ts`) — it reads the spec persisted in the run's journal, checks every routed provider's env var (`missingProviderEnv`, `src/taskspec.ts`), and refuses fast (exit 1, naming each var) BEFORE hosting a worker; fail-open when the journal is missing/unreadable so it can never block a legitimate resume. Unit-tested in `test/cli/resume-env-precheck.test.ts`.** Seeing a silent multi-minute resume stall now is a regression — file it. |
 | A LOOSE run seals SUCCESS and every AC is green, but review finds the first PART(s) delivered only a refactor — the "net-new symbol" already had its capability on HEAD | **The spec's premise line was STALE** (dogfood-096 **F-129**): the spec asserted "today `activities.ts` commits only `spec.repos[0]`" but `fadc124` had landed the per-repo commit loop + per-repo diff evidence 6 days before launch, so PARTs 1–2 were satisfied by EXTRACTING existing code into the AC-named symbols (`commitAllRepos`, `collectPerRepoDiffs`) plus a redundant `perRepoCommits` field duplicating `gitCommits` (collapsed into `gitCommits` by the 2026-07-11 track-B hand-fix). The F-90 "symbol absent on HEAD" armor proves the SYMBOL is new, not that the CAPABILITY is missing. **Authoring rule:** before writing a premise ("today X only does Y"), verify it against the CAPABILITY — `git log -S` on the mechanism (call sites, loops), read the current code path — not just a grep proving the symbol is absent. Same failure shape as the plan-lags-main rule (dogfood-088 review). |
+| A judge pass reports a headline AC as `DID NOT COMPLETE (killed at the per-check cap) — infra failure, not a code red`, non-deterministically across steps | **The AC's `check` runs longer than the judge's per-check cap (~120s)** (dogfood-102 **F-141**): AC-3 = `tsc --noEmit && eslint . && vitest run` (the whole SDK suite) finishes in ~37s wall standalone but ~262s of test CPU; in the judge's constrained per-check sandbox it blew the cap at steps 3 & 6. It is correctly classed infra (not a code red) so no false ROLLBACK fires, but the "full suite green" rubric leg can't be relied on those passes. **Authoring rule:** a headline AC-3 should be a SCOPED `vitest run <the touched test files>` that fits the cap (time it: `time (cd packages/sdk-ts && pnpm exec vitest run <files>)`), with any whole-suite check left to the harvest verify-pack §3 (which has no cap), not the inner-loop judge. Fold into the WP-266/511 loose-AC-hygiene family. |
 
 ## 8. Known P1 limitations (so you don't fight them)
 
@@ -706,19 +707,22 @@ broken (a false-green, not a follow-on fix).
   429 carries NO `retry-after`, so the park lasts the LEARNED 1000ms (median of steps
   1/3 observed resets), then resumes and completes the throttled item. No longer a
   mocked/`maxSteps` proof.
-- **The cross-run learned-capacity seam is DEAD — WP-309 is only half done** (🔴 F-138,
-  dogfood-100): dogfood-100 journals limit observations to the PER-RUN journal and
-  learns resets from a single run's history, but never wires
-  `EndpointLedger.appendLimitObservation` (`endpoint-ledger.ts:110`, no `src/` caller)
-  or a reader of `learnedCapacityTokens`. The plan.md WP-309 scope amendment requires
-  observations to persist to the cross-run ledger `<dataDir>/ledger/endpoints.db` so
-  the WP-310 governor can learn subscription-window capacity across runs — that is
-  still owed. Root cause: the dogfood-100 spec was authored journal-only and missed
-  the amendment; the judge only gates the spec's ACs, so a partial WP-309 greened.
-  **Operating rule:** before writing a dogfood spec for a WP, diff that WP's plan.md
-  row for amendments landed since the last run — the ACs must cover the CURRENT scope.
-  WP-309 stays 🟡; the completion slice (wire `appendLimitObservation` + read learned
-  capacity into `decideLimitPacing`) is queued behind the STALLED-binding headline.
+- **The cross-run learned-capacity seam is now WIRED — WP-309 ✅ DONE (test-complete)**
+  (🔴 F-138 CLOSED, dogfood-102 `run-cd98de3e`): the real (non-injected) limit path
+  calls net-new `appendEndpointLimitObservations` (`activities.ts`, inside
+  `if (observation !== undefined)`) → per declared window persists the learned capacity
+  to `<dataDir>/ledger/endpoints.db`; a fresh `EndpointLedger` reads it as
+  `windowState().capacityTokens` and `decideLimitPacing` throttles against it (F-97
+  co-reference test). Injected seam provably writes nothing (byte-identical held).
+  **⚠️ Not live-proven across two real runs** (ℹ️ F-142): the KPI (a real hit in run A
+  paces run B) is proven only by deterministic test, because there is NO deterministic
+  seam to force a NON-INJECTED limit hit in a live run — the only seam
+  (`CHIKORY_LIMIT_AT_STEP`) is `source:"injected"`, which by design never writes the
+  ledger (keeps no-op runs byte-identical). A LIVE cross-run/chain proof needs a
+  test-only non-injected real-shaped-hit seam gated behind an explicit flag — owed if
+  such a proof is ever headlined. The original F-138 authoring lesson stands: before
+  writing a dogfood spec for a WP, diff that WP's plan.md row for amendments landed
+  since the last run — the ACs must cover the CURRENT scope.
 - **`judge.cadence` is INERT on a chunked spec** (dogfood-096 observation, by design
   JD-2): every step that consumes a `work_chunks` entry is a judge milestone
   (`workChunkMilestone`, `src/workflow/agent-loop.ts:633`), so a `min_durable_steps`

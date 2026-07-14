@@ -422,6 +422,48 @@ function appendStepConsumption(
   }
 }
 
+/**
+ * Cross-run capacity learning (WP-309): a real limit hit records the ledger's
+ * consumption at that instant as the learned capacity for every declared
+ * quota window on the wrapped executor endpoint. Ledger failure is
+ * non-fatal, matching the consumption writer above.
+ */
+function appendEndpointLimitObservations(
+  deps: RunnerActivityDeps,
+  spec: TaskSpec,
+  observedAtMs: number,
+  resetAtMs: number | undefined,
+): void {
+  const capability = describeEndpointCapability({
+    adapter: spec.executor.adapter,
+    family: spec.executor.family,
+  });
+  const declared: readonly DeclaredQuotaWindow[] =
+    spec.debug?.quotaWindows ??
+    (capability.kind === "executor" ? (capability.limits.quotaWindows ?? []) : []);
+  if (declared.length === 0) return;
+
+  try {
+    const ledger = new EndpointLedger(endpointLedgerPath(deps.dataDir));
+    try {
+      for (const window of declared) {
+        const state = ledger.windowState(spec.executor.adapter, window, observedAtMs);
+        ledger.appendLimitObservation({
+          endpointTarget: spec.executor.adapter,
+          windowKind: window.window,
+          observedAtMs,
+          ...(resetAtMs === undefined ? {} : { resetAtMs }),
+          consumedTokensAtHit: state.consumedTokens,
+        });
+      }
+    } finally {
+      ledger.close();
+    }
+  } catch {
+    // observe-only degradation: a broken ledger must not fail limit handling
+  }
+}
+
 /** Git tag marking the workspace state right after prepareRun (= `<runId>@base`). */
 export const BASE_TAG = "chikory-base";
 
@@ -1081,6 +1123,12 @@ export function createRunnerActivities(deps: RunnerActivityDeps) {
                     costDeltaUsd: 0,
                     artifactRefs: [],
                   },
+                );
+                appendEndpointLimitObservations(
+                  deps,
+                  spec,
+                  observation.observedAtMs,
+                  observation.resetAtMs,
                 );
               }
               journal.appendOnce(

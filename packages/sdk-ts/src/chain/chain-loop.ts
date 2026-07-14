@@ -23,6 +23,7 @@ import type { ChainRecord, ChainStatus, Plan, RunStatus } from "../types.js";
 import { agentLoop } from "../workflow/agent-loop.js";
 import type { ChainActivities } from "./activities.js";
 import { advanceChain, deriveChainStatus } from "./advance.js";
+import { decideChainCompletionReview } from "./completion-review.js";
 import { buildStructuredCompactionNote } from "./compaction-note.js";
 import { childRunId, planNodeToTaskSpec, type ChainNodeTemplate } from "./node-spec.js";
 import { decideReplan } from "./replan.js";
@@ -35,6 +36,20 @@ const activities = proxyActivities<ChainActivities>({
     initialInterval: "1 second",
     backoffCoefficient: 2,
     maximumInterval: "30 seconds",
+  },
+});
+
+// WP-311 chain-completion review runs a real judge LLM call + git over the
+// cumulative diff — minutes, not seconds — so it needs its own generous cap
+// (the per-node judge activities in `activities` above must stay short). The
+// journal write is idempotent (`appendOnce`), so a retry never double-records.
+const reviewActivities = proxyActivities<ChainActivities>({
+  startToCloseTimeout: "15 minutes",
+  retry: {
+    initialInterval: "2 seconds",
+    backoffCoefficient: 2,
+    maximumInterval: "30 seconds",
+    maximumAttempts: 3,
   },
 });
 
@@ -200,6 +215,32 @@ export async function chainLoop(input: ChainLoopInput): Promise<ChainStatus> {
       }
     }
     void runStatus; // terminal status is sourced from the journal via readNodeOutcome
+  }
+
+  // WP-311 chain-completion aggregate design review: at the SUCCESS seal, ONE
+  // judge pass over the whole chain's cumulative cross-node diff + `plan.goal`.
+  // Non-destructive — a finished chain is never re-judged/re-parked (F-107); the
+  // review only records findings, so the status is unchanged either way.
+  if (record.status === "SUCCESS") {
+    const succeededCount = Object.values(record.nodeOutcomes).filter(
+      (outcome) => outcome.status === "SUCCESS",
+    ).length;
+    const review = decideChainCompletionReview({
+      nodeCount: plan.nodes.length,
+      succeededCount,
+      alreadyReviewed: false,
+    });
+    if (review.action === "review") {
+      await reviewActivities.reviewChainCompletion({
+        chainId,
+        plan,
+        nodeRuns: record.nodeRuns,
+        nodeOutcomes: record.nodeOutcomes,
+        repos: template.repos,
+        judge: template.judge,
+        routing: template.routing,
+      });
+    }
   }
 
   if (record.status === "SUCCESS" || record.status === "FAILED") {

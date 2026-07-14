@@ -1,0 +1,148 @@
+# Dogfood-103: WP-311 COMPLETION — CHAIN-COMPLETION AGGREGATE DESIGN REVIEW (P3 intelligent-scaling /
+#   big-picture-judging track, plan.md §7). WP-311 core (dogfood-101-era hand-land) gave the JUDGE design
+#   sight at three altitudes for a SINGLE run: the `design_serves_overall_goal` standing rubric item, the
+#   `## OVERALL GOAL` chain-goal prompt section on node judges, and a per-RUN completion review over the
+#   cumulative diff (`src/workflow/completion-review.ts` `decideCompletionReview`, `source:"completion-review"`).
+#   The residue (plan.md §7 WP-311 row): a CHAIN-level aggregate review — a post-chain meta judge pass over
+#   `plan.goal` + ALL `NodeOutcome`s + the cross-node cumulative diff — was "deferred until A–C dogfood data
+#   exists". This run closes it: prove the chain-completion aggregate review fires on a REAL multi-node chain,
+#   preserving the "a chain never re-judges its sealed nodes" invariant.
+#
+# ⚠️⚠️ HARD PREREQUISITE — HAND-LAND THE FEATURE TO HEAD FIRST (worker-load constraint, dogfood-041/043 lesson).
+#   The running Temporal worker loads the COMMITTED chain-loop/activity code at chain start. A chain therefore
+#   CANNOT implement AND exercise its own chain-runner substrate in one execution — the chain running this
+#   campaign uses the pre-committed `chain-loop.ts`. So the chain-completion aggregate review is NOT built by
+#   this dogfood; it is hand-designed and committed to HEAD BEFORE launch (TASK-PROTOCOL §4), exactly as
+#   WP-239 was for dogfood-043 and WP-310/WP-311 cores were track-B. This dogfood is a PROOF run (KPI read from
+#   the chain journal, dogfood-101 precedent), not a build run. Feature to land first (mirror the per-run
+#   review symbol-for-symbol):
+#     * `src/chain/completion-review.ts` — pure `decideChainCompletionReview(state): {action:"review"|"skip"}`
+#       (bounded to ONE aggregate pass; skip a single-node chain), the `decideCompletionReview` sibling.
+#     * `chain-loop.ts` seal hook: after `deriveChainStatus` = SUCCESS and BEFORE `sealChain`, run ONE aggregate
+#       judge pass over `plan.goal` + every `NodeOutcome` + the cross-node CUMULATIVE diff, with a
+#       NON-DESTRUCTIVE-ONLY rubric (never rolls back / re-parks / re-judges a sealed node — F-107 discipline;
+#       a finding is journaled, the chain still seals SUCCESS-with-findings).
+#     * additive `ChainEntry` kind `chain_completion_review` (store.ts payload+reducer, types+zod+py+CONTRACTS
+#       §6/§7a synced) + a `chikory trace <chain-id>` totals line; no `ChainRecord`/`NodeOutcome`/`Plan` reshape.
+#     * a LIVE Temporal proof in-suite (`test/chain/chain-completion-review-live.test.ts`) — the committed
+#       regression; this dogfood is the REAL-CHAIN observation on top.
+#
+# CLASS / LADDER. class=product. Ladder retired at rung 5 (P2 exit, dogfood-096); rung-4-shape P3 completion.
+#   The STALLED axis this MOVES is the flat multi-run/horizon axis: this is a REAL `chikory chain` run (≥3
+#   dependent nodes), the first chain headline since the P3 track opened. §1.2 frozen-substrate carve-out
+#   APPLIES: the review mechanism IS the chain-runner substrate, so it must be pre-committed and the dogfood
+#   proves it (the sanctioned scaffold-fallback — no open WP can host a change to the runner the dogfood needs
+#   loaded). Node deliverables are a small genuine chain-observability advance (below), not invented throwaway.
+# Ladder-rung: 4
+# Thesis-KPI: CHAIN-LEVEL BIG-PICTURE JUDGING — on a real multi-node chain that seals SUCCESS, the chain
+#   journal carries EXACTLY ONE `chain_completion_review` entry whose evidence references `plan.goal` and the
+#   cross-node cumulative diff; every node's own judge verdicts are UNCHANGED by it (no `node_sealed` re-write,
+#   no re-judge); the `chikory trace <chain-id>` totals render the aggregate-review line. Proof is READ FROM
+#   THE CHAIN JOURNAL post-run (not an AC the node executors satisfy), dogfood-101 precedent.
+#
+# Format: LOOSE chain goal (the planner emits the topology; ACs pin the node deliverables + full-suite green).
+#   The chain-completion-review KPI is journal-read, not an AC. AC greps key on consumed CALL EXPRESSIONS /
+#   `spec.x` fields, never a bare type name (F-90/F-114-safe); occurrence counts via `grep -rl … | grep -v`
+#   (F-119); AC checks are SCOPED vitest runs that fit the 120s judge per-check cap (F-141 lesson — do NOT put
+#   the whole suite in a headline AC; the harvest verify-pack §3 runs the full suite uncapped); no wall-clock
+#   asserts (F-115).
+#
+# ⚠️ SCOPE / DETERMINISM. Node deliverables write ONLY inside `packages/sdk-ts/`. ADDITIVE — no frozen-contract
+#   reshape, NO new dependency, NO key material. The chain runner / completion-review substrate is FROZEN for
+#   this run (pre-committed; do NOT modify it inside the chain — dogfood-043 rule).
+#
+# ⚠️ LAUNCH — this is a CHAIN, launch with `chain-dogfood` (NOT `run-dogfood`):
+#   0. Hand-land the prerequisite feature above; commit it + the dogfood-102 working tree to HEAD (the chain
+#      worker clones/loads HEAD — the review MUST be committed or the KPI cannot fire).
+#   1. Verify the spec-pick glob resolves to THIS file: `dogfood-103` sorts after `dogfood-102`.
+#   2. `CHIKORY_PREFLIGHT_ONLY=1 devbox run chain-dogfood` dry-runs the guards at $0.
+#   3. `devbox run chain-dogfood`
+#   Post-run: `devbox run harvest` then `/dogfood-review <chain-id>`.
+
+name: dogfood-103-wp311-chain-completion-review
+goal: >
+  Prove the ALREADY-LANDED WP-311 chain-completion aggregate design review on a REAL Chikory chain of THREE
+  dependent nodes, and advance the chain-observability surface while doing so. This campaign validates the
+  committed chain runner; do NOT redesign or modify the chain runner, the completion-review substrate, chain
+  contracts, schemas, ADRs, or the harvest scripts inside this run (the running worker loaded them at start).
+
+  The planner MUST emit a LINEAR three-node topology on ONE shared design goal — "give `chikory trace
+  <chain-id>` a per-node design-summary surface": node B `dependsOn` node A, node C `dependsOn` node B. Each
+  node produces a NON-EMPTY code-and-test diff inside `packages/sdk-ts/`; do not add a verification-only node.
+
+    * NODE A — add a pure `src/chain/design-summary.ts` exporting the named function
+      `summarizeNodeDesign(outcome)` that turns one `NodeOutcome` into a bounded one-line design-summary
+      string (node id · status · a size-capped reason). Add `test/chain/design-summary.test.ts` with a focused
+      passing test. Touch only those two files.
+
+    * NODE B — add a pure `renderChainDesignSummary(record)` (same file or a sibling) that folds every
+      `NodeOutcome` through `summarizeNodeDesign` into a deterministic multi-line block in plan order, mirroring
+      `renderChainTrace`'s per-node section. Add its focused test. Import node A's function via a `.js` relative
+      ESM import — it must be present via the chain handoff, not recreated.
+
+    * NODE C — wire `renderChainDesignSummary` into the `chikory trace <chain-id>` render (`src/chain/trace.ts`
+      / the CLI trace branch) as an ADDITIVE section, so a chain trace shows the per-node design summary;
+      no-op/legacy chains still render byte-identically. Add its focused test importing BOTH predecessors'
+      symbols. Touch only the trace surface + test.
+
+  CONSTRAINTS: additive only; strict TypeScript, ESM `.js` relative imports, named exports, no default exports,
+  no I/O, no new dependency, no key material; run project commands sequentially inside the existing devbox
+  environment. Each node lands its own test and does NOT break an earlier node's tests. Do NOT touch
+  `chain-loop.ts`, `completion-review.ts`, `advance.ts`, `store.ts` reducers, or any frozen contract.
+
+repos:
+  - url: /Users/nikitazolotarev/repos/chikory
+    writable: true
+
+acceptance_criteria:
+  - id: AC-1
+    description: >
+      Node A landed a pure per-node design summariser — some `src/chain/` file OTHER than trace.ts gained a
+      `summarizeNodeDesign(` caller/definition. (F-114-safe: greps the CALL/def expression, not a type name.)
+    check: >
+      cd packages/sdk-ts &&
+      grep -rlE 'summarizeNodeDesign\(' src/chain | grep -v 'chain/trace.ts' | head -1 | grep -q .
+  - id: AC-2
+    description: >
+      Nodes A+B+C are co-referenced — the trace surface renders the chain design summary: `renderChainDesignSummary`
+      exists AND `src/chain/trace.ts` (or the CLI trace branch) references it. (F-97-safe co-reference.)
+    check: >
+      cd packages/sdk-ts &&
+      grep -rlE 'renderChainDesignSummary\(' src | grep -q . &&
+      grep -rlE 'renderChainDesignSummary' src/chain/trace.ts src/cli/commands.ts 2>/dev/null | head -1 | grep -q .
+  - id: AC-3
+    description: >
+      The three new chain design-summary tests pass and the SDK stays type- and lint-clean. (SCOPED vitest run
+      — fits the judge per-check cap; the harvest verify-pack §3 runs the full suite uncapped. F-141 lesson.)
+    check: >
+      cd packages/sdk-ts &&
+      pnpm exec tsc --noEmit && pnpm exec eslint src/chain/design-summary.ts src/chain/trace.ts &&
+      pnpm exec vitest run test/chain/design-summary.test.ts
+
+budget_usd: 30
+max_steps: 12
+
+# CONTEXT-ROT (WP-203/WP-207): auto-calibrated window (F-125 mechanism, live-proven 095-099, 101).
+pacing:
+  mode: auto
+  autoCalibrate: true
+
+# UNATTENDED (WP-271): operator-free; a genuine ESCALATE seals a resumable FAILED (WP-520).
+unattended:
+  escalation: seal_resumable_failed
+
+executor:
+  adapter: codex
+  family: openai
+
+judge:
+  family: openai-compat
+  cadence: 2
+  max_cost_share: 0.5
+
+routing:
+  stages:
+    plan: { provider: openai-compat, model: gpt-5.6-sol xhigh }
+    code: { provider: openai-compat, model: gpt-5.6-sol xhigh }
+    review: { provider: openai-compat, model: gpt-5.6-sol xhigh }
+    judge: { provider: openai-compat, model: gemini-3.1-pro-preview }

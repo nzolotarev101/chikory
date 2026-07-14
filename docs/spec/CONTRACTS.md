@@ -249,7 +249,9 @@ export type JournalEntryKind =
   // intercepted: brief + rollback + bounded retry)
   | "remediation"
   // P2 (WP-219, ADR-005) — chain-scope kinds (emitted to the chain store)
-  | "plan" | "plan_verdict" | "node_started" | "node_replanned" | "node_sealed";
+  // `chain_completion_review` (WP-311): the aggregate design-judge pass at the SUCCESS seal
+  | "plan" | "plan_verdict" | "node_started" | "node_replanned" | "node_sealed"
+  | "chain_completion_review";
 
 export interface JournalEntry {
   idx: number;                  // monotonic per run

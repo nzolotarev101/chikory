@@ -211,6 +211,14 @@ function formatChainEntryLine(entry: ChainEntry): string {
       const p = entry.payload as { failedNodeId: string; revisedPlan?: { id: string } };
       return `[${entry.ts}] node ${p.failedNodeId} replanned → ${p.revisedPlan?.id ?? "revised plan"}`;
     }
+    case "chain_completion_review": {
+      const p = entry.payload as {
+        verdict: string;
+        findings: { pass: boolean }[];
+      };
+      const failed = p.findings.filter((finding) => !finding.pass).length;
+      return `[${entry.ts}] chain-completion review ${p.verdict} — ${failed} design finding(s)`;
+    }
     case "terminal": {
       const p = entry.payload as { status: string; reason?: string };
       return `[${entry.ts}] chain ${p.status}${p.reason ? ` — ${p.reason}` : ""}`;

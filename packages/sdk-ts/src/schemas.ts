@@ -437,6 +437,7 @@ export const JournalEntryKindSchema = z.enum([
   "node_started",
   "node_replanned",
   "node_sealed",
+  "chain_completion_review",
 ]);
 
 export const JournalEntrySchema = z

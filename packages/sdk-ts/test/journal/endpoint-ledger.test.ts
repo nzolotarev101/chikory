@@ -4,13 +4,20 @@ import { join } from "node:path";
 
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
-import { EndpointLedger, endpointLedgerPath, ROLLING_5H_WINDOW_MS, WEEKLY_WINDOW_MS } from "../../src/index.js";
+import {
+  decideLimitPacing,
+  EndpointLedger,
+  endpointLedgerPath,
+  ROLLING_5H_WINDOW_MS,
+  WEEKLY_WINDOW_MS,
+} from "../../src/index.js";
 import type { DeclaredQuotaWindow } from "../../src/index.js";
 
 const WEEKLY: DeclaredQuotaWindow = { window: "weekly", durationMs: WEEKLY_WINDOW_MS };
 const ROLLING_5H: DeclaredQuotaWindow = { window: "rolling-5h", durationMs: ROLLING_5H_WINDOW_MS };
 
 const NOW = Date.parse("2026-07-12T00:00:00.000Z");
+const HOUR = 60 * 60 * 1000;
 
 function consume(overrides: Partial<Parameters<EndpointLedger["appendConsumption"]>[0]> = {}) {
   return {
@@ -102,6 +109,62 @@ describe("EndpointLedger (WP-310)", () => {
     const state = ledger.windowState("codex", ROLLING_5H, NOW);
     expect(state.capacityTokens).toBe(40_000);
     expect(state.resetAtMs).toBeUndefined();
+  });
+
+  it("a fresh ledger on the same database reads the persisted learned capacity", () => {
+    ledger.appendLimitObservation({
+      endpointTarget: "codex",
+      windowKind: "weekly",
+      observedAtMs: NOW - 1000,
+      consumedTokensAtHit: 52_000,
+    });
+
+    const freshLedger = new EndpointLedger(endpointLedgerPath(dir));
+    try {
+      expect(freshLedger.windowState("codex", WEEKLY, NOW).capacityTokens).toBe(52_000);
+    } finally {
+      freshLedger.close();
+    }
+  });
+
+  it("feeds only learned capacity into pacing and stays observe-only before learning", () => {
+    const withoutObservation = decideLimitPacing({
+      nowMs: NOW,
+      windows: [ledger.windowState("codex", WEEKLY, NOW)],
+      estimatedRemainingSteps: 10,
+      recentStepTokens: [1000, 1000, 1000, 1000, 1000],
+      recentStepDurationsMs: [60_000, 60_000, 60_000, 60_000, 60_000],
+    });
+    expect(withoutObservation.action).toBe("push");
+    expect(withoutObservation.sustainableTokensPerHour).toBe(Infinity);
+
+    ledger.appendLimitObservation({
+      endpointTarget: "codex",
+      windowKind: "weekly",
+      observedAtMs: NOW - 1000,
+      resetAtMs: NOW + 10 * HOUR,
+      consumedTokensAtHit: 100_000,
+    });
+
+    const freshLedger = new EndpointLedger(endpointLedgerPath(dir));
+    try {
+      const learnedWindow = freshLedger.windowState("codex", WEEKLY, NOW);
+      expect(learnedWindow.capacityTokens).toBe(100_000);
+
+      const withObservation = decideLimitPacing({
+        nowMs: NOW,
+        windows: [learnedWindow],
+        estimatedRemainingSteps: 10,
+        recentStepTokens: [1000, 1000, 1000, 1000, 1000],
+        recentStepDurationsMs: [60_000, 60_000, 60_000, 60_000, 60_000],
+      });
+      expect(withObservation.action).toBe("throttle");
+      expect(withObservation.limitingWindow).toBe("weekly");
+      expect(withObservation.sustainableTokensPerHour).toBeCloseTo(10_000, 0);
+      expect(withObservation.interStepDelayMs).toBe(300_000);
+    } finally {
+      freshLedger.close();
+    }
   });
 
   it("survives reopen — two ledger handles on one file see the same rows", () => {

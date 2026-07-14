@@ -2,6 +2,7 @@ import { existsSync } from "node:fs";
 import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { DatabaseSync } from "node:sqlite";
 
 import { afterEach, describe, expect, test } from "vitest";
 
@@ -11,6 +12,7 @@ import {
   createRunnerActivities,
   decideLimitParkDelay,
   decideLimitResponse,
+  endpointLedgerPath,
   Journal,
   journalPath,
   learnEndpointReset,
@@ -20,6 +22,7 @@ import {
   workspaceDir,
   type LimitObservationPayload,
   type LimitSignalPayload,
+  type AdapterRegistry,
   type StepPayload,
   type TaskSpec,
 } from "../../src/index.js";
@@ -42,15 +45,37 @@ describe("executeStep limit response seam", () => {
     runId: string,
     overrides: Partial<TaskSpec> = {},
     scriptedConfig: Parameters<typeof initSourceRepo>[1] = {},
+    adapters: AdapterRegistry = scriptedRegistry,
   ) {
     const tmp = await mkdtemp(join(tmpdir(), "chikory-limit-response-"));
     cleanups.push(() => rm(tmp, { recursive: true, force: true }));
     const repoUrl = await initSourceRepo(join(tmp, "src"), scriptedConfig);
     const dataDir = join(tmp, "data");
     const spec = makeSpec({ repoUrl, ...overrides });
-    const activities = createRunnerActivities({ dataDir, adapters: scriptedRegistry });
+    const activities = createRunnerActivities({ dataDir, adapters });
     await activities.prepareRun({ runId, spec });
     return { activities, dataDir, spec };
+  }
+
+  function limitObservationRows(dataDir: string) {
+    const db = new DatabaseSync(endpointLedgerPath(dataDir), { readOnly: true });
+    try {
+      return db
+        .prepare(
+          `SELECT endpoint_target, window_kind, observed_at_ms, reset_at_ms, consumed_tokens_at_hit
+             FROM limit_observations
+            ORDER BY window_kind`,
+        )
+        .all() as Array<{
+        endpoint_target: string;
+        window_kind: string;
+        observed_at_ms: number;
+        reset_at_ms: number | null;
+        consumed_tokens_at_hit: number;
+      }>;
+    } finally {
+      db.close();
+    }
   }
 
   test("leaves normal step payloads without a scheduler field when the signal is absent", async () => {
@@ -429,6 +454,80 @@ describe("executeStep limit response seam", () => {
     } finally {
       journal.close();
     }
+  });
+
+  test("writes one cross-run observation per declared window for a real limit hit", async () => {
+    delete process.env["CHIKORY_LIMIT_AT_STEP"];
+    const runId = "run-limit-response-ledger-real";
+    const { activities, dataDir, spec } = await preparedRun(
+      runId,
+      { executor: { adapter: "codex", family: "openai" } },
+      { httpLimitSteps: [2], httpLimitRetryAfterSeconds: 12 },
+      { codex: scriptedRegistry.scripted! },
+    );
+    const context = {
+      goal: spec.goal,
+      acceptanceCriteria: spec.acceptanceCriteria,
+      planItem: spec.goal,
+      notes: {},
+      recentSteps: [],
+      injections: [],
+      memoryRefs: [],
+    };
+
+    await activities.executeStep({
+      runId,
+      stepIndex: 0,
+      instruction: spec.goal,
+      context,
+      limits: { maxSeconds: 600 },
+    });
+    await activities.executeStep({
+      runId,
+      stepIndex: 1,
+      instruction: spec.goal,
+      context,
+      limits: { maxSeconds: 600 },
+    });
+
+    const rows = limitObservationRows(dataDir);
+    expect(rows).toHaveLength(2);
+    expect(rows.map((row) => row.window_kind)).toEqual(["rolling-5h", "weekly"]);
+    for (const row of rows) {
+      expect(row.endpoint_target).toBe("codex");
+      expect(row.consumed_tokens_at_hit).toBe(150);
+      expect(row.observed_at_ms).toBeGreaterThan(0);
+      expect(row.reset_at_ms).toBe(row.observed_at_ms + 12_000);
+    }
+  });
+
+  test("writes no cross-run observations for the injected limit seam", async () => {
+    process.env["CHIKORY_LIMIT_AT_STEP"] = "0";
+    const runId = "run-limit-response-ledger-injected";
+    const { activities, dataDir, spec } = await preparedRun(
+      runId,
+      { executor: { adapter: "codex", family: "openai" } },
+      {},
+      { codex: scriptedRegistry.scripted! },
+    );
+
+    await activities.executeStep({
+      runId,
+      stepIndex: 0,
+      instruction: spec.goal,
+      context: {
+        goal: spec.goal,
+        acceptanceCriteria: spec.acceptanceCriteria,
+        planItem: spec.goal,
+        notes: {},
+        recentSteps: [],
+        injections: [],
+        memoryRefs: [],
+      },
+      limits: { maxSeconds: 600 },
+    });
+
+    expect(limitObservationRows(dataDir)).toEqual([]);
   });
 
   test("learns a park reset from scripted HTTP 429 observation history without the injected seam", async () => {

@@ -39,6 +39,7 @@ JournalEntryKind = Literal[
     "node_started",
     "node_replanned",
     "node_sealed",
+    "chain_completion_review",
 ]
 PlanVerdictKind = Literal["PROCEED", "REVISE", "ESCALATE"]
 ChainStatus = Literal[

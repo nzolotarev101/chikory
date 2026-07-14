@@ -146,6 +146,12 @@ export { buildPlanVerdict, type PlanJudgeReply } from "./planner/meta-judge-verd
 export { advanceChain, deriveChainStatus } from "./chain/advance.js";
 export { decideReplan, type ReplanDecision } from "./chain/replan.js";
 export {
+  decideChainCompletionReview,
+  MIN_CHAIN_NODES_FOR_REVIEW,
+  type ChainCompletionReviewDecision,
+  type ChainCompletionReviewState,
+} from "./chain/completion-review.js";
+export {
   buildStructuredCompactionNote,
   DEFAULT_STRUCTURED_COMPACTION_NOTE_MAX_CHARS,
   type StructuredCompactionNoteInput,
@@ -161,6 +167,8 @@ export {
   chainRecordFrom,
   type ChainEntry,
   type ChainEntryKind,
+  type ChainCompletionReviewFinding,
+  type ChainCompletionReviewPayload,
   type NodeStartedPayload,
   type NodeReplannedPayload,
   type NodeSealedPayload,

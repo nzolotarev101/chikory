@@ -75,7 +75,7 @@ export async function createRunnerWorker(opts: RunnerWorkerOptions): Promise<Run
       routerOptions: opts.routerOptions,
       handoffStore: opts.handoffStore,
     }),
-    ...createChainActivities({ dataDir }),
+    ...createChainActivities({ dataDir, routerOptions: opts.routerOptions }),
     ...opts.chainActivitiesOverride,
     ...opts.activitiesOverride,
   };

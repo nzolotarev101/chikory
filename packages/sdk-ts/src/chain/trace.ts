@@ -1,5 +1,5 @@
 import type { ChainRecord, PlanNode } from "../types.js";
-import type { ChainEntry } from "./store.js";
+import type { ChainCompletionReviewPayload, ChainEntry } from "./store.js";
 
 interface TerminalPayload {
   status: string;
@@ -44,6 +44,19 @@ export function renderChainTrace(record: ChainRecord, entries: ChainEntry[]): st
   }
 
   lines.push(`totals: nodes ${total} · succeeded ${succeeded} · failed ${failed} · pending ${pending}`);
+
+  // WP-311 chain-completion aggregate design review (non-destructive — a summary line).
+  const reviewEntry = entries.find((entry) => entry.kind === "chain_completion_review");
+  if (reviewEntry) {
+    const review = reviewEntry.payload as ChainCompletionReviewPayload;
+    const failedFindings = review.findings.filter((finding) => !finding.pass);
+    const base = review.diffBase.length > 12 ? review.diffBase.slice(0, 12) : review.diffBase;
+    const findingsCell =
+      failedFindings.length === 0
+        ? "no design findings"
+        : `${failedFindings.length} finding(s): ${failedFindings.map((finding) => finding.id).join(", ")}`;
+    lines.push(`review: ${review.verdict} · ${findingsCell} · base ${base}`);
+  }
 
   const terminal = entries.find((entry) => entry.kind === "terminal");
   if (terminal) {
