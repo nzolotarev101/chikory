@@ -201,7 +201,7 @@ describe("executeStep limit response seam", () => {
           stages: {
             plan: { provider: "anthropic", model: "claude-fable-5" },
             code: { provider: "anthropic", model: "claude-fable-5" },
-            review: { provider: "openai-compat", model: "gpt-5.5" },
+            review: { provider: "openai-compat", model: "gpt-5.6-sol xhigh" },
             judge: { provider: "gemini", model: "gemini-2.5-pro" },
           },
         },

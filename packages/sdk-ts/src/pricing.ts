@@ -28,6 +28,8 @@ export const PRICE_TABLE: Record<string, ModelPricing> = {
   "claude-sonnet-4-6": { inputPerMTok: 3, outputPerMTok: 15 },
   "claude-haiku-4-5": { inputPerMTok: 1, outputPerMTok: 5 },
   // OpenAI
+  "gpt-5.6-sol xhigh": { inputPerMTok: 1.25, outputPerMTok: 10 },
+  "gpt-5.6-sol": { inputPerMTok: 1.25, outputPerMTok: 10 },
   "gpt-5.5": { inputPerMTok: 1.25, outputPerMTok: 10 },
   "gpt-5.5-mini": { inputPerMTok: 0.25, outputPerMTok: 2 },
   "gpt-5.2": { inputPerMTok: 1.25, outputPerMTok: 10 },

@@ -152,7 +152,7 @@ judge:
 
 routing:
   stages:
-    plan: { provider: openai-compat, model: gpt-5.5 }
-    code: { provider: openai-compat, model: gpt-5.5 }
-    review: { provider: openai-compat, model: gpt-5.5 }
+    plan: { provider: openai-compat, model: gpt-5.6-sol xhigh }
+    code: { provider: openai-compat, model: gpt-5.6-sol xhigh }
+    review: { provider: openai-compat, model: gpt-5.6-sol xhigh }
     judge: { provider: openai-compat, model: gemini-3.1-pro-preview }

@@ -12,13 +12,13 @@ import { decideContextWindowPacing } from "../../src/runner/pacing.js";
 
 describe("context-window lookup (WP-252)", () => {
   it("resolves exact model families", () => {
-    expect(lookupContextWindow("gpt-5.5")).toBe(400_000);
+    expect(lookupContextWindow("gpt-5.6-sol xhigh")).toBe(400_000);
     expect(lookupContextWindow("claude-opus-4-8")).toBe(200_000);
     expect(lookupContextWindow("gemini-3.1-pro-preview")).toBe(1_000_000);
   });
 
   it("resolves dated snapshot ids by longest prefix", () => {
-    expect(lookupContextWindow("gpt-5.5-2026-06-01")).toBe(400_000);
+    expect(lookupContextWindow("gpt-5.6-sol-2026-06-01")).toBe(400_000);
   });
 
   it("returns fallback values for unknown models", () => {
@@ -27,12 +27,12 @@ describe("context-window lookup (WP-252)", () => {
   });
 
   it("exports the static context-window table", () => {
-    expect(CONTEXT_WINDOW_TABLE["gpt-5.5"]).toBe(400_000);
+    expect(CONTEXT_WINDOW_TABLE["gpt-5.6-sol xhigh"]).toBe(400_000);
   });
 
   it("resolves the executor code-stage model from a task spec", () => {
     const spec = {
-      routing: { stages: { code: { model: "gpt-5.5" } } },
+      routing: { stages: { code: { model: "gpt-5.6-sol xhigh" } } },
     } as TaskSpec;
 
     expect(resolveContextWindowForSpec(spec, 200_000)).toBe(400_000);

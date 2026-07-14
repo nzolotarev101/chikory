@@ -19,7 +19,7 @@ describe("pricing (WP-101)", () => {
       0.003 + 0.03,
       10,
     );
-    expect(computeCostUsd("gpt-5.5", { input: 1000, output: 2000 })).toBeGreaterThan(0);
+    expect(computeCostUsd("gpt-5.6-sol xhigh", { input: 1000, output: 2000 })).toBeGreaterThan(0);
     expect(
       computeCostUsd("gemini-3.1-pro-preview", { input: 1000, output: 2000 }),
     ).toBeGreaterThan(0);
@@ -27,7 +27,7 @@ describe("pricing (WP-101)", () => {
 
   it("resolves date-suffixed model ids via longest prefix", () => {
     expect(lookupPricing("claude-haiku-4-5-20251001")).toEqual(PRICE_TABLE["claude-haiku-4-5"]);
-    expect(lookupPricing("gpt-5.5-2026-01-15")).toEqual(PRICE_TABLE["gpt-5.5"]);
+    expect(lookupPricing("gpt-5.6-sol-2026-01-15")).toEqual(PRICE_TABLE["gpt-5.6-sol"]);
   });
 
   it("unknown (open) models cost 0 unless overridden", () => {

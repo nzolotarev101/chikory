@@ -468,9 +468,9 @@ the router (known wart, friction F-1; fix planned in P2):
 routing:
   stages:
     # plan/review are unused by CLI executors in P1; code.model feeds the executor CLI (-m flag).
-    plan:   { provider: openai-compat, model: gpt-5.5 }
-    code:   { provider: openai-compat, model: gpt-5.5 }            # ← a model id the EXECUTOR CLI accepts
-    review: { provider: openai-compat, model: gpt-5.5 }
+    plan:   { provider: openai-compat, model: gpt-5.6-sol xhigh }
+    code:   { provider: openai-compat, model: gpt-5.6-sol xhigh }            # ← a model id the EXECUTOR CLI accepts
+    review: { provider: openai-compat, model: gpt-5.6-sol xhigh }
     judge:  { provider: openai-compat, model: gemini-3.1-pro-preview }  # ← passed to the shim's backend CLI (-m)
 ```
 

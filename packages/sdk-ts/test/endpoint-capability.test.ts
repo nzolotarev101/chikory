@@ -214,7 +214,7 @@ describe("resolveEndpointCapabilities", () => {
   });
 
   it("resolves CLI executor capabilities against the real router policy surface", () => {
-    const choice = { provider: "openai-compat" as const, model: "gpt-5.5" };
+    const choice = { provider: "openai-compat" as const, model: "gpt-5.6-sol xhigh" };
     const policy: RoutingPolicy = {
       stages: {
         plan: choice,
@@ -254,8 +254,8 @@ describe("resolveEndpointCapabilities", () => {
     const policy = {
       stages: {
         plan: { provider: "future-provider", model: "future-light" },
-        code: { provider: "openai-compat", model: "gpt-5.5" },
-        review: { provider: "openai-compat", model: "gpt-5.5" },
+        code: { provider: "openai-compat", model: "gpt-5.6-sol xhigh" },
+        review: { provider: "openai-compat", model: "gpt-5.6-sol xhigh" },
         judge: { provider: "gemini", model: "gemini-2.5-pro" },
       },
     } as unknown as RoutingPolicy;

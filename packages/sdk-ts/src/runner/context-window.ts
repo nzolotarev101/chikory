@@ -10,6 +10,8 @@ export const CONTEXT_WINDOW_TABLE: Record<string, number> = {
   "claude-sonnet-4-6": 200_000,
   "claude-haiku-4-5": 200_000,
   // OpenAI
+  "gpt-5.6-sol xhigh": 400_000,
+  "gpt-5.6-sol": 400_000,
   "gpt-5.5": 400_000,
   "gpt-5.5-mini": 400_000,
   "gpt-5.2": 400_000,

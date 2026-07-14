@@ -63,9 +63,9 @@ describe("classifyLimitSignal", () => {
   it("normalizes CLI usage-limit stderr against resolved WP-307 executor capabilities", () => {
     const policy: RoutingPolicy = {
       stages: {
-        plan: { provider: "openai-compat", model: "gpt-5.5" },
-        code: { provider: "openai-compat", model: "gpt-5.5" },
-        review: { provider: "openai-compat", model: "gpt-5.5" },
+        plan: { provider: "openai-compat", model: "gpt-5.6-sol xhigh" },
+        code: { provider: "openai-compat", model: "gpt-5.6-sol xhigh" },
+        review: { provider: "openai-compat", model: "gpt-5.6-sol xhigh" },
         judge: { provider: "gemini", model: "gemini-2.5-pro" },
       },
     };
