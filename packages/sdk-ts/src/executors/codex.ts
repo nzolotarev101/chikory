@@ -113,7 +113,27 @@ export function createCodexAdapter(opts: CodexAdapterOptions): ExecutorAdapter {
         "-C",
         input.workspaceDir,
       ];
-      if (opts.model) args.push("-m", opts.model);
+      if (opts.model) {
+        let modelName = opts.model;
+        let reasoningEffort: string | undefined;
+        if (modelName.endsWith(" xhigh")) {
+          modelName = modelName.slice(0, -6);
+          reasoningEffort = "xhigh";
+        } else if (modelName.endsWith(" high")) {
+          modelName = modelName.slice(0, -5);
+          reasoningEffort = "high";
+        } else if (modelName.endsWith(" medium")) {
+          modelName = modelName.slice(0, -7);
+          reasoningEffort = "medium";
+        } else if (modelName.endsWith(" low")) {
+          modelName = modelName.slice(0, -4);
+          reasoningEffort = "low";
+        }
+        args.push("-m", modelName);
+        if (reasoningEffort) {
+          args.push("-c", `model_reasoning_effort="${reasoningEffort}"`);
+        }
+      }
       args.push(renderStepPrompt(input));
 
       return runCliStep({

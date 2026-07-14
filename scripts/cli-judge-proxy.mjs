@@ -75,7 +75,27 @@ function run(bin, args, opts, stdin) {
 
 async function codexComplete(prompt, model) {
   const args = ["exec", "--json", "--skip-git-repo-check", "-s", "read-only", "-C", sandbox];
-  if (model !== "default") args.push("-m", model);
+  if (model !== "default") {
+    let modelName = model;
+    let reasoningEffort = undefined;
+    if (modelName.endsWith(" xhigh")) {
+      modelName = modelName.slice(0, -6);
+      reasoningEffort = "xhigh";
+    } else if (modelName.endsWith(" high")) {
+      modelName = modelName.slice(0, -5);
+      reasoningEffort = "high";
+    } else if (modelName.endsWith(" medium")) {
+      modelName = modelName.slice(0, -7);
+      reasoningEffort = "medium";
+    } else if (modelName.endsWith(" low")) {
+      modelName = modelName.slice(0, -4);
+      reasoningEffort = "low";
+    }
+    args.push("-m", modelName);
+    if (reasoningEffort) {
+      args.push("-c", `model_reasoning_effort="${reasoningEffort}"`);
+    }
+  }
   args.push("-");
   const stdout = await run("codex", args, {}, prompt);
   let text = "";
