@@ -74,7 +74,7 @@ function run(bin, args, opts, stdin) {
 }
 
 async function codexComplete(prompt, model) {
-  const args = ["exec", "--json", "--skip-git-repo-check", "-s", "read-only", "-a", "never", "-C", sandbox];
+  const args = ["exec", "--json", "--skip-git-repo-check", "-s", "read-only", "-c", 'approval_policy="never"', "-C", sandbox];
   if (model !== "default") {
     let modelName = model;
     let reasoningEffort = undefined;
