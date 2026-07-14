@@ -110,8 +110,12 @@ export function createCodexAdapter(opts: CodexAdapterOptions): ExecutorAdapter {
         "--skip-git-repo-check", // workspace IS a git repo; skip the cwd≠root warning path
         "-s",
         "workspace-write", // deny-by-default outside the workspace (executors.md)
-        "-a",
-        "never",
+        // `codex exec` has no `-a/--ask-for-approval` flag (that lives on the
+        // interactive TUI); approval policy is a config key here. "never" =
+        // never block on an approval prompt — auto-run within the sandbox,
+        // auto-deny escalations — which is the unattended-run contract.
+        "-c",
+        'approval_policy="never"',
         "-C",
         input.workspaceDir,
       ];
