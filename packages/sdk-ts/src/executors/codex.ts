@@ -110,6 +110,8 @@ export function createCodexAdapter(opts: CodexAdapterOptions): ExecutorAdapter {
         "--skip-git-repo-check", // workspace IS a git repo; skip the cwd≠root warning path
         "-s",
         "workspace-write", // deny-by-default outside the workspace (executors.md)
+        "-a",
+        "never",
         "-C",
         input.workspaceDir,
       ];
