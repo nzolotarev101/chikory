@@ -41,6 +41,13 @@ export interface ChainNodeTemplate {
    */
   debugPark?: { beforeStep: number; nodeIndex?: number };
   /**
+   * WP-521 dogfood/test-only: force the node whose id equals this value to seal
+   * FAILED on its FIRST incarnation, so chain heal-by-default replan is exercised
+   * deterministically on a real chain. The retry node (`${id}-r${n}`) is not
+   * targeted, so it runs for real. Frozen host-side from `CHIKORY_SEED_CHAIN_FAIL_NODE`.
+   */
+  seedFailNodeId?: string;
+  /**
    * WP-246 dogfood/test-only: arm the judge-catch bad-diff seam on the targeted
    * dispatch node (`nodeIndex`, 0-based) or every node when absent. The chain
    * analog of `debug.seedBadDiff`; armed host-side from `CHIKORY_SEED_BAD_DIFF_*`

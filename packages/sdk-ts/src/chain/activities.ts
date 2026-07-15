@@ -29,6 +29,7 @@ import type {
   RoutingPolicy,
 } from "../types.js";
 import { deriveNodeOutcome } from "./node-spec.js";
+import { buildReplanBrief, buildRetryPlan } from "./replan-plan.js";
 import type { ReplanDecision } from "./replan.js";
 import { ChainJournal, type ChainCompletionReviewFinding } from "./store.js";
 
@@ -75,10 +76,12 @@ export interface ReplanRemainingInput {
   failedNodeId: string;
   remainingNodeIds: string[];
   decision: ReplanDecision;
+  /** WP-521: the failed node's seal reason (judge evidence) fed into the retry brief. */
+  failureReason?: string;
 }
 
 export type ReplanRemainingResult =
-  | { status: "SUCCESS"; plan: Plan }
+  | { status: "SUCCESS"; plan: Plan; brief?: string }
   | { status: "HALT"; reason: string };
 
 function openChain(deps: ChainActivityDeps, chainId: string): ChainJournal {
@@ -131,7 +134,7 @@ export function createChainActivities(deps: ChainActivityDeps) {
      */
     async readNodeResult(input: {
       childRunId: string;
-    }): Promise<{ outcome: NodeOutcome; handoff?: ChainNodeHandoff }> {
+    }): Promise<{ outcome: NodeOutcome; handoff?: ChainNodeHandoff; reason?: string }> {
       const journal = new Journal(journalPath(deps.dataDir, input.childRunId));
       try {
         const report = reportFromJournal(journal);
@@ -139,12 +142,14 @@ export function createChainActivities(deps: ChainActivityDeps) {
           throw new Error(`child run ${input.childRunId} has no journal — cannot seal node`);
         }
         const terminal = journal.entries("terminal").at(-1)?.payload as
-          | { handoff?: ChainNodeHandoff }
+          | { handoff?: ChainNodeHandoff; reason?: string }
           | undefined;
-        const result: { outcome: NodeOutcome; handoff?: ChainNodeHandoff } = {
+        const result: { outcome: NodeOutcome; handoff?: ChainNodeHandoff; reason?: string } = {
           outcome: deriveNodeOutcome(report.status, report.lastVerdict?.kind),
         };
         if (terminal?.handoff !== undefined) result.handoff = terminal.handoff;
+        // WP-521: the seal reason is the retry brief's evidence on a FAILED node.
+        if (terminal?.reason !== undefined) result.reason = terminal.reason;
         return result;
       } finally {
         journal.close();
@@ -175,10 +180,22 @@ export function createChainActivities(deps: ChainActivityDeps) {
     },
 
     async replanRemaining(input: ReplanRemainingInput): Promise<ReplanRemainingResult> {
-      if (deps.replanRemaining === undefined) {
-        return { status: "HALT", reason: "no chain replanner is configured" };
+      // An injected replanner (test scripts, a future LLM re-decomposer) wins.
+      if (deps.replanRemaining !== undefined) {
+        return deps.replanRemaining(input);
       }
-      return deps.replanRemaining(input);
+      // WP-521 heal-by-default: the self-contained deterministic retry-the-failed-
+      // node-with-evidence path — fires in the REAL worker (no injected dep, no
+      // router), the `reviewChainCompletion` self-containment principle at the
+      // replan seam. `decideReplan` already confirmed we are under budget.
+      const brief = buildReplanBrief(input.failedNodeId, input.failureReason ?? "unknown");
+      const retryPlan = buildRetryPlan(
+        input.plan,
+        input.failedNodeId,
+        input.failureReason ?? "unknown",
+        input.decision.replansUsed,
+      );
+      return { status: "SUCCESS", plan: retryPlan, brief };
     },
 
     async recordNodeReplanned(input: {
@@ -186,6 +203,7 @@ export function createChainActivities(deps: ChainActivityDeps) {
       failedNodeId: string;
       reason: string;
       revisedPlan: Plan;
+      brief?: string;
     }): Promise<void> {
       const journal = openChain(deps, input.chainId);
       try {
@@ -196,6 +214,7 @@ export function createChainActivities(deps: ChainActivityDeps) {
             failedNodeId: input.failedNodeId,
             reason: input.reason,
             revisedPlan: input.revisedPlan,
+            ...(input.brief !== undefined ? { brief: input.brief } : {}),
           },
         );
         journal.updatePlan(input.revisedPlan);

@@ -138,7 +138,8 @@ judgment is yours); each earlier hit became a WP:
    `run,wp,mode,outcome,steps,cost_usd,spec_format,class,resumes,judge_catches,rung,rollbacks`.
    `spec_format` = `loose`/`prescribed` (what the spec actually was);
    `class` = `product`/`meta` (§1.5 definition, by the deliverable's primary
-   surface); `rung` = highest WP-265 ladder rung this run satisfied (0 = none);
+   surface); `rung` = highest CURRENT-PHASE ladder rung this run satisfied (P2 =
+   WP-265, P3 = WP-530; phase-scoped, 0 = off-ladder);
    `judge_catches` = genuine true-positives only (not seam drills);
    `rollbacks` = judge ROLLBACK verdicts from chikory trace totals (seam-drill rollbacks count here; drill catches still excluded from `judge_catches`; pre-084 rows lack the column).
 
@@ -161,10 +162,19 @@ remains available for an explicit second opinion; if the user already ran it, ho
 its `⛔ VETO`.)
 
 0. **Progression gate (MECHANICAL, binding — runs before all judgment gates).**
-   Use the phase-0 `scripts/dogfood-progression.sh` output (re-run it if the
-   ledger row was just appended). Its verdict is not advisory:
-   - `⛔ STALLED` → the next headline **IS the current WP-265 ladder rung**
-     (plan.md §6 queue) — no exceptions. New 🔴 loop-integrity friction found
+   **FIRST — phase-ladder check (a ladder ALWAYS exists).** Every phase carries
+   its own graduated-proof ladder (P2 = WP-265 horizon ladder, retired at rung 5;
+   P3 = WP-530 moat ladder). If the run you just reviewed is the LAST of one phase
+   and the next headline opens a NEW phase (or no ladder is defined for the current
+   phase yet), you MUST **author that phase's ladder BEFORE writing the next spec**:
+   define its rungs 1–N in `plan.md` §<phase> as a `WP-<n>` row + intro block
+   (mirror WP-265/WP-530), each rung a graduated thesis proof ending in the phase
+   exit gate, and record it in DOGFOODING §5. The ledger `rung` column is
+   phase-scoped (highest CURRENT-PHASE rung a run satisfied, 0 = off-ladder). Only
+   then pick the next headline = the phase ladder's next rung. Then read the
+   `scripts/dogfood-progression.sh` verdict (not advisory):
+   - `⛔ STALLED` → the next headline **IS the current phase's ladder rung**
+     (plan.md §<phase> queue) — no exceptions. New 🔴 loop-integrity friction found
      this review is **hand-fixed in the same sitting** (TASK-PROTOCOL §4) or
      queued track-B; it does not headline. Write the ladder spec.
    - `🔴 CAP BUSTED` → the next headline must be `class=product` regardless of
@@ -204,7 +214,7 @@ its `⛔ VETO`.)
    `examples/dogfood/`, launch prechecks, spec hygiene, or verifier plumbing).
    A harness-meta candidate is **⛔ VETO** unless it is 🔴 loop-integrity AND
    the cap (≤1 harness-meta headline per 3 runs) is not busted. Default
-   headline = the current WP-265 horizon-ladder rung (plan.md §6 queue).
+   headline = the current phase's ladder rung (P2 = WP-265 §6, P3 = WP-530 §7).
 
 Then write `examples/dogfood/dogfood-<NNN+1>.yaml` per DOGFOODING §3, **in the
 format the track demands**: a headline (ladder) spec is LOOSE — goal states the
@@ -234,6 +244,6 @@ structured summary must additionally follow these rules:
    - Cost details: Total cost in USD, input/output tokens per step, and execution duration.
 3. **Structured Visual Layout**: Present cost metrics, step progress, or comparisons using markdown tables and bullet points. Avoid walls of text. Use visual status indicators (e.g., `🟢`, `🟡`, `🔴`, `⚠️`, `ℹ️`).
 4. **Acronym & Terminology Explanations**: Explain any complex domain terms (e.g., WP, AC, OTel spans, probe steps) in detail when summarizing, so a reader can digest it without needing external documentation.
-5. **KPI Table (mandatory)**: Report the DOGFOODING §1.4 KPI values for this run and the trailing window: max horizon survived (steps / wall-clock), kill→resume count, judge true-positives pre-land, trailing-3-run meta:product headline ratio, per-step reliability (runs ≥5 steps), current ladder rung vs the P2 exit gate.
+5. **KPI Table (mandatory)**: Report the DOGFOODING §1.4 KPI values for this run and the trailing window: max horizon survived (steps / wall-clock), kill→resume count, judge true-positives pre-land, trailing-3-run meta:product headline ratio, per-step reliability (runs ≥5 steps), current-phase ladder rung vs the phase exit gate.
 6. **Clear Call-to-Action**: End with the exact command to run the next spec (unblocked and verified). Leave all edits uncommitted for the user's review.
 

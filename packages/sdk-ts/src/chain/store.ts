@@ -61,6 +61,8 @@ export interface NodeReplannedPayload {
   failedNodeId: string;
   reason: string;
   revisedPlan: Plan;
+  /** WP-521 heal-by-default: the retry brief (failed node's evidence) carried into the retry. */
+  brief?: string;
 }
 
 /** One rubric result from the chain-completion aggregate design review. */

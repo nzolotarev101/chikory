@@ -19,8 +19,8 @@ proof (a coherent design correctly PROCEEDed); catch-power stays proven by the i
 (progression gate is chain-blind — a 3-node chain reads as "3 steps", can't flip ⛔ STALLED → dogfood-progression track-B; §8) · ℹ️ **F-143** ("work in
 progress, no criteria evaluated" rationale on a SEALED aggregate review → convention/hand-fix). **NEXT headline (progression ⛔ STALLED — rung flat 4
 (ladder RETIRED at rung 5, dogfood-096; STALLED can't credit chain-horizon, F-145); real axis = the flat kill→resume/chain-recovery KPI, 0 across 097…103):
-dogfood-104 (WP-521 CHAIN HEAL-BY-DEFAULT + `chikory chain resume` for FAILED chains — hand-land substrate first, dogfood-103 pattern; user-confirmed).**
-See §7, §8, §1.5, §3. (Earlier — dogfood-102 WP-309 → PLAN-HISTORY.md.)
+dogfood-104 (WP-521 CHAIN HEAL-BY-DEFAULT — P3-rung-1 on the new WP-530 P3 moat ladder; substrate a+b+seam+live-regression HAND-LANDED + committed 2026-07-15, launch-ready; WP-521c chain-resume = P3-rung-2).**
+See §5 (ladders always exist — first dogfood of a phase authors its ladder), §7, §8, §1.5, §3. (Earlier — dogfood-102 WP-309 → PLAN-HISTORY.md.)
 
 Related docs: [`docs/spec/task-spec.md`](spec/task-spec.md) (schema
 reference) · [`docs/TASK-PROTOCOL.md`](TASK-PROTOCOL.md) (WP etiquette, §7 is
@@ -147,11 +147,15 @@ gate 0 (binding). Semantics:
 
 - **⛔ STALLED** — no thesis axis (max steps survived, ladder rung, resume,
   spec looseness) moved across the trailing 3 runs vs the prior 3. The next
-  headline **is the current WP-265 ladder rung, no exceptions**. New 🔴
+  headline **is the current phase's ladder rung, no exceptions**. New 🔴
   loop-integrity friction is **hand-fixed in the same review sitting**
   (TASK-PROTOCOL §4) or queued track-B — under STALLED it never headlines.
   (Rationale: 🔴s kept appearing for 14 straight runs; if a 🔴 can always
-  preempt, the ladder never starts.)
+  preempt, the ladder never starts.) *A ladder ALWAYS exists — every phase
+  carries one (P2 = WP-265 horizon ladder, retired at rung 5; P3 = WP-530 moat
+  ladder). The FIRST dogfood of a new phase must author that phase's ladder
+  before its first headline (see §5 gate 0); the ledger `rung` column is
+  phase-scoped = highest CURRENT-PHASE rung a run satisfied (0 = off-ladder).*
 - **🔴 CAP BUSTED** — >1 harness-meta headline in the trailing 3: next headline
   must be `class=product` regardless of the verdict.
 - **✅ PROGRESSING** — the ladder is climbing; the next rung stays the default

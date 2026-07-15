@@ -19,7 +19,7 @@
  */
 import { executeChild, proxyActivities, workflowInfo } from "@temporalio/workflow";
 
-import type { ChainRecord, ChainStatus, Plan, RunStatus } from "../types.js";
+import type { ChainRecord, ChainStatus, NodeOutcome, Plan, RunStatus } from "../types.js";
 import { agentLoop } from "../workflow/agent-loop.js";
 import type { ChainActivities } from "./activities.js";
 import { advanceChain, deriveChainStatus } from "./advance.js";
@@ -162,7 +162,17 @@ export async function chainLoop(input: ChainLoopInput): Promise<ChainStatus> {
     });
 
     const result = await activities.readNodeResult({ childRunId: runId });
-    const { outcome } = result;
+    // WP-521 dogfood/test-only seam: force the targeted node's FIRST incarnation
+    // to seal FAILED so heal-by-default replan is exercised deterministically on
+    // a real chain. The retry node's id is `${id}-r${n}` (≠ the seeded id), so
+    // only the first incarnation fails; frozen into the template host-side, never
+    // an env read inside this deterministic workflow body.
+    const seeded =
+      template.seedFailNodeId !== undefined && node.id === template.seedFailNodeId;
+    const outcome: NodeOutcome = seeded ? { status: "FAILED", verdict: "HALT" } : result.outcome;
+    const failureReason = seeded
+      ? "seeded first-incarnation failure (CHIKORY_SEED_CHAIN_FAIL_NODE)"
+      : result.reason;
     await activities.recordNodeSealed({
       chainId,
       nodeId: node.id,
@@ -192,6 +202,7 @@ export async function chainLoop(input: ChainLoopInput): Promise<ChainStatus> {
           failedNodeId: node.id,
           remainingNodeIds: decision.remainingNodeIds,
           decision,
+          ...(failureReason !== undefined ? { failureReason } : {}),
         });
         if (replanned.status === "SUCCESS") {
           plan = replanned.plan;
@@ -200,6 +211,7 @@ export async function chainLoop(input: ChainLoopInput): Promise<ChainStatus> {
             failedNodeId: node.id,
             reason: decision.reason,
             revisedPlan: replanned.plan,
+            ...(replanned.brief !== undefined ? { brief: replanned.brief } : {}),
           });
           record = {
             ...record,

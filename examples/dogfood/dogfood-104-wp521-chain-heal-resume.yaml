@@ -7,12 +7,16 @@
 #   (WP-241/dogfood-044) — a sealed FAILED / replan-exhausted chain has NO way forward. This run closes the
 #   flattest thesis axis on the board: kill→resume / chain-recovery has been 0 across dogfood-097…103.
 #
-# ⚠️⚠️ HARD PREREQUISITE — HAND-LAND THE SUBSTRATE TO HEAD FIRST (worker-load constraint, dogfood-041/043/103
-#   lesson). The Temporal worker loads the COMMITTED `chain-loop.ts` / chain activities at chain start, so a
-#   chain CANNOT build AND exercise its own chain-runner recovery path in one execution. §1.2 frozen-substrate
-#   carve-out APPLIES (the recovery mechanism IS the chain-runner substrate — the sanctioned scaffold-fallback,
-#   exactly as WP-311's completion review was for dogfood-103). Hand-design + commit to HEAD BEFORE launch
-#   (TASK-PROTOCOL §4), mirroring WP-519/520 symbol-for-symbol at chain scope:
+# ✅ PREREQUISITE SUBSTRATE LANDED 2026-07-15 (committed) — this run is now launch-ready. WP-521 (a) heal-by-
+#   default (`startChain` defaults `maxReplans` to 1) + (b) self-contained evidence-enriched replan (pure
+#   `src/chain/replan-plan.ts` `buildReplanBrief`/`buildRetryPlan`; `replanRemaining` retries the failed node
+#   with its evidence in the REAL worker) + the `CHIKORY_SEED_CHAIN_FAIL_NODE` force-fail seam + the LIVE
+#   regression `test/chain/chain-heal-live.test.ts` are all committed to HEAD (923 TS + 84 py green). WP-521 (c)
+#   operator `chikory chain resume` for FAILED chains is NOT needed for THIS run's P3-rung-1 KPI (it is
+#   P3-rung-2, WP-530). Original prerequisite note (worker-load constraint, dogfood-041/043/103 lesson): the
+#   Temporal worker loads the COMMITTED `chain-loop.ts` / chain activities at chain start, so a chain CANNOT
+#   build AND exercise its own chain-runner recovery path in one execution — §1.2 frozen-substrate carve-out.
+#   The landed substrate mirrors WP-519/520 at chain scope:
 #     * (a) DEFAULT halt-and-replan ON: `chain-loop.ts:70` default `maxReplans` ≥1 (opt-out explicit). The pure
 #       `decideReplan` (`src/chain/replan.ts`) is unchanged — only the default budget flips.
 #     * (b) EVIDENCE-ENRICHED replan: widen `ReplanRemainingInput` + `recordNodeReplanned` to carry the failed
@@ -33,11 +37,12 @@
 #       node FAILS → default replan-with-evidence → chain SUCCESS; and a replan-exhausted chain seals FAILED →
 #       `chain resume` retries the failed node → SUCCESS. This dogfood is the REAL-CHAIN observation on top.
 #
-# CLASS / LADDER. class=product. Ladder retired at rung 5 (P2 exit, dogfood-096); this is rung-4-shape P3
-#   self-heal. The STALLED axis it MOVES is the flat kill→resume / chain-recovery axis (0 across 097…103, the
-#   loudest §1.4 KPI gap) AND the multi-run/chain-horizon axis — a REAL `chikory chain` (≥3 dependent nodes)
-#   that RECOVERS from a mid-chain node failure. First chain self-heal proof.
-# Ladder-rung: 4
+# CLASS / LADDER. class=product. This is P3-rung-1 on the WP-530 P3 moat ladder (the P2/WP-265 horizon ladder
+#   retired at rung 5, dogfood-096): "chain self-heal — a real `chikory chain` recovers from a mid-chain node
+#   FAILURE via the default evidence-enriched replan → SUCCESS." The STALLED axis it MOVES is the flat
+#   kill→resume / chain-recovery axis (0 across 097…103, the loudest §1.4 KPI gap) AND the multi-run/chain-horizon
+#   axis — a REAL `chikory chain` (≥3 dependent nodes) that RECOVERS from a mid-chain node failure.
+# Ladder-rung: 1
 # Thesis-KPI: CHAIN SELF-HEAL / RECOVERY — on a real 3-node chain where the middle node FAILS its first
 #   incarnation, the chain journal shows the DEFAULT halt-and-replan firing with the failed node's judge
 #   evidence carried into the replan (a `node_replanned` entry whose payload references the failed node's
@@ -59,9 +64,7 @@
 #   trace) — NOT invented throwaway code.
 #
 # ⚠️ LAUNCH — this is a CHAIN, launch with `chain-dogfood` (NOT `run-dogfood`):
-#   0. Hand-land the prerequisite substrate above (WP-521 a/b/c + force-fail seam + live regression); commit it
-#      + the dogfood-103 working tree to HEAD (the chain worker clones/loads HEAD — recovery MUST be committed
-#      or the KPI cannot fire).
+#   0. ✅ DONE — prerequisite substrate (WP-521 a+b + force-fail seam + live regression) committed to HEAD.
 #   1. Verify the spec-pick glob resolves to THIS file: `dogfood-104` sorts after `dogfood-103`.
 #   2. `CHIKORY_PREFLIGHT_ONLY=1 devbox run chain-dogfood` dry-runs the guards at $0.
 #   3. `CHIKORY_SEED_CHAIN_FAIL_NODE=<middle-node-id> devbox run chain-dogfood`  (the force-fail seam; the seam

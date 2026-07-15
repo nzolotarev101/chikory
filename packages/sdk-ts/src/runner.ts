@@ -43,7 +43,12 @@ export interface TemporalRunner extends DurableRunner {
    * (mirrors `start`'s workflowId = run-id). The chain's progress is followed
    * through the `ChainJournal` on disk, not a workflow query.
    */
-  startChain(input: { plan: Plan; template: ChainNodeTemplate }): Promise<{ chainId: string }>;
+  startChain(input: {
+    plan: Plan;
+    template: ChainNodeTemplate;
+    /** WP-521: replan budget; defaults to 1 (heal-by-default). Explicit 0 = legacy halt. */
+    maxReplans?: number;
+  }): Promise<{ chainId: string }>;
   close(): Promise<void>;
 }
 
@@ -156,7 +161,10 @@ export function createTemporalRunner(opts: TemporalRunnerOptions = {}): Temporal
       await client.workflow.start("chainLoop", {
         workflowId: chainId,
         taskQueue,
-        args: [{ plan: input.plan, template: input.template }],
+        // WP-521 heal-by-default: a real chain replans ONCE by default (opt-out
+        // is an explicit `maxReplans: 0`). Direct `chainLoop` callers/tests keep
+        // the legacy `?? 0` halt-on-FAILED unless they opt in.
+        args: [{ plan: input.plan, template: input.template, maxReplans: input.maxReplans ?? 1 }],
       });
       return { chainId };
     },

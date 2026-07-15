@@ -190,6 +190,12 @@ function templateFromSpec(spec: TaskSpec): ChainNodeTemplate {
       ...(idx !== undefined ? { nodeIndex: Number(idx) } : {}),
     };
   }
+  // WP-521 dogfood/test-only heal-by-default seam: force the named node's FIRST
+  // incarnation to seal FAILED so the chain replans+retries it deterministically.
+  const seedFailNode = process.env["CHIKORY_SEED_CHAIN_FAIL_NODE"];
+  if (seedFailNode !== undefined && seedFailNode.length > 0) {
+    template.seedFailNodeId = seedFailNode;
+  }
   return template;
 }
 
