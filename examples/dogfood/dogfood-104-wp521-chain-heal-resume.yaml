@@ -1,0 +1,162 @@
+# Dogfood-104: WP-521 — CHAIN HEAL-BY-DEFAULT + `chikory chain resume` FOR FAILED CHAINS
+#   (P3 self-heal / durable-execution track, plan.md §7 / §6 WP-521; ADR-009 D5). This is the chain-scope
+#   sibling of WP-519/WP-520 (per-RUN remediation + resumable-FAILED, done 07-08): today a chain that hits a
+#   FAILED node either HALTs (default `maxReplans = input.maxReplans ?? 0` — replan OFF, `chain-loop.ts:70`) or,
+#   if replan is explicitly armed, re-plans the REMAINING nodes through a TEST-ONLY injected `replanRemaining`
+#   dep (undefined in the real worker → throws). And `chikory chain resume <chain-id>` is PARKED-ONLY today
+#   (WP-241/dogfood-044) — a sealed FAILED / replan-exhausted chain has NO way forward. This run closes the
+#   flattest thesis axis on the board: kill→resume / chain-recovery has been 0 across dogfood-097…103.
+#
+# ⚠️⚠️ HARD PREREQUISITE — HAND-LAND THE SUBSTRATE TO HEAD FIRST (worker-load constraint, dogfood-041/043/103
+#   lesson). The Temporal worker loads the COMMITTED `chain-loop.ts` / chain activities at chain start, so a
+#   chain CANNOT build AND exercise its own chain-runner recovery path in one execution. §1.2 frozen-substrate
+#   carve-out APPLIES (the recovery mechanism IS the chain-runner substrate — the sanctioned scaffold-fallback,
+#   exactly as WP-311's completion review was for dogfood-103). Hand-design + commit to HEAD BEFORE launch
+#   (TASK-PROTOCOL §4), mirroring WP-519/520 symbol-for-symbol at chain scope:
+#     * (a) DEFAULT halt-and-replan ON: `chain-loop.ts:70` default `maxReplans` ≥1 (opt-out explicit). The pure
+#       `decideReplan` (`src/chain/replan.ts`) is unchanged — only the default budget flips.
+#     * (b) EVIDENCE-ENRICHED replan: widen `ReplanRemainingInput` + `recordNodeReplanned` to carry the failed
+#       node's judge rationale + AC-failure history (read from the failed node's run journal, the
+#       `buildRemediationBrief` shape at chain scope), and make the replanner SELF-CONTAINED (build its own
+#       planner via `createRouter`, like `reviewChainCompletion` — NOT a test-only injected dep) so it fires in
+#       the REAL worker. Additive `node_replanned` payload fields; no `ChainRecord`/`Plan` reshape.
+#     * (c) `chikory chain resume <chain-id>` extended past parked-only: a sealed FAILED / replan-exhausted
+#       chain re-enters, RETRIES the failed node with its failure evidence as feedback (fresh heal budget,
+#       remaining chain budget permitting), journals an idempotent reopen `control_event`
+#       (`source:"chain_failed_seal"`, the WP-520 `failed_seal` sibling), and on the retry's SUCCESS resumes the
+#       chain forward. Dead / SUCCESS chains refuse with the way forward. One terminal entry per incarnation
+#       (re-seal guard on the reopen boundary).
+#     * A deterministic FORCE-FAIL seam for the proof (the `CHIKORY_SEED_BAD_DIFF_*` / `CHIKORY_LIMIT_AT_STEP`
+#       precedent): an env seam that makes exactly ONE named node seal FAILED on its FIRST incarnation and PASS
+#       on the retry/replan incarnation — so the recovery is deterministic, not luck.
+#     * A LIVE Temporal proof in-suite (`test/chain/chain-heal-live.test.ts`) — the committed regression: a
+#       node FAILS → default replan-with-evidence → chain SUCCESS; and a replan-exhausted chain seals FAILED →
+#       `chain resume` retries the failed node → SUCCESS. This dogfood is the REAL-CHAIN observation on top.
+#
+# CLASS / LADDER. class=product. Ladder retired at rung 5 (P2 exit, dogfood-096); this is rung-4-shape P3
+#   self-heal. The STALLED axis it MOVES is the flat kill→resume / chain-recovery axis (0 across 097…103, the
+#   loudest §1.4 KPI gap) AND the multi-run/chain-horizon axis — a REAL `chikory chain` (≥3 dependent nodes)
+#   that RECOVERS from a mid-chain node failure. First chain self-heal proof.
+# Ladder-rung: 4
+# Thesis-KPI: CHAIN SELF-HEAL / RECOVERY — on a real 3-node chain where the middle node FAILS its first
+#   incarnation, the chain journal shows the DEFAULT halt-and-replan firing with the failed node's judge
+#   evidence carried into the replan (a `node_replanned` entry whose payload references the failed node's
+#   AC-failure rationale), the chain RECOVERS to SUCCESS, and every EARLIER sealed node's verdict is UNCHANGED
+#   (no re-judge). Proof is READ FROM THE CHAIN JOURNAL post-run (a `node_replanned` + recovery, NOT an AC the
+#   node executors satisfy), dogfood-101/103 precedent. (Stretch, operator-driven: a replan-exhausted variant
+#   sealing FAILED then `chikory chain resume` retrying the failed node to SUCCESS — a literal kill→resume tick.)
+#
+# Format: LOOSE chain goal (the planner emits the topology; ACs pin the node deliverables + full-suite green).
+#   The chain-recovery KPI is journal-read, not an AC. AC greps key on consumed CALL EXPRESSIONS / `spec.x`
+#   fields, never a bare type name (F-90/F-114-safe); occurrence counts via `grep -rl … | grep -v` (F-119); AC
+#   checks are SCOPED vitest runs that fit the 120s judge per-check cap (F-141 — the full suite runs uncapped in
+#   the harvest verify-pack §3, NOT in a headline AC); no wall-clock asserts (F-115).
+#
+# ⚠️ SCOPE / DETERMINISM. Node deliverables write ONLY inside `packages/sdk-ts/`. ADDITIVE — no frozen-contract
+#   reshape, NO new dependency, NO key material. The chain runner / recovery substrate is FROZEN for this run
+#   (pre-committed; do NOT modify it inside the chain — dogfood-043 rule). The node deliverables advance a real
+#   chain-RECOVERY OBSERVABILITY surface (below) — which also productively closes F-144 (no read-only chain
+#   trace) — NOT invented throwaway code.
+#
+# ⚠️ LAUNCH — this is a CHAIN, launch with `chain-dogfood` (NOT `run-dogfood`):
+#   0. Hand-land the prerequisite substrate above (WP-521 a/b/c + force-fail seam + live regression); commit it
+#      + the dogfood-103 working tree to HEAD (the chain worker clones/loads HEAD — recovery MUST be committed
+#      or the KPI cannot fire).
+#   1. Verify the spec-pick glob resolves to THIS file: `dogfood-104` sorts after `dogfood-103`.
+#   2. `CHIKORY_PREFLIGHT_ONLY=1 devbox run chain-dogfood` dry-runs the guards at $0.
+#   3. `CHIKORY_SEED_CHAIN_FAIL_NODE=<middle-node-id> devbox run chain-dogfood`  (the force-fail seam; the seam
+#      name is fixed by the hand-land — set it so the MIDDLE node fails its first incarnation only).
+#   Post-run: `devbox run -- bash scripts/harvest.sh <chain-id>` then `/dogfood-review <chain-id>`.
+
+name: dogfood-104-wp521-chain-heal-resume
+goal: >
+  Advance the chain-RECOVERY OBSERVABILITY surface on a REAL Chikory chain of THREE dependent nodes, while the
+  chain itself exercises the ALREADY-LANDED WP-521 chain heal-by-default recovery path (a mid-chain node fails
+  its first incarnation and the chain self-recovers via the default evidence-enriched replan). This campaign
+  validates the committed chain runner; do NOT redesign or modify the chain runner, the replan/resume
+  substrate, `decideReplan`, `chain-loop.ts`, chain contracts, schemas, ADRs, or the harvest scripts inside
+  this run (the running worker loaded them at start).
+
+  The planner MUST emit a LINEAR three-node topology on ONE shared observability goal — give the chikory chain
+  trace a per-node RECOVERY-summary surface (how many replan/resume incarnations each node took to seal): node
+  B depends on node A, node C depends on node B. Each node produces a NON-EMPTY code-and-test diff inside the
+  packages/sdk-ts SDK package; do not add a verification-only node.
+
+    * NODE A — add a pure recovery-summary module under src/chain exporting the named function
+      summarizeNodeRecovery that turns one sealed NodeOutcome + its replan/resume incarnation count into a
+      bounded one-line recovery-summary string (node id, status, attempts, a size-capped last-failure reason).
+      Add a focused passing test for it. Touch only those two files.
+
+    * NODE B — add a pure renderChainRecoverySummary (sibling module) that folds every NodeOutcome + the
+      chain's `node_replanned` entries through summarizeNodeRecovery into a deterministic multi-line block in
+      plan order, mirroring the existing renderChainDesignSummary. Add its focused test. Reuse node A's
+      function through a relative ESM module specifier — it must be present via the chain handoff, not
+      recreated.
+
+    * NODE C — wire renderChainRecoverySummary into the chikory chain-trace render as an ADDITIVE section, so a
+      chain trace shows the per-node recovery summary; existing chains with no replans still render
+      byte-identically. Add its focused test importing BOTH predecessors' symbols. Touch only the trace surface
+      and its test.
+
+  CONSTRAINTS: additive only; strict TypeScript, ESM relative imports, named exports, no default exports, no
+  I/O, no new dependency, no key material; run project commands sequentially inside the existing devbox
+  environment. Each node lands its own test and does NOT break an earlier node's tests. Do NOT modify the chain
+  runner, the replan/resume substrate, advance, or store modules, or any frozen contract.
+
+repos:
+  - url: /Users/nikitazolotarev/repos/chikory
+    writable: true
+
+acceptance_criteria:
+  - id: AC-1
+    description: >
+      Node A landed a pure per-node recovery summariser — some `src/chain/` file OTHER than trace.ts gained a
+      `summarizeNodeRecovery(` caller/definition. (F-114-safe: greps the CALL/def expression, not a type name.)
+    check: >
+      cd packages/sdk-ts &&
+      grep -rlE 'summarizeNodeRecovery\(' src/chain | grep -v 'chain/trace.ts' | head -1 | grep -q .
+  - id: AC-2
+    description: >
+      Nodes A+B+C are co-referenced — the trace surface renders the chain recovery summary:
+      `renderChainRecoverySummary` exists AND `src/chain/trace.ts` (or the CLI trace branch) references it.
+      (F-97-safe co-reference.)
+    check: >
+      cd packages/sdk-ts &&
+      grep -rlE 'renderChainRecoverySummary\(' src | grep -q . &&
+      grep -rlE 'renderChainRecoverySummary' src/chain/trace.ts src/cli/chain.ts 2>/dev/null | head -1 | grep -q .
+  - id: AC-3
+    description: >
+      The new chain recovery-summary tests pass and the SDK stays type- and lint-clean. (SCOPED vitest run —
+      fits the judge per-check cap; the harvest verify-pack §3 runs the full suite uncapped. F-141 lesson.)
+    check: >
+      cd packages/sdk-ts &&
+      pnpm exec tsc --noEmit && pnpm exec eslint src/chain/recovery-summary.ts src/chain/trace.ts &&
+      pnpm exec vitest run test/chain/recovery-summary.test.ts
+
+budget_usd: 30
+max_steps: 12
+
+# CONTEXT-ROT (WP-203/WP-207): auto-calibrated window (F-125 mechanism, live-proven 095-099, 101, 103).
+pacing:
+  mode: auto
+  autoCalibrate: true
+
+# UNATTENDED (WP-271): operator-free; a genuine ESCALATE seals a resumable FAILED (WP-520).
+unattended:
+  escalation: seal_resumable_failed
+
+executor:
+  adapter: codex
+  family: openai
+
+judge:
+  family: openai-compat
+  cadence: 2
+  max_cost_share: 0.5
+
+routing:
+  stages:
+    plan: { provider: openai-compat, model: gpt-5.6-sol xhigh }
+    code: { provider: openai-compat, model: gpt-5.6-sol xhigh }
+    review: { provider: openai-compat, model: gpt-5.6-sol xhigh }
+    judge: { provider: openai-compat, model: gemini-3.1-pro-preview }

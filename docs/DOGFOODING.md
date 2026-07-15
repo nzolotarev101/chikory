@@ -8,17 +8,19 @@ recover a run, and how to land the result as a normal PR.
 **Status (2026-07-13, bounded — update discipline: REPLACE this block, ≤15 lines;
 displaced prose moves verbatim to [`PLAN-HISTORY.md`](PLAN-HISTORY.md); per-run detail:
 `docs/reports/dogfood-NNN.md`; queue + course correction: `plan.md` §6).**
-Latest: dogfood-102 — **WP-309 (limit telemetry + reset learning) ✅ DONE (test-complete) + 🔴 F-138 CLOSED** (`run-cd98de3e-7c33-48a1-8e62-d2fbe8e46c45`,
-`docs/reports/dogfood-102.md`, uncommitted working tree, harvest byte-IDENTICAL). 🟢 **SUCCESS · 7 steps · $11.25/$45 · 1h 55m · 5 PROCEED / 2 ROLLBACK** —
-the cross-run half of limit learning is now wired: a real (non-injected) limit hit calls net-new `appendEndpointLimitObservations` (`activities.ts`, inside
-`if (observation !== undefined)`) → per declared window persists the learned capacity to the shared ledger `<dataDir>/ledger/endpoints.db`; a fresh
-`EndpointLedger` on the same db reads it as `windowState().capacityTokens` and `decideLimitPacing` throttles against it with ZERO declared/injected capacity
-(F-97 co-reference test). Injected seam provably writes nothing (byte-identical held); 904 TS green. Cross-run KPI proven DETERMINISTICALLY, NOT yet live
-across two real runs. New friction: 🟡 **F-141** (AC-3 full-suite `tsc+eslint+vitest` twice exceeded the judge per-check cap → DID-NOT-COMPLETE, classed
-infra so no false red — §7; author headline AC-3 as a scoped vitest run) · 🟡 **F-134 recurrence** (front-load ROLLBACK ×1, enforcement tax $2.19 = 19.5%,
-4th product run) · ℹ️ **F-142** (no LIVE cross-run proof path — the only deterministic hit seam is injected, which by design never writes; §8). **NEXT
-headline (progression ⛔ STALLED — rung flat 4 ×5; ladder retired at rung 5 (dogfood-096); STALLED axis-mover = a real chain run): dogfood-103 (WP-311
-COMPLETION — chain-completion aggregate design review, launched as a real `chikory chain` dogfood).** See §7, §8, §1.5, §3. (Earlier — dogfood-101 WP-310 → PLAN-HISTORY.md.)
+Latest: dogfood-103 — **WP-311 (big-picture design judging) ✅ DONE — chain-completion aggregate review LIVE-PROVEN on a REAL 3-node chain**
+(`chain-9d189c1a-e66b-4a30-b1c5-f6093b72e6fd`, `docs/reports/dogfood-103.md`, harvested + committed this review). 🟢 **SUCCESS · 3 nodes (1 step each) ·
+$4.46 · 12m 31s · 3/3 nodes PROCEED**. Thesis-KPI proven from the chain journal: EXACTLY ONE `chain_completion_review` (PROCEED, `diffBase:"chain-base"` —
+the true cross-node cumulative diff resolved across BOTH handoffs, not the degraded node-local fallback), reviewed all 3 nodes, and the 3 `node_sealed`
+verdicts stayed UNCHANGED (F-107 at chain scope). Node deliverable: a per-node `design summary:` section in the chain trace (`summarizeNodeDesign` +
+`renderChainDesignSummary` + additive `trace.ts`), 179 insertions / 4 files, full suite 916 TS + 30 harness + 84 py green on the harvested merge. Green-path
+proof (a coherent design correctly PROCEEDed); catch-power stays proven by the in-suite scripted-fail regression. New friction: 🟡 **F-144** (no read-only
+`chikory chain trace <chain-id>` — the aggregate `review:`/`design summary:` surface only renders during a live follow → WP-522 track-B; §7) · 🟡 **F-145**
+(progression gate is chain-blind — a 3-node chain reads as "3 steps", can't flip ⛔ STALLED → dogfood-progression track-B; §8) · ℹ️ **F-143** ("work in
+progress, no criteria evaluated" rationale on a SEALED aggregate review → convention/hand-fix). **NEXT headline (progression ⛔ STALLED — rung flat 4
+(ladder RETIRED at rung 5, dogfood-096; STALLED can't credit chain-horizon, F-145); real axis = the flat kill→resume/chain-recovery KPI, 0 across 097…103):
+dogfood-104 (WP-521 CHAIN HEAL-BY-DEFAULT + `chikory chain resume` for FAILED chains — hand-land substrate first, dogfood-103 pattern; user-confirmed).**
+See §7, §8, §1.5, §3. (Earlier — dogfood-102 WP-309 → PLAN-HISTORY.md.)
 
 Related docs: [`docs/spec/task-spec.md`](spec/task-spec.md) (schema
 reference) · [`docs/TASK-PROTOCOL.md`](TASK-PROTOCOL.md) (WP etiquette, §7 is
@@ -689,6 +691,22 @@ broken (a false-green, not a follow-on fix).
 
 ## 8. Known P1 limitations (so you don't fight them)
 
+- **No read-only `chikory chain trace <chain-id>`** (🟡 F-144, dogfood-103 → WP-522
+  track-B). A sealed chain's trace — carrying the WP-311 aggregate `review:` line AND
+  the per-node design/recovery-summary sections — only renders inline during a live
+  `chikory chain` launch/approve/resume follow (`chain.ts:429 finishChain`). `chikory
+  trace <chain-id>` errors (`no journal … under .chikory/runs`) because chain journals
+  live under `.chikory/chains/`, not `.chikory/runs/`. To inspect a finished chain
+  post-hoc today, reconstruct via `scripts/read-chain-record.mjs` + `renderChainTrace`,
+  or read `chain.db` directly (`sqlite3 … 'SELECT kind,payload_json FROM chain_entries'`).
+  The chain-completion-review pass COST is likewise surfaced nowhere.
+- **The progression gate is chain-blind** (🟡 F-145, dogfood-103 → `dogfood-progression`
+  track-B). `scripts/dogfood-progression.sh`'s horizon axis counts a single run's
+  `max steps`, so a multi-node chain (e.g. dogfood-103's 3 nodes) reads as "3 steps"
+  and CANNOT flip ⛔ STALLED even when it moved the chain-horizon axis the review
+  credited. When a headline is a `mode=chain` run, read the STALLED verdict with that
+  caveat and record the real axis moved in the report (the gate permits "climb the rung
+  OR record why not").
 - **`CHIKORY_LIMIT_AT_STEP` now EXECUTES the scheduler's decision** (F-136 FIXED,
   dogfood-099 `run-03cd4c21`, WP-308 complete): when the seam fires, `executeStep`
   (`src/runner/activities.ts`) classifies the injected signal, consults

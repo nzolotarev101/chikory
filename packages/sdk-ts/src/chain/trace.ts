@@ -1,4 +1,5 @@
 import type { ChainRecord, PlanNode } from "../types.js";
+import { renderChainDesignSummary } from "./chain-design-summary.js";
 import type { ChainCompletionReviewPayload, ChainEntry } from "./store.js";
 
 interface TerminalPayload {
@@ -44,6 +45,12 @@ export function renderChainTrace(record: ChainRecord, entries: ChainEntry[]): st
   }
 
   lines.push(`totals: nodes ${total} · succeeded ${succeeded} · failed ${failed} · pending ${pending}`);
+
+  const designSummary = renderChainDesignSummary(record.plan, record.nodeOutcomes);
+  if (designSummary.length > 0) {
+    lines.push("design summary:");
+    lines.push(designSummary);
+  }
 
   // WP-311 chain-completion aggregate design review (non-destructive — a summary line).
   const reviewEntry = entries.find((entry) => entry.kind === "chain_completion_review");
