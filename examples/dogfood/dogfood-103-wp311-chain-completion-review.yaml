@@ -66,29 +66,29 @@ goal: >
   committed chain runner; do NOT redesign or modify the chain runner, the completion-review substrate, chain
   contracts, schemas, ADRs, or the harvest scripts inside this run (the running worker loaded them at start).
 
-  The planner MUST emit a LINEAR three-node topology on ONE shared design goal — "give `chikory trace
-  <chain-id>` a per-node design-summary surface": node B `dependsOn` node A, node C `dependsOn` node B. Each
-  node produces a NON-EMPTY code-and-test diff inside `packages/sdk-ts/`; do not add a verification-only node.
+  The planner MUST emit a LINEAR three-node topology on ONE shared design goal — give the chikory trace chain
+  command a per-node design-summary surface: node B depends on node A, node C depends on node B. Each node
+  produces a NON-EMPTY code-and-test diff inside the packages/sdk-ts SDK package; do not add a
+  verification-only node.
 
-    * NODE A — add a pure `src/chain/design-summary.ts` exporting the named function
-      `summarizeNodeDesign(outcome)` that turns one `NodeOutcome` into a bounded one-line design-summary
-      string (node id · status · a size-capped reason). Add `test/chain/design-summary.test.ts` with a focused
-      passing test. Touch only those two files.
+    * NODE A — add a pure design-summary module under src/chain exporting the named function
+      summarizeNodeDesign that turns one sealed NodeOutcome into a bounded one-line design-summary string
+      (node id, status, a size-capped reason). Add a focused passing test for it. Touch only those two files.
 
-    * NODE B — add a pure `renderChainDesignSummary(record)` (same file or a sibling) that folds every
-      `NodeOutcome` through `summarizeNodeDesign` into a deterministic multi-line block in plan order, mirroring
-      `renderChainTrace`'s per-node section. Add its focused test. Import node A's function via a `.js` relative
-      ESM import — it must be present via the chain handoff, not recreated.
+    * NODE B — add a pure renderChainDesignSummary (same file or a sibling) that folds every NodeOutcome
+      through summarizeNodeDesign into a deterministic multi-line block in plan order, mirroring the existing
+      renderChainTrace per-node section. Add its focused test. Reuse node A's function through a relative ESM
+      module specifier — it must be present via the chain handoff, not recreated.
 
-    * NODE C — wire `renderChainDesignSummary` into the `chikory trace <chain-id>` render (`src/chain/trace.ts`
-      / the CLI trace branch) as an ADDITIVE section, so a chain trace shows the per-node design summary;
-      no-op/legacy chains still render byte-identically. Add its focused test importing BOTH predecessors'
-      symbols. Touch only the trace surface + test.
+    * NODE C — wire renderChainDesignSummary into the chikory trace chain render (the chain trace surface or
+      the CLI trace branch) as an ADDITIVE section, so a chain trace shows the per-node design summary; existing
+      chains still render byte-identically. Add its focused test importing BOTH predecessors' symbols. Touch
+      only the trace surface and its test.
 
-  CONSTRAINTS: additive only; strict TypeScript, ESM `.js` relative imports, named exports, no default exports,
-  no I/O, no new dependency, no key material; run project commands sequentially inside the existing devbox
-  environment. Each node lands its own test and does NOT break an earlier node's tests. Do NOT touch
-  `chain-loop.ts`, `completion-review.ts`, `advance.ts`, `store.ts` reducers, or any frozen contract.
+  CONSTRAINTS: additive only; strict TypeScript, ESM relative imports, named exports, no default exports, no
+  I/O, no new dependency, no key material; run project commands sequentially inside the existing devbox
+  environment. Each node lands its own test and does NOT break an earlier node's tests. Do NOT modify the chain
+  runner, the completion-review, advance, or store modules, or any frozen contract.
 
 repos:
   - url: /Users/nikitazolotarev/repos/chikory
