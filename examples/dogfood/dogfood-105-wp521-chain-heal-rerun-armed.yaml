@@ -1,0 +1,157 @@
+# Dogfood-105: WP-521 P3-RUNG-1 RE-RUN — CHAIN HEAL-BY-DEFAULT, FORCE-FAIL SEAM ARMED
+#   (P3 self-heal / durable-execution track, plan.md §7 / §6 WP-521; WP-530 ladder rung-1). This is the RE-RUN
+#   of dogfood-104 (`chain-83913c34`), which delivered the per-node recovery-summary surface CLEAN but did NOT
+#   climb rung-1: the chain sealed SUCCESS with 0 `node_replanned` because the deterministic force-fail seam
+#   `CHIKORY_SEED_CHAIN_FAIL_NODE` was NOT armed at launch (F-146 — plain `chain-dogfood`, no preflight guard).
+#   heal-by-default never fired, so there was no recovery to observe. This run ARMS the seam and closes the
+#   loop: a REAL 3-node chain whose MIDDLE node fails its first incarnation → default evidence-enriched replan
+#   → retry SUCCESS → chain SUCCESS, READ FROM THE CHAIN JOURNAL. The flat kill→resume/chain-recovery KPI (0
+#   across 097…103; a lone incidental run-scope tick in 104) finally moves at CHAIN scope.
+#
+# ✅ TWO HAND-FIX PREREQUISITES BEFORE LAUNCH (commit HEAD — the worker clones HEAD at chain start):
+#   1. WP-531 (F-146 fix) — `chain-dogfood` preflight guard: a spec that declares `Ladder-rung:` on the P3 heal
+#      track (or whose goal/KPI names chain recovery / `node_replanned`) must REFUSE launch unless
+#      `CHIKORY_SEED_CHAIN_FAIL_NODE` is set. This is what makes THIS re-run's determinism enforceable rather
+#      than operator-remembered. Hand-land + commit (dogfood.sh preflight lineage F-119/120/121).
+#   2. dogfood-104's DELIVERY — commit the harvested recovery-summary surface (`src/chain/recovery-summary.ts`,
+#      `src/chain/chain-recovery-summary.ts`, additive `trace.ts` wire, tests) to HEAD. This run's node
+#      deliverables BUILD ON it (the read-only trace command renders `renderChainRecoverySummary`); without it
+#      there is nothing to expose. 934 TS + 84 py must be green on the commit.
+#   The WP-521 (a) heal-by-default + (b) self-contained evidence-enriched replan + the force-fail seam + the
+#   live regression `test/chain/chain-heal-live.test.ts` are ALREADY committed (dogfood-104 prereq, 923 TS
+#   green) — §1.2 frozen-substrate carve-out (the recovery path IS the chain runner; a chain cannot build AND
+#   exercise its own runner recovery in one execution — dogfood-041/043/103/104 lesson).
+#
+# CLASS / LADDER. class=product. P3-rung-1 on the WP-530 P3 moat ladder: "chain self-heal — a real `chikory
+#   chain` recovers from a mid-chain node FAILURE via the default evidence-enriched replan → SUCCESS." The
+#   STALLED axis it MOVES: the flat kill→resume/chain-recovery KPI AND the multi-run/chain-horizon axis. The
+#   node deliverables advance a REAL open WP — WP-522 (read-only `chikory chain trace <chain-id>`, the F-144
+#   fix): the natural read-side consumer of dogfood-104's recovery surface, and now there is a real replan for
+#   it to render.
+# Ladder-rung: 1
+# Thesis-KPI: CHAIN SELF-HEAL / RECOVERY — on a real 3-node chain where the MIDDLE node FAILS its first
+#   incarnation (forced via `CHIKORY_SEED_CHAIN_FAIL_NODE`), the chain journal shows the DEFAULT halt-and-replan
+#   firing with the failed node's evidence carried into the replan (a `node_replanned` entry whose payload
+#   references the failed node's seal reason), the chain RECOVERS to SUCCESS, and every EARLIER sealed node's
+#   verdict is UNCHANGED (no re-judge). Proof is READ FROM THE CHAIN JOURNAL post-run (a `node_replanned` +
+#   recovery, NOT an AC the executors satisfy), dogfood-101/103 precedent. As a bonus the new read-only trace
+#   command now renders a NON-EMPTY `recovery summary:` block (the retried node shows `attempts 2`), which
+#   dogfood-104's guarded wire never produced (0 replans → empty).
+#
+# Format: LOOSE chain goal (the planner emits the topology; ACs pin the node deliverables + full-suite green).
+#   The chain-recovery KPI is journal-read, not an AC. AC greps key on consumed CALL EXPRESSIONS / `spec.x`
+#   fields, never a bare type name (F-90/F-114-safe); occurrence counts via `grep -rl … | grep -v` (F-119); AC
+#   checks are SCOPED vitest runs that fit the 120s judge per-check cap (F-141 — the full suite runs uncapped in
+#   the harvest verify-pack §3, NOT in a headline AC); no wall-clock asserts (F-115).
+#
+# ⚠️ SCOPE / DETERMINISM. Node deliverables write ONLY inside `packages/sdk-ts/`. ADDITIVE — no frozen-contract
+#   reshape, NO new dependency, NO key material. The chain runner / recovery substrate is FROZEN for this run
+#   (pre-committed; do NOT modify it inside the chain — dogfood-043 rule). The MIDDLE node WILL be force-failed
+#   on its first incarnation by the seam and re-attempted on the retry — the node deliverable must land on the
+#   retry incarnation, so keep each node's deliverable independently completable.
+#
+# ⚠️ LAUNCH — this is a CHAIN, launch with `chain-dogfood` (NOT `run-dogfood`):
+#   0. Commit the TWO prerequisites above (WP-531 guard + dogfood-104 delivery) to HEAD; 934 TS + 84 py green.
+#   1. Verify the spec-pick glob resolves to THIS file: `dogfood-105` sorts after `dogfood-104`.
+#   2. `CHIKORY_PREFLIGHT_ONLY=1 devbox run chain-dogfood` dry-runs the guards at $0 — with WP-531 landed this
+#      MUST now REFUSE unless the seam is set (the F-146 regression proof).
+#   3. `CHIKORY_SEED_CHAIN_FAIL_NODE=B devbox run chain-dogfood`  (planner ids are A/B/C; `=B` force-fails the
+#      MIDDLE node's first incarnation only — the retry node id `B-r1` ≠ `B`, so it passes).
+#   Post-run: `devbox run -- bash scripts/harvest.sh <chain-id>` then `/dogfood-review <chain-id>`.
+
+name: dogfood-105-wp521-chain-heal-rerun-armed
+goal: >
+  Prove CHAIN SELF-HEAL on a REAL Chikory chain of THREE dependent nodes while the chain exercises the
+  ALREADY-LANDED WP-521 chain heal-by-default recovery path (the MIDDLE node fails its first incarnation and the
+  chain self-recovers via the default evidence-enriched replan). This campaign VALIDATES the committed chain
+  runner; do NOT redesign or modify the chain runner, the replan/resume substrate, decideReplan, chain-loop.ts,
+  chain contracts, schemas, ADRs, the recovery-summary modules, or the harvest scripts inside this run (the
+  running worker loaded them at start).
+
+  The planner MUST emit a LINEAR three-node topology on ONE shared observability goal — give Chikory a READ-ONLY
+  `chikory chain trace <chain-id>` command that renders a SEALED chain's journal (topology, per-node verdicts,
+  the recovery summary, the design summary, and the completion review) WITHOUT a live follow, closing F-144:
+  node B depends on node A, node C depends on node B. Each node produces a NON-EMPTY code-and-test diff inside
+  the packages/sdk-ts SDK package; do not add a verification-only node.
+
+    * NODE A — add a pure named export renderChainReadTrace in a NEW src/chain module that folds a sealed
+      ChainRecord + its chain journal entries into a bounded, deterministic multi-line read-only trace block
+      (topology + per-node status/verdict), reusing the existing renderChainRecoverySummary /
+      renderChainDesignSummary rather than recomputing them. Add a focused passing test. Touch only the new
+      module and its test.
+
+    * NODE B — add the CLI wiring: a `chikory chain trace <chain-id>` subcommand that loads the sealed chain
+      record + entries from the chain store and prints node A's renderer to stdout, exiting non-zero with a
+      clear message if the chain id is unknown. Reuse node A's function through a relative ESM module specifier —
+      it must be present via the chain handoff, not recreated. Add its focused test. (This node is the one the
+      force-fail seam targets — its deliverable must land on the retry incarnation.)
+
+    * NODE C — add a focused end-to-end test that seals a small synthetic chain record (including at least one
+      `node_replanned` entry) into a temp chain store and asserts the `chikory chain trace` command renders a
+      NON-EMPTY `recovery summary:` block showing the replanned node's elevated attempt count. Import BOTH
+      predecessors' symbols. Touch only the test surface (and a tiny test helper if unavoidable).
+
+  CONSTRAINTS: additive only; strict TypeScript, ESM relative imports, named exports, no default exports, no new
+  I/O beyond the read-only chain-store read the command needs, no new dependency, no key material; run project
+  commands sequentially inside the existing devbox environment. Each node lands its own test and does NOT break
+  an earlier node's tests. Do NOT modify the chain runner, the replan/resume substrate, advance, or store WRITE
+  paths, or any frozen contract.
+
+repos:
+  - url: /Users/nikitazolotarev/repos/chikory
+    writable: true
+
+acceptance_criteria:
+  - id: AC-1
+    description: >
+      Node A landed a pure read-only chain-trace renderer — some NEW `src/chain/` file gained a renderer that
+      folds a sealed chain into a bounded block and CALLS `renderChainRecoverySummary(`. (F-114-safe: greps the
+      CALL expression, not a type name.)
+    check: >
+      cd packages/sdk-ts &&
+      grep -rlE 'renderChainRecoverySummary\(' src/chain | grep -vE 'chain/(trace|chain-recovery-summary)\.ts' | head -1 | grep -q .
+  - id: AC-2
+    description: >
+      Nodes A+B are co-referenced — the CLI exposes a read-only `chain trace` subcommand wired to node A's
+      renderer: `src/cli/chain.ts` references node A's `renderChainReadTrace(` CALL AND has a `trace` subcommand
+      branch. (F-97-safe co-reference; F-114-safe — greps the CALL expression, not a type name.)
+    check: >
+      cd packages/sdk-ts &&
+      grep -rlE 'renderChainReadTrace\(' src/cli/chain.ts | head -1 | grep -q . &&
+      grep -qE "\"trace\"|'trace'" src/cli/chain.ts
+  - id: AC-3
+    description: >
+      The new read-only chain-trace tests pass and the SDK stays type- and lint-clean. (SCOPED vitest run — fits
+      the judge per-check cap; the harvest verify-pack §3 runs the full suite uncapped. F-141 lesson.)
+    check: >
+      cd packages/sdk-ts &&
+      pnpm exec tsc --noEmit && pnpm exec eslint src/cli/chain.ts &&
+      pnpm exec vitest run test/chain/read-trace.test.ts
+
+budget_usd: 30
+max_steps: 12
+
+# CONTEXT-ROT (WP-203/WP-207): auto-calibrated window (F-125 mechanism, live-proven 095-099, 101, 103).
+pacing:
+  mode: auto
+  autoCalibrate: true
+
+# UNATTENDED (WP-271): operator-free; a genuine ESCALATE seals a resumable FAILED (WP-520).
+unattended:
+  escalation: seal_resumable_failed
+
+executor:
+  adapter: codex
+  family: openai
+
+judge:
+  family: openai-compat
+  cadence: 2
+  max_cost_share: 0.5
+
+routing:
+  stages:
+    plan: { provider: openai-compat, model: gpt-5.6-sol xhigh }
+    code: { provider: openai-compat, model: gpt-5.6-sol xhigh }
+    review: { provider: openai-compat, model: gpt-5.6-sol xhigh }
+    judge: { provider: openai-compat, model: gemini-3.1-pro-preview }

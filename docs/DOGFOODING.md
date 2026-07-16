@@ -5,22 +5,21 @@ This is the complete operating manual for executing Phase 2+ work packages
 task spec for a WP (every field explained), how to launch, supervise, and
 recover a run, and how to land the result as a normal PR.
 
-**Status (2026-07-13, bounded — update discipline: REPLACE this block, ≤15 lines;
+**Status (2026-07-15, bounded — update discipline: REPLACE this block, ≤15 lines;
 displaced prose moves verbatim to [`PLAN-HISTORY.md`](PLAN-HISTORY.md); per-run detail:
 `docs/reports/dogfood-NNN.md`; queue + course correction: `plan.md` §6).**
-Latest: dogfood-103 — **WP-311 (big-picture design judging) ✅ DONE — chain-completion aggregate review LIVE-PROVEN on a REAL 3-node chain**
-(`chain-9d189c1a-e66b-4a30-b1c5-f6093b72e6fd`, `docs/reports/dogfood-103.md`, harvested + committed this review). 🟢 **SUCCESS · 3 nodes (1 step each) ·
-$4.46 · 12m 31s · 3/3 nodes PROCEED**. Thesis-KPI proven from the chain journal: EXACTLY ONE `chain_completion_review` (PROCEED, `diffBase:"chain-base"` —
-the true cross-node cumulative diff resolved across BOTH handoffs, not the degraded node-local fallback), reviewed all 3 nodes, and the 3 `node_sealed`
-verdicts stayed UNCHANGED (F-107 at chain scope). Node deliverable: a per-node `design summary:` section in the chain trace (`summarizeNodeDesign` +
-`renderChainDesignSummary` + additive `trace.ts`), 179 insertions / 4 files, full suite 916 TS + 30 harness + 84 py green on the harvested merge. Green-path
-proof (a coherent design correctly PROCEEDed); catch-power stays proven by the in-suite scripted-fail regression. New friction: 🟡 **F-144** (no read-only
-`chikory chain trace <chain-id>` — the aggregate `review:`/`design summary:` surface only renders during a live follow → WP-522 track-B; §7) · 🟡 **F-145**
-(progression gate is chain-blind — a 3-node chain reads as "3 steps", can't flip ⛔ STALLED → dogfood-progression track-B; §8) · ℹ️ **F-143** ("work in
-progress, no criteria evaluated" rationale on a SEALED aggregate review → convention/hand-fix). **NEXT headline (progression ⛔ STALLED — rung flat 4
-(ladder RETIRED at rung 5, dogfood-096; STALLED can't credit chain-horizon, F-145); real axis = the flat kill→resume/chain-recovery KPI, 0 across 097…103):
-dogfood-104 (WP-521 CHAIN HEAL-BY-DEFAULT — P3-rung-1 on the new WP-530 P3 moat ladder; substrate a+b+seam+live-regression HAND-LANDED + committed 2026-07-15, launch-ready; WP-521c chain-resume = P3-rung-2).**
-See §5 (ladders always exist — first dogfood of a phase authors its ladder), §7, §8, §1.5, §3. (Earlier — dogfood-102 WP-309 → PLAN-HISTORY.md.)
+Latest: dogfood-104 — **WP-521 (chain heal-by-default) P3-rung-1 attempt: recovery-observability surface LANDED 🟢, chain self-heal KPI NOT EXERCISED 🔴**
+(`chain-83913c34-312d-4c7f-95f4-832a6a168473`, `docs/reports/dogfood-104.md`, harvested to working tree, uncommitted). Delivery 🟢: a real 3-node chain built a
+per-node RECOVERY-summary surface (`summarizeNodeRecovery` + `renderChainRecoverySummary` + additive guarded `trace.ts` wire), full suite **934 TS pass / 22
+skipped**, tsc + eslint clean, 6 files all `packages/sdk-ts/`. **Thesis-KPI 🔴 NOT MET:** chain terminal SUCCESS with **0 `node_replanned` / 0 `chain_failed`** —
+the force-fail seam `CHIKORY_SEED_CHAIN_FAIL_NODE` was NOT armed at launch, so all 3 nodes sealed SUCCESS first incarnation and the heal-by-default path never
+fired. P3-rung-1 (chain self-heal) **UNPROVEN** → ledger `rung=0`, re-run owed. One incidental run-scope tick: node A step 2 stalled → killed by `maxSeconds`
+(retriable) → step 3 resumed to SUCCESS (`resumes=1`, first non-zero in the window). New friction: 🔴 **F-146** (heal-ladder chain launched with the seam
+UNARMED, no preflight guard caught it — $5.51/56m proved nothing on the headline axis → WP-531 track-B, HAND-FIX this sitting) · 🟡 **F-147** (cost/token telemetry
+$0.00/0 tokens on node A's 2 FAILED steps despite 13 tool calls) · 🟡 **F-148** (node A ~36m thrash across 2 failed steps before a 2m delivery; the maxSeconds
+kill→resume is the silver lining). **NEXT headline (progression ⛔ STALLED; rung-1 still owed): dogfood-105 = P3-rung-1 RE-RUN, seam ARMED (`CHIKORY_SEED_CHAIN_FAIL_NODE=B`),
+after hand-fixing F-146 (WP-531 preflight guard).**
+See §5 (ladders always exist — first dogfood of a phase authors its ladder), §7, §8, §1.5, §3. (Earlier — dogfood-103 WP-311 → PLAN-HISTORY.md.)
 
 Related docs: [`docs/spec/task-spec.md`](spec/task-spec.md) (schema
 reference) · [`docs/TASK-PROTOCOL.md`](TASK-PROTOCOL.md) (WP etiquette, §7 is

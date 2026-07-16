@@ -77,7 +77,7 @@ goal: >
   chain itself exercises the ALREADY-LANDED WP-521 chain heal-by-default recovery path (a mid-chain node fails
   its first incarnation and the chain self-recovers via the default evidence-enriched replan). This campaign
   validates the committed chain runner; do NOT redesign or modify the chain runner, the replan/resume
-  substrate, `decideReplan`, `chain-loop.ts`, chain contracts, schemas, ADRs, or the harvest scripts inside
+  substrate, decideReplan, chain-loop.ts, chain contracts, schemas, ADRs, or the harvest scripts inside
   this run (the running worker loaded them at start).
 
   The planner MUST emit a LINEAR three-node topology on ONE shared observability goal — give the chikory chain
@@ -91,7 +91,7 @@ goal: >
       Add a focused passing test for it. Touch only those two files.
 
     * NODE B — add a pure renderChainRecoverySummary (sibling module) that folds every NodeOutcome + the
-      chain's `node_replanned` entries through summarizeNodeRecovery into a deterministic multi-line block in
+      chain's node_replanned entries through summarizeNodeRecovery into a deterministic multi-line block in
       plan order, mirroring the existing renderChainDesignSummary. Add its focused test. Reuse node A's
       function through a relative ESM module specifier — it must be present via the chain handoff, not
       recreated.

@@ -1,7 +1,14 @@
 import { describe, expect, it } from "vitest";
 
 import { renderChainTrace } from "../../src/index.js";
-import type { ChainEntry, ChainRecord, NodeOutcome } from "../../src/index.js";
+import { renderChainRecoverySummary } from "../../src/chain/chain-recovery-summary.js";
+import { summarizeNodeRecovery } from "../../src/chain/recovery-summary.js";
+import type {
+  ChainEntry,
+  ChainRecord,
+  NodeOutcome,
+  NodeReplannedPayload,
+} from "../../src/index.js";
 
 const successOutcome: NodeOutcome = { status: "SUCCESS", verdict: "PROCEED" };
 const failedOutcome: NodeOutcome = { status: "FAILED", verdict: "HALT" };
@@ -61,6 +68,15 @@ function terminalEntry(payload: unknown): ChainEntry {
   };
 }
 
+function chainEntry(idx: number, kind: ChainEntry["kind"], payload: unknown): ChainEntry {
+  return {
+    idx,
+    ts: `2026-06-20T00:00:0${idx}.000Z`,
+    kind,
+    payload,
+  };
+}
+
 describe("renderChainTrace (WP-219 S6)", () => {
   it("renders a header with chain identity, status, node count, and succeeded count", () => {
     const record = chainRecord({ "N-1": successOutcome }, { "N-1": "chain-1::N-1" });
@@ -112,5 +128,70 @@ describe("renderChainTrace (WP-219 S6)", () => {
 
     expect(withReason.endsWith("failed: chain stuck")).toBe(true);
     expect(withoutTerminal).not.toContain("failed:");
+  });
+
+  it("appends recovery summaries for replanned nodes through both shared recovery renderers", () => {
+    const initialRecord = chainRecord({
+      "N-1": successOutcome,
+      "N-2": failedOutcome,
+    });
+    const revisedPlan = {
+      ...initialRecord.plan,
+      nodes: initialRecord.plan.nodes.map((node) => {
+        if (node.id === "N-2") return { ...node, id: "N-2-r1" };
+        if (node.id === "N-3") return { ...node, dependsOn: ["N-2-r1"] };
+        return node;
+      }),
+    };
+    const replan: NodeReplannedPayload = {
+      failedNodeId: "N-2",
+      reason: "AC-2 failed on the first incarnation",
+      revisedPlan,
+    };
+    const entries = [
+      chainEntry(0, "plan", initialRecord.plan),
+      chainEntry(1, "node_replanned", replan),
+    ];
+    const recoveredRecord: ChainRecord = {
+      ...initialRecord,
+      plan: revisedPlan,
+      nodeOutcomes: {
+        ...initialRecord.nodeOutcomes,
+        "N-2-r1": successOutcome,
+      },
+    };
+    const expectedRecoverySummary = [
+      summarizeNodeRecovery("N-1", successOutcome, 1, "none recorded"),
+      summarizeNodeRecovery(
+        "N-2-r1",
+        successOutcome,
+        2,
+        "AC-2 failed on the first incarnation",
+      ),
+    ].join("\n");
+
+    expect(
+      renderChainRecoverySummary(revisedPlan, recoveredRecord.nodeOutcomes, entries),
+    ).toBe(expectedRecoverySummary);
+    expect(renderChainTrace(recoveredRecord, entries)).toContain(
+      `recovery summary:\n${expectedRecoverySummary}`,
+    );
+  });
+
+  it("keeps the trace byte-identical when the chain has no replans", () => {
+    const record = chainRecord({ "N-1": successOutcome }, { "N-1": "chain-1::N-1" });
+    const legacyOutput = [
+      "chain plan-219 · RUNNING · 3 nodes · 1/3 succeeded",
+      "goal: Ship a chain trace renderer",
+      "─".repeat(60),
+      "N-1 · depends-on — · run chain-1::N-1 · ✓ SUCCESS (PROCEED)",
+      "N-2 · depends-on N-1 · run — · · pending",
+      "N-3 · depends-on N-2 · run — · · pending",
+      "totals: nodes 3 · succeeded 1 · failed 0 · pending 2",
+      "design summary:",
+      "N-1 · SUCCESS · Build the first slice",
+    ].join("\n");
+
+    expect(renderChainTrace(record, [])).toBe(legacyOutput);
   });
 });

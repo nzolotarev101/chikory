@@ -1,5 +1,6 @@
 import type { ChainRecord, PlanNode } from "../types.js";
 import { renderChainDesignSummary } from "./chain-design-summary.js";
+import { renderChainRecoverySummary } from "./chain-recovery-summary.js";
 import type { ChainCompletionReviewPayload, ChainEntry } from "./store.js";
 
 interface TerminalPayload {
@@ -50,6 +51,14 @@ export function renderChainTrace(record: ChainRecord, entries: ChainEntry[]): st
   if (designSummary.length > 0) {
     lines.push("design summary:");
     lines.push(designSummary);
+  }
+
+  const recoverySummary = entries.some((entry) => entry.kind === "node_replanned")
+    ? renderChainRecoverySummary(record.plan, record.nodeOutcomes, entries)
+    : "";
+  if (recoverySummary.length > 0) {
+    lines.push("recovery summary:");
+    lines.push(recoverySummary);
   }
 
   // WP-311 chain-completion aggregate design review (non-destructive — a summary line).
