@@ -16,7 +16,9 @@
 # Launch guards (all before any build/spend; each has a deliberate override env):
 #   exit 3 — WP-266/WP-267 AC hazard (static lint or dynamic dry-run: broken check,
 #            file-pin, bare-word negative grep, or no RED-on-HEAD challenge AC)
-#   exit 4 — F-121 spec-named env unset, or F-120 window sized at executor scale
+#   exit 4 — F-121 spec-named env unset, F-120 window sized at executor scale, or
+#            F-146/WP-531 a --chain self-heal spec launched with the force-fail seam
+#            CHIKORY_SEED_CHAIN_FAIL_NODE unarmed (override CHIKORY_ALLOW_UNARMED_HEAL=1)
 #
 # The LAUNCH MODE is now EXPLICIT (--run / --chain), chosen by the operator.
 # The old auto-detection (grep the spec for "chikory chain") was BROKEN: every
@@ -104,7 +106,7 @@ fi
 # Any CHIKORY_* env the spec text names is therefore a LAUNCH CONTRACT: every one must be
 # exported in the launching shell or the launch is refused at zero LLM cost.
 # Deliberate exception: CHIKORY_ALLOW_MISSING_ENV=1.
-LAUNCHER_INTERNAL_ENVS='^CHIKORY_(ALLOW_LOOSE_AC_HAZARD|ALLOW_MISSING_ENV|ALLOW_WINDOW_SIZE|PREFLIGHT_ONLY)$'
+LAUNCHER_INTERNAL_ENVS='^CHIKORY_(ALLOW_LOOSE_AC_HAZARD|ALLOW_MISSING_ENV|ALLOW_UNARMED_HEAL|ALLOW_WINDOW_SIZE|PREFLIGHT_ONLY)$'
 SPEC_ENVS=$(grep -oE 'CHIKORY_[A-Z0-9_]+' "$SPEC_FILE" | sort -u | grep -vE "$LAUNCHER_INTERNAL_ENVS" || true)
 MISSING_ENVS=""
 for VAR in $SPEC_ENVS; do
@@ -153,6 +155,38 @@ if [ -n "${CHIKORY_CONTEXT_WINDOW_TOKENS:-}" ]; then
       echo "   Deliberate override: CHIKORY_ALLOW_WINDOW_SIZE=1 devbox run run-dogfood" >&2
       exit 4
     fi
+  fi
+fi
+
+# 1d-bis. WP-531 / F-146: a CHAIN spec that tests self-heal — it names the force-fail
+# seam CHIKORY_SEED_CHAIN_FAIL_NODE or reads the `node_replanned` recovery journal —
+# MUST have the seam armed, or NO node fails, the default halt-and-replan never fires,
+# and the chain seals SUCCESS while proving NOTHING on its recovery KPI (dogfood-104:
+# a $5.51 / 56m chain sealed SUCCESS with 0 `node_replanned` because the seam was unset).
+# This is a DISTINCT guard with its OWN override on purpose: dogfood-104 slipped because
+# the spec's header names PROSE-only precedent seams (CHIKORY_SEED_BAD_DIFF_*,
+# CHIKORY_LIMIT_AT_STEP) that F-121 (1c) demands be set, so the operator reached for the
+# blanket CHIKORY_ALLOW_MISSING_ENV=1 — which ALSO un-armed the one real seam. The coarse
+# missing-env override must NOT be able to silence this. Deliberate exception (e.g. a
+# green-path chain that only BUILDS recovery code): CHIKORY_ALLOW_UNARMED_HEAL=1.
+if [ "$MODE" = "chain" ] && grep -qE 'CHIKORY_SEED_CHAIN_FAIL_NODE|node_replanned' "$SPEC_FILE"; then
+  if [ -z "${CHIKORY_SEED_CHAIN_FAIL_NODE:-}" ]; then
+    if [ "${CHIKORY_ALLOW_UNARMED_HEAL:-}" = "1" ]; then
+      echo "⚠️  Chain self-heal spec launched with CHIKORY_SEED_CHAIN_FAIL_NODE UNARMED — OVERRIDDEN by CHIKORY_ALLOW_UNARMED_HEAL=1." >&2
+    else
+      echo "⛔ REFUSING LAUNCH (F-146/WP-531): this is a CHAIN self-heal spec (it names the" >&2
+      echo "   CHIKORY_SEED_CHAIN_FAIL_NODE force-fail seam or the node_replanned recovery" >&2
+      echo "   journal), but the seam is NOT set in this shell. Without it NO node fails, the" >&2
+      echo "   default halt-and-replan never fires, and the chain seals SUCCESS while proving" >&2
+      echo "   NOTHING on its recovery KPI (dogfood-104: \$5.51 / 56m, 0 node_replanned)." >&2
+      echo "   Arm it to the node id the planner will force-fail, e.g.:" >&2
+      echo "     CHIKORY_SEED_CHAIN_FAIL_NODE=B devbox run chain-dogfood" >&2
+      echo "   Deliberate override (a green-path chain that only BUILDS recovery code):" >&2
+      echo "     CHIKORY_ALLOW_UNARMED_HEAL=1 devbox run chain-dogfood" >&2
+      exit 4
+    fi
+  else
+    echo "Setup: heal seam armed: CHIKORY_SEED_CHAIN_FAIL_NODE=$CHIKORY_SEED_CHAIN_FAIL_NODE (chain self-heal will be exercised)."
   fi
 fi
 

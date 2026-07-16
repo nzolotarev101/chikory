@@ -17,8 +17,9 @@ fired. P3-rung-1 (chain self-heal) **UNPROVEN** → ledger `rung=0`, re-run owed
 (retriable) → step 3 resumed to SUCCESS (`resumes=1`, first non-zero in the window). New friction: 🔴 **F-146** (heal-ladder chain launched with the seam
 UNARMED, no preflight guard caught it — $5.51/56m proved nothing on the headline axis → WP-531 track-B, HAND-FIX this sitting) · 🟡 **F-147** (cost/token telemetry
 $0.00/0 tokens on node A's 2 FAILED steps despite 13 tool calls) · 🟡 **F-148** (node A ~36m thrash across 2 failed steps before a 2m delivery; the maxSeconds
-kill→resume is the silver lining). **NEXT headline (progression ⛔ STALLED; rung-1 still owed): dogfood-105 = P3-rung-1 RE-RUN, seam ARMED (`CHIKORY_SEED_CHAIN_FAIL_NODE=B`),
-after hand-fixing F-146 (WP-531 preflight guard).**
+kill→resume is the silver lining). **NEXT headline (progression ⛔ STALLED; rung-1 still owed): dogfood-105 = P3-rung-1 RE-RUN, seam ARMED (`CHIKORY_SEED_CHAIN_FAIL_NODE=B`).
+WP-531 (F-146 fix) ✅ LANDED 2026-07-16 — `scripts/dogfood.sh` 1d-bis refuses a `--chain` heal spec unless the seam is armed (own override `CHIKORY_ALLOW_UNARMED_HEAL=1`;
+`ALLOW_MISSING_ENV` can no longer silence it); dogfood-104's delivery committed (`f303ed8`). dogfood-105 is launch-ready.**
 See §5 (ladders always exist — first dogfood of a phase authors its ladder), §7, §8, §1.5, §3. (Earlier — dogfood-103 WP-311 → PLAN-HISTORY.md.)
 
 Related docs: [`docs/spec/task-spec.md`](spec/task-spec.md) (schema

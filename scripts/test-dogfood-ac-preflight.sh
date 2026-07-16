@@ -116,6 +116,46 @@ check "dogfood.sh refuses an executor-scale window (F-120)" 4 $?
 CHIKORY_CONTEXT_WINDOW_TOKENS=2000 CHIKORY_PREFLIGHT_ONLY=1 \
   bash scripts/dogfood.sh --run "$TMPDIR_FIXTURES/env-contract.yaml" >/dev/null 2>&1
 check "dogfood.sh preflight-only passes with env armed + sane window" 0 $?
+
+# ---- WP-531 / F-146: --chain self-heal spec must arm CHIKORY_SEED_CHAIN_FAIL_NODE ----
+# The seam is NOT in the AC checks — it's a header/goal launch contract — so only the
+# semantic guard (not F-121's spec-env grep alone) enforces it against the coarse
+# ALLOW_MISSING_ENV override that un-armed dogfood-104. Fixture names the recovery
+# journal (node_replanned) without ever mentioning CHIKORY_*, isolating the new guard.
+cat > "$TMPDIR_FIXTURES/heal-chain.yaml" <<'EOF'
+name: fixture-heal-chain
+goal: >
+  A 3-node chain whose middle node fails its first incarnation; the chain journal
+  must show a node_replanned entry and recover to SUCCESS.
+acceptance_criteria:
+  - id: AC-1
+    description: net-new symbol absent on HEAD
+    check: grep -rq 'thisSymbolDoesNotExistAnywhereOnHead' packages/sdk-ts/src/
+EOF
+
+env -u CHIKORY_SEED_CHAIN_FAIL_NODE CHIKORY_PREFLIGHT_ONLY=1 \
+  bash scripts/dogfood.sh --chain "$TMPDIR_FIXTURES/heal-chain.yaml" >/dev/null 2>&1
+check "dogfood.sh refuses a --chain self-heal spec with the seam UNARMED (F-146/WP-531)" 4 $?
+
+# The SAME coarse missing-env override that slipped dogfood-104 must NOT silence it.
+env -u CHIKORY_SEED_CHAIN_FAIL_NODE CHIKORY_ALLOW_MISSING_ENV=1 CHIKORY_PREFLIGHT_ONLY=1 \
+  bash scripts/dogfood.sh --chain "$TMPDIR_FIXTURES/heal-chain.yaml" >/dev/null 2>&1
+check "ALLOW_MISSING_ENV=1 does NOT silence the unarmed-heal guard (the F-146 hole)" 4 $?
+
+# Armed → preflight passes.
+CHIKORY_SEED_CHAIN_FAIL_NODE=B CHIKORY_PREFLIGHT_ONLY=1 \
+  bash scripts/dogfood.sh --chain "$TMPDIR_FIXTURES/heal-chain.yaml" >/dev/null 2>&1
+check "dogfood.sh preflight-only passes when the heal seam IS armed" 0 $?
+
+# Deliberate override → preflight passes even unarmed.
+env -u CHIKORY_SEED_CHAIN_FAIL_NODE CHIKORY_ALLOW_UNARMED_HEAL=1 CHIKORY_PREFLIGHT_ONLY=1 \
+  bash scripts/dogfood.sh --chain "$TMPDIR_FIXTURES/heal-chain.yaml" >/dev/null 2>&1
+check "CHIKORY_ALLOW_UNARMED_HEAL=1 overrides the unarmed-heal guard" 0 $?
+
+# Same spec as a --run (not a chain) must NOT trip the chain-only guard.
+env -u CHIKORY_SEED_CHAIN_FAIL_NODE CHIKORY_PREFLIGHT_ONLY=1 \
+  bash scripts/dogfood.sh --run "$TMPDIR_FIXTURES/heal-chain.yaml" >/dev/null 2>&1
+check "the heal guard is --chain-only (a --run of the same spec passes)" 0 $?
 set -e
 
 echo
