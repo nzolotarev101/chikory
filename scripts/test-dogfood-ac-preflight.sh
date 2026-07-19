@@ -156,6 +156,20 @@ check "CHIKORY_ALLOW_UNARMED_HEAL=1 overrides the unarmed-heal guard" 0 $?
 env -u CHIKORY_SEED_CHAIN_FAIL_NODE CHIKORY_PREFLIGHT_ONLY=1 \
   bash scripts/dogfood.sh --run "$TMPDIR_FIXTURES/heal-chain.yaml" >/dev/null 2>&1
 check "the heal guard is --chain-only (a --run of the same spec passes)" 0 $?
+
+# ---- WP-532 / P3-rung-2: the two-phase operator-resume drill precondition guard (1d-ter) ----
+# CHIKORY_CHAIN_RESUME_DRILL=1 validates at $0: --chain only, and the force-fail seam armed.
+CHIKORY_CHAIN_RESUME_DRILL=1 CHIKORY_PREFLIGHT_ONLY=1 \
+  bash scripts/dogfood.sh --run "$TMPDIR_FIXTURES/heal-chain.yaml" >/dev/null 2>&1
+check "resume drill refuses --run mode (WP-532, chain-only)" 4 $?
+
+env -u CHIKORY_SEED_CHAIN_FAIL_NODE CHIKORY_CHAIN_RESUME_DRILL=1 CHIKORY_PREFLIGHT_ONLY=1 \
+  bash scripts/dogfood.sh --chain "$TMPDIR_FIXTURES/heal-chain.yaml" >/dev/null 2>&1
+check "resume drill refuses when the force-fail seam is UNARMED (WP-532)" 4 $?
+
+CHIKORY_SEED_CHAIN_FAIL_NODE=1 CHIKORY_CHAIN_RESUME_DRILL=1 CHIKORY_PREFLIGHT_ONLY=1 \
+  bash scripts/dogfood.sh --chain "$TMPDIR_FIXTURES/heal-chain.yaml" >/dev/null 2>&1
+check "resume drill preflight passes when --chain + seam armed (WP-532)" 0 $?
 set -e
 
 echo

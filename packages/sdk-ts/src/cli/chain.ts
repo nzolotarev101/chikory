@@ -565,11 +565,34 @@ export async function cmdChain(
 
   // 3: start the durable chain executor and follow it to a terminal status.
   try {
-    return await hostChainAndFollow(args, args.watch, deps, ioPair, gate.plan, templateFromSpec(spec));
+    return await hostChainAndFollow(
+      args,
+      args.watch,
+      deps,
+      ioPair,
+      gate.plan,
+      templateFromSpec(spec),
+      replanBudgetFromEnv(),
+    );
   } catch (err) {
     ioPair.err(`chikory: ${actionable(err)}`);
     return 1;
   }
+}
+
+/**
+ * WP-532 dogfood/test-only heal-budget seam: `CHIKORY_CHAIN_MAX_REPLANS=0` seals
+ * a seeded-failure chain FAILED (heal-by-default OFF) so the two-phase operator
+ * `chikory chain resume` drill (P3-rung-2) has a sealed-FAILED chain to resume.
+ * Unset → the WP-521 heal-by-default `startChain` default (1) applies. Read here
+ * (host process), frozen into the workflow input — never inside the workflow body.
+ */
+export function replanBudgetFromEnv(
+  raw = process.env["CHIKORY_CHAIN_MAX_REPLANS"],
+): number | undefined {
+  if (raw === undefined || raw.length === 0) return undefined;
+  const n = Number(raw);
+  return Number.isInteger(n) && n >= 0 ? n : undefined;
 }
 
 async function hostChainAndFollow(
@@ -579,6 +602,7 @@ async function hostChainAndFollow(
   ioPair: Io,
   plan: Plan,
   template: ChainNodeTemplate,
+  maxReplans?: number,
 ): Promise<number> {
   const worker = await createRunnerWorker({
     adapters: deps.adapters ?? DEFAULT_ADAPTERS,
@@ -595,7 +619,11 @@ async function hostChainAndFollow(
     taskQueue: deps.taskQueue,
   });
   try {
-    const { chainId } = await runner.startChain({ plan, template });
+    const { chainId } = await runner.startChain({
+      plan,
+      template,
+      ...(maxReplans !== undefined ? { maxReplans } : {}),
+    });
     if (!flags.json) {
       ioPair.out(`chain-id: ${chainId}`);
       ioPair.out(`(ctrl-c detaches the local worker; node runs are durable — re-run to re-attach)`);

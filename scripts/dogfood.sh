@@ -13,6 +13,11 @@
 #     — run every launch guard (spec lint, AC dry-run, spec-env contract, window
 #       sizing) and exit WITHOUT launching. Zero LLM cost.
 #
+#   CHIKORY_CHAIN_RESUME_DRILL=1 CHIKORY_SEED_CHAIN_FAIL_NODE=<n> devbox run chain-dogfood
+#     — WP-532 / P3-rung-2 two-phase operator-resume drill: phase 1 seals the chain
+#       FAILED (heal-by-default OFF), phase 2 `chikory chain resume` recovers it to
+#       SUCCESS. --chain only; requires the force-fail seam armed.
+#
 # Launch guards (all before any build/spend; each has a deliberate override env):
 #   exit 3 — WP-266/WP-267 AC hazard (static lint or dynamic dry-run: broken check,
 #            file-pin, bare-word negative grep, or no RED-on-HEAD challenge AC)
@@ -106,7 +111,7 @@ fi
 # Any CHIKORY_* env the spec text names is therefore a LAUNCH CONTRACT: every one must be
 # exported in the launching shell or the launch is refused at zero LLM cost.
 # Deliberate exception: CHIKORY_ALLOW_MISSING_ENV=1.
-LAUNCHER_INTERNAL_ENVS='^CHIKORY_(ALLOW_LOOSE_AC_HAZARD|ALLOW_MISSING_ENV|ALLOW_UNARMED_HEAL|ALLOW_WINDOW_SIZE|PREFLIGHT_ONLY)$'
+LAUNCHER_INTERNAL_ENVS='^CHIKORY_(ALLOW_LOOSE_AC_HAZARD|ALLOW_MISSING_ENV|ALLOW_UNARMED_HEAL|ALLOW_WINDOW_SIZE|PREFLIGHT_ONLY|CHAIN_MAX_REPLANS)$'
 SPEC_ENVS=$(grep -oE 'CHIKORY_[A-Z0-9_]+' "$SPEC_FILE" | sort -u | grep -vE "$LAUNCHER_INTERNAL_ENVS" || true)
 MISSING_ENVS=""
 for VAR in $SPEC_ENVS; do
@@ -188,6 +193,28 @@ if [ "$MODE" = "chain" ] && grep -qE 'CHIKORY_SEED_CHAIN_FAIL_NODE|node_replanne
   else
     echo "Setup: heal seam armed: CHIKORY_SEED_CHAIN_FAIL_NODE=$CHIKORY_SEED_CHAIN_FAIL_NODE (chain self-heal will be exercised)."
   fi
+fi
+
+# 1d-ter. WP-532 / P3-rung-2: the two-phase operator-resume drill (CHIKORY_CHAIN_RESUME_DRILL=1)
+# validates its own preconditions at ZERO cost, alongside the other guards, so a mis-launched
+# drill is refused before any build/spend (and CHIKORY_PREFLIGHT_ONLY=1 exercises it too):
+#   - it is --chain only (phase 2 issues `chikory chain resume`, meaningless for a single run);
+#   - the force-fail seam MUST be armed so phase 1 can seal FAILED — the whole point is to reach
+#     a sealed-FAILED chain and then resume it (1d-bis already enforces this for a self-heal spec,
+#     but the drill re-asserts it so a non-self-heal spec launched as a drill still refuses here).
+if [ "${CHIKORY_CHAIN_RESUME_DRILL:-}" = "1" ]; then
+  if [ "$MODE" != "chain" ]; then
+    echo "⛔ REFUSING LAUNCH (WP-532): CHIKORY_CHAIN_RESUME_DRILL=1 requires --chain" >&2
+    echo "   (devbox run chain-dogfood). Phase 2 issues \`chikory chain resume\`." >&2
+    exit 4
+  fi
+  if [ -z "${CHIKORY_SEED_CHAIN_FAIL_NODE:-}" ]; then
+    echo "⛔ REFUSING LAUNCH (WP-532): the resume drill needs the force-fail seam armed" >&2
+    echo "   (CHIKORY_SEED_CHAIN_FAIL_NODE=<node-id|dispatch-index>) so phase 1 seals FAILED." >&2
+    echo "   Arm it, e.g.: CHIKORY_SEED_CHAIN_FAIL_NODE=1 CHIKORY_CHAIN_RESUME_DRILL=1 devbox run chain-dogfood" >&2
+    exit 4
+  fi
+  echo "Setup: WP-532 resume drill ARMED — phase 1 seals FAILED (maxReplans 0), phase 2 chikory chain resume."
 fi
 
 # 1e. Preflight-only mode: run every launch guard above, then stop WITHOUT building,
@@ -299,6 +326,44 @@ trap cleanup EXIT SIGINT SIGTERM
 
 # 5. Run the dogfood spec
 export OPENAI_COMPAT_BASE_URL="http://127.0.0.1:$PROXY_PORT"
+
+# WP-532 / P3-rung-2: two-phase operator-resume drill (the WP-531 analog — the chain
+# self-heal ladder's harness sibling). `chikory chain resume` (WP-521c substrate) is
+# committed but never yet exercised on a REAL dogfood chain. This mode does it in one
+# launch, deterministically:
+#   Phase 1 — launch the chain with heal-by-default OFF (CHIKORY_CHAIN_MAX_REPLANS=0)
+#             while the force-fail seam is armed → a node fails, nothing auto-heals,
+#             the chain seals FAILED (resumable). The 1d-bis guard already enforces the
+#             seam is armed, so an unarmed drill can't reach here.
+#   Phase 2 — `chikory chain resume <chain-id>` re-enters the sealed-FAILED chain; the
+#             failed node gets one fresh heal attempt and the chain recovers to SUCCESS.
+# Records the chain-scope kill→resume KPI (§1.4) on a live dogfood chain. --chain only.
+if [ "${CHIKORY_CHAIN_RESUME_DRILL:-}" = "1" ]; then
+  # Preconditions (--chain, seam armed) were enforced at $0 in guard 1d-ter.
+  PHASE1_LOG="$(mktemp)"
+  echo "=== WP-532 resume drill — PHASE 1: sealing the chain FAILED (heal-by-default OFF) ==="
+  echo "Running: CHIKORY_CHAIN_MAX_REPLANS=0 pnpm chikory chain $SPEC_FILE --watch"
+  set +e
+  CHIKORY_CHAIN_MAX_REPLANS=0 pnpm chikory chain "$SPEC_FILE" --watch 2>&1 | tee "$PHASE1_LOG"
+  PHASE1_RC=${PIPESTATUS[0]}
+  set -e
+
+  CHAIN_ID=$(grep -oE 'chain-id: [A-Za-z0-9-]+' "$PHASE1_LOG" | head -n 1 | awk '{print $2}')
+  rm -f "$PHASE1_LOG"
+  if [ -z "$CHAIN_ID" ]; then
+    echo "Error: WP-532 drill could not read the chain-id from phase 1 output." >&2
+    exit 1
+  fi
+  if [ "$PHASE1_RC" -eq 0 ]; then
+    echo "Error: WP-532 drill phase 1 sealed SUCCESS (exit 0) — nothing to resume." >&2
+    echo "       The chain must seal FAILED: check the force-fail seam actually fired on a node." >&2
+    exit 1
+  fi
+  echo
+  echo "=== WP-532 resume drill — PHASE 2: chikory chain resume $CHAIN_ID ==="
+  pnpm chikory chain resume "$CHAIN_ID" --watch
+  exit $?
+fi
 
 echo "Running Chikory dogfooding command: pnpm chikory $MODE ..."
 pnpm chikory "$MODE" "$SPEC_FILE" --watch
