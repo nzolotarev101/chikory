@@ -34,7 +34,31 @@ export type ChainEntryKind =
   | "node_sealed"
   | "node_replanned"
   | "chain_completion_review"
+  | "control_event"
   | "terminal";
+
+/**
+ * `terminal` payload: how the chain sealed. `resumable` (WP-521(c), the chain
+ * analog of the run-level WP-520 flag) marks a replan-exhausted FAILED that
+ * `chikory chain resume` can re-enter — as opposed to a dead/malformed FAILED.
+ */
+export interface ChainTerminalPayload {
+  status: "SUCCESS" | "FAILED";
+  reason?: string;
+  resumable?: boolean;
+}
+
+/**
+ * `control_event` payload (WP-521(c)): the reopen boundary a `chikory chain
+ * resume` appends over a sealed-FAILED chain — the chain analog of the run-level
+ * `control_event source:"failed_seal"`. The `terminal` entry stays; this marks
+ * where the resumed incarnation picks up.
+ */
+export interface ChainControlEventPayload {
+  event: "resume";
+  source: "chain_failed_seal";
+  failedNodeId?: string;
+}
 
 export interface ChainEntry {
   idx: number;
@@ -101,6 +125,7 @@ interface ChainEntryRow {
 interface ChainRow {
   plan_json: string;
   status: string;
+  template_json?: string | null;
 }
 
 function rowToEntry(row: ChainEntryRow): ChainEntry {
@@ -135,6 +160,7 @@ export class ChainJournal {
       CREATE TABLE IF NOT EXISTS chains (
         chain_id TEXT PRIMARY KEY,
         plan_json TEXT NOT NULL,
+        template_json TEXT,
         started_at TEXT NOT NULL,
         ended_at TEXT,
         status TEXT NOT NULL
@@ -142,20 +168,40 @@ export class ChainJournal {
     `);
   }
 
-  /** Idempotent — re-entry after a crash must not reset chain metadata. */
-  createChain(chainId: string, plan: Plan): void {
+  /**
+   * Idempotent — re-entry after a crash must not reset chain metadata. The
+   * template is persisted so a sealed-FAILED chain can be re-entered by
+   * `chikory chain resume` without the operator re-supplying it (WP-521(c)).
+   */
+  createChain(chainId: string, plan: Plan, template?: unknown): void {
     this.db
       .prepare(
-        "INSERT OR IGNORE INTO chains (chain_id, plan_json, started_at, status) VALUES (?, ?, ?, ?)",
+        "INSERT OR IGNORE INTO chains (chain_id, plan_json, template_json, started_at, status) VALUES (?, ?, ?, ?, ?)",
       )
-      .run(chainId, JSON.stringify(plan), new Date().toISOString(), "RUNNING");
+      .run(
+        chainId,
+        JSON.stringify(plan),
+        template !== undefined ? JSON.stringify(template) : null,
+        new Date().toISOString(),
+        "RUNNING",
+      );
   }
 
   getChain(): ChainRow | undefined {
-    const row = this.db.prepare("SELECT plan_json, status FROM chains LIMIT 1").get() as
+    const row = this.db.prepare("SELECT plan_json, template_json, status FROM chains LIMIT 1").get() as
       | ChainRow
       | undefined;
     return row;
+  }
+
+  /**
+   * Reopen a sealed-FAILED chain (WP-521(c), the chain analog of
+   * `Journal.reopenRun`): flip the chain row back to RUNNING so status/trace
+   * stop reporting the stale seal. The `terminal` entry stays — history is never
+   * rewritten; the paired `control_event` marks the reopen boundary.
+   */
+  reopenChain(): void {
+    this.db.prepare("UPDATE chains SET status = 'RUNNING', ended_at = NULL").run();
   }
 
   setStatus(status: ChainStatus, ended = false): void {

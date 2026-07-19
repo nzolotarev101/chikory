@@ -21,6 +21,7 @@ import { artifactsDir, chainJournalPath, journalPath, workspaceDir } from "../ru
 import { collectWorkspaceRepos } from "../runner/workspace-repos.js";
 import type {
   ChainNodeHandoff,
+  ChainRecord,
   JudgePolicy,
   ModelChoice,
   NodeOutcome,
@@ -31,7 +32,7 @@ import type {
 import { deriveNodeOutcome } from "./node-spec.js";
 import { buildReplanBrief, buildRetryPlan } from "./replan-plan.js";
 import type { ReplanDecision } from "./replan.js";
-import { ChainJournal, type ChainCompletionReviewFinding } from "./store.js";
+import { ChainJournal, chainRecordFrom, type ChainCompletionReviewFinding } from "./store.js";
 
 const execFileAsync = promisify(execFile);
 
@@ -96,14 +97,55 @@ export function createChainActivities(deps: ChainActivityDeps) {
      * Idempotent chain setup: the chain row + the durable `plan` entry. Safe to
      * re-run on a workflow replay — the plan is journaled at most once.
      */
-    async initChain(input: { chainId: string; plan: Plan }): Promise<void> {
+    async initChain(input: { chainId: string; plan: Plan; template?: unknown }): Promise<void> {
       const journal = openChain(deps, input.chainId);
       try {
-        journal.createChain(input.chainId, input.plan);
+        journal.createChain(input.chainId, input.plan, input.template);
         if (journal.entries("plan").length === 0) {
           journal.append("plan", input.plan);
         }
         journal.setStatus("RUNNING");
+      } finally {
+        journal.close();
+      }
+    },
+
+    /**
+     * WP-521(c) restore: rebuild the chain record from the journal at chainLoop
+     * (re-)entry. `resumed` is true when the chain previously sealed (a `terminal`
+     * entry exists) — a `chikory chain resume` re-start; the reopen boundary
+     * (`control_event source:"chain_failed_seal"` + `reopenChain`) is journaled
+     * once here (idempotent), mirroring the run-level `restoreWorkflowState`.
+     */
+    async restoreChain(input: {
+      chainId: string;
+    }): Promise<{ record?: ChainRecord; resumed: boolean }> {
+      const journal = openChain(deps, input.chainId);
+      try {
+        const record = chainRecordFrom(journal);
+        const terminals = journal.entries("terminal");
+        const resumed = terminals.length > 0;
+        if (resumed) {
+          // Append the reopen boundary once per seal→resume cycle: only when the
+          // last terminal is newer than the last reopen (mirrors the run-level
+          // `lastTerminal.idx > lastReopenIdx` guard — idempotent on replay,
+          // distinct across repeated resumes).
+          const lastTerminalIdx = terminals[terminals.length - 1]!.idx;
+          const reopens = journal.entries("control_event");
+          const lastReopenIdx = reopens[reopens.length - 1]?.idx ?? -1;
+          if (lastTerminalIdx > lastReopenIdx) {
+            const failedNodeId = record
+              ? record.plan.nodes.find((n) => record.nodeOutcomes[n.id]?.status === "FAILED")?.id
+              : undefined;
+            journal.append("control_event", {
+              event: "resume",
+              source: "chain_failed_seal",
+              ...(failedNodeId !== undefined ? { failedNodeId } : {}),
+            });
+            journal.reopenChain();
+          }
+        }
+        return { ...(record !== undefined ? { record } : {}), resumed };
       } finally {
         journal.close();
       }
@@ -360,11 +402,25 @@ export function createChainActivities(deps: ChainActivityDeps) {
       chainId: string;
       status: "SUCCESS" | "FAILED";
       reason?: string;
+      /** WP-521(c): mark a replan-exhausted FAILED that `chikory chain resume` can re-enter. */
+      resumable?: boolean;
     }): Promise<void> {
       const journal = openChain(deps, input.chainId);
       try {
-        if (journal.entries("terminal").length === 0) {
-          journal.append("terminal", { status: input.status, reason: input.reason });
+        // One terminal entry per incarnation: a resumed chain seals again after
+        // its reopen `control_event`, so gate on "no terminal since the last
+        // reopen" rather than "no terminal ever" (mirrors the run-level re-seal
+        // guard keyed on the reopen boundary).
+        const terminals = journal.entries("terminal");
+        const reopens = journal.entries("control_event");
+        const lastReopenIdx = reopens[reopens.length - 1]?.idx ?? -1;
+        const sealedSinceReopen = terminals.some((t) => t.idx > lastReopenIdx);
+        if (!sealedSinceReopen) {
+          journal.append("terminal", {
+            status: input.status,
+            reason: input.reason,
+            ...(input.resumable === true ? { resumable: true } : {}),
+          });
         }
         journal.setStatus(input.status, true);
       } finally {

@@ -25,7 +25,8 @@ import {
   TASK_QUEUE_DEFAULT,
 } from "./runner/api.js";
 import { forkRunAtCheckpoint } from "./runner/branch.js";
-import { DEFAULT_DATA_DIR, journalPath } from "./runner/paths.js";
+import { DEFAULT_DATA_DIR, chainJournalPath, journalPath } from "./runner/paths.js";
+import { ChainJournal } from "./chain/store.js";
 import type { ChainNodeTemplate } from "./chain/node-spec.js";
 import type { DurableRunner, Plan, RunHandle, RunStatusReport, TaskSpec } from "./types.js";
 
@@ -49,6 +50,13 @@ export interface TemporalRunner extends DurableRunner {
     /** WP-521: replan budget; defaults to 1 (heal-by-default). Explicit 0 = legacy halt. */
     maxReplans?: number;
   }): Promise<{ chainId: string }>;
+  /**
+   * WP-521(c) / P3-rung-2: re-enter a sealed-FAILED, resumable chain — the chain
+   * analog of `resume`. Re-starts `chainLoop` over the same chain-id with the
+   * persisted plan + template; the workflow reopens the journal and grants the
+   * failed node one fresh heal attempt. Refuses a SUCCESS / dead-FAILED chain.
+   */
+  resumeChain(chainId: string): Promise<{ chainId: string }>;
   close(): Promise<void>;
 }
 
@@ -110,6 +118,50 @@ export function createTemporalRunner(opts: TemporalRunnerOptions = {}): Temporal
     }
   }
 
+  /**
+   * WP-521(c): the sealed state a chain resume decision needs — the chain row's
+   * terminal status plus the last terminal entry's resumable flag/reason, and
+   * the persisted plan + template a re-start reuses. Undefined while the chain is
+   * live or has no journal. `template` is absent for chains sealed before
+   * WP-521(c) persisted it → not resumable.
+   */
+  function sealedChainState(chainId: string):
+    | {
+        status: "SUCCESS" | "FAILED";
+        resumable: boolean;
+        reason: string;
+        plan: Plan;
+        template?: ChainNodeTemplate;
+      }
+    | undefined {
+    const path = chainJournalPath(dataDir, chainId);
+    if (!existsSync(path)) return undefined;
+    const journal = new ChainJournal(path);
+    try {
+      const chain = journal.getChain();
+      if (!chain) return undefined;
+      if (chain.status !== "SUCCESS" && chain.status !== "FAILED") return undefined;
+      const status = chain.status as "SUCCESS" | "FAILED";
+      const terminals = journal.entries("terminal");
+      const payload = terminals[terminals.length - 1]?.payload as
+        | { reason?: string; resumable?: boolean }
+        | undefined;
+      const template =
+        chain.template_json != null
+          ? (JSON.parse(chain.template_json) as ChainNodeTemplate)
+          : undefined;
+      return {
+        status,
+        resumable: payload?.resumable === true,
+        reason: payload?.reason ?? "unknown",
+        plan: JSON.parse(chain.plan_json) as Plan,
+        ...(template !== undefined ? { template } : {}),
+      };
+    } finally {
+      journal.close();
+    }
+  }
+
   function makeHandle(runId: string): RunHandle {
     return {
       runId,
@@ -165,6 +217,34 @@ export function createTemporalRunner(opts: TemporalRunnerOptions = {}): Temporal
         // is an explicit `maxReplans: 0`). Direct `chainLoop` callers/tests keep
         // the legacy `?? 0` halt-on-FAILED unless they opt in.
         args: [{ plan: input.plan, template: input.template, maxReplans: input.maxReplans ?? 1 }],
+      });
+      return { chainId };
+    },
+
+    async resumeChain(chainId): Promise<{ chainId: string }> {
+      // WP-521(c) / P3-rung-2: mirror the run-level `resume`. Resumable FAILED →
+      // re-start `chainLoop` over the same chain-id (Temporal permits workflowId
+      // reuse after completion); the workflow's `restoreChain` reopens the journal
+      // and grants the failed node one fresh heal attempt. Dead / non-resumable →
+      // refuse with the way forward.
+      const sealed = sealedChainState(chainId);
+      if (sealed === undefined) {
+        throw new Error(`chain ${chainId} has no journal or is still live — nothing to resume`);
+      }
+      if (sealed.status !== "FAILED") {
+        throw new Error(`chain ${chainId} already sealed ${sealed.status} — nothing to resume`);
+      }
+      if (!sealed.resumable || sealed.template === undefined) {
+        throw new Error(
+          `chain ${chainId} sealed a dead FAILED (${sealed.reason}) — not resumable; ` +
+            `fork a node checkpoint instead: chikory branch <node-run-id>@<journalIdx>`,
+        );
+      }
+      const client = await getClient();
+      await client.workflow.start("chainLoop", {
+        workflowId: chainId,
+        taskQueue,
+        args: [{ plan: sealed.plan, template: sealed.template, maxReplans: 1 }],
       });
       return { chainId };
     },

@@ -230,6 +230,10 @@ function formatChainEntryLine(entry: ChainEntry): string {
       const p = entry.payload as { status: string; reason?: string };
       return `[${entry.ts}] chain ${p.status}${p.reason ? ` — ${p.reason}` : ""}`;
     }
+    case "control_event": {
+      const p = entry.payload as { event: string; source: string; failedNodeId?: string };
+      return `[${entry.ts}] chain ${p.event} (${p.source})${p.failedNodeId ? ` — retry ${p.failedNodeId}` : ""}`;
+    }
   }
 }
 
@@ -700,13 +704,27 @@ export async function cmdChainApprove(
   }
 }
 
-/** `chikory chain resume <chain-id>` — clear a parked child's budget cap (WP-241). */
+/**
+ * `chikory chain resume <chain-id>` — resume a chain past a park. Two cases:
+ * a RUNNING chain with a parked in-flight child clears its budget cap (WP-241);
+ * a sealed-FAILED, resumable chain re-enters `chainLoop` to retry the failed
+ * node (WP-521(c) / P3-rung-2).
+ */
 export async function cmdChainResume(
   args: { chainId: string; addBudgetUsd?: number; watch: boolean } & CommonFlags,
   deps: CliDeps = {},
 ): Promise<number> {
   const ioPair = io(deps);
   try {
+    const record = readChainRecord(args.dataDir, args.chainId);
+    if (record && CHAIN_TERMINAL.has(record.status)) {
+      // WP-521(c): a sealed-FAILED chain re-enters via runner.resumeChain (which
+      // refuses SUCCESS / dead-FAILED); a sealed-SUCCESS falls through to the
+      // WP-241 path, which reports "already SUCCESS".
+      if (record.status === "FAILED") {
+        return await hostChainResumeAndFollow(args.chainId, args, deps, ioPair);
+      }
+    }
     return await hostChainControlAndFollow(args.chainId, args, deps, ioPair, {
       kind: "resume",
       ...(args.addBudgetUsd !== undefined ? { addBudgetUsd: args.addBudgetUsd } : {}),
@@ -714,6 +732,43 @@ export async function cmdChainResume(
   } catch (err) {
     ioPair.err(`chikory: ${actionable(err)}`);
     return 1;
+  }
+}
+
+/**
+ * WP-521(c): host a worker, re-enter a sealed-FAILED chain over its own
+ * chain-id, and follow it to terminal (mirrors `hostChainControlAndFollow`'s
+ * worker lifecycle, but the action is a whole-chain resume, not a child signal).
+ */
+async function hostChainResumeAndFollow(
+  chainId: string,
+  flags: CommonFlags & { watch: boolean },
+  deps: CliDeps,
+  ioPair: Io,
+): Promise<number> {
+  const worker = await createRunnerWorker({
+    adapters: deps.adapters ?? DEFAULT_ADAPTERS,
+    address: flags.address,
+    dataDir: flags.dataDir,
+    taskQueue: deps.taskQueue,
+    routerOptions: deps.routerOptions,
+    workflowBundlePath: deps.workflowBundlePath,
+  });
+  const workerDone = worker.run();
+  const runner = createTemporalRunner({
+    address: flags.address,
+    dataDir: flags.dataDir,
+    taskQueue: deps.taskQueue,
+  });
+  try {
+    await runner.resumeChain(chainId);
+    ioPair.out(`resume delivered to chain ${chainId} (retrying the failed node)`);
+    const final = await followChain(chainId, flags, { watch: flags.watch, deps, io: ioPair });
+    return finishChain(chainId, final, flags, ioPair);
+  } finally {
+    worker.shutdown();
+    await workerDone.catch(() => {});
+    await runner.close();
   }
 }
 

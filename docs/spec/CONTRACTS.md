@@ -187,6 +187,7 @@ export interface JudgeVerdict {
   rationale: string;
   rollbackTo?: CheckpointId;       // required when kind=ROLLBACK
   escalateReason?: string;         // required when kind=ESCALATE
+  escalateClass?: "out_of_rubric" | "judge_drift"; // F-154: out_of_rubric → approve force-seals SUCCESS
   costUsd: number;
   tokens: TokenUsage;
   judgeModel: ModelChoice;
@@ -250,8 +251,10 @@ export type JournalEntryKind =
   | "remediation"
   // P2 (WP-219, ADR-005) — chain-scope kinds (emitted to the chain store)
   // `chain_completion_review` (WP-311): the aggregate design-judge pass at the SUCCESS seal
+  // `control_event` (WP-521(c)): the chain-scope `source:"chain_failed_seal"` reopen boundary
+  // `terminal` carries `resumable?` on a FAILED chain (WP-521(c), the chain WP-520 analog)
   | "plan" | "plan_verdict" | "node_started" | "node_replanned" | "node_sealed"
-  | "chain_completion_review";
+  | "chain_completion_review" | "control_event" | "terminal";
 
 export interface JournalEntry {
   idx: number;                  // monotonic per run

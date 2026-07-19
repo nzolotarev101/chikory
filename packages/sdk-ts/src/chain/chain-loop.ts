@@ -74,9 +74,13 @@ export async function chainLoop(input: ChainLoopInput): Promise<ChainStatus> {
   let plan = input.plan;
   const maxReplans = input.maxReplans ?? 0;
 
-  await activities.initChain({ chainId, plan });
+  await activities.initChain({ chainId, plan, template });
 
-  let record: ChainRecord = {
+  // WP-521(c): rebuild state from the journal. A fresh chain restores an empty
+  // record; a `chikory chain resume` re-start restores the sealed record and
+  // journals the reopen boundary (`control_event source:"chain_failed_seal"`).
+  const restored = await activities.restoreChain({ chainId });
+  let record: ChainRecord = restored.record ?? {
     planId: plan.id,
     plan,
     nodeRuns: {},
@@ -84,10 +88,61 @@ export async function chainLoop(input: ChainLoopInput): Promise<ChainStatus> {
     nodeHandoffs: {},
     status: "RUNNING",
   };
+  plan = record.plan;
   // An empty (or already-complete) plan resolves immediately.
   record = { ...record, status: deriveChainStatus(record) };
 
   let reason: string | undefined;
+  let resumableSeal = false;
+
+  // WP-521(c) operator resume grants ONE fresh heal attempt to the blocking
+  // failed node (the operator-triggered analog of heal-by-default): replan it
+  // before the loop so the retry node dispatches. If the retry also fails, the
+  // loop's own `decideReplan` governs and re-seals a resumable FAILED for
+  // another resume. Carries the failed child's seal reason as the retry brief.
+  if (restored.resumed) {
+    const failedNode = plan.nodes.find(
+      (node) => record.nodeOutcomes[node.id]?.status === "FAILED",
+    );
+    if (failedNode !== undefined) {
+      const failedCount = Object.values(record.nodeOutcomes).filter(
+        (outcome) => outcome.status === "FAILED",
+      ).length;
+      // Fresh budget (failedCount + 1) forces exactly one REPLAN this incarnation.
+      const decision = decideReplan(record, failedNode.id, failedCount + 1);
+      if (decision.action === "REPLAN") {
+        const failedRunId = record.nodeRuns[failedNode.id];
+        const failedResult =
+          failedRunId !== undefined
+            ? await activities.readNodeResult({ childRunId: failedRunId })
+            : undefined;
+        const replanned = await activities.replanRemaining({
+          chainId,
+          plan,
+          failedNodeId: failedNode.id,
+          remainingNodeIds: decision.remainingNodeIds,
+          decision,
+          ...(failedResult?.reason !== undefined ? { failureReason: failedResult.reason } : {}),
+        });
+        if (replanned.status === "SUCCESS") {
+          plan = replanned.plan;
+          await activities.recordNodeReplanned({
+            chainId,
+            failedNodeId: failedNode.id,
+            reason: decision.reason,
+            revisedPlan: replanned.plan,
+            ...(replanned.brief !== undefined ? { brief: replanned.brief } : {}),
+          });
+          record = {
+            ...record,
+            planId: replanned.plan.id,
+            plan: replanned.plan,
+            status: "RUNNING",
+          };
+        }
+      }
+    }
+  }
 
   while (record.status === "RUNNING") {
     const succeeded = Object.entries(record.nodeOutcomes)
@@ -228,6 +283,10 @@ export async function chainLoop(input: ChainLoopInput): Promise<ChainStatus> {
         }
       } else {
         reason = maxReplans > 0 ? decision.reason : undefined;
+        // A node-failure HALT (replans exhausted, or maxReplans 0) is resumable —
+        // `chikory chain resume` grants a fresh heal attempt (WP-521(c)). Only the
+        // malformed-plan break above (unsatisfiable dependency) is a dead FAILED.
+        resumableSeal = true;
       }
     }
     void runStatus; // terminal status is sourced from the journal via readNodeOutcome
@@ -260,7 +319,12 @@ export async function chainLoop(input: ChainLoopInput): Promise<ChainStatus> {
   }
 
   if (record.status === "SUCCESS" || record.status === "FAILED") {
-    await activities.sealChain({ chainId, status: record.status, reason });
+    await activities.sealChain({
+      chainId,
+      status: record.status,
+      reason,
+      ...(record.status === "FAILED" && resumableSeal ? { resumable: true } : {}),
+    });
   }
   return record.status;
 }
