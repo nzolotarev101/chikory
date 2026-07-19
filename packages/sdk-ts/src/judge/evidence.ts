@@ -13,6 +13,7 @@ import { promisify } from "node:util";
 
 import { scrubExecutorEnv } from "../executors/env.js";
 import { runBounded } from "../executors/process.js";
+import { clearStaleIndexLock } from "../executors/workspace.js";
 import type {
   AcceptanceCriterion,
   ArtifactStore,
@@ -123,6 +124,7 @@ export async function collectPerRepoDiffs(input: CollectPerRepoDiffsInput): Prom
     for (const repo of writableRepos) {
       const repoDir = repo.relativePath === "." ? input.workspaceDir : join(input.workspaceDir, repo.relativePath);
       const sinceCommit = input.repoDiffBases?.[repo.name] ?? input.sinceCommit;
+      await clearStaleIndexLock(repoDir);
       await git(repoDir, ["add", "-N", "."]);
       const repoDiff = await git(repoDir, ["diff", sinceCommit]);
       const label = diffEvidenceLabel(repo.name, repo.relativePath);
@@ -136,6 +138,7 @@ export async function collectPerRepoDiffs(input: CollectPerRepoDiffsInput): Prom
       });
     }
   } else {
+    await clearStaleIndexLock(input.workspaceDir);
     await git(input.workspaceDir, ["add", "-N", "."]);
     const diff = await git(input.workspaceDir, ["diff", input.sinceCommit]);
     const repoName = writableRepos[0]?.name ?? ".";
