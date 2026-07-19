@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
   childRunId,
   deriveNodeOutcome,
+  isSeededFailNode,
   planNodeToTaskSpec,
   type ChainNodeTemplate,
 } from "../../src/index.js";
@@ -34,6 +35,35 @@ describe("childRunId", () => {
   it("is a pure function of chainId and nodeId", () => {
     expect(childRunId("chain-abc", "N-2")).toBe("chain-abc-node-N-2");
     expect(childRunId("chain-abc", "N-2")).toBe(childRunId("chain-abc", "N-2"));
+  });
+});
+
+describe("isSeededFailNode (WP-521 force-fail targeting)", () => {
+  it("is never seeded when the seam is unset or empty", () => {
+    expect(isSeededFailNode("N-B", 1, undefined)).toBe(false);
+    expect(isSeededFailNode("N-B", 1, "")).toBe(false);
+  });
+
+  it("targets a 0-based dispatch index for a numeric seam value (planner-agnostic)", () => {
+    // `=1` targets the middle of a 3-node chain regardless of the planner's ids.
+    expect(isSeededFailNode("N-A", 0, "1")).toBe(false);
+    expect(isSeededFailNode("N-B", 1, "1")).toBe(true);
+    expect(isSeededFailNode("N-C", 2, "1")).toBe(false);
+    // the retry incarnation dispatches at a higher index → never re-seeded.
+    expect(isSeededFailNode("N-B-r1", 2, "1")).toBe(false);
+  });
+
+  it("matches a non-numeric seam value by exact id", () => {
+    expect(isSeededFailNode("N-2", 1, "N-2")).toBe(true);
+    expect(isSeededFailNode("N-2-r1", 2, "N-2")).toBe(false);
+  });
+
+  it("matches a non-numeric seam value by trailing id segment (F-146: `=B` → planner `N-B`)", () => {
+    expect(isSeededFailNode("N-B", 1, "B")).toBe(true);
+    expect(isSeededFailNode("N-A", 0, "B")).toBe(false);
+    expect(isSeededFailNode("N-C", 2, "B")).toBe(false);
+    // the retry incarnation `N-B-r1` has trailing segment `r1`, never `B`.
+    expect(isSeededFailNode("N-B-r1", 2, "B")).toBe(false);
   });
 });
 

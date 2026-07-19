@@ -176,6 +176,7 @@ export {
 export {
   childRunId,
   deriveNodeOutcome,
+  isSeededFailNode,
   planNodeToTaskSpec,
   type ChainNodeTemplate,
 } from "./chain/node-spec.js";

@@ -41,10 +41,13 @@ export interface ChainNodeTemplate {
    */
   debugPark?: { beforeStep: number; nodeIndex?: number };
   /**
-   * WP-521 dogfood/test-only: force the node whose id equals this value to seal
-   * FAILED on its FIRST incarnation, so chain heal-by-default replan is exercised
-   * deterministically on a real chain. The retry node (`${id}-r${n}`) is not
-   * targeted, so it runs for real. Frozen host-side from `CHIKORY_SEED_CHAIN_FAIL_NODE`.
+   * WP-521 dogfood/test-only: force the targeted node to seal FAILED on its
+   * FIRST incarnation, so chain heal-by-default replan is exercised
+   * deterministically on a real chain. Targeting is planner-agnostic (see
+   * `isSeededFailNode`): a numeric value is a 0-based dispatch index, otherwise
+   * it matches the node id exactly or its trailing segment. The retry node
+   * (`${id}-r${n}`) is never re-targeted. Frozen host-side from
+   * `CHIKORY_SEED_CHAIN_FAIL_NODE`.
    */
   seedFailNodeId?: string;
   /**
@@ -66,6 +69,31 @@ export interface ChainNodeTemplate {
  */
 export function childRunId(chainId: string, nodeId: string): string {
   return `${chainId}-node-${nodeId}`;
+}
+
+/**
+ * Whether a node is the WP-521 force-fail target for the given seam value
+ * (`CHIKORY_SEED_CHAIN_FAIL_NODE`). The planner mints node ids freely (a real
+ * `chikory chain` emitted `N-A/N-B/N-C`, not `A/B/C`), so an exact-id-only
+ * match silently no-ops when the operator can't predict the id (F-146 residue:
+ * dogfood-105 armed `=B`, planner said `N-B`, seam never fired). Matching is
+ * therefore planner-agnostic:
+ *   - a NUMERIC seam value is a 0-based DISPATCH INDEX (`1` = the middle of a
+ *     3-node chain) — deterministic regardless of the planner's naming;
+ *   - otherwise it matches the node id EXACTLY, or the node id's trailing
+ *     `-`/`_` segment (so `B` targets a planner-minted `N-B`).
+ * The retry incarnation `${id}-r${n}` never re-matches: its trailing segment is
+ * `r${n}`, and it dispatches at a strictly higher index than the first failure.
+ */
+export function isSeededFailNode(
+  nodeId: string,
+  dispatchIndex: number,
+  seedFailNodeId: string | undefined,
+): boolean {
+  if (seedFailNodeId === undefined || seedFailNodeId.length === 0) return false;
+  if (/^\d+$/.test(seedFailNodeId)) return dispatchIndex === Number(seedFailNodeId);
+  if (nodeId === seedFailNodeId) return true;
+  return nodeId.split(/[-_]/).pop() === seedFailNodeId;
 }
 
 /**
