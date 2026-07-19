@@ -1,0 +1,159 @@
+# Dogfood-106: WP-521(c) P3-RUNG-2 — OPERATOR `chikory chain resume` OF A SEALED-FAILED CHAIN
+#   (P3 self-heal / durable-execution track, plan.md §7 / §6 WP-521; WP-530 ladder rung-2). dogfood-105 proved
+#   rung-1 (a chain SELF-heals a mid-chain failure via the default replan). Rung-2 is the OPERATOR-driven
+#   chain-scope kill→resume: a chain that has SEALED FAILED (replan opted out / exhausted) is re-entered by
+#   `chikory chain resume <chain-id>`, which retries the failed node with its failure evidence → SUCCESS. It is
+#   the literal chain analog of run-level `chikory resume` on a resumable-FAILED run (WP-520).
+#
+# ✅ SUBSTRATE ALREADY LANDED (committed 2026-07-19, do NOT rebuild inside the run — §1.2 frozen-substrate
+#   carve-out; the worker clones HEAD at chain start):
+#   - `af9ce6b` WP-521(c): `chikory chain resume` for sealed-FAILED chains — `restoreChain` journal-restore +
+#     reopen `control_event source:"chain_failed_seal"` + `ChainJournal.reopenChain` + `runner.resumeChain`
+#     (refuses SUCCESS/dead-FAILED) + persisted `chains.template_json`. Live proof
+#     `test/chain/chain-resume-live.test.ts`.
+#   - `81066d3` F-154: approve force-seal for an out-of-rubric ESCALATE (so a resumed chain's completion node can
+#     actually SEAL instead of looping — the dogfood-105 N-C failure mode).
+#   The chain runner / resume substrate is FROZEN for this run (dogfood-041/043/103/104/105 lesson: a chain
+#   cannot BUILD and EXERCISE its own runner recovery in one execution).
+#
+# ⚠️ ONE HARNESS PREREQUISITE BEFORE LAUNCH (the WP-531 analog — HAND-FIX + COMMIT FIRST):
+#   A TWO-PHASE chain-dogfood drill. `chain-dogfood` today launches ONE chain and follows it to terminal; rung-2
+#   needs: (1) launch the chain so it SEALS resumable-FAILED (seam forces the middle node + `maxReplans: 0`),
+#   then (2) run `chikory chain resume <chain-id>` and follow THAT to SUCCESS, then (3) harvest. Add a
+#   `CHIKORY_CHAIN_RESUME_DRILL=1` mode to `scripts/dogfood.sh --chain` that, after a resumable-FAILED seal,
+#   issues `chikory chain resume` and follows to terminal (refuse to call it a rung-2 run if the first phase did
+#   not seal resumable-FAILED). Register as WP-532 (plan.md §7). Without it the resume is operator-remembered,
+#   not enforced — exactly the F-146 gap rung-1 hit.
+#
+# CLASS / LADDER. class=product. P3-rung-2 on the WP-530 moat ladder: "operator `chikory chain resume` of a
+#   sealed-FAILED chain retries the failed node → SUCCESS." Moves the flat kill→resume / chain-recovery KPI at
+#   OPERATOR scope (rung-1 moved it at self-heal scope). Node deliverables advance a REAL open product surface —
+#   WP-523 (chain-resume observability): teach the just-landed read-only `chikory chain trace <chain-id>`
+#   (WP-522) to render the `control_event source:"chain_failed_seal"` REOPEN boundary and the resumed node's
+#   recovery, so an operator can SEE a chain was resumed and by which retry it recovered.
+# Ladder-rung: 2
+# Thesis-KPI: OPERATOR CHAIN RESUME — a real 3-node chain SEALS resumable-FAILED (its MIDDLE node fails, replan
+#   opted out), then `chikory chain resume <chain-id>` RE-ENTERS it and the failed node's retry RECOVERS the
+#   chain to SUCCESS. Proof READ FROM THE CHAIN JOURNAL post-run: exactly one `control_event source:
+#   "chain_failed_seal"` reopen boundary appended AFTER the FAILED terminal, the retried node sealed SUCCESS,
+#   every EARLIER sealed node's verdict UNCHANGED, and the chain's LAST terminal is SUCCESS. NOT an AC the
+#   executors satisfy (dogfood-101/103/105 precedent).
+#
+# Format: LOOSE chain goal (the planner emits the linear topology; ACs pin the node deliverables + scoped green).
+#   The rung-2 KPI is journal-read, not an AC. AC greps key on consumed CALL EXPRESSIONS / `spec.x` fields, never
+#   a bare type name (F-90/F-114-safe); occurrence counts via `grep -rl … | grep -v` (F-119); AC checks are
+#   SCOPED vitest runs that fit the 120s judge per-check cap (F-141 — the full suite runs uncapped in the harvest
+#   verify-pack §3); no wall-clock asserts (F-115); the AC-pinned test path IS the delivered file (F-153).
+#
+# ⚠️ SCOPE / DETERMINISM. Node deliverables write ONLY inside `packages/sdk-ts/`. ADDITIVE — no frozen-contract
+#   reshape, NO new dependency, NO key material. Do NOT modify the chain runner, resume/replan substrate,
+#   advance, store WRITE paths, or any frozen contract. The MIDDLE node WILL be force-failed on its first
+#   incarnation and retried on resume — keep each node's deliverable independently completable so it lands on the
+#   retry incarnation.
+#
+# ⚠️ LAUNCH — this is a CHAIN with a RESUME DRILL, launch with `chain-dogfood` (NOT `run-dogfood`):
+#   0. Commit the WP-532 two-phase drill + this spec to HEAD; full suite green.
+#   1. Verify the spec-pick glob resolves to THIS file: `dogfood-106` sorts after `dogfood-105`.
+#   2. `CHIKORY_PREFLIGHT_ONLY=1 CHIKORY_CHAIN_RESUME_DRILL=1 devbox run chain-dogfood` dry-runs the guards at $0.
+#   3. `CHIKORY_SEED_CHAIN_FAIL_NODE=1 CHIKORY_CHAIN_RESUME_DRILL=1 devbox run chain-dogfood`
+#      (`=1` = 0-based dispatch index of the MIDDLE node in a 3-chain; planner-agnostic since F-149).
+#   Post-run: `devbox run -- bash scripts/harvest.sh <chain-id>` then `/dogfood-review <chain-id>`.
+
+name: dogfood-106-wp521c-chain-resume
+goal: >
+  Prove OPERATOR CHAIN RESUME on a REAL Chikory chain of THREE dependent nodes while the chain exercises the
+  ALREADY-LANDED WP-521(c) `chikory chain resume` substrate (the MIDDLE node fails its first incarnation, the
+  chain seals resumable-FAILED with the replan opted out, and `chikory chain resume` re-enters the chain so the
+  failed node's retry recovers it to SUCCESS). This campaign VALIDATES the committed chain resume runner; do NOT
+  redesign or modify the chain runner, the resume/replan substrate, decideReplan, chain-loop.ts, chain contracts,
+  schemas, ADRs, the recovery/read-trace modules, or the harvest scripts inside this run (the worker loaded them
+  at start).
+
+  The planner MUST emit a LINEAR three-node topology on ONE shared observability goal — teach the read-only
+  `chikory chain trace <chain-id>` command (WP-522, already present) to RENDER a chain's RESUME history so an
+  operator can see a chain was resumed and how it recovered: node B depends on node A, node C depends on node B.
+  Each node produces a NON-EMPTY code-and-test diff inside the packages/sdk-ts SDK package; do not add a
+  verification-only node.
+
+    * NODE A — add a pure named export renderChainResumeSummary in a NEW src/chain module that folds a sealed
+      chain journal's `control_event` reopen entries (source "chain_failed_seal") + the node_replanned/node_sealed
+      history into a bounded, deterministic multi-line block naming each reopen boundary and which retry node
+      recovered the chain. Reuse the existing chain journal entry reader rather than re-parsing sqlite. Add a
+      focused passing test. Touch only the new module and its test.
+
+    * NODE B — wire node A's renderer into the read-only trace: `renderChainReadTrace` (src/chain/read-trace.ts)
+      calls renderChainResumeSummary and includes its block when the chain has at least one reopen boundary.
+      Reuse node A's function through a relative ESM module specifier — it must be present via the chain handoff,
+      not recreated. Add its focused test. (This node is the one the force-fail seam targets — its deliverable
+      must land on the retry incarnation.)
+
+    * NODE C — add a focused end-to-end test that seals a small synthetic chain record (a FAILED terminal, one
+      `control_event` source "chain_failed_seal", one `node_replanned`, then a SUCCESS terminal) into a temp
+      chain store and asserts `chikory chain trace` renders a NON-EMPTY resume summary block naming the reopen
+      boundary and the recovering retry node. Import BOTH predecessors' symbols. Touch only the test surface
+      (and a tiny test helper if unavoidable).
+
+  CONSTRAINTS: additive only; strict TypeScript, ESM relative imports, named exports, no default exports, no new
+  I/O beyond the read-only chain-store read the command needs, no new dependency, no key material; run project
+  commands sequentially inside the existing devbox environment. Each node lands its own test and does NOT break
+  an earlier node's tests. Do NOT modify the chain runner, the resume/replan substrate, advance, or store WRITE
+  paths, or any frozen contract.
+
+repos:
+  - url: /Users/nikitazolotarev/repos/chikory
+    writable: true
+
+acceptance_criteria:
+  - id: AC-1
+    description: >
+      Node A landed a pure chain-resume-summary renderer — some `src/chain/` file exports a new
+      `renderChainResumeSummary`. (F-114-safe: greps the function EXPORT symbol, absent on HEAD, not a type name;
+      positive grep only — F-83-safe.)
+    check: >
+      cd packages/sdk-ts &&
+      grep -rlE 'export (function|const) renderChainResumeSummary' src/chain | head -1 | grep -q .
+  - id: AC-2
+    description: >
+      Nodes A+B are co-referenced — the read-only trace renders node A's resume summary: `src/chain/read-trace.ts`
+      references node A's `renderChainResumeSummary(` CALL. (F-97-safe co-reference; F-114-safe — greps the CALL
+      expression, not a type name.)
+    check: >
+      cd packages/sdk-ts &&
+      grep -qE 'renderChainResumeSummary\(' src/chain/read-trace.ts
+  - id: AC-3
+    description: >
+      The new chain-resume-observability tests pass and the SDK stays type- and lint-clean. (SCOPED vitest run
+      over the DELIVERED test files — fits the judge per-check cap; the harvest verify-pack §3 runs the full suite
+      uncapped. F-141 + F-153: the pinned paths ARE the delivered tests.)
+    check: >
+      cd packages/sdk-ts &&
+      pnpm exec tsc --noEmit && pnpm exec eslint src/chain/read-trace.ts &&
+      pnpm exec vitest run test/chain/resume-summary.test.ts test/cli/chain-trace-resume.test.ts
+
+budget_usd: 30
+max_steps: 12
+
+# CONTEXT-ROT (WP-203/WP-207): auto-calibrated window (F-125 mechanism, live-proven 095-099, 101, 103, 105).
+pacing:
+  mode: auto
+  autoCalibrate: true
+
+# UNATTENDED (WP-271): operator-free; a genuine ESCALATE seals a resumable FAILED (WP-520).
+unattended:
+  escalation: seal_resumable_failed
+
+executor:
+  adapter: codex
+  family: openai
+
+judge:
+  family: openai-compat
+  cadence: 2
+  max_cost_share: 0.5
+
+routing:
+  stages:
+    plan: { provider: openai-compat, model: gpt-5.6-sol xhigh }
+    code: { provider: openai-compat, model: gpt-5.6-sol xhigh }
+    review: { provider: openai-compat, model: gpt-5.6-sol xhigh }
+    judge: { provider: openai-compat, model: gemini-3.1-pro-preview }
