@@ -51,7 +51,8 @@ All project tasks (build, lint, test, run, Temporal, scripts) run **inside devbo
 - Enter the environment: `devbox shell` — or prefix one-offs: `devbox run <script>` / `devbox run -- <command>`
 - Canonical task entry points live in `devbox.json` `shell.scripts` (e.g., `devbox run test`, `devbox run lint`, `devbox run temporal-dev`)
 - Run Devbox commands sequentially. Concurrent `devbox run` startup races on `.devbox/gen/scripts/.cmd.sh` under Devbox 0.17.0.
-- Never invoke `pnpm`, `node`, `python`, `pytest`, `ruff`, `temporal`, etc. directly on the host — toolchain versions are pinned in `devbox.json`, host versions are not supported
+- **Already inside devbox? Do NOT nest another `devbox run`.** When `DEVBOX_SHELL_ENABLED=1` (the Chikory run harness always runs the executor inside an activated devbox), the pinned toolchain is already on `PATH` — invoke tools directly (`pnpm exec vitest`, `pnpm exec tsc --noEmit`, `pnpm exec eslint`). A nested `devbox run` cold-starts a fresh Nix env per call; repeated across a verify loop it blows the per-step `maxSeconds` cap (dogfood-105 hung node N-B on 50+ nested calls).
+- Never invoke `pnpm`, `node`, `python`, `pytest`, `ruff`, `temporal`, etc. directly on the host — toolchain versions are pinned in `devbox.json`, host versions are not supported. (Inside an activated devbox, bare `pnpm`/`node` ARE the pinned versions — that satisfies this rule.)
 - Adding a tool = `devbox add <pkg>` (updates `devbox.json` + lock), never a global install
 - CI uses the same `devbox run` scripts — if it isn't runnable via devbox, it doesn't exist
 

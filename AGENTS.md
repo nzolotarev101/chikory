@@ -15,7 +15,8 @@ Every project task runs inside [devbox](https://www.jetify.com/devbox) — build
 - `devbox shell` to enter, or `devbox run <script>` / `devbox run -- <command>` for one-offs
 - Canonical scripts are defined in `devbox.json` (`devbox run test`, `devbox run lint`, `devbox run temporal-dev`)
 - **Run Devbox commands sequentially, never in parallel** — Devbox 0.17.0 races on `.devbox/gen/scripts/.cmd.sh` during concurrent startup
-- **Never** call host toolchains directly (`pnpm`, `node`, `python`, `pytest`, `ruff`, `temporal`) — versions are pinned only in `devbox.json`
+- **Already inside devbox? Do NOT nest another `devbox run`.** When `DEVBOX_SHELL_ENABLED=1` (the Chikory run harness always launches the executor inside an activated devbox), the pinned toolchain is already on `PATH` — run tools **directly**: `pnpm exec vitest …`, `pnpm exec tsc --noEmit`, `pnpm exec eslint …`. A nested `devbox run` cold-starts a fresh Nix env on **every** call; repeating that across an inner verify loop makes a single step exceed its `maxSeconds` wall-clock cap and get killed (dogfood-105: 50+ nested `devbox run` verify calls hung node N-B). Direct invocation here is NOT "host toolchain" — `PATH` already points at the devbox-pinned binaries.
+- **Never** call host toolchains directly (`pnpm`, `node`, `python`, `pytest`, `ruff`, `temporal`) — versions are pinned only in `devbox.json`. (Being *inside* an activated devbox satisfies this: bare `pnpm`/`node` there ARE the pinned versions.)
 - Need a new tool? `devbox add <pkg>` and commit the updated `devbox.json` + `devbox.lock`; no global installs
 - CI runs the same devbox scripts; commands not expressed as devbox scripts are not supported
 
