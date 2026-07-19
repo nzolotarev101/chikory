@@ -69,7 +69,7 @@ goal: >
   running worker loaded them at start).
 
   The planner MUST emit a LINEAR three-node topology on ONE shared observability goal — give Chikory a READ-ONLY
-  `chikory chain trace <chain-id>` command that renders a SEALED chain's journal (topology, per-node verdicts,
+  `chikory chain trace` <chain-id> command that renders a SEALED chain's journal (topology, per-node verdicts,
   the recovery summary, the design summary, and the completion review) WITHOUT a live follow, closing F-144:
   node B depends on node A, node C depends on node B. Each node produces a NON-EMPTY code-and-test diff inside
   the packages/sdk-ts SDK package; do not add a verification-only node.
@@ -80,7 +80,7 @@ goal: >
       renderChainDesignSummary rather than recomputing them. Add a focused passing test. Touch only the new
       module and its test.
 
-    * NODE B — add the CLI wiring: a `chikory chain trace <chain-id>` subcommand that loads the sealed chain
+    * NODE B — add the CLI wiring: a `chikory chain trace` <chain-id> subcommand that loads the sealed chain
       record + entries from the chain store and prints node A's renderer to stdout, exiting non-zero with a
       clear message if the chain id is unknown. Reuse node A's function through a relative ESM module specifier —
       it must be present via the chain handoff, not recreated. Add its focused test. (This node is the one the
