@@ -554,6 +554,26 @@ async function ensureBaseTag(repoDir: string): Promise<string> {
   }
 }
 
+/**
+ * Install workspace dependencies in a freshly-cloned executor workspace so the
+ * executor's own verification commands (`pnpm exec vitest|tsc|eslint`) resolve.
+ * The workspace is a bare `git clone` with no `node_modules`, so without this an
+ * executor that self-verifies hits `vitest: not found` and thrashes until its
+ * step trips the `maxSeconds` wall-clock cap — F-148: dogfood-105 hung nodes on
+ * a deps-less clone. Guarded so it stays a no-op for non-pnpm task repos (no
+ * root `pnpm-lock.yaml`, e.g. the scripted-executor test fixtures) and idempotent
+ * across crash-retries (skipped once `node_modules` exists). `pnpm` resolves from
+ * the devbox-activated PATH the worker already runs under.
+ */
+async function ensureWorkspaceDeps(repoDir: string): Promise<void> {
+  if (!existsSync(join(repoDir, "pnpm-lock.yaml"))) return;
+  if (existsSync(join(repoDir, "node_modules"))) return;
+  await execFileAsync("pnpm", ["install", "--frozen-lockfile", "--prefer-offline"], {
+    cwd: repoDir,
+    maxBuffer: 64 * 1024 * 1024,
+  });
+}
+
 export async function resolveCheckpointCommit(input: {
   dataDir: string;
   runId: string;
@@ -850,6 +870,11 @@ export function createRunnerActivities(deps: RunnerActivityDeps) {
             await git(ws, ["checkout", "-b", `chikory/run-${input.runId}`]);
             await configureWorkspaceRepo(ws);
           }
+        }
+        // Install deps so the executor can run its own verification (F-148).
+        // Idempotent + guarded, so crash-retries and non-pnpm repos are cheap.
+        for (const workspaceRepo of workspaceRepos.all) {
+          await ensureWorkspaceDeps(workspaceRepoDir(ws, workspaceRepo));
         }
         // Tag the run's base state — `<runId>@base` rollbacks resolve to it
         // (WP-132). Steps only run after prepareRun completes, so on a crashed
