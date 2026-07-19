@@ -88,7 +88,7 @@ goal: >
 
     * NODE C — add a focused end-to-end test that seals a small synthetic chain record (including at least one
       `node_replanned` entry) into a temp chain store and asserts the `chikory chain trace` command renders a
-      NON-EMPTY `recovery summary:` block showing the replanned node's elevated attempt count. Import BOTH
+      NON-EMPTY recovery summary: block showing the replanned node's elevated attempt count. Import BOTH
       predecessors' symbols. Touch only the test surface (and a tiny test helper if unavoidable).
 
   CONSTRAINTS: additive only; strict TypeScript, ESM relative imports, named exports, no default exports, no new
