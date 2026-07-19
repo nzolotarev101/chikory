@@ -984,6 +984,19 @@ export async function agentLoop(spec: TaskSpec): Promise<RunStatus> {
             `judge escalation rejected${decision.reason ? `: ${decision.reason}` : ""} — ${verdict.escalateReason ?? verdict.rationale}`,
           );
         }
+        // F-154: approving an OUT-OF-RUBRIC escalate (advisory concern, rubric
+        // fully passing) whose acceptance criteria all pass force-seals SUCCESS —
+        // resuming into RUNNING would re-judge an empty diff, re-raise the same
+        // concern, and loop forever (the operator cannot otherwise seal a node
+        // whose rubric passed). The approval IS the human adjudication F-107 defers
+        // to. A judge-drift (Rule 5 flip-flop) escalate, or one where criteria are
+        // not all passing, still resumes to re-judge.
+        if (verdict.escalateClass === "out_of_rubric" && allCriteriaPass(verdict)) {
+          return seal(
+            "SUCCESS",
+            `approved out-of-rubric escalation, all criteria pass — ${verdict.escalateReason ?? verdict.rationale} (F-107)`,
+          );
+        }
         status = "RUNNING";
       }
     }

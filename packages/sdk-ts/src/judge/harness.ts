@@ -77,6 +77,7 @@ export function buildVerdict(
         ? (opts.lastGoodCheckpointId ?? baseCheckpointId(opts.runId))
         : undefined,
     escalateReason: decision.escalateReason,
+    ...(decision.escalateClass !== undefined ? { escalateClass: decision.escalateClass } : {}),
     costUsd: opts.costUsd,
     tokens: opts.tokens,
     judgeModel: opts.judgeModel,

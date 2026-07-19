@@ -377,6 +377,12 @@ export interface JudgeVerdict {
   rollbackTo?: CheckpointId;
   /** Required when kind=ESCALATE. */
   escalateReason?: string;
+  /**
+   * Origin of an ESCALATE (F-154): `out_of_rubric` (advisory concern, rubric passing —
+   * approve force-seals SUCCESS) vs `judge_drift` (unstable-criterion flip-flop —
+   * approve re-judges). Absent on infra/router escalates.
+   */
+  escalateClass?: "out_of_rubric" | "judge_drift";
   costUsd: number;
   tokens: TokenUsage;
   judgeModel: ModelChoice;

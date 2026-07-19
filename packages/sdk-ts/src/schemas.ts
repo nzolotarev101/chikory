@@ -401,6 +401,7 @@ export const JudgeVerdictSchema = z
     rationale: z.string().min(1),
     rollbackTo: z.string().min(1).optional(),
     escalateReason: z.string().min(1).optional(),
+    escalateClass: z.enum(["out_of_rubric", "judge_drift"]).optional(),
     costUsd: z.number().nonnegative(),
     tokens: TokenUsageSchema,
     judgeModel: ModelChoiceSchema,

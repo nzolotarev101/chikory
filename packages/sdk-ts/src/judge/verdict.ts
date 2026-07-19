@@ -17,6 +17,13 @@ export interface VerdictDecision {
   kind: "PROCEED" | "ROLLBACK" | "HALT" | "ESCALATE" | "BRANCH";
   rationale: string;
   escalateReason?: string;
+  /**
+   * Origin of an ESCALATE (F-154): `judge_drift` (Rule 5 flip-flop — the diff is
+   * unstable, re-judge on approve) vs `out_of_rubric` (Rule 4 advisory concern with
+   * the rubric fully passing — approve force-seals SUCCESS instead of re-judging an
+   * empty diff into an infinite approve loop). Absent on infra/router escalates.
+   */
+  escalateClass?: "out_of_rubric" | "judge_drift";
 }
 
 function flipFlops(history: boolean[]): number {
@@ -112,13 +119,13 @@ export function computeVerdict(
     const reason =
       `criterion ${flippers.map((s) => s.id).join(", ")} flip-flopped ` +
       `${FLIP_FLOPS_TO_ESCALATE}+ times across verdicts — judge drift or unstable criterion (JD-7)`;
-    return { kind: "ESCALATE", rationale: reason, escalateReason: reason };
+    return { kind: "ESCALATE", rationale: reason, escalateReason: reason, escalateClass: "judge_drift" };
   }
 
   // Rule 4 — concerns with no rubric basis → ESCALATE (ambiguity belongs to humans).
   if (form.concerns.length > 0 && rubricFails.length === 0) {
     const reason = `judge raised concerns outside the rubric: ${form.concerns.join(" | ")}`;
-    return { kind: "ESCALATE", rationale: reason, escalateReason: reason };
+    return { kind: "ESCALATE", rationale: reason, escalateReason: reason, escalateClass: "out_of_rubric" };
   }
 
   // Rule 2 / default — PROCEED. All-criteria-pass → the runner seals run-level

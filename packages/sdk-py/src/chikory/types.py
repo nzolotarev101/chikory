@@ -322,6 +322,7 @@ class JudgeVerdict(ContractModel):
     rationale: str
     rollback_to: CheckpointId | None = None
     escalate_reason: str | None = None
+    escalate_class: Literal["out_of_rubric", "judge_drift"] | None = None
     cost_usd: float
     tokens: TokenUsage
     judge_model: ModelChoice

@@ -248,6 +248,40 @@ describe.skipIf(address === null)("verdict gating (WP-132)", () => {
     expect(verdictKinds(dataDir, handle.runId)).toEqual(["ESCALATE", "PROCEED"]);
   });
 
+  test("F-154: approve on an out-of-rubric ESCALATE with all criteria passing force-seals SUCCESS", async () => {
+    // The completion milestone: every acceptance criterion passes, but the judge
+    // raises an advisory concern OUTSIDE the rubric → Rule 4 ESCALATE. Resuming
+    // into RUNNING re-judges an empty diff, which re-raises the SAME concern —
+    // the F-154 infinite approve loop. The fix seals SUCCESS on approve, so the
+    // second (identical) form is NEVER consumed.
+    const wire = await startFakeJudgeWire([
+      judgeForm({ criteria: { "AC-1": true }, concerns: ["prefers a different file layout"] }),
+      judgeForm({ criteria: { "AC-1": true }, concerns: ["prefers a different file layout"] }),
+    ]);
+    const { dataDir, handle } = await run(wire, {});
+
+    await waitFor(
+      async () => ((await handle.status()).status === "AWAITING_APPROVAL" ? true : undefined),
+      { what: "run to await approval" },
+    );
+    await handle.approve({ approved: true, reason: "layout is fine" });
+
+    const report = await awaitTerminal(handle);
+    expect(report.status).toBe("SUCCESS");
+    // Only the FIRST escalate was judged — the fix sealed on approve instead of
+    // re-judging the empty diff into the same concern (no second ESCALATE).
+    expect(verdictKinds(dataDir, handle.runId)).toEqual(["ESCALATE"]);
+
+    const journal = new Journal(journalPath(dataDir, handle.runId));
+    try {
+      const terminal = journal.entries("terminal")[0]!.payload as { status: string; reason?: string };
+      expect(terminal.status).toBe("SUCCESS");
+      expect(terminal.reason ?? "").toContain("approved out-of-rubric escalation");
+    } finally {
+      journal.close();
+    }
+  });
+
   test("ESCALATE + reject seals FAILED with the judge's reason", async () => {
     const wire = await startFakeJudgeWire([
       judgeForm({ criteria: { "AC-1": false }, concerns: ["unexplained dependency swap"] }),
