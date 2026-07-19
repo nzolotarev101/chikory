@@ -24,6 +24,7 @@ import { readFile } from "node:fs/promises";
 
 import { classifyPlanGateFailure } from "../chain/plan-gate-failure.js";
 import { renderPlanGateFailureNotice } from "../chain/plan-gate-notice.js";
+import { renderChainReadTrace } from "../chain/read-trace.js";
 import { ChainJournal, chainRecordFrom, type ChainEntry } from "../chain/store.js";
 import { serializeWriteConflicts } from "../chain/write-set.js";
 import type { ChainNodeTemplate } from "../chain/node-spec.js";
@@ -350,6 +351,50 @@ function readChainRecord(dataDir: string, chainId: string): ChainRecord | undefi
   const journal = new ChainJournal(path);
   try {
     return chainRecordFrom(journal);
+  } finally {
+    journal.close();
+  }
+}
+
+/** Route read-only `chikory chain` subcommands without entering a write path. */
+export function cmdChainReadSubcommand(
+  positionals: readonly string[],
+  flags: CommonFlags,
+  deps: CliDeps = {},
+): number | undefined {
+  if (positionals[0] !== "trace") return undefined;
+
+  const chainId = positionals[1];
+  if (chainId === undefined) {
+    io(deps).err(`chikory: missing chain-id (see chikory --help)`);
+    return 1;
+  }
+  return cmdChainTrace({ chainId, ...flags }, deps);
+}
+
+/** `chikory chain trace <chain-id>` — render a sealed chain from its local journal. */
+export function cmdChainTrace(
+  args: { chainId: string } & CommonFlags,
+  deps: CliDeps = {},
+): number {
+  const ioPair = io(deps);
+  const path = chainJournalPath(args.dataDir, args.chainId);
+  if (!existsSync(path)) {
+    ioPair.err(
+      `chikory: unknown chain id '${args.chainId}' (no journal under ${args.dataDir}/chains)`,
+    );
+    return 1;
+  }
+
+  const journal = new ChainJournal(path);
+  try {
+    const record = chainRecordFrom(journal);
+    if (record === undefined) {
+      ioPair.err(`chikory: unknown chain id '${args.chainId}' (journal has no chain record)`);
+      return 1;
+    }
+    ioPair.out(renderChainReadTrace(record, journal.entries()));
+    return 0;
   } finally {
     journal.close();
   }

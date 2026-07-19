@@ -20,7 +20,7 @@ import {
   cmdTrace,
   type CommonFlags,
 } from "./commands.js";
-import { cmdChain, cmdChainApprove, cmdChainResume } from "./chain.js";
+import { cmdChain, cmdChainApprove, cmdChainReadSubcommand, cmdChainResume } from "./chain.js";
 import { cmdLand, type LandDeps } from "./land.js";
 
 export const HELP = `chikory — vendor-neutral control plane for long-running, self-correcting agents
@@ -33,6 +33,8 @@ commands:
   chain <goal.yaml>   decompose a goal into a plan, gate it with the
                       different-family plan meta-judge, then run each node as a
                       child run through the durable chain executor (WP-219)
+  chain trace <chain-id>    render a bounded read-only trace from the sealed
+                      chain record and journal
   chain approve <chain-id>  answer a parked chain node's ESCALATE and follow the
                       chain to its terminal state (default approves; WP-241)
   chain resume <chain-id>   clear a parked chain node's budget cap (--add-budget)
@@ -220,8 +222,11 @@ export async function main(argv: string[], deps: LandDeps = {}): Promise<number>
       return cmdRun({ file, watch: values["watch"] === true, ...flags }, deps);
     }
     case "chain": {
-      // `chain approve|resume <chain-id>` unblock a parked child at chain level
-      // (WP-241); anything else is a goal spec file to launch.
+      // Read-only subcommands dispatch in chain.ts; approve/resume unblock a
+      // parked child at chain level (WP-241); anything else launches a goal.
+      const readResult = cmdChainReadSubcommand(positionals, flags, deps);
+      if (readResult !== undefined) return readResult;
+
       const sub = positionals[0];
       if (sub === "approve" || sub === "resume") {
         const chainId = positionals[1];

@@ -158,6 +158,10 @@ export {
 } from "./chain/compaction-note.js";
 export { classifyPlanGateFailure, PLAN_GATE_INFRA_REASON_PREFIXES } from "./chain/plan-gate-failure.js";
 export { renderPlanGateFailureNotice } from "./chain/plan-gate-notice.js";
+export {
+  MAX_CHAIN_READ_TRACE_CHARS,
+  renderChainReadTrace,
+} from "./chain/read-trace.js";
 export { renderChainTrace } from "./chain/trace.js";
 export { readyNodes } from "./chain/sequencing.js";
 export { hasDependencyCycle } from "./chain/validation.js";
