@@ -5,20 +5,18 @@ This is the complete operating manual for executing Phase 2+ work packages
 task spec for a WP (every field explained), how to launch, supervise, and
 recover a run, and how to land the result as a normal PR.
 
-**Status (2026-07-15, bounded — update discipline: REPLACE this block, ≤15 lines;
+**Status (2026-07-20, bounded — update discipline: REPLACE this block, ≤15 lines;
 displaced prose moves verbatim to [`PLAN-HISTORY.md`](PLAN-HISTORY.md); per-run detail:
 `docs/reports/dogfood-NNN.md`; queue + course correction: `plan.md` §6).**
-Latest: dogfood-105 — **WP-521 (chain heal-by-default) P3-rung-1 ✅ CLIMBED: chain self-heal PROVEN 🟢 (journal), chain did NOT fully seal 🟡**
-(`chain-da846d34-d528-41b0-9b13-d9c28c64f807`, `docs/reports/dogfood-105.md`, HALTED 8 steps $8.92, seam `=1`). **Thesis-KPI 🟢:** a real 3-node chain force-failed its
-MIDDLE node → `node_replanned` (evidence-enriched) → **N-B-r1 recovered to SUCCESS**, both halves journal-read (first chain-recovery tick since 097); ledger `rung=1`.
-Bonus node N-C (WP-522 read-only `chikory chain trace`, delivered correct + independently verified) could not SEAL — an out-of-rubric approve loop (🔴 **F-154**) after a
-genuine judge true-positive (🟡 **F-153**, AC-3 pinned the wrong test file); **WP-522 HARVESTED + landed this review (5 files, 941 TS green) → F-144 CLOSED.** Six launches to climb, each
-clearing a harness wall: **F-148 CLOSED** (`a2abd71` install deps in executor clone) · 🔴 **F-149** seam keyed on planner id not dispatch idx (`903be2f`, launch `=1`) ·
-🟡 **F-150** executor nests `devbox run` (`6347c86`, inert) · 🟡 **F-151** plan-gate mandates prose literal (`8a0580f`) · 🔴 **F-152** stale git `index.lock` → activity
-crash-loop (`8274c1f`). 5 fixes committed + pushed; F-153/F-154 open WP candidates (hand-fix owed for the F-154 approve force-seal). **NEXT headline (progression
-✅ PROGRESSING — chain-recovery KPI 0→1): P3-rung-2 = operator `chikory chain resume` of a sealed-FAILED chain (WP-521c) — needs the (c) substrate + F-154 fix
-hand-landed first; the halted `chain-da846d34` is itself a candidate resume substrate.**
-See §5 (ladders always exist — first dogfood of a phase authors its ladder), §7, §8, §1.5, §3. (Earlier — dogfood-104 WP-521 rung-1 attempt → PLAN-HISTORY.md 2026-07-19.)
+Latest: dogfood-106 — **WP-532 (two-phase chain-resume drill) P3-rung-2 ✅ CLIMBED: `chikory chain resume` PROVEN 🟢 on a real sealed-FAILED chain, first time the operator
+resume CLI path (not just chain-internal self-heal) has recovered a chain.** (`chain-babfabb0-4f4b-46c0-a5c3-42ac27153709`, `docs/reports/dogfood-106.md`, SUCCESS 4 steps
+$5.55, seam `=1`.) 1st launch hit a real bug: `chikory chain resume` printed "resume delivered" then silently reprinted the pre-resume FAILED trace verbatim and exited 1 —
+node N-B-r1 never dispatched. 🔴 **F-155 → FIXED same session** (`9e01e09`): `followChain` raced the new `chainLoop` workflow start — its terminal check honored the
+journal's PRE-EXISTING FAILED tail before the new workflow had appended anything. Now takes a `sinceIdx` baseline (journal length snapshotted before `resumeChain`) and
+waits for a genuinely new entry past it. Re-ran end to end: `N-B-r1` retried for real, chain recovered to SUCCESS, `chikory chain trace` renders the resume history
+(WP-532 delivery, `a7fc10b`, independently re-verified against landed HEAD). F-153/F-154 (dogfood-105, out-of-rubric approve-loop force-seal) remain open track-B.
+**NEXT headline: next `/dogfood-review` picks the next WP-530 ladder rung (P3-rung-3) via the progression gate — not yet run.**
+See §5 (ladders always exist — first dogfood of a phase authors its ladder), §7, §8, §1.5, §3. (Earlier — dogfood-105 WP-521 rung-1 → PLAN-HISTORY.md 2026-07-20.)
 
 Related docs: [`docs/spec/task-spec.md`](spec/task-spec.md) (schema
 reference) · [`docs/TASK-PROTOCOL.md`](TASK-PROTOCOL.md) (WP etiquette, §7 is
@@ -695,6 +693,7 @@ broken (a false-green, not a follow-on fix).
 | A killed step's retry crash-loops forever with `git … 'File exists'` / `.git/index.lock`, each ~20m attempt re-hitting it | **A step SIGKILLed mid-git leaves a stale `.git/index.lock`; diff-capture's `git add -N .` hard-throws out of the `executeStep` activity → Temporal retries forever** (dogfood-105 **F-152 → `8274c1f`**). **Fixed:** `clearStaleIndexLock` runs before every diff-capture `add -N .` (single-writer workspace → a leftover lock is always stale). Seeing this on old code = rebuild the SDK. |
 | An AC `check` pins one test file but the loose goal let the executor put the delivered test elsewhere → the check exits 0 WITHOUT running the new test | **AC-file-pin blind spot** (dogfood-105 **F-153**, sibling of F-82/F-83; the family-diverse judge caught it and escalated — a genuine true-positive). AC-3 pinned `test/chain/read-trace.test.ts` but the E2E test landed in `test/cli/chain-trace.test.ts`, so the pinned check passed vacuously. **Authoring rule (open WP candidate):** an AC that verifies a test ran must target the test DIRECTORY/suite, or the goal must pin the exact test path the executor will use. |
 | `chikory chain approve <chain-id>` on an out-of-rubric ESCALATE re-judges instead of sealing → the node loops (empty-diff approve loop), the operator can't seal it | **Approve on an out-of-rubric ESCALATE (rubric passed, advisory concern persists) resumes `status=RUNNING` and re-judges** (dogfood-105 **F-154**, `agent-loop.ts:968-988`). With the delivery already complete, the resumed step produces an empty diff → the judge re-escalates → infinite loop; there is no force-seal path. A code fix can't rescue an IN-FLIGHT run (Temporal pins the workflow code) — kill it and stop. **Open WP candidate (hand-fix owed):** approve on an out-of-rubric ESCALATE should offer force-seal-SUCCESS, not only resume+re-judge. This is a rung-2 (operator chain resume) prerequisite. |
+| `chikory chain resume <chain-id>` on a sealed-FAILED chain prints "resume delivered" then immediately reprints the OLD failed trace verbatim (identical timestamps) and exits 1 — the retry node never dispatches | **`followChain` raced the freshly-started `chainLoop` workflow** (dogfood-106 **F-155 → FIXED same session, `9e01e09`**). `client.workflow.start` only enqueues the start and returns; `followChain`'s poll loop starts immediately and its FIRST tick often lands before the new workflow's worker has picked up the task, so it reads only the PRE-EXISTING FAILED tail from before the resume and treats that stale state as the resume's own terminal verdict. **Fixed:** `followChain` takes an optional `sinceIdx` baseline; `hostChainResumeAndFollow` snapshots the journal's entry count before calling `resumeChain`, and the terminal check now requires at least one entry PAST that baseline (a genuine reopen/dispatch) before honoring a verdict. Seeing this on old code = rebuild the SDK. |
 
 ## 8. Known P1 limitations (so you don't fight them)
 

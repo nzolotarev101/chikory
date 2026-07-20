@@ -43,3 +43,4 @@ run,wp,mode,outcome,steps,cost_usd,spec_format,class,resumes,judge_catches,rung,
 103,WP-311,chain,SUCCESS,3,4.46,loose,product,0,0,4,0
 104,WP-521,chain,SUCCESS,6,5.51,loose,product,1,0,0,0
 105,WP-521,chain,HALTED,8,8.92,loose,product,1,1,1,0
+106,WP-532,chain,SUCCESS,4,5.55,loose,product,1,0,2,0
