@@ -1,29 +1,71 @@
-# Draft brownfield task — reproduce-then-fix from a real issue report.
+# PINNED brownfield task — reproduce-then-fix from a real issue report.
 # Stresses: diagnosis before edits (most agent failures here are confident
 # wrong fixes), terminal-state discipline (knowing when NOT to keep digging),
-# judge value (a fix that greens the repro but breaks a sibling path).
+# judge value (a fix that greens the reported repro but leaves a sibling path
+# broken — narrow patch vs. root cause).
+#
+# Source: colinhacks/zod issue #5826 ("`.default()` shallow-copies"), fixed by
+# PR #5855 (merged as 34f601590351e5d3a57fe20c001155940ba65324). `.default()`
+# on a Map/Set-typed schema returned the SAME mutable instance on every parse
+# of `undefined` — `shallowClone` (packages/zod/src/v4/core/util.ts) only
+# special-cased plain objects and arrays, so Map/Set fell through and leaked
+# shared state across independent parses.
 id: brownfield-003
 class: brownfield
-status: draft
+status: pinned
 repo:
-  url: TBD # candidate profile: OSS repo with a confirmed, non-trivial, still-open (or revert-able fixed) bug whose report includes repro steps but no root cause
-  ref: TBD # pinned BEFORE the upstream fix
+  url: https://github.com/colinhacks/zod
+  ref: b6b1288277e6ca87dab0ad1c7251b92612b7445c # pinned BEFORE #5855 (parent of the fix commit on main)
 horizon: 3-6h
 goal: |
-  Starting from the issue report only, write a failing regression test that
+  Starting from the issue report only (`.default()` returns the same mutable
+  Map/Set instance on every parse of `undefined`, so a mutation on one parse
+  result leaks into the next), write a failing regression test that
   reproduces the bug, then fix the root cause. The fix must not change any
-  other observable behavior; the regression test must fail on the pinned ref
-  and pass on the result.
+  other observable behavior and must not be a narrow patch that only handles
+  the exact type reported in the issue.
 requirements:
   - id: R1
-    description: new regression test fails on the base ref, passes after the fix
-    check: TBD
+    description: dependencies install clean (pnpm workspace, frozen lockfile)
+    check: npx -y pnpm@10.12.1 install --frozen-lockfile
   - id: R2
-    description: full pre-existing suite green
-    check: TBD
+    description: a new or modified test reproduces the reported Map-default sharing bug and passes on the final code
+    prerequisites: [R1]
+    check: |
+      set -e
+      git add -A -N .
+      NEW=$(git diff --name-only b6b1288277e6ca87dab0ad1c7251b92612b7445c -- '*.test.ts')
+      test -n "$NEW"
+      for f in $NEW; do npx -y pnpm@10.12.1 exec vitest run --project zod "$f"; done
   - id: R3
-    description: fix is root-cause (upstream maintainer fix, if one exists, touches the same mechanism — scored by harness rubric, not string match)
-    check: TBD
+    description: full pre-existing zod test suite is green (no other observable behavior changed)
+    prerequisites: [R1]
+    check: npx -y pnpm@10.12.1 exec vitest run --project zod
+  - id: R4
+    description: the fix is root-cause, not a narrow Map-only patch — the same shared-state bug is independently verified fixed for Set-typed defaults too, which the issue never reported
+    prerequisites: [R1]
+    check: |
+      set -e
+      mkdir -p packages/zod/src/v4/classic/tests
+      cat > packages/zod/src/v4/classic/tests/__root-cause-check.test.ts <<'TESTEOF'
+      import { expect, test } from "vitest";
+      import { z } from "zod/v4";
+
+      test("root-cause check: Set defaults are ALSO cloned, not just Map", () => {
+        const schema = z.set(z.string()).default(new Set());
+        const result1 = schema.parse(undefined);
+        result1.add("x");
+        const result2 = schema.parse(undefined);
+        expect(result2.size).toBe(0);
+      });
+      TESTEOF
+      npx -y pnpm@10.12.1 exec vitest run --project zod packages/zod/src/v4/classic/tests/__root-cause-check.test.ts
 metrics_notes: |
-  Cost/time distribution split between diagnosis and edit phases; false-fix
-  rate (greens R1 but fails R3) is the judge's headline catch opportunity.
+  Cost/time distribution split between diagnosis (reading shallowClone,
+  finding every mutable-type branch) and edit phases; false-fix rate (R1-R3
+  green but R4 red — the classic "fixed the reported case, missed the
+  sibling") is the judge's headline catch opportunity. R4 is a mechanical
+  root-cause proxy that does NOT depend on the agent's chosen test file
+  layout or name — it writes and runs its own probe directly, so it cannot
+  be gamed by a differently-shaped regression test.
+tags: [bug-archaeology, regression, mutable-state]

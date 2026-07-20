@@ -8,15 +8,15 @@ recover a run, and how to land the result as a normal PR.
 **Status (2026-07-20, bounded — update discipline: REPLACE this block, ≤15 lines;
 displaced prose moves verbatim to [`PLAN-HISTORY.md`](PLAN-HISTORY.md); per-run detail:
 `docs/reports/dogfood-NNN.md`; queue + course correction: `plan.md` §6).**
-Latest: dogfood-106 — **WP-532 (two-phase chain-resume drill) P3-rung-2 ✅ CLIMBED: `chikory chain resume` PROVEN 🟢 on a real sealed-FAILED chain, first time the operator
-resume CLI path (not just chain-internal self-heal) has recovered a chain.** (`chain-babfabb0-4f4b-46c0-a5c3-42ac27153709`, `docs/reports/dogfood-106.md`, SUCCESS 4 steps
-$5.55, seam `=1`.) 1st launch hit a real bug: `chikory chain resume` printed "resume delivered" then silently reprinted the pre-resume FAILED trace verbatim and exited 1 —
-node N-B-r1 never dispatched. 🔴 **F-155 → FIXED same session** (`9e01e09`): `followChain` raced the new `chainLoop` workflow start — its terminal check honored the
-journal's PRE-EXISTING FAILED tail before the new workflow had appended anything. Now takes a `sinceIdx` baseline (journal length snapshotted before `resumeChain`) and
-waits for a genuinely new entry past it. Re-ran end to end: `N-B-r1` retried for real, chain recovered to SUCCESS, `chikory chain trace` renders the resume history
-(WP-532 delivery, `a7fc10b`, independently re-verified against landed HEAD). F-153/F-154 (dogfood-105, out-of-rubric approve-loop force-seal) remain open track-B.
-**NEXT headline: next `/dogfood-review` picks the next WP-530 ladder rung (P3-rung-3) via the progression gate — not yet run.**
-See §5 (ladders always exist — first dogfood of a phase authors its ladder), §7, §8, §1.5, §3. (Earlier — dogfood-105 WP-521 rung-1 → PLAN-HISTORY.md 2026-07-20.)
+dogfood-106 climbed P3-rung-2 (`chikory chain resume` proven live, F-155 fixed). Since then, **dogfood-107 (`docs/reports/dogfood-107.md`, 2026-07-20, NOT a
+`chikory run` — hand-authored WP-302 prerequisite work, no run-id)** cleared P3-rung-3's hard blocker: `benchmarks/tasks/brownfield-003-bug-archaeology.yaml` is now
+**PINNED** — a real `colinhacks/zod` bug (issue #5826, `.default()` shallow-copies Map/Set, upstream fix PR #5855) at ref `b6b1288277e6ca87dab0ad1c7251b92612b7445c`,
+4 check-graded requirements including a mechanical root-cause discriminator (independently probes the unreported `Set` sibling — proven to reject a hand-constructed
+narrow Map-only patch). Verified end-to-end through the REAL harness (`devbox run bench -- run --adapter command`): 2/4 satisfied on the unmodified pinned tree,
+4/4 on the real fix. **P3-rung-3 itself is NOT YET climbed** — only dry-run via the `command` baseline adapter, never through `chikory` + a real judge (what the rung
+requires: a genuine I-SR/D-SR score artifact). **NEXT: launch `devbox run bench -- run --tasks benchmarks/tasks --filter brownfield-003 --adapter chikory --judge-cmd
+'<keyless CLI judge>'`** — expect a real 3-6h external-repo horizon, materially different cost/time shape than a normal `examples/dogfood/` headline.
+See §5 (ladders always exist — first dogfood of a phase authors its ladder), §7, §8, §1.5, §3. (Earlier — dogfood-106 WP-532 rung-2 → PLAN-HISTORY.md 2026-07-20.)
 
 Related docs: [`docs/spec/task-spec.md`](spec/task-spec.md) (schema
 reference) · [`docs/TASK-PROTOCOL.md`](TASK-PROTOCOL.md) (WP etiquette, §7 is

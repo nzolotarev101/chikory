@@ -40,7 +40,17 @@ Design rules (inherited from dogfood lessons; expanded in AUTHORING.md):
 
 ## Status
 
-Three brownfield drafts below double as long-horizon dogfood spec sources for
-the WP-265 ladder (rung 4+). All three validate against the frozen v1 loader;
-next step per task is pinning (repo sha + reproducible checks — see
-AUTHORING.md lifecycle).
+**`brownfield-003` PINNED 2026-07-20** (P3-rung-3 prerequisite, WP-302 —
+`docs/reports/dogfood-107.md`): `colinhacks/zod` @ `b6b1288277e6ca87dab0ad1c7251b92612b7445c`
+(the commit before upstream PR #5855 fixed issue #5826, `.default()`
+shallow-copying Map/Set). 4 check-graded requirements (install-clean, the
+regression test, full-suite-green, and a root-cause discriminator that
+independently probes the Set-typed sibling the issue never reported — no
+narrow Map-only patch can pass it). Verified end-to-end through the real
+harness (`devbox run bench -- run --adapter command`): 2/4 satisfied on the
+unmodified pinned tree (the bug is genuinely present), 4/4 on the real
+upstream fix. `brownfield-001`/`brownfield-002` remain drafts — still need a
+real repo/ref pinned the same way before they're runnable.
+
+`brownfield-001`/`002`/`003` double as long-horizon dogfood spec sources for
+the WP-265 ladder (rung 4+) once pinned.
