@@ -1,6 +1,7 @@
 import type { ChainRecord, PlanNode } from "../types.js";
 import { renderChainDesignSummary } from "./chain-design-summary.js";
 import { renderChainRecoverySummary } from "./chain-recovery-summary.js";
+import { renderChainResumeSummary } from "./resume-summary.js";
 import type { ChainCompletionReviewPayload, ChainEntry } from "./store.js";
 
 export const MAX_CHAIN_READ_TRACE_CHARS = 16_000;
@@ -94,6 +95,7 @@ export function renderChainReadTrace(
     renderChainRecoverySummary(record.plan, record.nodeOutcomes, entries),
   );
   const design = summaryLines(renderChainDesignSummary(record.plan, record.nodeOutcomes));
+  const resume = renderChainResumeSummary(entries);
 
   const lines = [
     boundedLine(
@@ -111,6 +113,9 @@ export function renderChainReadTrace(
     "completion review:",
     completionReviewLine(entries),
   ];
+  if (resume.length > 0) {
+    lines.push("resume summary:", ...resume.split("\n"));
+  }
 
   return limit(lines.join("\n"), MAX_CHAIN_READ_TRACE_CHARS);
 }
