@@ -81,7 +81,7 @@ goal: >
       recovered the chain. Reuse the existing chain journal entry reader rather than re-parsing sqlite. Add a
       focused passing test. Touch only the new module and its test.
 
-    * NODE B — wire node A's renderer into the read-only trace: `renderChainReadTrace` (src/chain/read-trace.ts)
+    * NODE B — wire node A's renderer into the read-only trace: renderChainReadTrace (src/chain/read-trace.ts)
       calls renderChainResumeSummary and includes its block when the chain has at least one reopen boundary.
       Reuse node A's function through a relative ESM module specifier — it must be present via the chain handoff,
       not recreated. Add its focused test. (This node is the one the force-fail seam targets — its deliverable
