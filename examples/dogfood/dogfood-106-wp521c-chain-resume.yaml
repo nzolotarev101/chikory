@@ -62,21 +62,21 @@
 name: dogfood-106-wp521c-chain-resume
 goal: >
   Prove OPERATOR CHAIN RESUME on a REAL Chikory chain of THREE dependent nodes while the chain exercises the
-  ALREADY-LANDED WP-521(c) `chikory chain resume` substrate (the MIDDLE node fails its first incarnation, the
-  chain seals resumable-FAILED with the replan opted out, and `chikory chain resume` re-enters the chain so the
+  ALREADY-LANDED WP-521(c) chikory chain resume substrate (the MIDDLE node fails its first incarnation, the
+  chain seals resumable-FAILED with the replan opted out, and chikory chain resume re-enters the chain so the
   failed node's retry recovers it to SUCCESS). This campaign VALIDATES the committed chain resume runner; do NOT
   redesign or modify the chain runner, the resume/replan substrate, decideReplan, chain-loop.ts, chain contracts,
   schemas, ADRs, the recovery/read-trace modules, or the harvest scripts inside this run (the worker loaded them
   at start).
 
   The planner MUST emit a LINEAR three-node topology on ONE shared observability goal — teach the read-only
-  `chikory chain trace <chain-id>` command (WP-522, already present) to RENDER a chain's RESUME history so an
+  chikory chain trace command (WP-522, already present) to RENDER a chain's RESUME history so an
   operator can see a chain was resumed and how it recovered: node B depends on node A, node C depends on node B.
   Each node produces a NON-EMPTY code-and-test diff inside the packages/sdk-ts SDK package; do not add a
   verification-only node.
 
     * NODE A — add a pure named export renderChainResumeSummary in a NEW src/chain module that folds a sealed
-      chain journal's `control_event` reopen entries (source "chain_failed_seal") + the node_replanned/node_sealed
+      chain journal's control_event reopen entries (source "chain_failed_seal") + the node_replanned/node_sealed
       history into a bounded, deterministic multi-line block naming each reopen boundary and which retry node
       recovered the chain. Reuse the existing chain journal entry reader rather than re-parsing sqlite. Add a
       focused passing test. Touch only the new module and its test.
@@ -88,8 +88,8 @@ goal: >
       must land on the retry incarnation.)
 
     * NODE C — add a focused end-to-end test that seals a small synthetic chain record (a FAILED terminal, one
-      `control_event` source "chain_failed_seal", one `node_replanned`, then a SUCCESS terminal) into a temp
-      chain store and asserts `chikory chain trace` renders a NON-EMPTY resume summary block naming the reopen
+      control_event source "chain_failed_seal", one node_replanned, then a SUCCESS terminal) into a temp
+      chain store and asserts chikory chain trace renders a NON-EMPTY resume summary block naming the reopen
       boundary and the recovering retry node. Import BOTH predecessors' symbols. Touch only the test surface
       (and a tiny test helper if unavoidable).
 
