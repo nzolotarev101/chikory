@@ -360,6 +360,20 @@ function readChainRecord(dataDir: string, chainId: string): ChainRecord | undefi
   }
 }
 
+/** Count of journal entries already sealed — the `followChain` resume baseline. */
+function chainEntryCount(dataDir: string, chainId: string): number {
+  const path = chainJournalPath(dataDir, chainId);
+  if (!existsSync(path)) return 0;
+  const journal = new ChainJournal(path);
+  try {
+    let count = 0;
+    for (const _entry of journal.entries()) count += 1;
+    return count;
+  } finally {
+    journal.close();
+  }
+}
+
 /** Route read-only `chikory chain` subcommands without entering a write path. */
 export function cmdChainReadSubcommand(
   positionals: readonly string[],
@@ -415,11 +429,21 @@ export function cmdChainTrace(
 export async function followChain(
   chainId: string,
   flags: CommonFlags,
-  opts: { watch: boolean; deps: CliDeps; io: Io },
+  // `sinceIdx` (WP-521(c) resume-follow fix): a resume re-enters a chain whose
+  // journal already holds a terminal FAILED tail. Starting the terminal check
+  // at idx 0 raced the freshly-started workflow — drain()'s FIRST poll (often
+  // before the worker even picks up the task) saw only the pre-existing FAILED
+  // entries and returned instantly, reporting the stale seal as the resume's
+  // own outcome. Callers resuming a sealed chain pass the entry count AT
+  // RESUME TIME; the terminal check then waits for at least one entry past
+  // that baseline (a genuine reopen/dispatch) before honoring a verdict.
+  opts: { watch: boolean; deps: CliDeps; io: Io; sinceIdx?: number },
 ): Promise<ChainRecord | undefined> {
   const interval = opts.deps.pollIntervalMs ?? 1000;
   const path = chainJournalPath(flags.dataDir, chainId);
-  let nextIdx = 0;
+  const baselineIdx = opts.sinceIdx ?? 0;
+  let nextIdx = baselineIdx;
+  let sawNewEntry = false;
   let announcedPark: string | undefined;
 
   function drain(): ChainRecord | undefined {
@@ -430,6 +454,7 @@ export async function followChain(
       for (const entry of journal.entries()) {
         if (entry.idx < nextIdx) continue;
         nextIdx = entry.idx + 1;
+        sawNewEntry = true;
         if (opts.watch) opts.io.out(formatChainEntryLine(entry));
       }
       record = chainRecordFrom(journal);
@@ -461,7 +486,9 @@ export async function followChain(
 
   for (;;) {
     const record = drain();
-    if (record && CHAIN_TERMINAL.has(record.status)) return record;
+    if (record && CHAIN_TERMINAL.has(record.status) && (baselineIdx === 0 || sawNewEntry)) {
+      return record;
+    }
     await sleep(interval);
   }
 }
@@ -789,9 +816,13 @@ async function hostChainResumeAndFollow(
     taskQueue: deps.taskQueue,
   });
   try {
+    // Snapshot the pre-resume journal length BEFORE starting the new workflow
+    // execution — this is the `sinceIdx` baseline followChain needs to avoid
+    // reporting the chain's pre-resume FAILED seal as this resume's outcome.
+    const sinceIdx = chainEntryCount(flags.dataDir, chainId);
     await runner.resumeChain(chainId);
     ioPair.out(`resume delivered to chain ${chainId} (retrying the failed node)`);
-    const final = await followChain(chainId, flags, { watch: flags.watch, deps, io: ioPair });
+    const final = await followChain(chainId, flags, { watch: flags.watch, deps, io: ioPair, sinceIdx });
     return finishChain(chainId, final, flags, ioPair);
   } finally {
     worker.shutdown();
