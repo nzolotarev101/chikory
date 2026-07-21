@@ -5,18 +5,18 @@ This is the complete operating manual for executing Phase 2+ work packages
 task spec for a WP (every field explained), how to launch, supervise, and
 recover a run, and how to land the result as a normal PR.
 
-**Status (2026-07-20, bounded — update discipline: REPLACE this block, ≤15 lines;
+**Status (2026-07-21, bounded — update discipline: REPLACE this block, ≤15 lines;
 displaced prose moves verbatim to [`PLAN-HISTORY.md`](PLAN-HISTORY.md); per-run detail:
 `docs/reports/dogfood-NNN.md`; queue + course correction: `plan.md` §6).**
-dogfood-106 climbed P3-rung-2 (`chikory chain resume` proven live, F-155 fixed). Since then, **dogfood-107 (`docs/reports/dogfood-107.md`, 2026-07-20, NOT a
-`chikory run` — hand-authored WP-302 prerequisite work, no run-id)** cleared P3-rung-3's hard blocker: `benchmarks/tasks/brownfield-003-bug-archaeology.yaml` is now
-**PINNED** — a real `colinhacks/zod` bug (issue #5826, `.default()` shallow-copies Map/Set, upstream fix PR #5855) at ref `b6b1288277e6ca87dab0ad1c7251b92612b7445c`,
-4 check-graded requirements including a mechanical root-cause discriminator (independently probes the unreported `Set` sibling — proven to reject a hand-constructed
-narrow Map-only patch). Verified end-to-end through the REAL harness (`devbox run bench -- run --adapter command`): 2/4 satisfied on the unmodified pinned tree,
-4/4 on the real fix. **P3-rung-3 itself is NOT YET climbed** — only dry-run via the `command` baseline adapter, never through `chikory` + a real judge (what the rung
-requires: a genuine I-SR/D-SR score artifact). **NEXT: launch `devbox run bench -- run --tasks benchmarks/tasks --filter brownfield-003 --adapter chikory --judge-cmd
-'<keyless CLI judge>'`** — expect a real 3-6h external-repo horizon, materially different cost/time shape than a normal `examples/dogfood/` headline.
-See §5 (ladders always exist — first dogfood of a phase authors its ladder), §7, §8, §1.5, §3. (Earlier — dogfood-106 WP-532 rung-2 → PLAN-HISTORY.md 2026-07-20.)
+P3-rung-3 CLIMBED (dogfood-108, `docs/reports/dogfood-108.md`) — see PLAN-HISTORY.md for the full displaced entry. Since then, **dogfood-109
+(`docs/reports/dogfood-109.md`, 2026-07-21, NOT a `chikory run` — hand-authored WP-302 prerequisite work, no run-id)** pinned the remaining 2 draft
+brownfield tasks toward **P3-rung-4** (needs ≥5 pinned tasks scored vs a baseline): `brownfield-001` = `ecyrbe/zodios` @
+`6e6f3b3dbc3fdd62bc2c043efbdcd0254823fcb4` (real zod v3→v4 upgrade, self-performed — no upstream PR exists; 3 verified break classes); `brownfield-002` =
+`gitify-app/gitify` @ `a061eaa112fa18885dd4de0cea6c0e51094cad0c` (real merged PR #3036, legacy auth API → store). Both verified RED-then-GREEN by hand;
+`devbox run -- bash scripts/bench.sh` → 3/3 valid. **Corpus now 3/5 toward rung-4** — 2 more tasks + `chikory`-adapter score runs for `brownfield-001`/`002`
+still owed (only `brownfield-003` has an actual score, from dogfood-108). **NEXT: pin 2 more OR bank `chikory`-adapter scores for the 2 just pinned — scope/pace
+TBD with the operator** before more autonomous multi-hour external-repo work.
+See §5 (ladders always exist — first dogfood of a phase authors its ladder), §7, §8, §1.5, §3. (Earlier — dogfood-108 P3-rung-3 CLIMBED → PLAN-HISTORY.md 2026-07-21.)
 
 Related docs: [`docs/spec/task-spec.md`](spec/task-spec.md) (schema
 reference) · [`docs/TASK-PROTOCOL.md`](TASK-PROTOCOL.md) (WP etiquette, §7 is
@@ -694,6 +694,8 @@ broken (a false-green, not a follow-on fix).
 | An AC `check` pins one test file but the loose goal let the executor put the delivered test elsewhere → the check exits 0 WITHOUT running the new test | **AC-file-pin blind spot** (dogfood-105 **F-153**, sibling of F-82/F-83; the family-diverse judge caught it and escalated — a genuine true-positive). AC-3 pinned `test/chain/read-trace.test.ts` but the E2E test landed in `test/cli/chain-trace.test.ts`, so the pinned check passed vacuously. **Authoring rule (open WP candidate):** an AC that verifies a test ran must target the test DIRECTORY/suite, or the goal must pin the exact test path the executor will use. |
 | `chikory chain approve <chain-id>` on an out-of-rubric ESCALATE re-judges instead of sealing → the node loops (empty-diff approve loop), the operator can't seal it | **Approve on an out-of-rubric ESCALATE (rubric passed, advisory concern persists) resumes `status=RUNNING` and re-judges** (dogfood-105 **F-154**, `agent-loop.ts:968-988`). With the delivery already complete, the resumed step produces an empty diff → the judge re-escalates → infinite loop; there is no force-seal path. A code fix can't rescue an IN-FLIGHT run (Temporal pins the workflow code) — kill it and stop. **Open WP candidate (hand-fix owed):** approve on an out-of-rubric ESCALATE should offer force-seal-SUCCESS, not only resume+re-judge. This is a rung-2 (operator chain resume) prerequisite. |
 | `chikory chain resume <chain-id>` on a sealed-FAILED chain prints "resume delivered" then immediately reprints the OLD failed trace verbatim (identical timestamps) and exits 1 — the retry node never dispatches | **`followChain` raced the freshly-started `chainLoop` workflow** (dogfood-106 **F-155 → FIXED same session, `9e01e09`**). `client.workflow.start` only enqueues the start and returns; `followChain`'s poll loop starts immediately and its FIRST tick often lands before the new workflow's worker has picked up the task, so it reads only the PRE-EXISTING FAILED tail from before the resume and treats that stale state as the resume's own terminal verdict. **Fixed:** `followChain` takes an optional `sinceIdx` baseline; `hostChainResumeAndFollow` snapshots the journal's entry count before calling `resumeChain`, and the terminal check now requires at least one entry PAST that baseline (a genuine reopen/dispatch) before honoring a verdict. Seeing this on old code = rebuild the SDK. |
+| A headless `claude-code` executor produces no diff / hangs on a task that needs it to run shell commands mid-step (install deps, run tests to diagnose) | **`createClaudeCodeAdapter`'s default `allowedTools` never includes `Bash`, and default `--permission-mode` is `acceptEdits`** (dogfood-108 **F-156**) — fine when the JUDGE runs acceptance checks (the normal dogfood shape), but an agent that must run tests itself to diagnose an unfamiliar bug (e.g. a brownfield benchmark task) has no shell and no operator to answer a permission prompt. **Fix:** set `CHIKORY_ALLOW_BASH=1` in the launching env — `claude-code.ts` adds `Bash` to `allowedTools` and switches `--permission-mode` to `auto` (all prompts auto-approved). Scoped opt-in only; a normal launch without the env is unaffected. |
+| A `benchmarks/harness` `chikoryAdapter` run scores suspiciously low (e.g. only the trivially-true requirement passes) even though the executor's transcript shows real work | **The harness was grading the WRONG directory** (dogfood-108 **F-157 → fixed `3791e26`**): before this fix, `chikoryAdapter` graded `ctx.workspaceDir` (the harness's own empty pre-provisioned clone), never `.chikory/runs/<id>/workspace` where the executor's edits actually land in the sandboxed run. **Fixed:** the adapter now `cpSync`s the run's final workspace over `ctx.workspaceDir` before grading. If you're on old code and see a too-low score, verify against the run's own workspace directly before trusting it as a real failure. |
 
 ## 8. Known P1 limitations (so you don't fight them)
 

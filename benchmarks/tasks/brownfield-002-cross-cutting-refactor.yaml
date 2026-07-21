@@ -1,29 +1,102 @@
-# Draft brownfield task — cross-cutting refactor under a compatibility
-# constraint. Stresses: long-horizon planning (touch order matters), memory
-# (the deprecation inventory exceeds context), silent-divergence detection
-# (judge must catch behavior drift the type checker can't).
+# PINNED brownfield task — merge a legacy free-function API into its
+# already-established modern replacement, across every internal consumer.
+# Stresses: cross-cutting internal refactor (the legacy API has exactly one
+# consumer module, but the goal forbids changing any of the MANY downstream
+# consumers that call through it), silent-divergence detection (a
+# rename-only or partial merge that keeps old behavior under a new name
+# would still read green on a shallow test pass), judge value (the
+# discriminator below can't be satisfied by aliasing).
+#
+# Source: gitify-app/gitify PR #3036 ("refactor(accounts): move account crud
+# into the accounts store"), merged as 8043b106324a5148e7a5ff82e11895f10677abd9,
+# parent a061eaa112fa18885dd4de0cea6c0e51094cad0c. Before the fix,
+# `src/renderer/utils/auth/utils.ts` exports a legacy `AuthState`-shaped
+# free-function API (`addAccount`, `removeAccount`, `hasAccounts`,
+# `hasMultipleAccounts`, `getPrimaryAccountHostname`) that is manually
+# threaded through `useAccountsStore.ts` (each call wraps the store's own
+# state as `{ accounts: get().accounts }` and unwraps the result back into
+# `set(...)`) — while every OTHER consumer in the app (routes, components,
+# hooks) already calls the store's actions directly, the modern pattern.
 id: brownfield-002
 class: brownfield
-status: draft
+status: pinned
 repo:
-  url: TBD # candidate profile: codebase with a widely-used legacy internal API (e.g. callback-style module used from 30+ sites) and good test coverage
-  ref: TBD
-horizon: 6-12h
+  url: https://github.com/gitify-app/gitify
+  ref: a061eaa112fa18885dd4de0cea6c0e51094cad0c # pinned BEFORE #3036 (parent of the merge commit on main)
+horizon: 4-6h
 goal: |
-  Migrate every internal consumer of the legacy API to its modern replacement
-  and delete the legacy implementation, WITHOUT changing any externally
-  observable behavior (public API surface, wire formats, CLI output). The
-  migration must land as a series of independently green commits.
+  `src/renderer/utils/auth/utils.ts` exports a legacy account-CRUD API shaped
+  around an explicit `AuthState` object argument: `addAccount`, `removeAccount`,
+  `hasAccounts`, `hasMultipleAccounts`, and `getPrimaryAccountHostname`, plus
+  the `AuthState` type itself (declared in `src/renderer/types.ts`). The ONLY
+  consumer of this legacy API is `src/renderer/stores/useAccountsStore.ts`,
+  which wraps its own Zustand state into an `AuthState` shape on every call
+  just to satisfy the old signature. Every other part of the app already
+  calls `useAccountsStore`'s own actions directly (the modern pattern used
+  throughout the rest of the codebase) and must NOT be touched.
+
+  Inline the account-CRUD logic directly into `useAccountsStore`'s own
+  actions, delete the legacy `addAccount`/`removeAccount`/`hasAccounts`/
+  `hasMultipleAccounts`/`getPrimaryAccountHostname` functions and the
+  `AuthState` type entirely, and remove the manual state-wrapping/unwrapping
+  they required. No externally observable behavior may change (account
+  creation, removal, and lookup must work identically from every existing
+  call site) and no test outside the account-CRUD area may need to change.
 requirements:
   - id: R1
-    description: legacy implementation deleted; no internal references remain
-    check: TBD
+    description: dependencies install clean (pnpm workspace, frozen lockfile)
+    check: npx -y pnpm@11.9.0 install --frozen-lockfile
   - id: R2
-    description: full test suite green at final state AND at each intermediate commit
-    check: TBD
+    description: full pre-existing test suite is green (every existing consumer's observable behavior is unchanged)
+    prerequisites: [R1]
+    check: npx -y pnpm@11.9.0 exec vitest run
   - id: R3
-    description: public API surface byte-identical (generated API report / d.ts diff empty)
-    check: TBD
+    description: project typechecks clean (tsc --noEmit over the whole src tree)
+    prerequisites: [R1]
+    check: |
+      set -e
+      rm -f tsconfig.tsbuildinfo
+      npx -y pnpm@11.9.0 exec tsc --noEmit -p tsconfig.json
+  - id: R4
+    description: the legacy AuthState type and all 5 free functions (addAccount, removeAccount, hasAccounts, hasMultipleAccounts, getPrimaryAccountHostname) are genuinely gone — not aliased, not re-exported, not left as dead stubs
+    prerequisites: [R1]
+    check: |
+      set -e
+      mkdir -p src/renderer/__probe__
+      cat > src/renderer/__probe__/legacy-gone.probe.ts <<'TESTEOF'
+      // Root-cause probe (not part of the app): every directive below must be
+      // a genuinely SUPPRESSED compile error, proving each named legacy
+      // symbol is truly gone from its module. Each check is a bare
+      // expression statement (no declared variable) so the only possible
+      // diagnostic is "does not exist", never an incidental unused-variable
+      // error masking a false pass.
+      import * as authUtils from '../utils/auth/utils';
+
+      // @ts-expect-error — AuthState type must no longer exist in types.ts
+      void (0 as unknown as import('../types').AuthState);
+      // @ts-expect-error — addAccount must no longer be exported from utils/auth/utils.ts
+      void authUtils.addAccount;
+      // @ts-expect-error — removeAccount must no longer be exported from utils/auth/utils.ts
+      void authUtils.removeAccount;
+      // @ts-expect-error — hasAccounts must no longer be exported from utils/auth/utils.ts
+      void authUtils.hasAccounts;
+      // @ts-expect-error — hasMultipleAccounts must no longer be exported from utils/auth/utils.ts
+      void authUtils.hasMultipleAccounts;
+      // @ts-expect-error — getPrimaryAccountHostname must no longer be exported from utils/auth/utils.ts
+      void authUtils.getPrimaryAccountHostname;
+      TESTEOF
+      rm -f tsconfig.tsbuildinfo
+      npx -y pnpm@11.9.0 exec tsc --noEmit -p tsconfig.json
 metrics_notes: |
-  Checkpoint discipline (green-at-every-commit maps to Chikory step seals);
-  context-rot measurement over a 30+ site inventory.
+  R4 is the headline catch opportunity: an agent that renames the legacy
+  functions, keeps them as thin re-exports, or leaves the `AuthState` type
+  declared-but-unused would pass R1-R3 (install/tests/typecheck all stay
+  green — the wrapper wiring still works) while R4 stays RED, the classic
+  "moved the call sites, didn't delete the legacy implementation" failure
+  this task class targets. Verified by construction: R4 fails with exactly
+  6/6 "Unused '@ts-expect-error' directive" errors against the pinned
+  (pre-migration) ref and passes cleanly against the real upstream fix
+  (8043b106324a5148e7a5ff82e11895f10677abd9). Full suite (153 files / ~1123
+  tests) runs in ~7-10s wall clock, typecheck in ~7s — both comfortably
+  inside the judge's 120s per-check cap.
+tags: [cross-cutting-refactor, internal-api-migration, silent-divergence]

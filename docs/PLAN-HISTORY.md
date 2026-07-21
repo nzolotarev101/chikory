@@ -1017,6 +1017,35 @@ crash-loop (`8274c1f`). 5 fixes committed + pushed; F-153/F-154 open WP candidat
 hand-landed first; the halted `chain-da846d34` is itself a candidate resume substrate.**
 See §5 (ladders always exist — first dogfood of a phase authors its ladder), §7, §8, §1.5, §3. (Earlier — dogfood-104 WP-521 rung-1 attempt → PLAN-HISTORY.md 2026-07-19.)
 
+## 2026-07-21 — displaced DOGFOODING.md header block (dogfood-108 review, P3-rung-3 CLIMBED)
+
+Prior DOGFOODING.md status block (dogfood-106/107, P3-rung-3 unblocked but not yet climbed), displaced verbatim:
+
+> dogfood-106 climbed P3-rung-2 (`chikory chain resume` proven live, F-155 fixed). Since then, **dogfood-107 (`docs/reports/dogfood-107.md`, 2026-07-20, NOT a
+> `chikory run` — hand-authored WP-302 prerequisite work, no run-id)** cleared P3-rung-3's hard blocker: `benchmarks/tasks/brownfield-003-bug-archaeology.yaml` is now
+> **PINNED** — a real `colinhacks/zod` bug (issue #5826, `.default()` shallow-copies Map/Set, upstream fix PR #5855) at ref `b6b1288277e6ca87dab0ad1c7251b92612b7445c`,
+> 4 check-graded requirements including a mechanical root-cause discriminator (independently probes the unreported `Set` sibling — proven to reject a hand-constructed
+> narrow Map-only patch). Verified end-to-end through the REAL harness (`devbox run bench -- run --adapter command`): 2/4 satisfied on the unmodified pinned tree,
+> 4/4 on the real fix. **P3-rung-3 itself is NOT YET climbed** — only dry-run via the `command` baseline adapter, never through `chikory` + a real judge (what the rung
+> requires: a genuine I-SR/D-SR score artifact). **NEXT: launch `devbox run bench -- run --tasks benchmarks/tasks --filter brownfield-003 --adapter chikory --judge-cmd
+> '<keyless CLI judge>'`** — expect a real 3-6h external-repo horizon, materially different cost/time shape than a normal `examples/dogfood/` headline.
+> See §5 (ladders always exist — first dogfood of a phase authors its ladder), §7, §8, §1.5, §3. (Earlier — dogfood-106 WP-532 rung-2 → PLAN-HISTORY.md 2026-07-20.)
+
+## 2026-07-21 — displaced DOGFOODING.md header block (dogfood-109 review, brownfield-001/002 pinned)
+
+Prior DOGFOODING.md status block (dogfood-108, P3-rung-3 CLIMBED), displaced verbatim:
+
+> **✅ P3-RUNG-3 CLIMBED — dogfood-108 (`run-2118efd2-…`, `benchmarks/results/20260721-013438-chikory`, `docs/reports/dogfood-108.md`, SUCCESS 1 step $0.65,
+> 2026-07-21):** `brownfield-003` (pinned dogfood-107) scored 4/4 (I-SR/D-SR 100%) through the real `chikory` adapter + a real different-family judge — first
+> genuine benchmark score artifact. Took 6 launch attempts; the first 5 surfaced 3 real bugs, all fixed + committed/pushed same session: 🟡 **F-156** (headless
+> bash-needing tasks need a new `CHIKORY_ALLOW_BASH=1` seam — `createClaudeCodeAdapter` never granted `Bash`/auto-approve by default,
+> `packages/sdk-ts/src/executors/claude-code.ts`) · 🟠 **F-157** (harness graded the WRONG directory — `chikoryAdapter` never copied the sandboxed run workspace
+> back before grading, silently under-scoring a real fix as 1/4; fixed `3791e26`) · ℹ️ **F-158** (stale Temporal workflow retries forever against a fresh
+> per-attempt dataDir — operational hygiene, no WP). **NEXT: P3-rung-4** needs ≥5 pinned brownfield tasks scored vs a baseline (only 1/3 drafts pinned so far,
+> 2+ more need the same real-repo research as dogfood-107) — a materially bigger lift than one spec; scope/pace TBD with the operator before launching more
+> autonomous multi-hour external-repo research.
+> See §5 (ladders always exist — first dogfood of a phase authors its ladder), §7, §8, §1.5, §3. (Earlier — dogfood-107 P3-rung-3 prereq → PLAN-HISTORY.md 2026-07-21.)
+
 ## 2026-07-09 — displaced from DOGFOODING.md header (dogfood-094 review)
 
 dogfood-093 — WP-251 LIVE COMPACTION-FOLD — OBSERVED at last (the ⑧ P2-exit context-rot axis, 4th attempt) (`run-60a32aff-0b81-4cbd-9d39-7eb50b8b9561`, `docs/reports/dogfood-093.md`). 🟢 SUCCESS · 7 steps · $4.53/$80 · 20m 52s · uncommitted (harvest byte-IDENTICAL). The F-122 fix — SAME ~2000 window but `min_durable_steps: 6` + 7 chunks — pushed resident summaries past `keepLastN=5`, so `planCompaction` FOLDED TWICE: the FIRST dogfood RUN to journal a live `trigger:"pacing"` compaction (`compactions 2 (pacing 2) · first pacing fold step 5 · pressure-steps 7 (unfolded 5)`). Net-new increment: pure `pressureFoldGapWarning` (F-123 loud-on-silent-fold) + additive `firstPacingFoldStep` on `describeCompactionPressure`, rendered additively in `chikory trace`; 790 TS green, 6 files, 0 rollbacks/escalations. WP-251 → 🟢 LIVE-PROVEN; the ⑧ P2-exit context-rot axis CLOSED (arc 053-park / 091-undershoot / 092-too-short / 093-FOLD). 🟡 F-124 — compaction journal entry lacks `stepIndex`, so `firstPacingFoldStep` is inferred from the adjacent pacing decision (reducer's `stepIndex` branch dead); track-B stamp-at-emit under WP-251.

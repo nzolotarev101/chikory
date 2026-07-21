@@ -1,30 +1,73 @@
-# Draft brownfield task — classic maintenance horizon: a major-version
-# dependency upgrade with breaking API changes rippling through a real
-# codebase. Stresses: compounding error across many small edits, context rot
-# (the changelog + N call sites exceed one attention span), judge value
-# (type-green ≠ behavior-preserved).
+# PINNED brownfield task — a real major-version dependency upgrade with
+# breaking API changes rippling through a real codebase. Stresses:
+# compounding error across many small edits, context rot (the changelog +
+# call sites exceed one attention span), judge value (type-green ≠
+# behavior-preserved — and behavior-preserved ≠ type-green, either).
+#
+# Source: ecyrbe/zodios (a TypeScript HTTP client/server built around zod
+# schemas), pinned at its zod-3 HEAD. Upgrading its `zod` peer/dev dependency
+# from 3.22.4 to the 4.x line is NOT a mechanical bump: it breaks (a) two
+# `src/api.ts` type-narrowing casts (`schema.partial() as z.Schema<...>` no
+# longer overlaps under zod v4's rebuilt internals — TS suggests casting
+# through `unknown` first), (b) the devDependency `typescript` itself (zod
+# v4's generated `.d.cts` references the `NoInfer` utility type, which needs
+# TypeScript >=5.4; the repo pins 5.2.2), which in turn needs `@types/node`
+# bumped to match, and (c) two pre-existing tests that hardcode zod v3's
+# exact `ZodError` issue shape/message text (`"code"` before `"expected"`,
+# message `"Required"`/`"Expected string, received number"`) — zod v4
+# reorders those fields and rewrites messages to
+# `"Invalid input: expected string, received undefined"` style. None of this
+# is discoverable from the dependency's version number alone; each break was
+# found by actually running the type checker and test suite after the bump.
 id: brownfield-001
 class: brownfield
-status: draft
+status: pinned
 repo:
-  url: TBD # candidate profile: 10-50k LOC TypeScript app pinned one major behind on a core dep (e.g. fastify 4→5, prisma 5→6)
-  ref: TBD
-horizon: 4-8h
+  url: https://github.com/ecyrbe/zodios
+  ref: 6e6f3b3dbc3fdd62bc2c043efbdcd0254823fcb4 # zod-3 HEAD, before any v4 upgrade attempt (upstream never did this migration)
+horizon: 3-6h
 goal: |
-  Upgrade the pinned core dependency to the latest major release. All existing
-  tests pass unmodified except where they assert the dependency's own changed
-  behavior; those are updated with a one-line justification each. No feature
-  regressions; no new deprecation warnings at startup.
+  Upgrade the `zod` dependency (currently pinned to `3.22.4` via both
+  `peerDependencies` and `devDependencies` in `package.json`) to its latest
+  4.x release. The full pre-existing test suite must stay green — a test
+  that only passes because it now asserts nothing, or because it was
+  deleted, does not count. The scoped TypeScript build (`tsconfig.build.json`)
+  must type-check cleanly; if `zod`'s v4 type definitions require a newer
+  `typescript` (and transitively `@types/node`) than currently pinned, those
+  must be upgraded too. No behavior outside what the `zod` major bump
+  necessitates may change.
 requirements:
   - id: R1
-    description: dependency at target major in lockfile; install clean
-    check: TBD
+    description: zod is upgraded to the 4.x line and installs clean
+    check: |
+      set -e
+      npm install --legacy-peer-deps --no-audit --no-fund
+      node -e "const v=require('zod/package.json').version; if(!/^4\./.test(v)) process.exit(1)"
   - id: R2
-    description: full pre-existing test suite green
-    check: TBD
+    description: full pre-existing jest suite is green, and no test was deleted/skipped to get there (test count unchanged at 117)
+    prerequisites: [R1]
+    check: |
+      set -e
+      npx jest --coverage=false --json --outputFile=/tmp/zodios-jest-result.json > /tmp/zodios-jest.log 2>&1 || true
+      node -e "
+      const r = require('/tmp/zodios-jest-result.json');
+      if (r.numFailedTests !== 0) { console.error('failed tests:', r.numFailedTests); process.exit(1); }
+      if (r.numTotalTests !== 117) { console.error('expected 117 total tests, got', r.numTotalTests); process.exit(1); }
+      "
   - id: R3
-    description: app boots and serves its smoke-test flows with zero deprecation warnings
-    check: TBD
+    description: the scoped library build (src only, excludes examples/website) type-checks cleanly under the upgraded toolchain
+    prerequisites: [R1]
+    check: npx tsc --noEmit -p tsconfig.build.json
 metrics_notes: |
-  Per-step reliability over 20+ edit sites; recovery rate when a mid-upgrade
-  test break forces a rollback.
+  Three independent failure classes stacked in one upgrade: a type-level
+  break in application code (src/api.ts), a transitive toolchain break
+  (typescript/@types/node version floor), and stale test oracles (hardcoded
+  error-shape assertions). An agent that only bumps package.json and runs
+  the tests will hit R2 first (2/117 red) and R3 second (3 tsc errors,
+  including one from node_modules only visible after the typescript bump is
+  attempted); recovering requires reading the actual zod v4 changelog/error
+  output rather than pattern-matching a single fix. R2's total-test-count
+  invariant is a mechanical guard against silencing the two broken
+  assertions by weakening or deleting them instead of updating them to the
+  new (real, verified) v4 message format.
+tags: [dependency-upgrade, type-safety, test-oracle-drift]
