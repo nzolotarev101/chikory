@@ -175,7 +175,7 @@ export function createClaudeCodeAdapter(opts: ClaudeCodeAdapterOptions): Executo
         "--setting-sources",
         "project",
         "--permission-mode",
-        "acceptEdits",
+        process.env.CHIKORY_ALLOW_BASH === "1" ? "auto" : "acceptEdits",
         "--allowedTools",
         allowedTools.join(","),
       ];
