@@ -8,7 +8,7 @@
  *   (`chikory trace --json`, the JIF interchange) is kept as the run artifact.
  */
 import { spawn } from "node:child_process";
-import { mkdirSync, writeFileSync } from "node:fs";
+import { createWriteStream, mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { stringify as stringifyYaml } from "yaml";
 
@@ -45,9 +45,11 @@ function runShell(
 ): Promise<{ code: number | null; timedOut: boolean }> {
   return new Promise((resolve) => {
     const chunks: string[] = [];
+    const logStream = createWriteStream(logPath, { flags: "w" });
     const child = spawn("bash", ["-c", command], { cwd, stdio: ["ignore", "pipe", "pipe"] });
     const cap = (c: Buffer) => {
       if (chunks.join("").length < 1_000_000) chunks.push(c.toString());
+      logStream.write(c);
     };
     child.stdout.on("data", cap);
     child.stderr.on("data", cap);
@@ -58,7 +60,7 @@ function runShell(
     }, timeoutMs);
     const finish = (code: number | null) => {
       clearTimeout(timer);
-      writeFileSync(logPath, chunks.join(""));
+      logStream.end();
       resolve({ code, timedOut });
     };
     child.on("close", finish);
@@ -122,8 +124,22 @@ export function buildChikorySpec(
   opts: ChikoryAdapterOptions,
   workspaceDir: string,
 ): Record<string, unknown> {
-  const executor = opts.executor ?? { adapter: "claude-code", family: "anthropic" };
-  const judge = opts.judge ?? { family: executor.family === "anthropic" ? "gemini" : "anthropic" };
+  let executor = opts.executor ?? { adapter: "claude-code", family: "anthropic" };
+  let judge = opts.judge ?? { family: executor.family === "anthropic" ? "gemini" : "anthropic" };
+  let routing = opts.routing;
+
+  if (process.env.OPENAI_COMPAT_BASE_URL) {
+    judge = { family: "openai-compat" };
+    routing = {
+      stages: {
+        plan: { provider: "openai-compat", model: "default" },
+        code: { provider: "openai-compat", model: "default" },
+        review: { provider: "openai-compat", model: "default" },
+        judge: { provider: "openai-compat", model: "default" },
+      },
+    };
+  }
+
   return {
     name: `bench-${task.id}`.toLowerCase().replace(/[^a-z0-9-]+/g, "-"),
     goal: task.goal,
@@ -142,7 +158,7 @@ export function buildChikorySpec(
     max_steps: opts.maxSteps ?? 60,
     executor,
     judge,
-    ...(opts.routing !== undefined ? { routing: opts.routing } : {}),
+    ...(routing !== undefined ? { routing } : {}),
   };
 }
 
@@ -157,6 +173,10 @@ export function chikoryAdapter(opts: ChikoryAdapterOptions = {}): RunnerAdapter 
       writeFileSync(specPath, stringifyYaml(spec));
       const dataDir = join(ctx.outDir, ".chikory");
       const logPath = join(ctx.outDir, "adapter.log");
+      
+      console.log(`\n  [chikory] Running ${task.id}...`);
+      console.log(`  [chikory] Logs are streaming to: tail -f ${logPath}\n`);
+
       const started = Date.now();
       const { code, timedOut } = await runShell(
         `${bin} run ${JSON.stringify(specPath)} --data-dir ${JSON.stringify(dataDir)}`,
