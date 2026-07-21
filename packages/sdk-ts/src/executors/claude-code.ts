@@ -152,7 +152,10 @@ export function parseClaudeCodeOutput(
 
 export function createClaudeCodeAdapter(opts: ClaudeCodeAdapterOptions): ExecutorAdapter {
   const bin = opts.binPath ?? "claude";
-  const allowedTools = opts.allowedTools ?? CLAUDE_CODE_DEFAULT_ALLOWED_TOOLS;
+  const allowedTools = opts.allowedTools ??
+    (process.env.CHIKORY_ALLOW_BASH === "1"
+      ? [...CLAUDE_CODE_DEFAULT_ALLOWED_TOOLS, "Bash"]
+      : CLAUDE_CODE_DEFAULT_ALLOWED_TOOLS);
 
   return {
     name: "claude-code",
