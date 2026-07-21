@@ -8,7 +8,7 @@
  *   (`chikory trace --json`, the JIF interchange) is kept as the run artifact.
  */
 import { spawn } from "node:child_process";
-import { createWriteStream, mkdirSync, writeFileSync } from "node:fs";
+import { createWriteStream, cpSync, existsSync, mkdirSync, readdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { stringify as stringifyYaml } from "yaml";
 
@@ -184,6 +184,24 @@ export function chikoryAdapter(opts: ChikoryAdapterOptions = {}): RunnerAdapter 
         ctx.timeoutMs ?? DEFAULT_ADAPTER_TIMEOUT_MS,
         logPath,
       );
+
+      // Copy the final sandboxed workspace back to the harness workspaceDir for grading
+      try {
+        const runsDir = join(dataDir, "runs");
+        if (existsSync(runsDir)) {
+          const runDirs = readdirSync(runsDir).filter((n) => n.startsWith("run-"));
+          if (runDirs.length > 0) {
+            const runId = runDirs[0];
+            const finalWs = join(runsDir, runId, "workspace");
+            if (existsSync(finalWs)) {
+              cpSync(finalWs, ctx.workspaceDir, { recursive: true, force: true });
+            }
+          }
+        }
+      } catch (err) {
+        console.error("  [chikory] Failed to copy workspace for grading:", err);
+      }
+
       return {
         exitCode: code,
         wallClockMs: Date.now() - started,
