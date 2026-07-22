@@ -27,14 +27,14 @@ requirements:
 `;
 
 describe("authored task format v1 (WP-301 freeze)", () => {
-  it("loads every real draft in benchmarks/tasks/", () => {
+  it("loads every real task in benchmarks/tasks/", () => {
     const files = readdirSync(TASKS_DIR).filter((f) => f.endsWith(".yaml"));
     expect(files.length).toBeGreaterThanOrEqual(3);
     for (const file of files) {
       const { task, issues } = validateAuthoredTask(readFileSync(join(TASKS_DIR, file), "utf8"), file);
       expect(issues, `${file}: ${issues.join("; ")}`).toEqual([]);
-      expect(task!.status).toBe("draft");
-      expect(isRunnable(task!)).toBe(false);
+      expect(task!.status).toBe("pinned");
+      expect(isRunnable(task!)).toBe(true);
     }
   });
 

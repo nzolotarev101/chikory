@@ -124,7 +124,7 @@ export function buildChikorySpec(
   opts: ChikoryAdapterOptions,
   workspaceDir: string,
 ): Record<string, unknown> {
-  let executor = opts.executor ?? { adapter: "claude-code", family: "anthropic" };
+  const executor = opts.executor ?? { adapter: "claude-code", family: "anthropic" };
   let judge = opts.judge ?? { family: executor.family === "anthropic" ? "gemini" : "anthropic" };
   let routing = opts.routing;
 

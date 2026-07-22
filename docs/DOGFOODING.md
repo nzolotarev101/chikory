@@ -8,15 +8,15 @@ recover a run, and how to land the result as a normal PR.
 **Status (2026-07-21, bounded — update discipline: REPLACE this block, ≤15 lines;
 displaced prose moves verbatim to [`PLAN-HISTORY.md`](PLAN-HISTORY.md); per-run detail:
 `docs/reports/dogfood-NNN.md`; queue + course correction: `plan.md` §6).**
-P3-rung-3 CLIMBED (dogfood-108, `docs/reports/dogfood-108.md`) — see PLAN-HISTORY.md for the full displaced entry. Since then, **dogfood-109
-(`docs/reports/dogfood-109.md`, 2026-07-21, NOT a `chikory run` — hand-authored WP-302 prerequisite work, no run-id)** pinned the remaining 2 draft
-brownfield tasks toward **P3-rung-4** (needs ≥5 pinned tasks scored vs a baseline): `brownfield-001` = `ecyrbe/zodios` @
-`6e6f3b3dbc3fdd62bc2c043efbdcd0254823fcb4` (real zod v3→v4 upgrade, self-performed — no upstream PR exists; 3 verified break classes); `brownfield-002` =
-`gitify-app/gitify` @ `a061eaa112fa18885dd4de0cea6c0e51094cad0c` (real merged PR #3036, legacy auth API → store). Both verified RED-then-GREEN by hand;
-`devbox run -- bash scripts/bench.sh` → 3/3 valid. **Corpus now 3/5 toward rung-4** — 2 more tasks + `chikory`-adapter score runs for `brownfield-001`/`002`
-still owed (only `brownfield-003` has an actual score, from dogfood-108). **NEXT: pin 2 more OR bank `chikory`-adapter scores for the 2 just pinned — scope/pace
-TBD with the operator** before more autonomous multi-hour external-repo work.
-See §5 (ladders always exist — first dogfood of a phase authors its ladder), §7, §8, §1.5, §3. (Earlier — dogfood-108 P3-rung-3 CLIMBED → PLAN-HISTORY.md 2026-07-21.)
+**dogfood-110 (2026-07-21, `docs/reports/dogfood-110.md`) ran `brownfield-001`/`002` through the `chikory` adapter — BOTH terminal FAILED.**
+`brownfield-001` (`run-2cb113d8`, $2.35/3 steps) = a genuine 2/3 (judge voted PROCEED "work in progress", run sealed FAILED anyway);
+`brownfield-002` (`run-ec7858be`, $2.71/3 steps) = 1/4 INVALID (broken workspace copy-back → graded a probe-only tree). **P3-rung-4 (≥5 pinned
+tasks scored vs a baseline; corpus 3/5) is BLOCKED on 🔴 F-159 → WP-533:** `step.ts:167` maps executor `exitCode !== 0` → step FAILED, so a
+"fix-until-green" agent auto-FAILs every step (its final test command exits non-zero) and the 3-consecutive escalation OVERRIDES the judge's
+PROCEED. Recurrences: 🟠 F-157 (copy-back skips the FAILED path) · 🟡 F-158 (45× orphaned-workflow `writeCheckpoint` retries). Hand-fixed same
+session (uncommitted `activities.ts`): F-160 checkpoint `--no-verify`, F-161 `ensureWorkspaceDeps` non-fatal. **NEXT HEADLINE = WP-533 (F-159 fix),
+not more task pinning** — the benchmark can't yield a credible "Chikory ran an agent to a graded SUCCESS" until step success is judge-driven.
+See §5 (ladders always exist), §7, §8, §1.5, §3. (Earlier — dogfood-108 P3-rung-3 CLIMBED + dogfood-109 pinned 001/002 → PLAN-HISTORY.md 2026-07-21.)
 
 Related docs: [`docs/spec/task-spec.md`](spec/task-spec.md) (schema
 reference) · [`docs/TASK-PROTOCOL.md`](TASK-PROTOCOL.md) (WP etiquette, §7 is
@@ -699,6 +699,23 @@ broken (a false-green, not a follow-on fix).
 
 ## 8. Known P1 limitations (so you don't fight them)
 
+- **A benchmark "fix-until-green" task cannot terminally SUCCEED yet** (🔴 F-159 →
+  WP-533, dogfood-110). Step status is derived from the executor CLI's process
+  exit code (`packages/sdk-ts/src/executors/step.ts:167` — `exitCode !== 0` ⇒
+  `FAILED`). On a task whose deliverable is "make the suite pass", the agent ends
+  each step by running the suite, which exits non-zero while any test is still red
+  → every step is marked FAILED → the runner's 3-consecutive-failure escalation
+  seals the whole run FAILED, **even when the judge just voted PROCEED**
+  (dogfood-110 `brownfield-001`: judge PROCEED 2/3, run FAILED). So any brownfield
+  task needing >3 red→green steps auto-FAILs regardless of real progress; the
+  benchmark *grade* (from the copied-back workspace) can still be non-zero, but the
+  Chikory *run* will read FAILED. Until WP-533 makes step success judge/AC-driven,
+  read a benchmark FAILED against the grade + the `chikory trace` judge verdict, not
+  as "the agent couldn't do it." **Related:** the grading copy-back (`3791e26`)
+  skips the terminal-FAILED path (F-157 recurrence) — a FAILED task may be graded
+  against a partial tree with no `node_modules` (`vitest`/`tsc` "not found" ⇒ false
+  requirement failures); and a superseded launch attempt can leave orphaned Temporal
+  workflows retrying `writeCheckpoint` ("no journal run row", F-158 recurrence).
 - **~~No read-only `chikory chain trace <chain-id>`~~ ✅ CLOSED (WP-522, F-144,
   landed 2026-07-19 from the dogfood-105 harvest — `chikory chain trace <chain-id>`
   now renders a sealed chain from its local journal; 5 files, 941 TS green).** The

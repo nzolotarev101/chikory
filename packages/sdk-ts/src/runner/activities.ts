@@ -489,6 +489,7 @@ export async function commitAllRepos(input: {
     // step, and resume always has a commit to anchor on).
     await git(repoDir, [
       "commit",
+      "--no-verify",
       "--allow-empty",
       "-m",
       `chikory: step ${input.stepIndex}`,
@@ -568,10 +569,15 @@ async function ensureBaseTag(repoDir: string): Promise<string> {
 async function ensureWorkspaceDeps(repoDir: string): Promise<void> {
   if (!existsSync(join(repoDir, "pnpm-lock.yaml"))) return;
   if (existsSync(join(repoDir, "node_modules"))) return;
-  await execFileAsync("pnpm", ["install", "--frozen-lockfile", "--prefer-offline"], {
-    cwd: repoDir,
-    maxBuffer: 64 * 1024 * 1024,
-  });
+  try {
+    await execFileAsync("pnpm", ["install", "--frozen-lockfile", "--prefer-offline"], {
+      cwd: repoDir,
+      maxBuffer: 64 * 1024 * 1024,
+    });
+  } catch {
+    // Non-fatal: if pre-installing workspace deps fails (e.g. pnpm version mismatch),
+    // the executor or requirement checks will handle installation themselves.
+  }
 }
 
 export async function resolveCheckpointCommit(input: {
