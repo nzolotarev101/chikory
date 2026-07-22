@@ -164,24 +164,35 @@ export async function runCliStep(opts: CliStepOptions): Promise<StepRecord> {
         retriable: true,
       },
     };
-  } else if (proc.exitCode !== 0) {
-    record = {
-      ...base,
-      status: "FAILED",
-      summary: parsed.summary || `executor exited with code ${proc.exitCode}`,
-      failure: {
-        reason: `exit code ${proc.exitCode}: ${proc.stderr.slice(0, 1000)}`,
-        retriable: false,
-      },
-    };
   } else if (!parsed.ok) {
+    // WP-533/F-159: the adapter's PARSER is the authority on whether the executor
+    // completed a valid turn — `parsed.ok === false` is a genuine execution error
+    // (crash, no result event, provider error) → FAILED. When the process ALSO
+    // exited non-zero, fold the exit code + stderr into the reason so a hard crash
+    // stays debuggable (this preserves the old "nonzero exit with stderr" forensics
+    // for the case where the executor really did fail).
+    const exitCtx =
+      proc.exitCode !== 0
+        ? ` (executor exit ${proc.exitCode}${proc.stderr ? `: ${proc.stderr.slice(0, 1000)}` : ""})`
+        : "";
+    const failure = parsed.failure ?? { reason: "executor reported failure", retriable: false };
     record = {
       ...base,
       status: "FAILED",
-      summary: parsed.summary || (parsed.failure?.reason ?? "executor reported failure"),
-      failure: parsed.failure ?? { reason: "executor reported failure", retriable: false },
+      summary: parsed.summary || failure.reason,
+      failure: { ...failure, reason: `${failure.reason}${exitCtx}` },
     };
   } else {
+    // WP-533/F-159: `parsed.ok` — the executor completed a valid turn. A non-zero
+    // PROCESS exit code is deliberately NOT a step failure here. Once Bash is
+    // allowed, the agent's own final verification command (e.g. a still-red test
+    // suite on a "fix-until-green" task) sets the process exit code; gating that
+    // is precisely the Agent-as-a-Judge inner loop's job, not a crude exit-code
+    // heuristic. The old `exitCode !== 0 → FAILED` branch auto-FAILed every such
+    // step and tripped the CG-1 consecutive-failure loop-breaker BEFORE the judge
+    // ever ran — overriding the judge's own PROCEED verdict (dogfood-110). Step
+    // status now reflects only that the executor DID its turn; correctness is
+    // decided downstream by the judge + acceptance checks.
     record = {
       ...base,
       status: "SUCCESS",

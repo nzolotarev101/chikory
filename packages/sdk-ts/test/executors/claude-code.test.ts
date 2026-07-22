@@ -144,6 +144,27 @@ describe("claude-code adapter on error-result wire", () => {
     expect(record.status).toBe("FAILED");
     expect(record.failure?.reason).toContain("error_during_execution");
   });
+
+  it("keeps a completed turn SUCCESS even when the process exits non-zero (WP-533/F-159)", async () => {
+    const ws = await makeWorkspace();
+    // The agent finishes its turn cleanly (a `result: success` event) but the
+    // process exits 1 — exactly what claude does once Bash is allowed and the
+    // agent's own final verification command (a still-red test suite) sets the
+    // exit code on a not-yet-green task. The step must NOT be FAILED: the judge,
+    // not the raw exit code, gates correctness (dogfood-110 sealed FAILED here
+    // even though the judge voted PROCEED).
+    const adapter = createClaudeCodeAdapter({
+      store: ws.store,
+      binPath: FAKE_BIN,
+      env: { ...process.env, FAKE_DIALECT: "claude", FAKE_MODE: "ok", FAKE_EXIT_CODE: "1" },
+    });
+    const record = await adapter.runStep(makeStepInput(ws, TOY_STEPS[0].instruction, 30));
+    StepRecordSchema.parse(record);
+    expect(record.status).toBe("SUCCESS");
+    expect(record.failure).toBeUndefined();
+    // the executor's real work landed despite the non-zero process exit
+    expect(record.summary).toContain("wrote alpha.txt");
+  });
 });
 
 // WP-112 acceptance: integration test completes a 3-step toy task with the

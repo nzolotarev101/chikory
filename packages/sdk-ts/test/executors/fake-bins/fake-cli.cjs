@@ -124,3 +124,11 @@ if (mode === "hang") {
     });
   }
 }
+
+// WP-533/F-159 reproduction: the agent completed a valid turn (a clean result
+// event was emitted above) but the PROCESS exits non-zero — exactly what happens
+// when the last Bash command (a still-red test suite) sets the exit code. The
+// step must still be SUCCESS (the judge, not the exit code, gates correctness).
+if (process.env.FAKE_EXIT_CODE) {
+  process.exit(Number(process.env.FAKE_EXIT_CODE));
+}

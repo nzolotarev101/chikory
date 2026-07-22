@@ -699,19 +699,21 @@ broken (a false-green, not a follow-on fix).
 
 ## 8. Known P1 limitations (so you don't fight them)
 
-- **A benchmark "fix-until-green" task cannot terminally SUCCEED yet** (🔴 F-159 →
-  WP-533, dogfood-110). Step status is derived from the executor CLI's process
-  exit code (`packages/sdk-ts/src/executors/step.ts:167` — `exitCode !== 0` ⇒
-  `FAILED`). On a task whose deliverable is "make the suite pass", the agent ends
-  each step by running the suite, which exits non-zero while any test is still red
-  → every step is marked FAILED → the runner's 3-consecutive-failure escalation
-  seals the whole run FAILED, **even when the judge just voted PROCEED**
-  (dogfood-110 `brownfield-001`: judge PROCEED 2/3, run FAILED). So any brownfield
-  task needing >3 red→green steps auto-FAILs regardless of real progress; the
-  benchmark *grade* (from the copied-back workspace) can still be non-zero, but the
-  Chikory *run* will read FAILED. Until WP-533 makes step success judge/AC-driven,
-  read a benchmark FAILED against the grade + the `chikory trace` judge verdict, not
-  as "the agent couldn't do it." **Related:** the grading copy-back (`3791e26`)
+- **~~A benchmark "fix-until-green" task cannot terminally SUCCEED~~ ✅ FIXED in code
+  (WP-533/F-159, hand-landed 2026-07-22 — NOT yet live-proven; dogfood-111 is the
+  proof).** `runCliStep` (`packages/sdk-ts/src/executors/step.ts`) no longer fails a
+  step on a non-zero process exit alone — the adapter parser's structured `ok`
+  verdict is now authoritative, so a completed turn is SUCCESS even when the agent's
+  own (still-red) test command sets a non-zero exit; the judge + acceptance checks
+  gate correctness. The historical failure, for context: step status was derived
+  from the executor CLI's process exit code (`exitCode !== 0` ⇒ `FAILED`); on a
+  "make the suite pass" task the agent ends each step by running the suite, which
+  exits non-zero while any test is red → every step FAILED → the runner's
+  3-consecutive-failure escalation sealed the whole run FAILED **even when the judge
+  just voted PROCEED** (dogfood-110 `brownfield-001`: judge PROCEED 2/3, run FAILED).
+  Until dogfood-111 confirms it live, read a pre-fix benchmark FAILED against the
+  grade + the `chikory trace` judge verdict, not as "the agent couldn't do it."
+  **Still open — related:** the grading copy-back (`3791e26`)
   skips the terminal-FAILED path (F-157 recurrence) — a FAILED task may be graded
   against a partial tree with no `node_modules` (`vitest`/`tsc` "not found" ⇒ false
   requirement failures); and a superseded launch attempt can leave orphaned Temporal
