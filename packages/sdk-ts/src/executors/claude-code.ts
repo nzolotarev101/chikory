@@ -51,7 +51,7 @@ interface ClaudeStreamEvent {
   // Per-assistant-turn usage rides on the message; the final `result` event
   // carries the authoritative total (WP-255: the per-turn usage is the partial
   // telemetry recoverable when a step is killed before `result`).
-  message?: { content?: Array<{ type?: string }>; usage?: ClaudeUsage };
+  message?: { content?: Array<{ type?: string; text?: string }>; usage?: ClaudeUsage };
 }
 
 function usageTokens(usage: ClaudeUsage | undefined): TokenUsage {
@@ -78,6 +78,11 @@ export function parseClaudeCodeOutput(
     // numerator + token budget gate would otherwise read a misleading 0/0).
     let lastAssistantUsage: ClaudeUsage | undefined;
     let assistantTurns = 0;
+    // On error_max_turns the result event's `result` field is EMPTY — the last
+    // assistant text is the only executor account of the step, and without it
+    // the next step's `recentSteps` handoff is blank (dogfood-111: each capped
+    // step restarted the same exploration from scratch).
+    let lastAssistantText = "";
 
     for (const line of stdout.split("\n")) {
       const trimmed = line.trim();
@@ -89,7 +94,14 @@ export function parseClaudeCodeOutput(
         continue; // interleaved non-JSON noise is not fatal
       }
       if (event.type === "assistant") {
-        toolCalls += (event.message?.content ?? []).filter((b) => b.type === "tool_use").length;
+        const content = event.message?.content ?? [];
+        toolCalls += content.filter((b) => b.type === "tool_use").length;
+        const text = content
+          .filter((b) => b.type === "text" && typeof b.text === "string")
+          .map((b) => b.text)
+          .join("\n")
+          .trim();
+        if (text) lastAssistantText = text;
         if (event.message?.usage) {
           lastAssistantUsage = event.message.usage;
           assistantTurns += 1;
@@ -126,14 +138,17 @@ export function parseClaudeCodeOutput(
     const costEstimated = resultEvent.total_cost_usd === undefined;
     // `error_max_turns` is a SUCCESSFUL bounded invocation: the turn cap is the
     // contract working as designed; the diff is real and the judge gates it.
-    // Only execution errors fail the step.
+    // The real CLI flags that event `is_error: true`, so the subtype must be
+    // checked before `is_error` — gating both subtypes behind `is_error !== true`
+    // re-FAILed every capped step and re-tripped the CG-1 loop-breaker WP-533
+    // removed (dogfood-111). Only execution errors fail the step.
     const ok =
-      resultEvent.is_error !== true &&
-      (resultEvent.subtype === "success" || resultEvent.subtype === "error_max_turns");
+      resultEvent.subtype === "error_max_turns" ||
+      (resultEvent.is_error !== true && resultEvent.subtype === "success");
 
     return {
       ok,
-      summary: resultEvent.result ?? "",
+      summary: resultEvent.result || lastAssistantText,
       toolCalls,
       tokens,
       costUsd,

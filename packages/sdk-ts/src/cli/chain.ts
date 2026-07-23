@@ -19,6 +19,7 @@
  * deterministic (the ADR's core decision — the planner is above the chain, the
  * chain is above the run loop). The node runs are the durable part.
  */
+import { randomUUID } from "node:crypto";
 import { existsSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 
@@ -34,7 +35,7 @@ import { FamilyDiversityError } from "../judge/family.js";
 import { runPlannerPass } from "../planner/harness.js";
 import { runPlanJudgePass } from "../planner/meta-judge-harness.js";
 import { createRouter } from "../router.js";
-import { createTemporalRunner } from "../runner.js";
+import { createTemporalRunner, describeWorkflowTaskQueue } from "../runner.js";
 import { createRunnerWorker } from "../runner/worker.js";
 import { chainJournalPath, journalPath } from "../runner/paths.js";
 import { parseTaskSpec, TaskSpecValidationError } from "../taskspec.js";
@@ -631,11 +632,16 @@ async function hostChainAndFollow(
   template: ChainNodeTemplate,
   maxReplans?: number,
 ): Promise<number> {
+  // Chain-scoped task queue (F-158, mirrors cmdRun): queue = chain-id; node
+  // child workflows inherit it via workflowInfo().taskQueue. An orphaned chain
+  // from a killed launch can never re-attach to this worker.
+  const chainId = `chain-${randomUUID()}`;
+  const taskQueue = deps.taskQueue ?? chainId;
   const worker = await createRunnerWorker({
     adapters: deps.adapters ?? DEFAULT_ADAPTERS,
     address: flags.address,
     dataDir: flags.dataDir,
-    taskQueue: deps.taskQueue,
+    taskQueue,
     routerOptions: deps.routerOptions,
     workflowBundlePath: deps.workflowBundlePath,
   });
@@ -643,12 +649,13 @@ async function hostChainAndFollow(
   const runner = createTemporalRunner({
     address: flags.address,
     dataDir: flags.dataDir,
-    taskQueue: deps.taskQueue,
+    taskQueue,
   });
   try {
-    const { chainId } = await runner.startChain({
+    await runner.startChain({
       plan,
       template,
+      chainId,
       ...(maxReplans !== undefined ? { maxReplans } : {}),
     });
     if (!flags.json) {
@@ -697,11 +704,17 @@ async function hostChainControlAndFollow(
     return 1;
   }
 
+  // Join the live chain's ORIGINAL queue (F-158: pre-change chains sit on the
+  // shared default, post-change on their own chain-id queue — ask the server).
+  const taskQueue =
+    deps.taskQueue ??
+    (await describeWorkflowTaskQueue(chainId, { address: flags.address })) ??
+    chainId;
   const worker = await createRunnerWorker({
     adapters: deps.adapters ?? DEFAULT_ADAPTERS,
     address: flags.address,
     dataDir: flags.dataDir,
-    taskQueue: deps.taskQueue,
+    taskQueue,
     routerOptions: deps.routerOptions,
     workflowBundlePath: deps.workflowBundlePath,
   });
@@ -709,7 +722,7 @@ async function hostChainControlAndFollow(
   const runner = createTemporalRunner({
     address: flags.address,
     dataDir: flags.dataDir,
-    taskQueue: deps.taskQueue,
+    taskQueue,
   });
   try {
     if (action.kind === "approve") {
@@ -801,11 +814,17 @@ async function hostChainResumeAndFollow(
   deps: CliDeps,
   ioPair: Io,
 ): Promise<number> {
+  // Sealed chain re-start: keep the chain on the queue it lived on (the
+  // completed workflow is still describable); no workflow → chain-id queue.
+  const taskQueue =
+    deps.taskQueue ??
+    (await describeWorkflowTaskQueue(chainId, { address: flags.address })) ??
+    chainId;
   const worker = await createRunnerWorker({
     adapters: deps.adapters ?? DEFAULT_ADAPTERS,
     address: flags.address,
     dataDir: flags.dataDir,
-    taskQueue: deps.taskQueue,
+    taskQueue,
     routerOptions: deps.routerOptions,
     workflowBundlePath: deps.workflowBundlePath,
   });
@@ -813,7 +832,7 @@ async function hostChainResumeAndFollow(
   const runner = createTemporalRunner({
     address: flags.address,
     dataDir: flags.dataDir,
-    taskQueue: deps.taskQueue,
+    taskQueue,
   });
   try {
     // Snapshot the pre-resume journal length BEFORE starting the new workflow

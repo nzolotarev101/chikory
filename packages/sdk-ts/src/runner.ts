@@ -39,6 +39,13 @@ export interface TemporalRunnerOptions {
 
 export interface TemporalRunner extends DurableRunner {
   /**
+   * Start a run. `opts.runId` lets the caller pre-generate the id — the CLI
+   * uses it to host the worker on a run-scoped task queue (queue = run-id,
+   * F-158: a shared queue lets orphaned workflows from killed runs re-attach
+   * to the next launch's worker and silently resume spending).
+   */
+  start(spec: TaskSpec, opts?: { runId?: string }): Promise<RunHandle>;
+  /**
    * Start a WP-219 chain executor (`chainLoop` workflow, ADR-005 §S3) over an
    * already-decomposed, plan-meta-judge-PROCEED'd `Plan`. workflowId = chain-id
    * (mirrors `start`'s workflowId = run-id). The chain's progress is followed
@@ -49,6 +56,8 @@ export interface TemporalRunner extends DurableRunner {
     template: ChainNodeTemplate;
     /** WP-521: replan budget; defaults to 1 (heal-by-default). Explicit 0 = legacy halt. */
     maxReplans?: number;
+    /** Pre-generated chain-id — the CLI's chain-scoped task queue (F-158, mirrors `start`). */
+    chainId?: string;
   }): Promise<{ chainId: string }>;
   /**
    * WP-521(c) / P3-rung-2: re-enter a sealed-FAILED, resumable chain — the chain
@@ -196,9 +205,9 @@ export function createTemporalRunner(opts: TemporalRunnerOptions = {}): Temporal
   }
 
   return {
-    async start(spec: TaskSpec): Promise<RunHandle> {
+    async start(spec: TaskSpec, startOpts?: { runId?: string }): Promise<RunHandle> {
       const client = await getClient();
-      const runId = `run-${randomUUID()}`;
+      const runId = startOpts?.runId ?? `run-${randomUUID()}`;
       await client.workflow.start("agentLoop", {
         workflowId: runId,
         taskQueue,
@@ -209,7 +218,7 @@ export function createTemporalRunner(opts: TemporalRunnerOptions = {}): Temporal
 
     async startChain(input): Promise<{ chainId: string }> {
       const client = await getClient();
-      const chainId = `chain-${randomUUID()}`;
+      const chainId = input.chainId ?? `chain-${randomUUID()}`;
       await client.workflow.start("chainLoop", {
         workflowId: chainId,
         taskQueue,
@@ -292,6 +301,19 @@ export function createTemporalRunner(opts: TemporalRunnerOptions = {}): Temporal
         const client = await getClient();
         await client.workflow.getHandle(runId).signal(SIGNAL_RESUME);
       }
+      // Seal-on-kill counterpart (dogfood-111): an operator-detached run's row
+      // says SUSPENDED — the signal landed, a worker is re-attaching, so flip
+      // it back to RUNNING. AFTER the signal: a terminated/missing workflow
+      // throws above and the row keeps telling the truth.
+      const path = journalPath(dataDir, runId);
+      if (existsSync(path)) {
+        const journal = new Journal(path);
+        try {
+          if (journal.getRun()?.status === "SUSPENDED") journal.reopenRun();
+        } finally {
+          journal.close();
+        }
+      }
       return makeHandle(runId);
     },
 
@@ -324,4 +346,30 @@ export function createTemporalRunner(opts: TemporalRunnerOptions = {}): Temporal
       if (clientPromise) await (await clientPromise).connection.close();
     },
   };
+}
+
+/**
+ * Task queue a workflow (live OR completed) was started on — the queue a
+ * re-attaching/resuming worker must listen to (F-158 run-scoped queues:
+ * pre-change runs sit on the shared default, post-change on their own id,
+ * so the CLI asks the server instead of guessing). Undefined when the server
+ * has no such workflow (journal-only run) or is unreachable — callers fall
+ * back to the run-scoped default.
+ */
+export async function describeWorkflowTaskQueue(
+  workflowId: string,
+  opts: { address?: string; namespace?: string } = {},
+): Promise<string | undefined> {
+  const address = opts.address ?? process.env["TEMPORAL_ADDRESS"] ?? "localhost:7233";
+  let connection: Connection | undefined;
+  try {
+    connection = await Connection.connect({ address });
+    const client = new Client({ connection, namespace: opts.namespace });
+    const description = await client.workflow.getHandle(workflowId).describe();
+    return description.taskQueue;
+  } catch {
+    return undefined;
+  } finally {
+    await connection?.close().catch(() => {});
+  }
 }

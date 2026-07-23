@@ -153,6 +153,17 @@ export class Journal {
     this.db.prepare("UPDATE runs SET status = 'RUNNING', ended_at = NULL").run();
   }
 
+  /**
+   * Operator-detach marker (dogfood-111): the local worker is dying (SIGINT/
+   * SIGTERM) while the workflow may still exist server-side — a killed run used
+   * to sit RUNNING in the journal forever. Row-only and guarded: no terminal
+   * entry is appended (the real seal's idempotency logic stays untouched) and
+   * an already-sealed run is never clobbered. `resume` flips it back.
+   */
+  markDetached(): void {
+    this.db.prepare("UPDATE runs SET status = 'SUSPENDED' WHERE status = 'RUNNING'").run();
+  }
+
   append(input: AppendInput): JournalEntry {
     this.db.exec("BEGIN IMMEDIATE");
     try {

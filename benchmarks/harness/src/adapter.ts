@@ -8,7 +8,7 @@
  *   (`chikory trace --json`, the JIF interchange) is kept as the run artifact.
  */
 import { spawn } from "node:child_process";
-import { createWriteStream, cpSync, existsSync, mkdirSync, readdirSync, writeFileSync } from "node:fs";
+import { createWriteStream, cpSync, existsSync, mkdirSync, readdirSync, statSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { stringify as stringifyYaml } from "yaml";
 
@@ -42,7 +42,7 @@ function runShell(
   cwd: string,
   timeoutMs: number,
   logPath: string,
-): Promise<{ code: number | null; timedOut: boolean }> {
+): Promise<{ code: number | null; timedOut: boolean; output: string }> {
   return new Promise((resolve) => {
     const chunks: string[] = [];
     const logStream = createWriteStream(logPath, { flags: "w" });
@@ -61,7 +61,7 @@ function runShell(
     const finish = (code: number | null) => {
       clearTimeout(timer);
       logStream.end();
-      resolve({ code, timedOut });
+      resolve({ code, timedOut, output: chunks.join("") });
     };
     child.on("close", finish);
     child.on("error", () => finish(null));
@@ -107,6 +107,12 @@ export interface ChikoryAdapterOptions {
   bin?: string;
   budgetUsd?: number;
   maxSteps?: number;
+  /**
+   * Per-step executor turn cap (task.yaml `step_limits.max_turns`). Default 50:
+   * the claude-code adapter default of 25 forced 3-6h brownfield tasks into
+   * restart churn — every capped step re-read ~1.1M input tokens (dogfood-111).
+   */
+  stepMaxTurns?: number;
   executor?: { adapter: string; family: string };
   judge?: { family: string; cadence?: number };
   /** Raw routing block passed through to the spec (snake_case YAML shape). */
@@ -156,6 +162,10 @@ export function buildChikorySpec(
     })),
     budget_usd: opts.budgetUsd ?? 25,
     max_steps: opts.maxSteps ?? 60,
+    // max_seconds 840 = the parse-time ceiling (Temporal activity timeout):
+    // at dogfood-111's observed pace 50 turns ≈ 540s — the default 600s
+    // wall-clock cap would kill the step before the turn cap bounds it.
+    step_limits: { max_turns: opts.stepMaxTurns ?? 50, max_seconds: 840 },
     executor,
     judge,
     ...(routing !== undefined ? { routing } : {}),
@@ -178,21 +188,50 @@ export function chikoryAdapter(opts: ChikoryAdapterOptions = {}): RunnerAdapter 
       console.log(`  [chikory] Logs are streaming to: tail -f ${logPath}\n`);
 
       const started = Date.now();
-      const { code, timedOut } = await runShell(
+      const { code, timedOut, output } = await runShell(
         `${bin} run ${JSON.stringify(specPath)} --data-dir ${JSON.stringify(dataDir)}`,
         ctx.workspaceDir,
         ctx.timeoutMs ?? DEFAULT_ADAPTER_TIMEOUT_MS,
         logPath,
       );
 
-      // Copy the final sandboxed workspace back to the harness workspaceDir for grading
+      // Copy the final sandboxed workspace back to the harness workspaceDir for
+      // grading. Authoritative pick: the run-id the CLI announced for THIS
+      // invocation (`run-id: run-<uuid>`). Stale Temporal workflows from earlier
+      // bench invocations can materialize extra run-* dirs in this dataDir
+      // (F-157/F-158) — newest-journal mtime is only the fallback when the
+      // announcement line is missing (e.g. the CLI died before printing it).
       try {
         const runsDir = join(dataDir, "runs");
         if (existsSync(runsDir)) {
-          const runDirs = readdirSync(runsDir).filter((n) => n.startsWith("run-"));
-          if (runDirs.length > 0) {
-            const runId = runDirs[0];
-            const finalWs = join(runsDir, runId, "workspace");
+          const announced = [...output.matchAll(/^run-id: (run-[0-9a-f-]+)$/gm)].map(
+            (m) => m[1],
+          );
+          const announcedId = announced[announced.length - 1];
+          let gradedId: string | undefined;
+          if (announcedId !== undefined && existsSync(join(runsDir, announcedId, "workspace"))) {
+            gradedId = announcedId;
+          } else {
+            const runDirs = readdirSync(runsDir)
+              .filter((n) => n.startsWith("run-"))
+              .map((n) => {
+                const journal = join(runsDir, n, "journal.db");
+                return {
+                  name: n,
+                  mtime: existsSync(journal) ? statSync(journal).mtimeMs : 0,
+                };
+              })
+              .sort((a, b) => b.mtime - a.mtime);
+            if (runDirs.length > 1) {
+              console.warn(
+                `  [chikory] ${runDirs.length} run dirs in ${runsDir} and no usable run-id ` +
+                  `announcement (stale Temporal re-attach?); grading newest journal: ${runDirs[0].name}`,
+              );
+            }
+            gradedId = runDirs[0]?.name;
+          }
+          if (gradedId !== undefined) {
+            const finalWs = join(runsDir, gradedId, "workspace");
             if (existsSync(finalWs)) {
               cpSync(finalWs, ctx.workspaceDir, { recursive: true, force: true });
             }

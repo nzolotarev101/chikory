@@ -159,6 +159,27 @@ guard (3 consecutive failing verdicts) will usually fire first.
 
 ---
 
+### `step_limits` (optional block — per-step executor bounds)
+
+```yaml
+step_limits:
+  max_seconds: 840   # wall-clock cap per step; ceiling 840 (Temporal activity timeout)
+  max_turns: 50      # tool-call/turn cap per step (adapter default: claude-code 25)
+  max_cost_usd: 2    # per-step spend cap (adapter-dependent)
+```
+
+All fields optional; anything unset falls back to the runner default
+(`max_seconds: 600`) or the adapter default. Raise `max_turns` for long
+brownfield tasks: dogfood-111 (WP-533 live proof) showed the 25-turn default
+forces a 3–6 h task into restart churn — every capped step re-reads ~1.1 M
+input tokens of context. A capped step is a SUCCESSFUL bounded invocation
+(the judge gates the work); the caps exist to bound spend per step, not to
+signal failure. `max_seconds` > 840 is rejected at parse time — the
+executeStep activity's 15-minute `startToCloseTimeout` would kill the step
+before the runner could reap and journal it.
+
+---
+
 ## `executor` block (required)
 
 ```yaml

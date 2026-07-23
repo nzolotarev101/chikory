@@ -79,11 +79,27 @@ describe("parseClaudeCodeOutput", () => {
   });
 
   it("treats error_max_turns as a successful bounded invocation", () => {
+    // The real CLI emits is_error: true alongside error_max_turns (dogfood-111
+    // transcript) — an is_error:false fixture masked the gate that re-FAILed
+    // every capped step.
     const parsed = parseClaudeCodeOutput(undefined)(
-      JSON.stringify({ type: "result", subtype: "error_max_turns", is_error: false, result: "partial" }),
+      JSON.stringify({ type: "result", subtype: "error_max_turns", is_error: true, result: "partial" }),
     );
     expect(parsed.ok).toBe(true);
     expect(parsed.costEstimated).toBe(true); // no total_cost_usd on this event
+  });
+
+  it("falls back to the last assistant text when the result field is empty (max-turns handoff)", () => {
+    const stream = [
+      JSON.stringify({
+        type: "assistant",
+        message: { content: [{ type: "text", text: "Bumped zod to 4.x; 2 tests still red in zodios.test.ts." }] },
+      }),
+      JSON.stringify({ type: "result", subtype: "error_max_turns", is_error: true, result: "" }),
+    ].join("\n");
+    const parsed = parseClaudeCodeOutput(undefined)(stream);
+    expect(parsed.ok).toBe(true);
+    expect(parsed.summary).toBe("Bumped zod to 4.x; 2 tests still red in zodios.test.ts.");
   });
 
   it("fails on error subtypes and on missing result event", () => {

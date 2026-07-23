@@ -12,6 +12,13 @@ import type { LLMProvider, ModelChoice, RoutingPolicy, Stage, TaskSpec } from ".
 export const DEFAULT_CADENCE = 3;
 export const DEFAULT_SCORING_METHOD = "pointwise" as const;
 export const DEFAULT_MAX_STEPS = 100;
+/**
+ * Ceiling for `step_limits.max_seconds`: the executeStep activity's Temporal
+ * startToCloseTimeout is 15 minutes (agent-loop.ts) — a step bound at/above it
+ * would be killed by Temporal mid-flight instead of reaped by the runner.
+ * 840s leaves the kill-grace + artifact-capture headroom inside the window.
+ */
+export const MAX_STEP_MAX_SECONDS = 840;
 
 /** Env var that must be present for a provider to count as configured. */
 export const PROVIDER_ENV_VARS: Record<LLMProvider, string> = {
@@ -128,6 +135,14 @@ const RawTaskSpecYaml = z
     budget_usd: z.number().gt(0),
     max_steps: z.number().int().positive().optional(),
     min_nodes: z.number().int().positive().optional(),
+    step_limits: z
+      .object({
+        max_seconds: z.number().positive().optional(),
+        max_turns: z.number().int().positive().optional(),
+        max_cost_usd: z.number().gt(0).optional(),
+      })
+      .strict()
+      .optional(),
     executor: z
       .object({ adapter: z.string().min(1), family: z.enum(["anthropic", "openai", "gemini", "openai-compat"]) })
       .strict(),
@@ -252,6 +267,21 @@ export function parseTaskSpec(yamlText: string, opts: ParseTaskSpecOptions = {})
     budgetUsd: raw.budget_usd,
     maxSteps: raw.max_steps ?? DEFAULT_MAX_STEPS,
     ...(raw.min_nodes !== undefined ? { minNodes: raw.min_nodes } : {}),
+    ...(raw.step_limits !== undefined
+      ? {
+          stepLimits: {
+            ...(raw.step_limits.max_seconds !== undefined
+              ? { maxSeconds: raw.step_limits.max_seconds }
+              : {}),
+            ...(raw.step_limits.max_turns !== undefined
+              ? { maxTurns: raw.step_limits.max_turns }
+              : {}),
+            ...(raw.step_limits.max_cost_usd !== undefined
+              ? { maxCostUsd: raw.step_limits.max_cost_usd }
+              : {}),
+          },
+        }
+      : {}),
     executor: { adapter: raw.executor.adapter, family: raw.executor.family },
     judge: {
       family: raw.judge.family,
@@ -331,6 +361,12 @@ export function parseTaskSpec(yamlText: string, opts: ParseTaskSpecOptions = {})
   // §9 rule 2 — sanity (budget/cadence/repo count enforced by schema; writability here).
   if (!spec.repos.some((r) => r.writable)) {
     issues.push("repos: at least one repo must be writable");
+  }
+  if (spec.stepLimits?.maxSeconds !== undefined && spec.stepLimits.maxSeconds > MAX_STEP_MAX_SECONDS) {
+    issues.push(
+      `step_limits.max_seconds: ${spec.stepLimits.maxSeconds} exceeds ${MAX_STEP_MAX_SECONDS} ` +
+        `(the executeStep activity's Temporal startToCloseTimeout would kill the step first)`,
+    );
   }
 
   // §9 rule 4 — criteria ids unique (non-emptiness enforced by schema).

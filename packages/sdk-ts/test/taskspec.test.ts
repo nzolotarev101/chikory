@@ -202,6 +202,56 @@ routing:
     expect(() => parseTaskSpec("{ not: [valid", { env })).toThrow(TaskSpecValidationError);
   });
 
+  it("maps step_limits through to spec.stepLimits (dogfood-111 turn-cap knob)", () => {
+    const yaml = `name: step-limits-knob
+goal: Prove the per-step bounds knob parses.
+repos:
+  - url: .
+    writable: true
+acceptance_criteria:
+  - id: AC-1
+    description: Something checkable
+budget_usd: 5
+step_limits:
+  max_turns: 50
+  max_seconds: 840
+executor:
+  adapter: claude-code
+  family: anthropic
+judge:
+  family: gemini
+`;
+    const spec = parseTaskSpec(yaml, { env });
+    expect(spec.stepLimits).toEqual({ maxTurns: 50, maxSeconds: 840 });
+    expect(TaskSpecSchema.safeParse(spec).success).toBe(true);
+  });
+
+  it("rejects step_limits.max_seconds above the activity-timeout ceiling", () => {
+    const yaml = `name: step-limits-too-long
+goal: Catch a step bound Temporal would kill first.
+repos:
+  - url: .
+    writable: true
+acceptance_criteria:
+  - id: AC-1
+    description: Something checkable
+budget_usd: 5
+step_limits:
+  max_seconds: 900
+executor:
+  adapter: claude-code
+  family: anthropic
+judge:
+  family: gemini
+`;
+    expect(() => parseTaskSpec(yaml, { env })).toThrow(TaskSpecValidationError);
+    try {
+      parseTaskSpec(yaml, { env });
+    } catch (err) {
+      expect((err as Error).message).toContain("step_limits.max_seconds: 900 exceeds 840");
+    }
+  });
+
   describe.each(Object.entries(invalidExpectations))("%s", (file, fragment) => {
     it(`fails validation mentioning '${fragment}'`, () => {
       expect(() => parseTaskSpec(read(file), { env })).toThrow(TaskSpecValidationError);

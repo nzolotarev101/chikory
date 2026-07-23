@@ -247,6 +247,14 @@ export const TaskSpecSchema = z
     budgetTokens: z.number().int().positive().optional(),
     maxSteps: z.number().int().positive().optional(),
     minNodes: z.number().int().positive().optional(),
+    stepLimits: z
+      .object({
+        maxSeconds: z.number().positive().optional(),
+        maxTurns: z.number().int().positive().optional(),
+        maxCostUsd: z.number().positive().optional(),
+      })
+      .strict()
+      .optional(),
     executor: z
       .object({
         adapter: z.string().min(1),

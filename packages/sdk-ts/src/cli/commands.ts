@@ -5,6 +5,7 @@
  * reachable, `trace` is journal-only (WP-142). Conventions per cli.md: exit
  * code mirrors SUCCESS/FAILED, `--json` everywhere, errors actionable.
  */
+import { randomUUID } from "node:crypto";
 import { existsSync } from "node:fs";
 import { readdir, readFile } from "node:fs/promises";
 import { join } from "node:path";
@@ -16,7 +17,7 @@ import {
 } from "../executors/index.js";
 import { Journal, reportFromJournal, runTotals } from "../journal/journal.js";
 import type { RouterOptions } from "../router.js";
-import { createTemporalRunner } from "../runner.js";
+import { createTemporalRunner, describeWorkflowTaskQueue } from "../runner.js";
 import type { AdapterRegistry } from "../runner/activities.js";
 import { journalPath } from "../runner/paths.js";
 import { createRunnerWorker } from "../runner/worker.js";
@@ -296,19 +297,24 @@ function finishRun(
   return report.status === "SUCCESS" ? 0 : 1;
 }
 
-/** Host a worker + follow one run to its terminal status (run/resume core). */
+/**
+ * Host a worker + follow one run to its terminal status (run/resume core).
+ * `taskQueue` is the RESOLVED queue for this hosting (run-scoped = run-id,
+ * F-158): worker and runner must agree on it, so callers resolve it once.
+ */
 async function hostAndFollow(
   flags: CommonFlags,
   watch: boolean,
   deps: CliDeps,
   ioPair: Io,
+  taskQueue: string | undefined,
   attach: (runner: ReturnType<typeof createTemporalRunner>) => Promise<RunHandle>,
 ): Promise<number> {
   const worker = await createRunnerWorker({
     adapters: deps.adapters ?? DEFAULT_ADAPTERS,
     address: flags.address,
     dataDir: flags.dataDir,
-    taskQueue: deps.taskQueue,
+    taskQueue,
     routerOptions: deps.routerOptions,
     workflowBundlePath: deps.workflowBundlePath,
   });
@@ -316,17 +322,48 @@ async function hostAndFollow(
   const runner = createTemporalRunner({
     address: flags.address,
     dataDir: flags.dataDir,
-    taskQueue: deps.taskQueue,
+    taskQueue,
   });
+  let removeSignalHandlers: (() => void) | undefined;
   try {
     const handle = await attach(runner);
     if (!flags.json) {
       ioPair.out(`run-id: ${handle.runId}`);
       ioPair.out(`(ctrl-c detaches the local worker; continue with: chikory resume ${handle.runId})`);
     }
+    // Seal-on-kill (dogfood-111): an operator kill used to leave the journal
+    // row RUNNING forever — post-mortems couldn't tell a live run from a
+    // corpse. Mark the row SUSPENDED (row-only, guarded — see markDetached)
+    // before dying, and say exactly where the run stands.
+    const onSignal = (signal: NodeJS.Signals): void => {
+      try {
+        const journal = new Journal(journalPath(flags.dataDir, handle.runId));
+        try {
+          journal.markDetached();
+        } finally {
+          journal.close();
+        }
+      } catch {
+        // Best effort — never block the exit on a journal hiccup.
+      }
+      ioPair.err(`\n${signal}: local worker detached — journal marked SUSPENDED.`);
+      ioPair.err(`continue:  chikory resume ${handle.runId}`);
+      ioPair.err(
+        `abandon:   temporal workflow terminate --workflow-id ${handle.runId} ` +
+          `(otherwise the server-side workflow stays Running)`,
+      );
+      process.exit(signal === "SIGTERM" ? 143 : 130);
+    };
+    process.once("SIGINT", onSignal);
+    process.once("SIGTERM", onSignal);
+    removeSignalHandlers = () => {
+      process.removeListener("SIGINT", onSignal);
+      process.removeListener("SIGTERM", onSignal);
+    };
     const report = await followRun(handle, flags, { watch, deps, io: ioPair });
     return finishRun(handle.runId, report, flags, ioPair);
   } finally {
+    removeSignalHandlers?.();
     worker.shutdown();
     await workerDone.catch(() => {});
     await runner.close();
@@ -435,7 +472,15 @@ export async function cmdRun(
     };
   }
   try {
-    return await hostAndFollow(args, args.watch, deps, ioPair, (runner) => runner.start(spec));
+    // Run-scoped task queue (F-158): queue = run-id, generated here so the
+    // hosted worker and the workflow start agree. Orphaned workflows from
+    // killed runs live on THEIR OWN queues — this launch's worker can never
+    // adopt them (dogfood-110 bf-002: 3 run-ids in one dataDir; dogfood-111:
+    // July-21 orphans materializing journals in July-23 dataDirs).
+    const runId = `run-${randomUUID()}`;
+    return await hostAndFollow(args, args.watch, deps, ioPair, deps.taskQueue ?? runId, (runner) =>
+      runner.start(spec, { runId }),
+    );
   } catch (err) {
     ioPair.err(`chikory: ${actionable(err)}`);
     return 1;
@@ -494,7 +539,15 @@ export async function cmdResume(
     return 1;
   }
   try {
-    return await hostAndFollow(args, args.watch, deps, ioPair, (runner) =>
+    // Resume must join the workflow's ORIGINAL queue: pre-F-158 runs sit on
+    // the shared default, post-F-158 runs on their own run-id queue — ask the
+    // server rather than guess. No workflow there (sealed journal-only run,
+    // or terminated orphan) → the re-start goes on the run-scoped queue.
+    const taskQueue =
+      deps.taskQueue ??
+      (await describeWorkflowTaskQueue(args.runId, { address: args.address })) ??
+      args.runId;
+    return await hostAndFollow(args, args.watch, deps, ioPair, taskQueue, (runner) =>
       runner.resume(
         args.runId,
         args.addBudgetUsd !== undefined ? { addBudgetUsd: args.addBudgetUsd } : undefined,

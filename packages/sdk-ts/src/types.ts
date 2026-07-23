@@ -86,6 +86,13 @@ export interface TaskSpec {
    * too coarsely). Absent = no floor. Ignored by single `chikory run`.
    */
   minNodes?: number;
+  /**
+   * Per-step executor bounds override (dogfood-111): partial — anything unset
+   * falls back to `DEFAULT_STEP_LIMITS` / the adapter default (e.g. claude-code's
+   * 25-turn cap). `maxSeconds` must stay under the executeStep activity's
+   * startToCloseTimeout (parse-time validated).
+   */
+  stepLimits?: { maxSeconds?: number; maxTurns?: number; maxCostUsd?: number };
   executor: { adapter: string; family: LLMProvider };
   judge: JudgePolicy;
   routing: RoutingPolicy;

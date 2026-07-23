@@ -161,6 +161,10 @@ function applyMemoryEviction(
 /** workflowId = run-id (durable-runner.md Temporal mapping). */
 export async function agentLoop(spec: TaskSpec): Promise<RunStatus> {
   const runId = workflowInfo().workflowId;
+  // Per-step bounds: spec knob over defaults (dogfood-111 — 25 adapter-default
+  // turns forced a 3-6h brownfield task into restart churn, ~1.1M input tokens
+  // re-read per capped step). Frozen workflow input → replay-safe.
+  const stepLimits: StepLimits = { ...DEFAULT_STEP_LIMITS, ...spec.stepLimits };
 
   let status: RunStatus = "RUNNING";
   let stepIndex = 0;
@@ -608,7 +612,7 @@ export async function agentLoop(spec: TaskSpec): Promise<RunStatus> {
       stepIndex,
       instruction: stepInstruction,
       context,
-      limits: DEFAULT_STEP_LIMITS,
+      limits: stepLimits,
       ...(predictLimit !== undefined ? { predictLimit } : {}),
     });
     const limitParkTerminal = await parkForLimitReset(record.limitParkResponse);
