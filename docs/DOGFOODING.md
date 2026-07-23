@@ -5,18 +5,20 @@ This is the complete operating manual for executing Phase 2+ work packages
 task spec for a WP (every field explained), how to launch, supervise, and
 recover a run, and how to land the result as a normal PR.
 
-**Status (2026-07-21, bounded — update discipline: REPLACE this block, ≤15 lines;
+**Status (2026-07-23, bounded — update discipline: REPLACE this block, ≤15 lines;
 displaced prose moves verbatim to [`PLAN-HISTORY.md`](PLAN-HISTORY.md); per-run detail:
-`docs/reports/dogfood-NNN.md`; queue + course correction: `plan.md` §6).**
-**dogfood-110 (2026-07-21, `docs/reports/dogfood-110.md`) ran `brownfield-001`/`002` through the `chikory` adapter — BOTH terminal FAILED.**
-`brownfield-001` (`run-2cb113d8`, $2.35/3 steps) = a genuine 2/3 (judge voted PROCEED "work in progress", run sealed FAILED anyway);
-`brownfield-002` (`run-ec7858be`, $2.71/3 steps) = 1/4 INVALID (broken workspace copy-back → graded a probe-only tree). **P3-rung-4 (≥5 pinned
-tasks scored vs a baseline; corpus 3/5) is BLOCKED on 🔴 F-159 → WP-533:** `step.ts:167` maps executor `exitCode !== 0` → step FAILED, so a
-"fix-until-green" agent auto-FAILs every step (its final test command exits non-zero) and the 3-consecutive escalation OVERRIDES the judge's
-PROCEED. Recurrences: 🟠 F-157 (copy-back skips the FAILED path) · 🟡 F-158 (45× orphaned-workflow `writeCheckpoint` retries). Hand-fixed same
-session (uncommitted `activities.ts`): F-160 checkpoint `--no-verify`, F-161 `ensureWorkspaceDeps` non-fatal. **NEXT HEADLINE = WP-533 (F-159 fix),
-not more task pinning** — the benchmark can't yield a credible "Chikory ran an agent to a graded SUCCESS" until step success is judge-driven.
-See §5 (ladders always exist), §7, §8, §1.5, §3. (Earlier — dogfood-108 P3-rung-3 CLIMBED + dogfood-109 pinned 001/002 → PLAN-HISTORY.md 2026-07-21.)
+`docs/reports/`; queue + course correction: `plan.md` §6/§7).**
+**🟢 WP-533 (judge-driven step success) is LIVE-PROVEN — suite `benchmarks/results/20260723-222341-chikory` (`docs/reports/bench-brownfield-20260723-222341.md`, 2026-07-23).**
+The two tasks that BOTH sealed FAILED on 07-21 under F-159 now seal SUCCESS: `brownfield-001` `run-8712271f` 2/3 → **3/3** (2 steps, $1.85, 10m 19s) ·
+`brownfield-003` `run-58b48706` **4/4** (1 step, $0.86, 5m 01s) → suite **7/7, I-SR/D-SR 100%, $2.7075, 16m 04s**, 2 PROCEED, 0 rollbacks, 0 resumes. Deliveries
+hand-verified post-landing (117/117 jest + `tsc -p tsconfig.build.json` exit 0; the zod fix is the real upstream `shallowClone` Map/Set root cause). Ledger `112` ×2, `rung=3`.
+**P3-rung-4 STILL NOT CLIMBED — three gates:** 🔴 **F-164 → WP-535 (NEXT HEADLINE, dogfood-112)** — a judge-executed `check`'s probe file is swept into the checkpoint commit
+(`agent-loop.ts:743-793` judges before `writeCheckpoint`), so `brownfield-003` R2 can be satisfied by the judge's OWN R4 probe; a requirement that grades itself is not publishable ·
+runnable corpus **2/5** (`brownfield-002` `status: blocked`, node≥24 vs devbox 22 → WP-534) · no baseline arm ever run (WP-304).
+Also 🟠 **F-165 → WP-536:** the suite ran `claude-code`/`anthropic`, NOT `gemini-cli` — the default flip (`20a2094`, 18:30:29) landed 7 min AFTER the 18:23:41 launch, so
+$2.7075 of real Anthropic spend bought a wrong-family arm (F-162 recurrence, 2nd in one day). 🟡 F-166 (copy-back rewrites relative symlinks to absolute sandbox paths) ·
+ℹ️ F-167 (judge `costUsd: 0` on 28,312/901 real tokens — keyless proxy unpriced) · ℹ️ F-168 (the progression gate's ⛔ STALLED message still names the RETIRED P2 ladder "WP-265 … plan.md §6"; the live ladder is WP-530 §7) = track-B hand-fixes.
+See §5 (ladders always exist), §7, §8, §1.5, §3. (Earlier — dogfood-110 + dogfood-108/109 → PLAN-HISTORY.md.)
 
 Related docs: [`docs/spec/task-spec.md`](spec/task-spec.md) (schema
 reference) · [`docs/TASK-PROTOCOL.md`](TASK-PROTOCOL.md) (WP etiquette, §7 is
@@ -699,12 +701,17 @@ broken (a false-green, not a follow-on fix).
 | `chikory chain resume <chain-id>` on a sealed-FAILED chain prints "resume delivered" then immediately reprints the OLD failed trace verbatim (identical timestamps) and exits 1 — the retry node never dispatches | **`followChain` raced the freshly-started `chainLoop` workflow** (dogfood-106 **F-155 → FIXED same session, `9e01e09`**). `client.workflow.start` only enqueues the start and returns; `followChain`'s poll loop starts immediately and its FIRST tick often lands before the new workflow's worker has picked up the task, so it reads only the PRE-EXISTING FAILED tail from before the resume and treats that stale state as the resume's own terminal verdict. **Fixed:** `followChain` takes an optional `sinceIdx` baseline; `hostChainResumeAndFollow` snapshots the journal's entry count before calling `resumeChain`, and the terminal check now requires at least one entry PAST that baseline (a genuine reopen/dispatch) before honoring a verdict. Seeing this on old code = rebuild the SDK. |
 | A headless `claude-code` executor produces no diff / hangs on a task that needs it to run shell commands mid-step (install deps, run tests to diagnose) | **`createClaudeCodeAdapter`'s default `allowedTools` never includes `Bash`, and default `--permission-mode` is `acceptEdits`** (dogfood-108 **F-156**) — fine when the JUDGE runs acceptance checks (the normal dogfood shape), but an agent that must run tests itself to diagnose an unfamiliar bug (e.g. a brownfield benchmark task) has no shell and no operator to answer a permission prompt. **Fix:** set `CHIKORY_ALLOW_BASH=1` in the launching env — `claude-code.ts` adds `Bash` to `allowedTools` and switches `--permission-mode` to `auto` (all prompts auto-approved). Scoped opt-in only; a normal launch without the env is unaffected. |
 | A `benchmarks/harness` `chikoryAdapter` run scores suspiciously low (e.g. only the trivially-true requirement passes) even though the executor's transcript shows real work | **The harness was grading the WRONG directory** (dogfood-108 **F-157 → fixed `3791e26`**): before this fix, `chikoryAdapter` graded `ctx.workspaceDir` (the harness's own empty pre-provisioned clone), never `.chikory/runs/<id>/workspace` where the executor's edits actually land in the sandboxed run. **Fixed:** the adapter now `cpSync`s the run's final workspace over `ctx.workspaceDir` before grading. If you're on old code and see a too-low score, verify against the run's own workspace directly before trusting it as a real failure. |
+| A benchmark requirement that demands the AGENT produce something ("a new test reproduces the bug") passes even when the agent produced nothing of the kind | **The judge's OWN discriminator probe is in the graded tree** (🔴 **F-164 → WP-535**, suite `20260723-222341`). `workflow/agent-loop.ts:743-793` runs `judgeStep` BEFORE `writeCheckpoint`, so any file a judge-executed `check` writes (e.g. `brownfield-003` R4's `__root-cause-check.test.ts`, `brownfield-002` R4's `__probe__/legacy-gone.probe.ts`) is swept into that step's commit. `brownfield-003` R2 globs `git diff --name-only <base> -- '*.test.ts'` — it finds the judge's probe. **Tell:** byte-compare the executor's step diff artifact against `git show --stat <step commit>`; `run-58b48706` was 2 files / 1,729 B vs a 3-file commit. **Until WP-535 lands, never trust an "agent authored X" requirement whose glob can match a probe path** — pin the requirement to the agent's diff artifact, or name probe files with a prefix every such glob excludes. |
+| A benchmark suite runs the WRONG executor family even though the default was just flipped | **The harness process loaded the PRE-flip module** (🟠 **F-165 → WP-536**). Suite `20260723-222341` launched 18:23:41 and ran `{adapter:"claude-code", family:"anthropic"}`; the gemini-cli default flip is `20a2094` (18:30:29) with `benchmarks/harness/dist/adapter.js` rebuilt at 18:30 — 7 minutes too late. Cost: $2.7075 of real Anthropic spend for an arm that violates the standing directive (Gemini executes / Codex judges). **Rule:** the resolved executor/judge family is only knowable from the run journal's capability entry (`sqlite3 <journal.db> "select payload_json from journal_entries where idx=0"` → `stages.code[0]`). Check it FIRST in any bench review, and pass `--executor gemini` explicitly rather than trusting a default you just changed. |
+| A copied-back benchmark workspace shows 3 phantom ` M` files (`.cursorrules`, `CLAUDE.md`, `README.md`) that the agent never touched | **Copy-back resolves relative symlinks to absolute sandbox paths** (🟡 **F-166**, track-B). All three are symlinks to `AGENTS.md`; after copy-back they point at `/Users/…/<results>/<task>/.chikory/runs/run-…/workspace/AGENTS.md`. The artifact is therefore not self-contained (prune the run dir and they dangle) and every scope review has to rule them out by hand. Fix: preserve symlinks verbatim in `benchmarks/harness/src/adapter.ts` copy-back (`fs.cp` with `verbatimSymlinks: true`). |
+| `chikory trace` shows a judge pass with real token counts but `$0.00` cost, and `judge.max_cost_share` never bites | **The keyless CLI judge proxy reports no model id** (ℹ️ **F-167**, F-9 family). Journal records `judgeModel {provider:"openai-compat", model:"default"}`, which `pricing.ts` cannot price — suite `20260723-222341` logged 28,312/901 and 26,173/581 tokens at `costUsd: 0`. Judge cost share is structurally unmeasurable, so WP-303/304's "cost per successful task" would under-report by the judge's whole share. Track-B: have the proxy surface its backing model id. |
 
 ## 8. Known P1 limitations (so you don't fight them)
 
-- **~~A benchmark "fix-until-green" task cannot terminally SUCCEED~~ ✅ FIXED in code
-  (WP-533/F-159, hand-landed 2026-07-22 — NOT yet live-proven; dogfood-111 is the
-  proof).** `runCliStep` (`packages/sdk-ts/src/executors/step.ts`) no longer fails a
+- **~~A benchmark "fix-until-green" task cannot terminally SUCCEED~~ ✅ FIXED AND
+  LIVE-PROVEN (WP-533/F-159; landed `b0ec0cb`, proven 2026-07-23 by suite
+  `20260723-222341` — `brownfield-001` 2/3 → 3/3, `brownfield-003` 4/4, suite 7/7 at
+  $2.7075; `docs/reports/bench-brownfield-20260723-222341.md`).** `runCliStep` (`packages/sdk-ts/src/executors/step.ts`) no longer fails a
   step on a non-zero process exit alone — the adapter parser's structured `ok`
   verdict is now authoritative, so a completed turn is SUCCESS even when the agent's
   own (still-red) test command sets a non-zero exit; the judge + acceptance checks
@@ -714,8 +721,8 @@ broken (a false-green, not a follow-on fix).
   exits non-zero while any test is red → every step FAILED → the runner's
   3-consecutive-failure escalation sealed the whole run FAILED **even when the judge
   just voted PROCEED** (dogfood-110 `brownfield-001`: judge PROCEED 2/3, run FAILED).
-  Until dogfood-111 confirms it live, read a pre-fix benchmark FAILED against the
-  grade + the `chikory trace` judge verdict, not as "the agent couldn't do it."
+  Read any PRE-`b0ec0cb` benchmark FAILED against the grade + the `chikory trace`
+  judge verdict, not as "the agent couldn't do it."
   **Still open — related:** the grading copy-back (`3791e26`)
   skips the terminal-FAILED path (F-157 recurrence) — a FAILED task may be graded
   against a partial tree with no `node_modules` (`vitest`/`tsc` "not found" ⇒ false

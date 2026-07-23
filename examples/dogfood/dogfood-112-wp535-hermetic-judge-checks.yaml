@@ -1,0 +1,168 @@
+# Dogfood-112: WP-535 — HERMETIC JUDGE CHECKS (a judge-executed `check` must not mutate the graded tree)
+#   (P3 benchmark/moat track, plan.md §7 WP-535; the 🔴 F-164 fix). This is the rung-4 PREREQUISITE, not a
+#   rung climb: P3-rung-4 publishes a benchmark score, and today one of that benchmark's requirements can be
+#   satisfied by a file the JUDGE ITSELF wrote. Fix the substrate before producing numbers off it.
+#
+# 🔴 THE BUG, PROVEN ON A REAL RUN (suite `benchmarks/results/20260723-222341-chikory`,
+#   `docs/reports/bench-brownfield-20260723-222341.md`):
+#   - `packages/sdk-ts/src/workflow/agent-loop.ts:743-793` runs `activities.judgeStep` BEFORE
+#     `activities.writeCheckpoint`. Any file a judge-executed acceptance `check` writes into the workspace is
+#     therefore swept into THAT STEP'S checkpoint commit.
+#   - `brownfield-003` `run-58b48706-2a64-4eff-969a-9c7c7c1d1e5a`: the executor's own step-0 diff artifact
+#     (`artifacts/f39686ee…`, 1,729 B) contains EXACTLY TWO `diff --git` headers (`default.test.ts`,
+#     `util.ts`). The checkpoint commit `c6a99d74 "chikory: step 0"` contains THREE — the extra file is
+#     `packages/zod/src/v4/classic/tests/__root-cause-check.test.ts`, byte-identical to the heredoc inside
+#     that task's R4 `check`.
+#   - Consequence: `brownfield-003` R2 is `NEW=$(git diff --name-only <base> -- '*.test.ts') … for f in $NEW`.
+#     The judge's own R4 probe IS a new passing `*.test.ts`, so an agent that fixes the bug and writes NO test
+#     at all still greens the requirement that certifies "the agent reproduced the bug". `brownfield-002` R4
+#     (`src/renderer/__probe__/legacy-gone.probe.ts`) has the same shape.
+#
+# CLASS / LADDER. class=product — the deliverable lands in `packages/sdk-ts/src/judge/` + the workflow's
+#   judge→checkpoint ordering, the in-loop-judge thesis pillar itself. NOT harness-meta (nothing in
+#   `scripts/`, `examples/dogfood/`, or `benchmarks/harness/` is the primary surface). Trailing-3 harness-meta
+#   headlines = 0/3, cap intact.
+# Ladder-rung: 4
+# Thesis-KPI: JUDGE-CHECK HERMETICITY — after a judge pass whose acceptance `check` CREATES and MODIFIES
+#   files in the workspace, the step's checkpoint commit contains EXACTLY the paths in that step's executor
+#   diff artifact and nothing else, and the check's side-effect files are gone from the tree. Proven by the
+#   DELIVERED live test (the run's own worker loaded PRE-fix code at start — §1.2 frozen-substrate: this run
+#   cannot demonstrate the fix on its own journal, so the proof is the landed live test, read post-run).
+#   Secondary KPI: per-step reliability (a false-green class removed from every future benchmark score).
+#
+# ⚠️ GATE VERDICTS (recorded 2026-07-23, review of suite `20260723-222341`):
+#   §0 progression  ✅ PROGRESSING (a thesis axis moved: WP-533 live-proven). Default candidate = ladder
+#                   rung-4; rung-4 is gated on THIS fix (grading integrity), on corpus 2/5 (WP-534), and on a
+#                   never-run baseline arm (WP-304) — so the rung-4 PREREQUISITE beats the rung itself.
+#   §1.1 failure-surface ✅ genuinely failable: cross-file (judge check runner + workflow ordering + a live
+#                   Temporal proof), and the naive fix (`git checkout .` after checks) DESTROYS the executor's
+#                   own uncommitted work — the trap this run is designed to expose.
+#   §1.2 product-progress ✅ real open `plan.md` §7 WP-535 on real product code (`src/judge/`), no scaffolding.
+#   §1.3 mission-critical ✅ PROCEED — not busy work, not scaffold-hosted; blocks WP-303/304 publication.
+#   §1.5 friction-budget ✅ class=product, harness-meta 0/3.
+#
+# ⚠️ SCOPE / DETERMINISM. Writes ONLY inside `packages/sdk-ts/`. ADDITIVE — no frozen-contract reshape, NO new
+#   dependency, NO key material. Do NOT touch the executor adapters, the chain runner, the benchmark harness,
+#   `benchmarks/tasks/*.yaml`, or the harvest scripts. Run project commands sequentially inside the existing
+#   devbox environment (already activated — do NOT nest `devbox run`).
+#
+# ⚠️ LAUNCH:
+#   0. Commit this spec + all review docs to HEAD; full suite green (the worker clones HEAD at run start).
+#   1. Verify the spec-pick glob resolves to THIS file: `dogfood-112` sorts after `dogfood-106` (the newest
+#      other spec in `examples/dogfood/`).
+#   2. `CHIKORY_PREFLIGHT_ONLY=1 devbox run run-dogfood` dry-runs the guards at $0 (expect AC-1/AC-2/AC-3
+#      RED-on-HEAD — the challenge is armed).
+#   3. `devbox run run-dogfood`
+#   Post-run: `devbox run -- bash scripts/harvest.sh <run-id>` then `/dogfood-review <run-id>`.
+
+name: dogfood-112-wp535-hermetic-judge-checks
+goal: >
+  Make judge-executed acceptance checks HERMETIC: after a judge pass, the workspace must be byte-identical to
+  what the executor left behind, so a step's checkpoint commit contains exactly the executor's own changes and
+  never a file that an acceptance check wrote. Today it does not — packages/sdk-ts/src/workflow/agent-loop.ts
+  runs the judge before writeCheckpoint, so a check that writes a probe test into the workspace (the
+  discriminator pattern used by the pinned brownfield benchmark tasks) has that probe swept into the graded
+  commit, where it can satisfy a requirement that was supposed to certify the AGENT's own work.
+
+  Deliver, inside packages/sdk-ts, in whatever design you judge best:
+
+    * A pure, named-export decision function planCheckSideEffectCleanup that takes a BEFORE and an AFTER
+      snapshot of the workspace's dirty-file state (the git porcelain view: path plus its status) and returns
+      the bounded, deterministic cleanup plan — which paths a check CREATED and must be deleted, and which
+      paths a check MODIFIED and must be restored to their pre-check content. It must be a pure function over
+      its two inputs with no I/O, exhaustively unit-testable, and it must return an EMPTY plan when the two
+      snapshots agree.
+
+    * THE TRAP YOU MUST NOT FALL INTO: the executor's own work is UNCOMMITTED at judge time (that is exactly
+      what the judge is diffing). A blanket revert, git checkout ., git stash, or "restore every dirty path"
+      would destroy the delivery under review. The plan must be derived strictly from the DIFFERENCE between
+      the two snapshots, so a path the executor dirtied and the check never touched is left completely alone.
+
+    * Wire it into the judge's check-running path so it is applied automatically around acceptance-check
+      execution (the check runner lives in packages/sdk-ts/src/judge/evidence.ts, runCriterionCheck /
+      collectEvidence). Snapshot before the checks run, snapshot after, apply the plan. The checks themselves
+      must still see the executor's real workspace — hermeticity means the tree is RESTORED afterwards, not
+      that checks run somewhere else, unless you can make a real overlay work without changing check semantics.
+
+    * A focused unit test at packages/sdk-ts/test/judge/check-hermeticity.test.ts covering
+      planCheckSideEffectCleanup directly: check-created path becomes a delete, check-modified path becomes a
+      restore, executor-dirtied-but-check-untouched path yields NOTHING, identical snapshots yield an empty
+      plan.
+
+    * A live end-to-end test at packages/sdk-ts/test/judge/check-hermeticity-live.test.ts that runs the real
+      judge evidence collection over a real temp git workspace which already has UNCOMMITTED executor-shaped
+      changes, using an acceptance criterion whose check WRITES a new file and APPENDS to an existing one
+      (mirroring the brownfield-003 R4 probe). Assert both halves: the check's own files are gone from the
+      tree afterwards, AND the executor's uncommitted changes survive untouched.
+
+  CONSTRAINTS: additive only; strict TypeScript, ESM relative imports with explicit .js specifiers, named
+  exports, no default exports, no new dependency, no key material. Keep the per-check 120s bound and the
+  existing process-group kill behavior intact. Do not modify executor adapters, the chain runner, the
+  benchmark harness, or benchmark task YAMLs. Each delivered test must pass and must not break an existing one.
+
+repos:
+  - url: /Users/nikitazolotarev/repos/chikory
+    writable: true
+
+acceptance_criteria:
+  - id: AC-1
+    description: >
+      The pure cleanup planner landed — some `src/judge/` file exports a new `planCheckSideEffectCleanup`.
+      (F-114-safe: greps the function EXPORT symbol named in the goal, absent on HEAD; positive grep only —
+      F-83-safe; no `test -f` — F-82-safe.)
+    check: >
+      cd packages/sdk-ts &&
+      grep -rlE 'export (function|const) planCheckSideEffectCleanup' src/judge | head -1 | grep -q .
+  - id: AC-2
+    description: >
+      The planner is CONSUMED, not just defined — at least 2 files under `src/` reference
+      `planCheckSideEffectCleanup`, i.e. its definition site plus a wiring site in the judge's check path.
+      (F-97-safe co-reference; F-119-safe file count via `grep -rl … | wc -l`, never `grep -c`.)
+    check: >
+      cd packages/sdk-ts &&
+      test "$(grep -rl 'planCheckSideEffectCleanup' src | wc -l | tr -d ' ')" -ge 2
+  - id: AC-3
+    description: >
+      The judge's check-running path itself applies the cleanup — `src/judge/evidence.ts` carries a
+      `planCheckSideEffectCleanup(` CALL. (F-114-safe: greps the CALL expression, not a type name.)
+    check: >
+      cd packages/sdk-ts &&
+      grep -qE 'planCheckSideEffectCleanup\(' src/judge/evidence.ts
+  - id: AC-4
+    description: >
+      Both delivered hermeticity tests pass and the SDK stays type- and lint-clean. (SCOPED vitest over the
+      two test paths the goal PINS — F-153-safe, the pinned paths ARE the delivered tests; fits the judge's
+      120s per-check cap, F-141 — the harvest verify-pack §3 runs the full suite uncapped.)
+    check: >
+      cd packages/sdk-ts &&
+      pnpm exec tsc --noEmit && pnpm exec eslint src/judge/evidence.ts &&
+      pnpm exec vitest run test/judge/check-hermeticity.test.ts test/judge/check-hermeticity-live.test.ts
+
+budget_usd: 30
+max_steps: 12
+
+# CONTEXT-ROT (WP-203/WP-207): auto-calibrated window (F-125 mechanism, live-proven 095-099, 101, 103, 105).
+pacing:
+  mode: auto
+  autoCalibrate: true
+
+# UNATTENDED (WP-271): operator-free; a genuine ESCALATE seals a resumable FAILED (WP-520).
+unattended:
+  escalation: seal_resumable_failed
+
+# DIRECTIVE (F-162/F-165): Gemini executes, Codex judges. Never Claude on a dogfood/benchmark run.
+executor:
+  adapter: gemini-cli
+  family: gemini
+
+judge:
+  family: openai-compat
+  cadence: 2
+  max_cost_share: 0.5
+
+routing:
+  stages:
+    plan: { provider: openai-compat, model: gpt-5.6-sol xhigh }
+    code: { provider: openai-compat, model: gpt-5.6-sol xhigh }
+    review: { provider: openai-compat, model: gpt-5.6-sol xhigh }
+    judge: { provider: openai-compat, model: gpt-5.6-sol xhigh }
