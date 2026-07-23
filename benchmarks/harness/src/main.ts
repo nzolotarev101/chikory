@@ -22,6 +22,8 @@ commands:
       [--out <dir>]          default benchmarks/devai/instances
   run --tasks <dir>        run a suite through one adapter and grade it
       --adapter <name>       chikory | command
+      [--executor <name>]    chikory executor: gemini | claude-code | codex
+                             (default claude-code; also CHIKORY_BENCH_EXECUTOR)
       [--cmd <template>]     command adapter template; placeholders
                              {workspace} {goalFile} {taskId}
       [--judge-cmd <tmpl>]   grade judge-kind requirements via a CLI judge;
@@ -38,6 +40,22 @@ exit codes: 0 ok · 1 invalid input or failed run
 interface Flags {
   values: Record<string, string>;
   positionals: string[];
+}
+
+/** Map a friendly `--executor` name to a Chikory `{adapter, family}` pair. */
+function resolveExecutor(name: string): { adapter: string; family: string } | undefined {
+  switch (name) {
+    case "gemini":
+    case "gemini-cli":
+      return { adapter: "gemini-cli", family: "gemini" };
+    case "claude":
+    case "claude-code":
+      return { adapter: "claude-code", family: "anthropic" };
+    case "codex":
+      return { adapter: "codex", family: "openai" };
+    default:
+      return undefined;
+  }
 }
 
 function parseFlags(argv: string[]): Flags {
@@ -129,7 +147,15 @@ export async function main(argv: string[], io = { out: console.log, err: console
     }
     let adapter: RunnerAdapter;
     if (adapterName === "chikory") {
-      adapter = chikoryAdapter();
+      // Executor override (directive: Gemini executes / Codex judges). Absent =
+      // the adapter's own default. Also readable from CHIKORY_BENCH_EXECUTOR.
+      const executorName = values["executor"] ?? process.env.CHIKORY_BENCH_EXECUTOR;
+      const executor = executorName ? resolveExecutor(executorName) : undefined;
+      if (executorName && !executor) {
+        io.err(`chikory-bench run: unknown --executor '${executorName}' (gemini | claude-code | codex)`);
+        return 1;
+      }
+      adapter = chikoryAdapter(executor ? { executor } : {});
     } else if (adapterName === "command") {
       const template = values["cmd"];
       if (!template) {

@@ -7,7 +7,7 @@
  */
 import type { LLMProvider, RoutingPolicy, Stage, TaskSpec } from "./types.js";
 
-export type ExecutorAdapterName = "claude-code" | "codex" | "native";
+export type ExecutorAdapterName = "claude-code" | "codex" | "gemini-cli" | "native";
 
 export type EndpointCapabilityTarget = LLMProvider | ExecutorAdapterName;
 
@@ -26,9 +26,9 @@ export type EndpointAuthMode =
   | { kind: "optional-api-key"; optionalEnv: string; header: string }
   | {
       kind: "cli-oauth-or-api-key";
-      oauth: "anthropic-subscription" | "chatgpt-subscription";
+      oauth: "anthropic-subscription" | "chatgpt-subscription" | "antigravity-subscription";
       apiKeyEnv: string;
-      binary: "claude" | "codex";
+      binary: "claude" | "codex" | "agy";
     }
   | { kind: "router-delegated" };
 
@@ -134,7 +134,12 @@ const DEFAULT_MAX_TOKENS = 4096;
 const STAGES: readonly Stage[] = ["plan", "code", "review", "judge"];
 
 function isExecutorAdapterName(adapter: string): adapter is ExecutorAdapterName {
-  return adapter === "claude-code" || adapter === "codex" || adapter === "native";
+  return (
+    adapter === "claude-code" ||
+    adapter === "codex" ||
+    adapter === "gemini-cli" ||
+    adapter === "native"
+  );
 }
 
 function executorTarget(target: string | ExecutorEndpointTarget): KnownExecutorEndpointTarget | undefined {
@@ -144,6 +149,8 @@ function executorTarget(target: string | ExecutorEndpointTarget): KnownExecutorE
         return { adapter: target, family: "anthropic" };
       case "codex":
         return { adapter: target, family: "openai" };
+      case "gemini-cli":
+        return { adapter: target, family: "gemini" };
       case "native":
         return { adapter: target, family: "openai-compat" };
       default:
@@ -155,6 +162,8 @@ function executorTarget(target: string | ExecutorEndpointTarget): KnownExecutorE
       return { adapter: target.adapter, family: "anthropic" };
     case "codex":
       return { adapter: target.adapter, family: "openai" };
+    case "gemini-cli":
+      return { adapter: target.adapter, family: "gemini" };
     case "native":
       return { adapter: target.adapter, family: target.family };
     default:
@@ -247,6 +256,33 @@ function describeExecutorCapability(target: KnownExecutorEndpointTarget): Execut
         },
         cost: {
           pricing: "subscription-linked",
+          metering: "estimated-from-cli-usage",
+          costEstimated: true,
+          subscriptionCost: "included-in-plan-or-zero-wire-cost",
+        },
+      };
+    case "gemini-cli":
+      return {
+        kind: "executor",
+        adapter: "gemini-cli",
+        family: target.family,
+        auth: {
+          kind: "cli-oauth-or-api-key",
+          oauth: "antigravity-subscription",
+          apiKeyEnv: "GEMINI_API_KEY",
+          binary: "agy",
+        },
+        limits: {
+          kind: "rolling-window",
+          window: "subscription-session",
+          reset: "provider-managed",
+          // No --max-turns on `agy`; bounded by maxSeconds + prompt scope (as codex).
+          boundedBy: "max-seconds-and-prompt-scope",
+          quotaWindows: SUBSCRIPTION_QUOTA_WINDOWS,
+        },
+        cost: {
+          pricing: "subscription-linked",
+          // Print mode reports no usage — estimated from CLI output length.
           metering: "estimated-from-cli-usage",
           costEstimated: true,
           subscriptionCost: "included-in-plan-or-zero-wire-cost",

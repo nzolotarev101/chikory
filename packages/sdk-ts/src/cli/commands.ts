@@ -13,6 +13,7 @@ import { join } from "node:path";
 import {
   createClaudeCodeAdapter,
   createCodexAdapter,
+  createGeminiCliAdapter,
   createNativeAdapter,
 } from "../executors/index.js";
 import { Journal, reportFromJournal, runTotals } from "../journal/journal.js";
@@ -43,6 +44,7 @@ import { formatEntryLine, renderStepDetail, renderTrace, traceJson } from "./tra
 export const ADAPTERS: AdapterRegistry = {
   "claude-code": (ctx) => createClaudeCodeAdapter({ store: ctx.store, model: ctx.model }),
   codex: (ctx) => createCodexAdapter({ store: ctx.store, model: ctx.model }),
+  "gemini-cli": (ctx) => createGeminiCliAdapter({ store: ctx.store, model: ctx.model }),
   native: (ctx) => {
     if (!ctx.createCodeRouter || !ctx.modelFamily) {
       throw new Error("native adapter requires createCodeRouter and modelFamily");

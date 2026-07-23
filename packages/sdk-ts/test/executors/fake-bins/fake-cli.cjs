@@ -108,6 +108,15 @@ if (mode === "hang") {
       },
     });
   }
+} else if (dialect === "agy") {
+  // Antigravity (`agy`) print mode: plain text, no structured wire events.
+  // An empty response is the only failure signal (parseAgyOutput → ok=false).
+  if (mode === "error-result") {
+    process.stdout.write("");
+  } else {
+    const summary = withEnvSummary(mode === "ok" ? doWork() : "did nothing");
+    process.stdout.write(summary + "\n");
+  }
 } else {
   // codex dialect
   emit({ type: "thread.started", thread_id: "fake-thread" });

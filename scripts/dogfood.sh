@@ -272,7 +272,9 @@ if grep -q "model:.*gemini" "$SPEC_FILE"; then
 elif grep -q "model:.*gpt" "$SPEC_FILE" || grep -q "model:.*codex" "$SPEC_FILE"; then
   BACKEND="codex"
 else
-  BACKEND="agy" # default fallback
+  # Directive: Codex judges (Gemini executes). Default the judge backend to
+  # codex when the spec does not pin a judge model family.
+  BACKEND="codex" # default fallback
 fi
 
 # Use node to check if the port is already in use

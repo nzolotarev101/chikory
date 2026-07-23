@@ -389,6 +389,9 @@ export function parseTaskSpec(yamlText: string, opts: ParseTaskSpecOptions = {})
     if (codeCapability.adapter === "codex" && spec.executor.family !== codeCapability.family) {
       issues.push("executor.adapter 'codex' must use executor.family 'openai'");
     }
+    if (codeCapability.adapter === "gemini-cli" && spec.executor.family !== codeCapability.family) {
+      issues.push("executor.adapter 'gemini-cli' must use executor.family 'gemini'");
+    }
   }
 
   if (issues.length > 0) throw new TaskSpecValidationError(issues);

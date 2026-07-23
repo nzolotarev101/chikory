@@ -113,7 +113,9 @@ export {
   CLAUDE_CODE_DEFAULT_MAX_TURNS,
   createClaudeCodeAdapter,
   createCodexAdapter,
+  createGeminiCliAdapter,
   createNativeAdapter,
+  parseAgyOutput,
   parseClaudeCodeOutput,
   parseCodexOutput,
   renderStepPrompt,
@@ -123,6 +125,7 @@ export {
   type ClaudeCodeAdapterOptions,
   type CliStepOptions,
   type CodexAdapterOptions,
+  type GeminiCliAdapterOptions,
   type NativeAdapterOptions,
   type ParsedCliResult,
 } from "./executors/index.js";

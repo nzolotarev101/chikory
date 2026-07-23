@@ -19,4 +19,9 @@ export {
   type ClaudeCodeAdapterOptions,
 } from "./claude-code.js";
 export { createCodexAdapter, parseCodexOutput, type CodexAdapterOptions } from "./codex.js";
+export {
+  createGeminiCliAdapter,
+  parseAgyOutput,
+  type GeminiCliAdapterOptions,
+} from "./gemini-cli.js";
 export { createNativeAdapter, type NativeAdapterOptions } from "./native.js";
