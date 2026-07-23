@@ -6,9 +6,7 @@
  * - **D-SR** (dependency-adjusted): a requirement counts only if it AND its
  *   transitive prerequisites are satisfied.
  */
-import { spawn } from "node:child_process";
-
-import { DEFAULT_CHECK_TIMEOUT_MS } from "@chikory/sdk";
+import { DEFAULT_CHECK_TIMEOUT_MS, runBounded, scrubExecutorEnv } from "@chikory/sdk";
 
 import type { BenchmarkRequirement, BenchmarkTask } from "./task.js";
 
@@ -45,29 +43,28 @@ export interface TaskGradeReport {
   dependencySatisfied: number;
 }
 
-function runCheck(
+/**
+ * Run one requirement check in the workspace. F-163 (judge/grader parity):
+ * the in-loop judge and this post-hoc grader MUST execute a `check` byte-for-byte
+ * identically — same shell (`/bin/sh`), same provider-scrubbed env, same
+ * process-group deadline — or a judge PROCEED can diverge from a grader FAIL on
+ * environment alone. This mirrors the SDK judge's runner (`judge/evidence.ts`).
+ */
+async function runCheck(
   command: string,
   cwd: string,
   timeoutMs: number,
 ): Promise<{ code: number | null; output: string }> {
-  return new Promise((resolve) => {
-    const child = spawn("bash", ["-c", command], { cwd, stdio: ["ignore", "pipe", "pipe"] });
-    let output = "";
-    const cap = (chunk: Buffer) => {
-      if (output.length < 8_192) output += chunk.toString();
-    };
-    child.stdout.on("data", cap);
-    child.stderr.on("data", cap);
-    const timer = setTimeout(() => child.kill("SIGKILL"), timeoutMs);
-    child.on("close", (code) => {
-      clearTimeout(timer);
-      resolve({ code, output });
-    });
-    child.on("error", (err) => {
-      clearTimeout(timer);
-      resolve({ code: null, output: String(err) });
-    });
+  const bounded = await runBounded("/bin/sh", ["-c", command], {
+    cwd,
+    env: scrubExecutorEnv(process.env, []),
+    maxSeconds: timeoutMs / 1000,
   });
+  const code = bounded.timedOut ? 1 : (bounded.exitCode ?? 1);
+  const output = `${bounded.stdout}${bounded.stderr}${
+    bounded.timedOut ? `\n[check timed out after ${timeoutMs}ms]` : ""
+  }`;
+  return { code, output };
 }
 
 async function gradeOne(

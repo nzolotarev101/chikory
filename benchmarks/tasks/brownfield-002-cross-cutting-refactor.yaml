@@ -19,7 +19,18 @@
 # hooks) already calls the store's actions directly, the modern pattern.
 id: brownfield-002
 class: brownfield
-status: pinned
+# BLOCKED (F-163, 2026-07-23): the target repo pins `engines.node >=24`, but the
+# Chikory devbox toolchain provides node v22 (devbox.json `nodejs@22`). Under the
+# unsupported engine, gitify's React-19 test suite is systemically red on the
+# UNTOUCHED base ref a061eaa1 — `renderHook` returns null (354/1128 tests fail,
+# incl. 107 snapshot-serialization drifts). R2 ("full suite green") therefore
+# cannot pass for ANY agent, so grading is meaningless. Unblock when per-target
+# node provisioning lands (see plan.md WP-534) — flip back to `status: pinned`.
+status: blocked
+blocked_reason: >-
+  target needs node>=24; devbox provides node v22 → gitify React-19 suite is
+  red on the untouched base ref (renderHook null + snapshot drift). Unblock via
+  per-target node provisioning (WP-534).
 repo:
   url: https://github.com/gitify-app/gitify
   ref: a061eaa112fa18885dd4de0cea6c0e51094cad0c # pinned BEFORE #3036 (parent of the merge commit on main)

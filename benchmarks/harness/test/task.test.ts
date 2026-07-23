@@ -33,8 +33,11 @@ describe("authored task format v1 (WP-301 freeze)", () => {
     for (const file of files) {
       const { task, issues } = validateAuthoredTask(readFileSync(join(TASKS_DIR, file), "utf8"), file);
       expect(issues, `${file}: ${issues.join("; ")}`).toEqual([]);
-      expect(task!.status).toBe("pinned");
-      expect(isRunnable(task!)).toBe(true);
+      // A real corpus task is either runnable (pinned) or env-blocked with a
+      // reason (F-163); blocked tasks are valid but skipped, never scored.
+      expect(["pinned", "blocked"]).toContain(task!.status);
+      expect(isRunnable(task!)).toBe(task!.status === "pinned");
+      if (task!.status === "blocked") expect(task!.blockedReason).toBeTruthy();
     }
   });
 
@@ -57,6 +60,24 @@ describe("authored task format v1 (WP-301 freeze)", () => {
     expect(task).toBeUndefined();
     expect(issues.join("\n")).toMatch(/check TBD/);
     expect(issues.join("\n")).toMatch(/40-hex commit sha/);
+  });
+
+  it("accepts a blocked task with a reason but marks it not-runnable (F-163)", () => {
+    const blocked = VALID_PINNED.replace(
+      "status: pinned",
+      "status: blocked\nblocked_reason: target needs node>=24; devbox provides node v22",
+    );
+    const task = parseAuthoredTask(blocked, "blocked.yaml");
+    expect(task.status).toBe("blocked");
+    expect(isRunnable(task)).toBe(false);
+    expect(task.blockedReason).toMatch(/node>=24/);
+  });
+
+  it("rejects a blocked task without a reason, and blocked_reason on a live task", () => {
+    const noReason = VALID_PINNED.replace("status: pinned", "status: blocked");
+    expect(validateAuthoredTask(noReason, "nr.yaml").issues.join()).toMatch(/blocked task requires blocked_reason/);
+    const strayReason = VALID_PINNED.replace("status: pinned", "status: pinned\nblocked_reason: nope");
+    expect(validateAuthoredTask(strayReason, "sr.yaml").issues.join()).toMatch(/only valid on a blocked task/);
   });
 
   it("rejects id/class mismatch, unknown prerequisite, and cycles", () => {

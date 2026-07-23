@@ -1,5 +1,6 @@
 export { runBounded, DEFAULT_KILL_GRACE_MS } from "./process.js";
 export type { BoundedProcessOptions, BoundedProcessResult } from "./process.js";
+export { scrubExecutorEnv } from "./env.js";
 export { assertGitWorkspace, captureWorkspaceDiff } from "./workspace.js";
 export { renderStepPrompt } from "./prompt.js";
 export { applyLimitResponse, type ApplyLimitResponseInput } from "./limit-response.js";

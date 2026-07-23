@@ -73,6 +73,12 @@ export async function runSuite(opts: RunSuiteOptions): Promise<{ summary: SuiteS
   const results: TaskResult[] = [];
   for (const task of opts.tasks) {
     if (!isRunnable(task)) {
+      // Env-unfit (blocked) tasks are ALWAYS skipped — scoring them would emit a
+      // meaningless red the judge can't reproduce (F-163). Drafts obey skipDrafts.
+      if (task.status === "blocked") {
+        log(`skip ${task.id} (blocked: ${task.blockedReason ?? "env cannot grade"})`);
+        continue;
+      }
       if (opts.skipDrafts ?? true) {
         log(`skip ${task.id} (draft)`);
         continue;

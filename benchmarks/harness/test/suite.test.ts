@@ -35,6 +35,22 @@ requirements:
     check: TBD
 `;
 
+const BLOCKED_YAML = `
+id: brownfield-002
+class: brownfield
+status: blocked
+blocked_reason: target needs node>=24; devbox provides node v22
+repo:
+  url: https://github.com/example/app
+  ref: 0123456789abcdef0123456789abcdef01234567
+goal: |
+  Env cannot grade this yet.
+requirements:
+  - id: R1
+    description: suite green
+    check: test -f hello.txt
+`;
+
 describe("loadTaskDir", () => {
   it("loads authored YAML and DevAI JSON side by side, reports invalid files", () => {
     const dir = mkdtempSync(join(tmpdir(), "bench-dir-"));
@@ -78,8 +94,31 @@ describe("runSuite", () => {
 
     const written = JSON.parse(readFileSync(join(outDir, "summary.json"), "utf8"));
     expect(written.perTask[0].taskId).toBe("greenfield-001");
+
     const taskJson = JSON.parse(readFileSync(join(outDir, "greenfield-001.json"), "utf8"));
     expect(taskJson.grading.grades).toHaveLength(2);
+  });
+
+  it("skips an env-blocked task with its reason, never scoring it (F-163)", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "bench-suite-"));
+    writeFileSync(join(dir, "greenfield-001.yaml"), PINNED_YAML);
+    writeFileSync(join(dir, "brownfield-002.yaml"), BLOCKED_YAML);
+    const { tasks, invalid } = loadTaskDir(dir);
+    expect(invalid).toEqual({});
+
+    const resultsDir = mkdtempSync(join(tmpdir(), "bench-results-"));
+    const lines: string[] = [];
+    const { summary } = await runSuite({
+      suite: "unit",
+      tasks,
+      adapter: commandAdapter("solver", "echo hello > hello.txt"),
+      resultsDir,
+      skipDrafts: false, // blocked is skipped regardless of skipDrafts
+      log: (l) => lines.push(l),
+    });
+
+    expect(summary.tasks).toBe(1); // blocked not scored
+    expect(lines.join("\n")).toContain("skip brownfield-002 (blocked: target needs node>=24");
   });
 
   it("a failing solver yields honest zeros, not an error", async () => {

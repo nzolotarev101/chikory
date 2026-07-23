@@ -40,6 +40,23 @@ describe("gradeTask", () => {
     expect(report.grades.find((g) => g.requirementId === "R2")!.detail).toMatch(/exit 1/);
   });
 
+  it("scrubs provider env from checks — judge/grader parity (F-163)", async () => {
+    const ws = mkdtempSync(join(tmpdir(), "bench-grade-"));
+    process.env.GEMINI_API_KEY = "should-not-leak";
+    try {
+      // Passes only if $GEMINI_API_KEY is empty in the check env, exactly as the
+      // in-loop judge sees it (both scrub PROVIDER_ENV_VARS) — so a check can
+      // never pass/fail on a provider var the two runners disagree about.
+      const report = await gradeTask(
+        task([{ id: "R1", description: "", prerequisites: [], grading: { kind: "check", command: 'test -z "$GEMINI_API_KEY"' } }]),
+        { workspaceDir: ws },
+      );
+      expect(report.satisfied).toBe(1);
+    } finally {
+      delete process.env.GEMINI_API_KEY;
+    }
+  });
+
   it("gates transitively: R3←R2←R1 with R1 failed drops both dependents", async () => {
     const ws = mkdtempSync(join(tmpdir(), "bench-grade-"));
     const report = await gradeTask(

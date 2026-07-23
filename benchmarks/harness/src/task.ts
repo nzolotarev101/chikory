@@ -9,7 +9,7 @@ import { z } from "zod";
 
 export type TaskClass = "greenfield" | "brownfield";
 export type TaskSource = "devai" | "authored";
-export type TaskStatus = "draft" | "pinned";
+export type TaskStatus = "draft" | "pinned" | "blocked";
 
 /**
  * How a requirement is graded: `check` = a command exiting 0/1 in the task
@@ -39,8 +39,15 @@ export interface BenchmarkTask {
   id: string;
   source: TaskSource;
   class: TaskClass;
-  /** Only `pinned` tasks are runnable — drafts may carry TBD refs/checks. */
+  /**
+   * Only `pinned` tasks are runnable. `draft` may carry TBD refs/checks;
+   * `blocked` is a fully-pinned task the current harness environment cannot
+   * grade reproducibly (e.g. the target repo needs a node engine the devbox
+   * toolchain does not provide) — skipped, never scored, until unblocked.
+   */
   status: TaskStatus;
+  /** Required when `status === "blocked"`: why the env cannot grade it (F-163). */
+  blockedReason?: string;
   goal: string;
   requirements: BenchmarkRequirement[];
   preferences: BenchmarkPreference[];
@@ -71,7 +78,8 @@ const AuthoredTaskYaml = z
   .object({
     id: z.string().regex(/^(brownfield|greenfield)-\d{3}$/, "id must be <class>-<nnn>"),
     class: z.enum(["brownfield", "greenfield"]),
-    status: z.enum(["draft", "pinned"]),
+    status: z.enum(["draft", "pinned", "blocked"]),
+    blocked_reason: z.string().min(1).optional(),
     repo: z.object({ url: z.string().min(1), ref: z.string().min(1) }).strict().optional(),
     horizon: z.union([z.string(), z.number()]).optional(),
     goal: z.string().min(1),
@@ -158,17 +166,25 @@ export function validateAuthoredTask(
     issues.push("brownfield task requires repo.url + repo.ref");
   }
 
-  // Pinned = reproducible: real repo ref, every check executable (no TBD).
-  if (t.status === "pinned") {
+  // Pinned/blocked = reproducible-quality: real repo ref, every check executable
+  // (no TBD). A `blocked` task is a pinned task the env can't grade yet, so it
+  // must stay just as concrete — plus carry the reason it's shelved.
+  if (t.status === "pinned" || t.status === "blocked") {
     if (t.repo) {
-      if (t.repo.url === "TBD") issues.push("pinned task has repo.url TBD");
+      if (t.repo.url === "TBD") issues.push(`${t.status} task has repo.url TBD`);
       if (!SHA_RE.test(t.repo.ref)) {
-        issues.push(`pinned task repo.ref must be a full 40-hex commit sha, got '${t.repo.ref}'`);
+        issues.push(`${t.status} task repo.ref must be a full 40-hex commit sha, got '${t.repo.ref}'`);
       }
     }
     for (const r of t.requirements) {
-      if (r.check.trim() === "TBD") issues.push(`pinned task has ${r.id} check TBD`);
+      if (r.check.trim() === "TBD") issues.push(`${t.status} task has ${r.id} check TBD`);
     }
+  }
+  if (t.status === "blocked" && !t.blocked_reason) {
+    issues.push("blocked task requires blocked_reason (why the env cannot grade it)");
+  }
+  if (t.status !== "blocked" && t.blocked_reason) {
+    issues.push("blocked_reason is only valid on a blocked task");
   }
 
   const requirements: BenchmarkRequirement[] = t.requirements.map((r) => ({
@@ -188,6 +204,7 @@ export function validateAuthoredTask(
     source: "authored",
     class: t.class,
     status: t.status,
+    ...(t.blocked_reason ? { blockedReason: t.blocked_reason } : {}),
     goal: t.goal,
     requirements,
     preferences: [],
