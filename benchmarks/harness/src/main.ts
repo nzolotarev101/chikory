@@ -23,7 +23,7 @@ commands:
   run --tasks <dir>        run a suite through one adapter and grade it
       --adapter <name>       chikory | command
       [--executor <name>]    chikory executor: gemini | claude-code | codex
-                             (default claude-code; also CHIKORY_BENCH_EXECUTOR)
+                             (default gemini; also CHIKORY_BENCH_EXECUTOR)
       [--cmd <template>]     command adapter template; placeholders
                              {workspace} {goalFile} {taskId}
       [--judge-cmd <tmpl>]   grade judge-kind requirements via a CLI judge;

@@ -130,8 +130,8 @@ export function buildChikorySpec(
   opts: ChikoryAdapterOptions,
   workspaceDir: string,
 ): Record<string, unknown> {
-  const executor = opts.executor ?? { adapter: "claude-code", family: "anthropic" };
-  let judge = opts.judge ?? { family: executor.family === "anthropic" ? "gemini" : "anthropic" };
+  const executor = opts.executor ?? { adapter: "gemini-cli", family: "gemini" };
+  let judge = opts.judge ?? { family: executor.family === "gemini" ? "anthropic" : "gemini" };
   let routing = opts.routing;
 
   if (process.env.OPENAI_COMPAT_BASE_URL) {
