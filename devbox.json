@@ -27,7 +27,7 @@
       "dogfood-verify": "bash scripts/dogfood-verify.sh",
       "dogfood-progression": "bash scripts/dogfood-progression.sh",
       "bench": "bash scripts/bench.sh",
-      "judge-proxy": "node scripts/cli-judge-proxy.mjs 8787 agy",
+      "judge-proxy": "node scripts/cli-judge-proxy.mjs 8787 codex",
       "harvest": "bash scripts/harvest.sh \"\" main",
       "harvest-audit": "bash scripts/harvest-audit.sh"
     }

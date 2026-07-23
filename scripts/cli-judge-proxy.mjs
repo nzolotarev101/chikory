@@ -31,7 +31,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 const port = Number(process.argv[2] ?? 8787);
-const backend = process.argv[3] ?? "agy";
+const backend = process.argv[3] ?? "codex";
 // Empty cwd: the judge prompt carries all evidence; the CLI must not wander.
 const sandbox = mkdtempSync(join(tmpdir(), "cli-judge-"));
 
