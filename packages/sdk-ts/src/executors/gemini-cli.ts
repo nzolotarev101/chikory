@@ -89,8 +89,13 @@ export function createGeminiCliAdapter(opts: GeminiCliAdapterOptions): ExecutorA
         "--add-dir",
         input.workspaceDir,
       ];
-      if (opts.model && opts.model !== "default") {
-        let modelName = opts.model;
+      const isGeminiModel =
+        opts.model &&
+        opts.model !== "default" &&
+        !opts.model.startsWith("gpt-") &&
+        !opts.model.startsWith("claude-");
+      if (isGeminiModel && opts.model) {
+        let modelName: string = opts.model;
         let effort: string | undefined;
         for (const level of ["low", "medium", "high"] as const) {
           if (modelName.endsWith(` ${level}`)) {

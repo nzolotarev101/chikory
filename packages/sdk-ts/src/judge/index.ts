@@ -60,3 +60,13 @@ export {
 } from "./scoring.js";
 export { scanDiffForNewDependencies } from "./scan-dependencies.js";
 export { scanDiffForLayeringViolations } from "./scan-layering.js";
+export {
+  applyCleanupPlan,
+  parseDirtySnapshot,
+  planCheckSideEffectCleanup,
+  snapshotWorkspace,
+  type CheckSideEffectCleanupPlan,
+  type GitDirtyEntry,
+  type WorkspaceDirtySnapshot,
+} from "./hermeticity.js";
+

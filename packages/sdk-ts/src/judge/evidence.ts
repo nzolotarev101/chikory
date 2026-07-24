@@ -23,6 +23,13 @@ import type {
 import { scanDiffForNewDependencies } from "./scan-dependencies.js";
 import { scanDiffForLayeringViolations } from "./scan-layering.js";
 import { scanDiffForSecrets } from "./scan-secrets.js";
+import {
+  applyCleanupPlan,
+  planCheckSideEffectCleanup,
+  snapshotWorkspace,
+  type WorkspaceDirtySnapshot,
+} from "./hermeticity.js";
+
 
 const execFileAsync = promisify(execFile);
 
@@ -241,16 +248,39 @@ export async function collectEvidence(input: CollectEvidenceInput): Promise<Coll
   // Judge-executed acceptance checks (JD-4) — sequential: checks may share
   // workspace state (build artifacts, ports).
   const checkRuns: CheckRun[] = [];
-  for (const criterion of input.criteria) {
-    if (!criterion.check) continue;
-    checkRuns.push(
-      await runCheck(
-        input.workspaceDir,
-        criterion,
-        input.checkTimeoutMs ?? DEFAULT_CHECK_TIMEOUT_MS,
-        input.workspaceRepos ?? [],
-      ),
-    );
+
+  const writableRepos = input.workspaceRepos?.filter((repo) => repo.writable) ?? [];
+  const reposToSnapshot =
+    writableRepos.length > 0
+      ? writableRepos.map((repo) => ({
+          dir: repo.relativePath === "." ? input.workspaceDir : join(input.workspaceDir, repo.relativePath),
+        }))
+      : [{ dir: input.workspaceDir }];
+
+  const beforeSnapshots = new Map<string, WorkspaceDirtySnapshot>();
+  for (const r of reposToSnapshot) {
+    beforeSnapshots.set(r.dir, await snapshotWorkspace(r.dir));
+  }
+
+  try {
+    for (const criterion of input.criteria) {
+      if (!criterion.check) continue;
+      checkRuns.push(
+        await runCheck(
+          input.workspaceDir,
+          criterion,
+          input.checkTimeoutMs ?? DEFAULT_CHECK_TIMEOUT_MS,
+          input.workspaceRepos ?? [],
+        ),
+      );
+    }
+  } finally {
+    for (const r of reposToSnapshot) {
+      const before = beforeSnapshots.get(r.dir);
+      const after = await snapshotWorkspace(r.dir);
+      const plan = planCheckSideEffectCleanup(before ?? "", after);
+      await applyCleanupPlan(r.dir, plan, before);
+    }
   }
 
   let testResults: TestResultArtifact | undefined;
