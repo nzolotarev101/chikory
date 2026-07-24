@@ -7,6 +7,11 @@ import { join, resolve } from "node:path";
 
 import { chikoryAdapter, commandAdapter, type RunnerAdapter } from "./adapter.js";
 import { fetchDevAIInstances } from "./devai.js";
+import {
+  checkBenchFamilyDirective,
+  formatResolvedFamilies,
+  resolveBenchFamilies,
+} from "./family-preflight.js";
 import { commandComplete, makeJudgeGrader } from "./judge-grader.js";
 import { loadTaskDir, runSuite } from "./suite.js";
 import { isRunnable } from "./task.js";
@@ -156,6 +161,24 @@ export async function main(argv: string[], io = { out: console.log, err: console
         return 1;
       }
       adapter = chikoryAdapter(executor ? { executor } : {});
+
+      // Family preflight (WP-536, F-165/F-170): echo the resolved arm and refuse
+      // to spend when the executor/judge/code-routing families violate the
+      // standing directive (Gemini executes / Codex judges, never Claude). Twice
+      // in one day a suite burned real Anthropic budget on a wrong-family arm
+      // because nothing asserted the family before launch. Override with
+      // CHIKORY_BENCH_ALLOW_FAMILY_OVERRIDE=1.
+      const resolvedFamilies = resolveBenchFamilies(executor ? { executor } : {}, process.env);
+      io.out(`bench preflight: ${formatResolvedFamilies(resolvedFamilies)}`);
+      const violations = checkBenchFamilyDirective(resolvedFamilies);
+      if (violations.length > 0 && process.env.CHIKORY_BENCH_ALLOW_FAMILY_OVERRIDE !== "1") {
+        io.err(
+          "chikory-bench run: REFUSING to launch — resolved families violate the standing directive (Gemini executes / Codex judges, never Claude):",
+        );
+        for (const v of violations) io.err(`  - ${v.message}`);
+        io.err("Override (you accept a non-standard arm): CHIKORY_BENCH_ALLOW_FAMILY_OVERRIDE=1");
+        return 1;
+      }
     } else if (adapterName === "command") {
       const template = values["cmd"];
       if (!template) {

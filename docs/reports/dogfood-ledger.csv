@@ -49,3 +49,4 @@ run,wp,mode,outcome,steps,cost_usd,spec_format,class,resumes,judge_catches,rung,
 110,WP-302,bench,FAILED,3,2.71,loose,product,0,0,0,0
 112,WP-533,bench,SUCCESS,2,1.85,loose,product,0,0,3,0
 112,WP-533,bench,SUCCESS,1,0.86,loose,product,0,0,3,0
+112,WP-535,run,SUCCESS,1,0.04,loose,product,0,1,0,0

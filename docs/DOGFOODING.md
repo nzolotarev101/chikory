@@ -5,20 +5,21 @@ This is the complete operating manual for executing Phase 2+ work packages
 task spec for a WP (every field explained), how to launch, supervise, and
 recover a run, and how to land the result as a normal PR.
 
-**Status (2026-07-23, bounded — update discipline: REPLACE this block, ≤15 lines;
+**Status (2026-07-24, bounded — update discipline: REPLACE this block, ≤15 lines;
 displaced prose moves verbatim to [`PLAN-HISTORY.md`](PLAN-HISTORY.md); per-run detail:
 `docs/reports/`; queue + course correction: `plan.md` §6/§7).**
-**🟢 WP-533 (judge-driven step success) is LIVE-PROVEN — suite `benchmarks/results/20260723-222341-chikory` (`docs/reports/bench-brownfield-20260723-222341.md`, 2026-07-23).**
-The two tasks that BOTH sealed FAILED on 07-21 under F-159 now seal SUCCESS: `brownfield-001` `run-8712271f` 2/3 → **3/3** (2 steps, $1.85, 10m 19s) ·
-`brownfield-003` `run-58b48706` **4/4** (1 step, $0.86, 5m 01s) → suite **7/7, I-SR/D-SR 100%, $2.7075, 16m 04s**, 2 PROCEED, 0 rollbacks, 0 resumes. Deliveries
-hand-verified post-landing (117/117 jest + `tsc -p tsconfig.build.json` exit 0; the zod fix is the real upstream `shallowClone` Map/Set root cause). Ledger `112` ×2, `rung=3`.
-**P3-rung-4 STILL NOT CLIMBED — three gates:** 🔴 **F-164 → WP-535 (NEXT HEADLINE, dogfood-112)** — a judge-executed `check`'s probe file is swept into the checkpoint commit
-(`agent-loop.ts:743-793` judges before `writeCheckpoint`), so `brownfield-003` R2 can be satisfied by the judge's OWN R4 probe; a requirement that grades itself is not publishable ·
-runnable corpus **2/5** (`brownfield-002` `status: blocked`, node≥24 vs devbox 22 → WP-534) · no baseline arm ever run (WP-304).
-Also 🟠 **F-165 → WP-536:** the suite ran `claude-code`/`anthropic`, NOT `gemini-cli` — the default flip (`20a2094`, 18:30:29) landed 7 min AFTER the 18:23:41 launch, so
-$2.7075 of real Anthropic spend bought a wrong-family arm (F-162 recurrence, 2nd in one day). 🟡 F-166 (copy-back rewrites relative symlinks to absolute sandbox paths) ·
-ℹ️ F-167 (judge `costUsd: 0` on 28,312/901 real tokens — keyless proxy unpriced) · ℹ️ F-168 (the progression gate's ⛔ STALLED message still names the RETIRED P2 ladder "WP-265 … plan.md §6"; the live ladder is WP-530 §7) = track-B hand-fixes.
-See §5 (ladders always exist), §7, §8, §1.5, §3. (Earlier — dogfood-110 + dogfood-108/109 → PLAN-HISTORY.md.)
+**🟢 WP-535 (hermetic judge checks) is DONE at the substrate — dogfood-112 (`run-4bd7ddc0`, landed `15649d1`, `docs/reports/dogfood-112.md`, 2026-07-24).**
+SUCCESS 1 step, $0.0416/$30, 2m 49s, executor `gemini-cli` (🟢 **F-165 did NOT recur** — the default flip is now committed), judge `openai-compat` PROCEED 4/4.
+Pure `planCheckSideEffectCleanup` + snapshot/restore wiring around `collectEvidence` (`src/judge/evidence.ts:248-286`) delete a check's created files and restore its
+modified files before `writeCheckpoint`, while the executor's uncommitted work (derived strictly from the snapshot DIFFERENCE) survives — the F-164 probe path is closed. 9 tests.
+⏳ **NOT yet proven in the wild** (§1.2 frozen-substrate — the run cloned HEAD and loaded PRE-fix code; a bench re-run must confirm checkpoint == executor diff on a real task).
+New friction: 🟡 **F-169** (restore is byte-identical for TEXT only — binary/symlink/mode fidelity + `mkdir -p`/try-catch on the content-restore branch owed before any
+binary-touching check; the judge caught it pre-land, non-blocking → track-B WP-535 residue) · 🟠 **F-170** (out-of-scope `gemini-cli.ts` in the headline commit + spec routed
+`gpt-5.6-sol` at a gemini executor → fold into WP-536) · ℹ️ **F-171** (ledger `run` column collides on "112" → track-B, F-168 sibling).
+**P3-rung-4 — gate 1 of 3 CLEARED (grading integrity ✅); STILL 2 gates away:** runnable corpus **2/5** (`brownfield-002` `status: blocked`, node≥24 vs devbox 22 → WP-534,
++ 3 more pins via WP-302) · no baseline arm ever run (WP-304). Progression gate = ⛔ **STALLED** (rung 3→3→3). ✅ **WP-536** (F-165/F-170 bench launch family preflight) HAND-LANDED 2026-07-24 (`benchmarks/harness/src/family-preflight.ts` — refuses a non-gemini executor / non-codex judge / foreign code-routing model before spending; 47 harness tests green) ·
+🟡 F-166 (symlink copy-back) · ℹ️ F-167 (judge `costUsd: 0`) · ℹ️ F-168 (STALLED msg names the retired P2 ladder) = track-B.
+See §5 (ladders always exist), §7, §8, §1.5, §3. (Earlier — WP-533 live-proof + dogfood-110/108/109 → PLAN-HISTORY.md.)
 
 Related docs: [`docs/spec/task-spec.md`](spec/task-spec.md) (schema
 reference) · [`docs/TASK-PROTOCOL.md`](TASK-PROTOCOL.md) (WP etiquette, §7 is

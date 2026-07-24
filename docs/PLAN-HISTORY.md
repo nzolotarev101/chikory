@@ -4,6 +4,12 @@
 > per-run detail lives in [`docs/reports/`](reports/). Content below was moved
 > verbatim out of the living docs on 2026-07-02 (course correction — plan.md §6).
 
+## Archived 2026-07-24 — displaced by dogfood-112 (`run-4bd7ddc0`, WP-535 hermetic judge checks DONE)
+
+Prior DOGFOODING.md header status block (WP-533 live-proof Latest), displaced verbatim:
+
+> **🟢 WP-533 (judge-driven step success) is LIVE-PROVEN — suite `benchmarks/results/20260723-222341-chikory` (`docs/reports/bench-brownfield-20260723-222341.md`, 2026-07-23).** The two tasks that BOTH sealed FAILED on 07-21 under F-159 now seal SUCCESS: `brownfield-001` `run-8712271f` 2/3 → **3/3** (2 steps, $1.85, 10m 19s) · `brownfield-003` `run-58b48706` **4/4** (1 step, $0.86, 5m 01s) → suite **7/7, I-SR/D-SR 100%, $2.7075, 16m 04s**, 2 PROCEED, 0 rollbacks, 0 resumes. Deliveries hand-verified post-landing (117/117 jest + `tsc -p tsconfig.build.json` exit 0; the zod fix is the real upstream `shallowClone` Map/Set root cause). Ledger `112` ×2, `rung=3`. **P3-rung-4 STILL NOT CLIMBED — three gates:** 🔴 F-164 → WP-535 (NEXT HEADLINE, dogfood-112); runnable corpus 2/5 (WP-534); no baseline arm ever run (WP-304). Also 🟠 F-165 → WP-536 (the suite ran `claude-code`/`anthropic`, NOT `gemini-cli` — the default flip landed 7 min after launch, $2.7075 wrong-family spend). 🟡 F-166 (symlink copy-back) · ℹ️ F-167 (judge `costUsd: 0`) · ℹ️ F-168 (STALLED msg names retired P2 ladder) = track-B.
+
 ## Archived 2026-07-19 — displaced by dogfood-105 (`chain-da846d34`, P3-rung-1 CLIMBED)
 
 Prior plan.md Queue-line dogfood-104 headline-selection + re-run-owed prose, displaced verbatim:
