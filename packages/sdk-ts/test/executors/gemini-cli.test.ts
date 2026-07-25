@@ -58,6 +58,22 @@ describe("parseAgyOutput", () => {
   });
 });
 
+describe("agy invocation flags", () => {
+  it("passes --print-timeout equal to the step's maxSeconds (F-172)", async () => {
+    const ws = await makeWorkspace();
+    const adapter = createGeminiCliAdapter({
+      store: ws.store,
+      binPath: FAKE_BIN,
+      env: { ...process.env, FAKE_DIALECT: "agy", FAKE_MODE: "ok", FAKE_ECHO_ARGV: "1" },
+    });
+    const record = await adapter.runStep(makeStepInput(ws, TOY_STEPS[0].instruction, 840));
+    // Without this flag `agy` self-truncates at its 5m default and exits 0, so a
+    // 14-minute step contract silently became a 5-minute one.
+    expect(record.summary).toContain("--print-timeout 840s");
+    expect(record.summary).toContain("--mode accept-edits");
+  });
+});
+
 // WP-216 acceptance: same conformance bar, real binary, gated.
 describe.skipIf(!process.env.CHIKORY_E2E_GEMINI)("gemini-cli @e2e (real agy)", () => {
   it("completes the 3-step toy task", async () => {

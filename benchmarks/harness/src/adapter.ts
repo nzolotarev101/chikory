@@ -233,7 +233,17 @@ export function chikoryAdapter(opts: ChikoryAdapterOptions = {}): RunnerAdapter 
           if (gradedId !== undefined) {
             const finalWs = join(runsDir, gradedId, "workspace");
             if (existsSync(finalWs)) {
-              cpSync(finalWs, ctx.workspaceDir, { recursive: true, force: true });
+              // verbatimSymlinks: node's cpSync otherwise resolves a RELATIVE
+              // symlink against the SOURCE dir and writes it back absolute, so
+              // a target repo's own symlinks (zod's CLAUDE.md/.cursorrules/
+              // README.md) come out pointing into `.chikory/runs/<id>/workspace`
+              // — the graded artifact stops being self-contained and shows 3
+              // phantom ` M` files in every scope review (F-166).
+              cpSync(finalWs, ctx.workspaceDir, {
+                recursive: true,
+                force: true,
+                verbatimSymlinks: true,
+              });
             }
           }
         }

@@ -107,6 +107,15 @@ export function createGeminiCliAdapter(opts: GeminiCliAdapterOptions): ExecutorA
         args.push("--model", modelName);
         if (effort) args.push("--effort", effort);
       }
+      // `agy --print-timeout` defaults to 5m and returns the partial answer as a
+      // CLEAN exit — so without this flag every step longer than 5 minutes is
+      // silently truncated mid-work and the harness sees a normal step, not a
+      // timeout. Bench steps run at maxSeconds=840, i.e. 64% of the granted
+      // horizon was being thrown away (F-172: bf-001 steps 1 and 8 both stopped
+      // at ~5m05s with the install still running). Hand the CLI the same
+      // deadline the step contract has; `runCliStep` still SIGTERMs at
+      // maxSeconds, so this only removes the earlier, invisible cap.
+      args.push("--print-timeout", `${input.limits.maxSeconds}s`);
       // `--print <prompt>` runs a single prompt non-interactively; keep it last
       // so the prompt is the flag's value (mirrors the CLI judge proxy).
       args.push("--print", prompt);

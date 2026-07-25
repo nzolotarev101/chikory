@@ -64,4 +64,20 @@ links to its raw trace. `benchmarks/results/` raw output never lands in git.
 - WP-302 authoring: format v1 frozen against the harness loader; guide in
   `tasks/AUTHORING.md`; three brownfield drafts pending repo pins.
 - Baselines (WP-304) not started; leaderboard (WP-303) not started.
+
+### Scored suites (chikory adapter)
+
+| Suite | Date | Arm | Tasks | Result | Report |
+|---|---|---|---|---|---|
+| `20260723-222341-chikory` | 2026-07-23 | ⚠️ `claude-code`/anthropic (F-165 — wrong arm) | 2 | 7/7, I-SR/D-SR 100%, $2.7075 | [`bench-brownfield-20260723-222341.md`](../docs/reports/bench-brownfield-20260723-222341.md) |
+| `20260725-130418-chikory` | 2026-07-25 | ✅ `gemini-cli` executes · codex judges (directive) | 2 (+1 blocked) | 7/7, I-SR/D-SR 100%, 36m 56s | [`bench-brownfield-20260725-130418.md`](../docs/reports/bench-brownfield-20260725-130418.md) |
+
+**These are not publishable numbers.** n=1 per cell, 2 tasks, no baseline arm —
+the publication rule above (ranges not points, n≥3 per cell) is not met. The
+runnable corpus is **2 of 5**: `brownfield-002` is `status: blocked` (F-163,
+target pins node≥24 vs devbox node 22 → WP-534) and `brownfield-004/005` do not
+exist yet (WP-302).
+
+Launch a suite with `devbox run bench-run` — it brings up Temporal and the
+keyless codex judge proxy and runs the directive arm in one process.
 Target: publish within 90 days of SDK launch (~2026-09-08).

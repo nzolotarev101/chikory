@@ -27,6 +27,10 @@
       "dogfood-verify": "bash scripts/dogfood-verify.sh",
       "dogfood-progression": "bash scripts/dogfood-progression.sh",
       "bench": "bash scripts/bench.sh",
+      // One-stop bench: brings up Temporal + the codex judge proxy, then runs the
+      // runnable brownfield corpus with the directive arm (Gemini executes /
+      // Codex judges). Custom filters/tasks: devbox run -- bash scripts/bench-run.sh <args>.
+      "bench-run": "bash scripts/bench-run.sh",
       "judge-proxy": "node scripts/cli-judge-proxy.mjs 8787 codex",
       "harvest": "bash scripts/harvest.sh \"\" main",
       "harvest-audit": "bash scripts/harvest-audit.sh"

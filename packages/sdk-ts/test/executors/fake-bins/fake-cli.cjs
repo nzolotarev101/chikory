@@ -50,9 +50,15 @@ function emit(obj) {
 }
 
 function withEnvSummary(summary) {
-  if (process.env.FAKE_ECHO_ENV !== "1") return summary;
+  let out = summary;
+  if (process.env.FAKE_ECHO_ARGV === "1") {
+    // Drop the prompt itself (always the last arg) — only the FLAGS matter, and
+    // the prompt is multi-line.
+    out = `${out}; argv=${process.argv.slice(2, -1).join(" ")}`;
+  }
+  if (process.env.FAKE_ECHO_ENV !== "1") return out;
   const present = providerEnvVars.filter((name) => process.env[name] !== undefined);
-  return `${summary}; provider_env=${present.length > 0 ? present.join(",") : "none"}`;
+  return `${out}; provider_env=${present.length > 0 ? present.join(",") : "none"}`;
 }
 
 if (mode === "hang") {
