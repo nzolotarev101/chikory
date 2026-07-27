@@ -230,6 +230,26 @@ Validate it parses (`parseTaskSpec` over the file, or `pnpm chikory run`/`chain`
 which validate first). Add the README index row ("not yet run"). Remind the
 user: commit everything before launching — the workspace clones HEAD.
 
+**Then arm the acceptance oracle, and say so.** An AC that greps for a symbol
+proves the symbol EXISTS; it cannot prove the symbol COMPUTES THE RIGHT ANSWER.
+dogfood-113 passed 4/4 symbol-greps on a delivery whose central function was
+semantically inverted, because the only behavioral evidence was tests the
+executor wrote for itself — and it pinned the one case it got right. So:
+
+- At least one AC on every headline spec must **own its oracle** — assert
+  BEHAVIOR the check itself specifies, against the real built artifact, with
+  inputs and expected outputs written into the `check`. Never delegate the
+  correctness question to a test file the executor authors.
+- Prove that AC **both ways** before launching: RED on HEAD (clean exit 1), and
+  GREEN against a throwaway reference implementation. An AC verified in only one
+  direction may be unsatisfiable, and you will not find out until the run burns.
+- `scripts/dogfood.sh` classes any check shelling out to `tsc`/`vitest`/`pnpm
+  exec` as VERIFY-SUITE and will NOT dry-run it — those are exactly the
+  behavioral ACs, so hand-verify them and record the wall-clock vs the 120 s cap.
+
+Finally, write the `## NEXT RUN` section required by the Output rules below. It
+is the last thing on the page and nothing follows it.
+
 ## Output
 
 Your output — and the report/friction/status docs you write — must follow the
@@ -245,5 +265,38 @@ structured summary must additionally follow these rules:
 3. **Structured Visual Layout**: Present cost metrics, step progress, or comparisons using markdown tables and bullet points. Avoid walls of text. Use visual status indicators (e.g., `🟢`, `🟡`, `🔴`, `⚠️`, `ℹ️`).
 4. **Acronym & Terminology Explanations**: Explain any complex domain terms (e.g., WP, AC, OTel spans, probe steps) in detail when summarizing, so a reader can digest it without needing external documentation.
 5. **KPI Table (mandatory)**: Report the DOGFOODING §1.4 KPI values for this run and the trailing window: max horizon survived (steps / wall-clock), kill→resume count, judge true-positives pre-land, trailing-3-run meta:product headline ratio, per-step reliability (runs ≥5 steps), current-phase ladder rung vs the phase exit gate.
-6. **Clear Call-to-Action**: End with the exact command to run the next spec (unblocked and verified). Leave all edits uncommitted for the user's review.
+6. **Friction disposition table (mandatory)**: every friction item this review
+   opened gets ONE row — `F-n · severity · one-line defect · disposition`, where
+   disposition is exactly one of **HAND-FIXED THIS SITTING** (with the file:line
+   and the test count proving it), **→ WP-n (queued)**, or **track-B note**. No
+   friction may be reported without a disposition; "found it" is not an outcome.
+
+7. **`## NEXT RUN` section — mandatory, LOUD, and LAST.** The review is worthless
+   to the operator if they have to reconstruct what happens next. End every
+   review with a section headed exactly `## NEXT RUN`, containing, in order:
+
+   - **One bolded sentence naming the target in plain English** — what the next
+     run makes true that is not true today, with no IDs in it. ("Make the harness
+     pick a Node version that actually satisfies each target's declared range,
+     resolved once and shared by the run and grading paths.")
+   - **The spec file path** and the **WP it advances**, glossed.
+   - **Why THIS and not the ladder rung** — one line. If the phase ladder rung is
+     not the candidate, the §0 progression verdict plus the reason the rung
+     cannot run yet must be stated explicitly, not implied.
+   - **The designed trap** — the plausible-but-wrong delivery the ACs are built
+     to reject. If you cannot name one, the spec is too easy (§1.1).
+   - **Gate verdicts** — §0 / §1.1 / §1.2 / §1.3 / §1.5, each ✅/⛔/🟡, one line each.
+   - **AC arming evidence** — which ACs dry-ran RED-on-HEAD, and for any AC the
+     preflight classed VERIFY-SUITE (so did NOT dry-run), the hand-verification
+     you performed in BOTH directions plus its wall-clock vs the 120 s judge cap.
+   - **The exact launch command**, in its own fenced block, as the final thing on
+     the page.
+
+   Nothing may follow `## NEXT RUN`. If the review ends without it, the review is
+   incomplete.
+
+8. **Landing**: harvest the run FIRST (phase 0, before any doc edits), and
+   commit + push everything LAST, once the full suite is green. (Standing user
+   override of the older "leave edits uncommitted" rule.) State the commit SHA
+   and whether the push succeeded.
 
