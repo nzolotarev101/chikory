@@ -1,5 +1,10 @@
+import { mkdtempSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+
 import { describe, expect, it } from "vitest";
-import { resolveTargetNodeEngine, planNodeProvisioning } from "../src/engine.js";
+import { resolveTargetNodeEngine, planNodeProvisioning, decideTargetNode, loadTargetEngineSource, satisfiesRange } from "../src/engine.js";
+import type { BenchmarkTask } from "../src/task.js";
 
 describe("resolveTargetNodeEngine", () => {
   it("handles >=24", () => {
@@ -84,3 +89,182 @@ describe("planNodeProvisioning", () => {
     });
   });
 });
+
+describe("decideTargetNode & loadTargetEngineSource", () => {
+  it("ambient strictly newer yields ambient no-op", () => {
+    const available = [{ version: "18.0.0", binDir: "/path/18" }];
+    const decision18 = decideTargetNode({ engines: { node: ">=18" } }, available, "v22.22.3");
+    expect(decision18).toEqual({ type: "ambient" });
+    const decision20 = decideTargetNode({ engines: { node: ">=20" } }, available, "v22.22.3");
+    expect(decision20).toEqual({ type: "ambient" });
+  });
+
+  it("requirement satisfied by newer toolchain", () => {
+    const available = [
+      { version: "26.0.0", binDir: "/path/26" }
+    ];
+    const decision = decideTargetNode({ engines: { node: ">=24" } }, available, "v22.0.0");
+    expect(decision).toEqual({ type: "provision", binDir: "/path/26" });
+  });
+
+  it("deterministic selection selects the newest satisfying one", () => {
+    const available = [
+      { version: "24.0.0", binDir: "/path/24" },
+      { version: "26.0.0", binDir: "/path/26" },
+      { version: "25.0.0", binDir: "/path/25" }
+    ];
+    const decision = decideTargetNode({ engines: { node: ">=24" } }, available, "v22.0.0");
+    expect(decision).toEqual({ type: "provision", binDir: "/path/26" });
+  });
+
+  it("unavailable outcome names the constraint and available versions", () => {
+    const available = [
+      { version: "18.0.0", binDir: "/path/18" },
+      { version: "20.0.0", binDir: "/path/20" }
+    ];
+    const decision = decideTargetNode({ engines: { node: ">=24" } }, available, "v22.0.0");
+    expect(decision).toEqual({
+      type: "unavailable",
+      neededVersion: ">=24",
+      available: ["18.0.0", "20.0.0"]
+    });
+  });
+
+  it("loadTargetEngineSource fails loud with structured reason", () => {
+    const task = {
+      id: "test-task",
+      class: "brownfield",
+      repo: { url: "https://invalid.example/repo", ref: "main" }
+    } as unknown as BenchmarkTask;
+    const result = loadTargetEngineSource(task, "/invalid-workspace-path-does-not-exist");
+    expect(result.type).toBe("error");
+    expect(result.type === "error" ? result.error : "").toBeDefined();
+  });
+
+  it("no-constraint and unparseable cases resolve to ambient without throwing", () => {
+    const available = [{ version: "24.0.0", binDir: "/path/24" }];
+    expect(decideTargetNode({}, available, "v22.0.0")).toEqual({ type: "ambient" });
+    expect(decideTargetNode({ engines: { node: "some garbage" } }, available, "v22.0.0")).toEqual({ type: "ambient" });
+    expect(decideTargetNode({ engines: { node: "" } }, available, "v22.0.0")).toEqual({ type: "ambient" });
+  });
+});
+
+/**
+ * F-187 (dogfood-114 review): comparators joined by WHITESPACE are an AND-range,
+ * and `>`/`<`/`<=`/`~` are as common in the wild as `>=`. Treating them as
+ * unparseable resolved a satisfiable range to the ambient toolchain — a silent
+ * wrong-node run, and a regression against the legacy major-only resolver.
+ */
+describe("satisfiesRange — comparator coverage (F-187)", () => {
+  it("evaluates whitespace-joined comparators as a conjunction", () => {
+    expect(satisfiesRange("22.22.3", ">=18 <21")).toBe(false);
+    expect(satisfiesRange("20.19.6", ">=18 <21")).toBe(true);
+    expect(satisfiesRange("22.22.3", ">=24 <26")).toBe(false);
+    expect(satisfiesRange("24.15.0", ">=24 <26")).toBe(true);
+    expect(satisfiesRange("26.0.0", ">=24 <26")).toBe(false);
+    expect(satisfiesRange("22.22.3", ">=20.0.0 <23")).toBe(true);
+  });
+
+  it("evaluates the strict and upper-bound comparators", () => {
+    expect(satisfiesRange("22.22.3", ">18")).toBe(true);
+    expect(satisfiesRange("18.0.0", ">18")).toBe(false);
+    expect(satisfiesRange("22.22.3", "<=24")).toBe(true);
+    expect(satisfiesRange("24.15.0", "<=24")).toBe(false);
+    expect(satisfiesRange("24.0.0", "<=24")).toBe(true);
+  });
+
+  it("evaluates tilde ranges against the minor it pins", () => {
+    expect(satisfiesRange("24.1.5", "~24.1")).toBe(true);
+    expect(satisfiesRange("24.2.0", "~24.1")).toBe(false);
+    expect(satisfiesRange("24.1.0", "~24.1.3")).toBe(false);
+  });
+
+  it("tolerates a space between operator and operand", () => {
+    expect(satisfiesRange("24.15.0", ">= 24")).toBe(true);
+    expect(satisfiesRange("22.22.3", ">= 24")).toBe(false);
+  });
+
+  it("keeps the OR, caret, x-range and bare forms working", () => {
+    expect(satisfiesRange("22.22.3", "22 || 24")).toBe(true);
+    expect(satisfiesRange("24.15.0", "22 || 24")).toBe(true);
+    expect(satisfiesRange("20.19.6", "22 || 24")).toBe(false);
+    expect(satisfiesRange("24.15.0", "^24.1.0")).toBe(true);
+    expect(satisfiesRange("25.0.0", "^24.1.0")).toBe(false);
+    expect(satisfiesRange("24.15.0", "24.x")).toBe(true);
+    expect(satisfiesRange("24.15.0", ">=18.19.1 <19 || >=20.11.1")).toBe(true);
+    expect(satisfiesRange("19.5.0", ">=18.19.1 <19 || >=20.11.1")).toBe(false);
+  });
+
+  it("treats a fully-specified bare version as an exact pin, not a major range", () => {
+    expect(satisfiesRange("24.15.0", "24.15.0")).toBe(true);
+    expect(satisfiesRange("24.14.1", "24.15.0")).toBe(false);
+    expect(satisfiesRange("24.14.1", "24")).toBe(true);
+  });
+
+  it("reports an unmodelled comparator as unsatisfied, not as satisfied", () => {
+    expect(satisfiesRange("22.22.3", "lts/*")).toBe(false);
+    expect(satisfiesRange("22.22.3", ">=20 lts/*")).toBe(false);
+  });
+});
+
+describe("decideTargetNode — AND-range provisioning (F-187)", () => {
+  const available = [
+    { version: "20.19.6", binDir: "/n20" },
+    { version: "24.14.1", binDir: "/n24a" },
+    { version: "24.15.0", binDir: "/n24b" },
+  ];
+
+  it("provisions the newest toolchain inside a bounded range", () => {
+    expect(decideTargetNode({ engines: { node: ">=24 <26" } }, available, "v22.22.3")).toEqual({
+      type: "provision",
+      binDir: "/n24b",
+    });
+  });
+
+  it("does not fall back to an ambient node the upper bound excludes", () => {
+    expect(decideTargetNode({ engines: { node: ">=18 <21" } }, available, "v22.22.3")).toEqual({
+      type: "provision",
+      binDir: "/n20",
+    });
+  });
+
+  it("reports a bounded range nothing satisfies as unavailable, never ambient", () => {
+    expect(decideTargetNode({ engines: { node: ">=30 <32" } }, available, "v22.22.3")).toEqual({
+      type: "unavailable",
+      neededVersion: ">=30 <32",
+      available: ["20.19.6", "24.14.1", "24.15.0"],
+    });
+  });
+});
+
+/**
+ * F-188 (dogfood-114 review): a target with NO package.json declares no engine
+ * constraint. Reading it as an unreadable-repo error skipped every non-Node
+ * target — shrinking the corpus the WP exists to grow.
+ */
+describe("loadTargetEngineSource — absent vs unreadable (F-188)", () => {
+  it("treats a greenfield task with no repo and no workspace package.json as no constraint", () => {
+    const task = { id: "greenfield-x", class: "greenfield" } as unknown as BenchmarkTask;
+    const result = loadTargetEngineSource(task, mkdtempSync(join(tmpdir(), "engine-noconstraint-")));
+    expect(result).toEqual({ type: "success", content: "{}" });
+  });
+
+  it("reads a workspace package.json when one is present", () => {
+    const dir = mkdtempSync(join(tmpdir(), "engine-localpkg-"));
+    writeFileSync(join(dir, "package.json"), JSON.stringify({ engines: { node: ">=24 <26" } }));
+    const result = loadTargetEngineSource({ id: "local-x" } as unknown as BenchmarkTask, dir);
+    expect(result.type).toBe("success");
+    expect(result.type === "success" ? JSON.parse(result.content).engines.node : "").toBe(">=24 <26");
+  });
+
+  it("reports a repo it cannot reach as a structured error", () => {
+    const task = {
+      id: "unreachable-x",
+      class: "brownfield",
+      repo: { url: "https://invalid.example/repo", ref: "main" },
+    } as unknown as BenchmarkTask;
+    const result = loadTargetEngineSource(task, mkdtempSync(join(tmpdir(), "engine-unreachable-")));
+    expect(result.type).toBe("error");
+  });
+});
+

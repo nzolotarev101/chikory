@@ -19,7 +19,7 @@ import {
 } from "./results.js";
 import { parseDevAITask } from "./devai.js";
 import { isRunnable, validateAuthoredTask, type BenchmarkTask } from "./task.js";
-import { resolveTargetNodeEngine, planNodeProvisioning, discoverNodeToolchains, getTargetPackageJson } from "./engine.js";
+import { decideTargetNode, loadTargetEngineSource, discoverNodeToolchains, type ProvisioningDecision } from "./engine.js";
 
 
 export interface LoadReport {
@@ -92,13 +92,24 @@ export async function runSuite(opts: RunSuiteOptions): Promise<{ summary: SuiteS
     mkdirSync(workspaceDir, { recursive: true });
 
     // Dynamic Node engine provisioning check
-    const pkgJsonText = getTargetPackageJson(task, workspaceDir);
-    const requiredEngine = pkgJsonText ? resolveTargetNodeEngine(pkgJsonText) : "no constraint";
-    const availableToolchains = discoverNodeToolchains();
-    const plan = planNodeProvisioning(requiredEngine, availableToolchains, process.version);
+    const engineSource = loadTargetEngineSource(task, workspaceDir);
+    let nodeProvisioning: ProvisioningDecision;
+    if (engineSource.type === "error") {
+      nodeProvisioning = {
+        type: "unavailable",
+        neededVersion: "unknown (read failed)",
+        available: discoverNodeToolchains().map(t => t.version),
+        error: engineSource.error,
+      };
+    } else {
+      nodeProvisioning = decideTargetNode(engineSource.content, discoverNodeToolchains(), process.version);
+    }
 
-    if (plan.type === "unavailable") {
-      log(`skip ${task.id} (blocked: required Node.js version ${plan.neededVersion} is unavailable. Found: ${plan.available.join(", ")})`);
+    if (nodeProvisioning.type === "unavailable") {
+      const reason = nodeProvisioning.error
+        ? `failed to read engine source: ${nodeProvisioning.error}`
+        : `required Node.js version ${nodeProvisioning.neededVersion} is unavailable. Found: ${nodeProvisioning.available.join(", ")}`;
+      log(`skip ${task.id} (blocked: ${reason})`);
       continue;
     }
 
@@ -113,11 +124,13 @@ export async function runSuite(opts: RunSuiteOptions): Promise<{ summary: SuiteS
       workspaceDir,
       outDir: taskOut,
       timeoutMs: opts.adapterTimeoutMs,
+      nodeProvisioning,
     });
     const gradeCtx: GradeContext = {
       workspaceDir,
       timeoutMs: opts.checkTimeoutMs,
       judge: opts.judge,
+      nodeProvisioning,
     };
     const grading = await gradeTask(task, gradeCtx);
     const result: TaskResult = {

@@ -13,7 +13,7 @@ import { join } from "node:path";
 import { stringify as stringifyYaml } from "yaml";
 
 import type { BenchmarkTask } from "./task.js";
-import { resolveTargetNodeEngine, planNodeProvisioning, discoverNodeToolchains, getTargetPackageJson } from "./engine.js";
+import { type ProvisioningDecision } from "./engine.js";
 
 
 
@@ -23,6 +23,7 @@ export interface AdapterContext {
   /** Per-task artifact dir (goal file, generated spec, journal JSON). */
   outDir: string;
   timeoutMs?: number;
+  nodeProvisioning?: ProvisioningDecision;
 }
 
 export interface AdapterResult {
@@ -71,14 +72,13 @@ function runShell(
   });
 }
 
-async function withProvisionedPath<T>(task: BenchmarkTask, workspaceDir: string, fn: () => Promise<T>): Promise<T> {
-  const pkgJsonText = getTargetPackageJson(task, workspaceDir);
-  const requiredEngine = pkgJsonText ? resolveTargetNodeEngine(pkgJsonText) : "no constraint";
-  const availableToolchains = discoverNodeToolchains();
-  const plan = planNodeProvisioning(requiredEngine, availableToolchains, process.version);
+async function withProvisionedPath<T>(nodeProvisioning: ProvisioningDecision | undefined, fn: () => Promise<T>): Promise<T> {
+  if (nodeProvisioning?.type === "unavailable") {
+    throw new Error(`Cannot run task: required Node.js version is unavailable: ${nodeProvisioning.neededVersion}`);
+  }
   const originalPath = process.env.PATH;
-  if (plan.type === "provision") {
-    process.env.PATH = `${plan.binDir}:${originalPath}`;
+  if (nodeProvisioning?.type === "provision") {
+    process.env.PATH = `${nodeProvisioning.binDir}:${originalPath}`;
   }
   try {
     return await fn();
@@ -96,7 +96,7 @@ export function commandAdapter(name: string, template: string): RunnerAdapter {
   return {
     name,
     async run(task, ctx) {
-      return withProvisionedPath(task, ctx.workspaceDir, async () => {
+      return withProvisionedPath(ctx.nodeProvisioning, async () => {
         mkdirSync(ctx.outDir, { recursive: true });
         const goalFile = join(ctx.outDir, "goal.md");
         writeFileSync(goalFile, task.goal);
@@ -199,7 +199,7 @@ export function chikoryAdapter(opts: ChikoryAdapterOptions = {}): RunnerAdapter 
   return {
     name: "chikory",
     async run(task, ctx) {
-      return withProvisionedPath(task, ctx.workspaceDir, async () => {
+      return withProvisionedPath(ctx.nodeProvisioning, async () => {
         mkdirSync(ctx.outDir, { recursive: true });
         const spec = buildChikorySpec(task, opts, ctx.workspaceDir);
         const specPath = join(ctx.outDir, "task.yaml");

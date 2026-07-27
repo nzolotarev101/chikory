@@ -142,10 +142,16 @@ if [ -n "$SPEC" ]; then
     echo "Error: spec not found at $SPEC" >&2
     exit 2
   fi
+  # F-191 (dogfood-114 review): the prescribed-diff heuristic must read the GOAL ONLY.
+  # Scanning the whole file matched code living inside `acceptance_criteria[].check`
+  # bodies, so an AC that OWNS ITS ORACLE — a `node -e` behavioral probe, which
+  # DOGFOODING §3.4 now REQUIRES on every headline after F-180/F-187 — was reported as a
+  # prescribed goal and the spec was ⛔'d for the one thing it did right.
+  GOAL_BLOCK=$(awk '/^goal:/{f=1;next} f && /^[a-z_]+:/{exit} f' "$SPEC")
   PRESCRIBED=0
-  grep -qE '^[[:space:]]*FILE [0-9]+ *(—|:|-)' "$SPEC" && PRESCRIBED=1
-  grep -qE '^[[:space:]]{4,}(import |const |export |return |await )' "$SPEC" && PRESCRIBED=1
-  grep -qE 'Rewrite .* body|Change exactly ONE existing file' "$SPEC" && PRESCRIBED=1
+  printf '%s\n' "$GOAL_BLOCK" | grep -qE '^[[:space:]]*FILE [0-9]+ *(—|:|-)' && PRESCRIBED=1
+  printf '%s\n' "$GOAL_BLOCK" | grep -qE '^[[:space:]]{4,}(import |const |export |return |await )' && PRESCRIBED=1
+  printf '%s\n' "$GOAL_BLOCK" | grep -qE 'Rewrite .* body|Change exactly ONE existing file' && PRESCRIBED=1
   if [ "$PRESCRIBED" -eq 1 ]; then
     if grep -qiE '^# *(Format|Track): *(track-B|prescribed)' "$SPEC"; then
       echo "ℹ️  PRESCRIBED format, declared track-B — OK for parity ports / hand-off verification."

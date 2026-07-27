@@ -1,6 +1,7 @@
 import { readFileSync, existsSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 import { execSync } from "node:child_process";
+import { tmpdir } from "node:os";
 import type { BenchmarkTask } from "./task.js";
 
 export type NodeEngineConstraint = number | "no constraint";
@@ -13,10 +14,243 @@ export interface NodeToolchain {
 export type ProvisioningDecision =
   | { type: "ambient" }
   | { type: "provision"; binDir: string }
-  | { type: "unavailable"; neededVersion: number; available: string[] };
+  | { type: "unavailable"; neededVersion: number | string; available: string[]; error?: string };
+
+export type LoadEngineSourceResult =
+  | { type: "success"; content: string }
+  | { type: "error"; error: string };
+
+interface SemVer {
+  major: number;
+  minor: number;
+  patch: number;
+}
+
+function parseVersion(v: string): SemVer | null {
+  const clean = v.trim().replace(/^v/, "");
+  const match = clean.match(/^(\d+)(?:\.(\d+))?(?:\.(\d+))?$/);
+  if (!match) return null;
+  return {
+    major: parseInt(match[1], 10),
+    minor: match[2] ? parseInt(match[2], 10) : 0,
+    patch: match[3] ? parseInt(match[3], 10) : 0,
+  };
+}
+
+function compareVersions(a: SemVer, b: SemVer): number {
+  if (a.major !== b.major) return a.major - b.major;
+  if (a.minor !== b.minor) return a.minor - b.minor;
+  return a.patch - b.patch;
+}
+
+/** One comparator inside a range — `>=24`, `<26`, `^24.1.0`, `24.x`, `*`. */
+type RangeAtom = (v: SemVer) => boolean;
+
+/**
+ * Parse a single comparator. Returns null when the atom is not a form we model,
+ * which is how the caller distinguishes "unparseable range" from "not satisfied".
+ *
+ * F-187: comparators may be joined by whitespace (AND) as well as `||` (OR), and
+ * `>`/`<`/`<=`/`~` are as common in the wild as `>=`. Treating an AND-range as
+ * unparseable silently resolved it to the ambient toolchain — a wrong-node run
+ * that grades red indistinguishably from agent failure.
+ */
+function parseAtom(atom: string): RangeAtom | null {
+  if (atom === "*" || atom === "x" || atom === "X") return () => true;
+
+  const m = atom.match(/^(>=|<=|>|<|=|\^|~)?v?(\d+)(?:\.(\d+|[xX*]))?(?:\.(\d+|[xX*]))?$/);
+  if (!m) return null;
+
+  const [, op, majorRaw, minorRaw, patchRaw] = m;
+  const major = parseInt(majorRaw, 10);
+  const minorWild = minorRaw === undefined || /^[xX*]$/.test(minorRaw);
+  const patchWild = patchRaw === undefined || /^[xX*]$/.test(patchRaw);
+  const bound: SemVer = {
+    major,
+    minor: minorWild ? 0 : parseInt(minorRaw, 10),
+    patch: patchWild ? 0 : parseInt(patchRaw, 10),
+  };
+
+  switch (op) {
+    case ">=":
+      return v => compareVersions(v, bound) >= 0;
+    case ">":
+      return v => compareVersions(v, bound) > 0;
+    case "<=":
+      return v => compareVersions(v, bound) <= 0;
+    case "<":
+      return v => compareVersions(v, bound) < 0;
+    case "^":
+      // ^24.1.0 → >=24.1.0 <25.0.0
+      return v => v.major === major && compareVersions(v, bound) >= 0;
+    case "~":
+      // ~24.1 → >=24.1.0 <24.2.0 (or >=24.0.0 <25.0.0 when only a major is given)
+      return v =>
+        v.major === major &&
+        (minorWild || v.minor === bound.minor) &&
+        compareVersions(v, bound) >= 0;
+    default:
+      // Bare/`=` form. A partial version is a range over what it omits
+      // (`24` → any 24.x, `24.1` → any 24.1.x); a full pin is an exact match.
+      if (minorWild) return v => v.major === major;
+      if (patchWild) return v => v.major === major && v.minor === bound.minor;
+      return v => compareVersions(v, bound) === 0;
+  }
+}
+
+/** OR-groups of AND-ed comparators. `null` = nothing in the range parsed. */
+function parseRange(rangeStr: string): RangeAtom[][] | null {
+  const groups = rangeStr
+    // `>= 24` / `^ 24` — detach the operator from its operand before AND-splitting.
+    .replace(/(>=|<=|>|<|=|\^|~)\s+/g, "$1")
+    .split("||")
+    .map(part => part.trim().split(/\s+/).filter(Boolean));
+
+  const parsed: RangeAtom[][] = [];
+  for (const group of groups) {
+    const atoms = group.map(parseAtom);
+    // An AND-group with any unmodelled comparator cannot be evaluated soundly:
+    // drop the whole group rather than satisfy it on its parseable half.
+    if (group.length === 0 || atoms.some(a => a === null)) continue;
+    parsed.push(atoms as RangeAtom[]);
+  }
+  return parsed.length > 0 ? parsed : null;
+}
+
+/** True when `versionStr` satisfies every comparator of at least one OR-group. */
+export function satisfiesRange(versionStr: string, rangeStr: string): boolean {
+  const version = parseVersion(versionStr);
+  if (!version) return false;
+  const groups = parseRange(rangeStr);
+  if (!groups) return false;
+  return groups.some(atoms => atoms.every(atom => atom(version)));
+}
+
+export function decideTargetNode(
+  packageJson: string | Record<string, unknown> | null | undefined,
+  availableToolchains: NodeToolchain[],
+  ambientVersion: string,
+): ProvisioningDecision {
+  if (!packageJson) {
+    return { type: "ambient" };
+  }
+  let obj: Record<string, unknown>;
+  if (typeof packageJson === "string") {
+    try {
+      obj = JSON.parse(packageJson);
+    } catch {
+      return { type: "ambient" };
+    }
+  } else {
+    obj = packageJson;
+  }
+
+  if (!obj || typeof obj !== "object") {
+    return { type: "ambient" };
+  }
+  const engines = obj.engines;
+  if (!engines || typeof engines !== "object" || !(engines as Record<string, unknown>).node || typeof (engines as Record<string, unknown>).node !== "string") {
+    return { type: "ambient" };
+  }
+
+  const constraint = ((engines as Record<string, unknown>).node as string).trim();
+  if (!constraint) {
+    return { type: "ambient" };
+  }
+
+  // Check if ambient satisfies the constraint
+  if (satisfiesRange(ambientVersion, constraint)) {
+    return { type: "ambient" };
+  }
+
+  // If ambient doesn't satisfy, find a satisfying toolchain from availableToolchains.
+  const satisfyingToolchains = availableToolchains
+    .filter(t => satisfiesRange(t.version, constraint))
+    .sort((a, b) => {
+      const av = parseVersion(a.version);
+      const bv = parseVersion(b.version);
+      if (!av && !bv) return 0;
+      if (!av) return 1;
+      if (!bv) return -1;
+      return compareVersions(bv, av); // newest first
+    });
+
+  if (satisfyingToolchains.length > 0) {
+    return { type: "provision", binDir: satisfyingToolchains[0].binDir };
+  }
+
+  // A range we cannot model at all is treated as no constraint — never a throw,
+  // never a skip. Parsed-but-unsatisfiable is the `unavailable` case below.
+  if (parseRange(constraint) === null) {
+    return { type: "ambient" };
+  }
+
+  return {
+    type: "unavailable",
+    neededVersion: constraint,
+    available: availableToolchains.map(t => t.version),
+  };
+}
+
+export function loadTargetEngineSource(task: BenchmarkTask, workspaceDir: string): LoadEngineSourceResult {
+  const pkgPath = join(workspaceDir, "package.json");
+  if (existsSync(pkgPath)) {
+    try {
+      const content = readFileSync(pkgPath, "utf8");
+      return { type: "success", content };
+    } catch (err) {
+      return { type: "error", error: (err as Error).message };
+    }
+  }
+
+  if (task.repo) {
+    const tempDir = join(tmpdir(), `temp-git-${task.id}-${Date.now()}`);
+    try {
+      // First try quick clone of just package.json via filter
+      execSync(`git clone --depth 1 --no-checkout --filter=blob:none ${JSON.stringify(task.repo.url)} ${JSON.stringify(tempDir)}`, {
+        stdio: "ignore",
+        timeout: 15000,
+      });
+      execSync(`git -C ${JSON.stringify(tempDir)} fetch --depth 1 origin ${JSON.stringify(task.repo.ref)}`, {
+        stdio: "ignore",
+        timeout: 15000,
+      });
+      // F-188: a target that simply HAS no package.json (a Python/Go/Rust repo)
+      // declares no engine constraint — that is not a read failure and must not
+      // shrink the corpus. Only a repo we could not READ degrades to a skip, so
+      // ask the tree before treating a failed checkout as an error.
+      const listed = execSync(
+        `git -C ${JSON.stringify(tempDir)} ls-tree --name-only FETCH_HEAD package.json`,
+        { encoding: "utf8", timeout: 15000 },
+      ).trim();
+      if (!listed) {
+        return { type: "success", content: "{}" };
+      }
+      execSync(`git -C ${JSON.stringify(tempDir)} checkout FETCH_HEAD -- package.json`, {
+        stdio: "ignore",
+        timeout: 15000,
+      });
+      const content = readFileSync(join(tempDir, "package.json"), "utf8");
+      return { type: "success", content };
+    } catch (err) {
+      return { type: "error", error: (err as Error).message };
+    } finally {
+      try {
+        if (existsSync(tempDir)) {
+          execSync(`rm -rf ${JSON.stringify(tempDir)}`, { stdio: "ignore" });
+        }
+      } catch {
+        // ignore rm error
+      }
+    }
+  }
+
+  return { type: "success", content: "{}" };
+}
 
 /**
  * Pure function to resolve the required node MAJOR version from package.json contents.
+ * Kept for compatibility.
  */
 export function resolveTargetNodeEngine(packageJson: string | Record<string, unknown>): NodeEngineConstraint {
   try {
@@ -82,6 +316,7 @@ export function resolveTargetNodeEngine(packageJson: string | Record<string, unk
 
 /**
  * Pure function to plan Node provisioning based on requirements and available toolchains.
+ * Kept for compatibility.
  */
 export function planNodeProvisioning(
   requiredMajor: NodeEngineConstraint,
@@ -112,7 +347,7 @@ export function planNodeProvisioning(
 
   return {
     type: "unavailable",
-    neededVersion: requiredMajor,
+    neededVersion: requiredMajor as number,
     available: availableToolchains.map((t) => t.version),
   };
 }
@@ -151,6 +386,7 @@ export function discoverNodeToolchains(): NodeToolchain[] {
 
 /**
  * Helper to retrieve package.json contents from local workspace or remote git repository.
+ * Kept for compatibility.
  */
 export function getTargetPackageJson(task: BenchmarkTask, workspaceDir: string): string | null {
   const pkgPath = join(workspaceDir, "package.json");
@@ -192,3 +428,4 @@ export function getTargetPackageJson(task: BenchmarkTask, workspaceDir: string):
 
   return null;
 }
+

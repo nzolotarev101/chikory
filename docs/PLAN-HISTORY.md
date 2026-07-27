@@ -4,6 +4,32 @@
 > per-run detail lives in [`docs/reports/`](reports/). Content below was moved
 > verbatim out of the living docs on 2026-07-02 (course correction — plan.md §6).
 
+## Archived 2026-07-27 — DOGFOODING.md header block displaced by dogfood-114 (`run-fc10fe73`)
+
+Prior DOGFOODING.md header status block (dogfood-113 / WP-534 defects), displaced verbatim:
+
+> **🟡 WP-534 (per-target node provisioning) RAN 2026-07-26 — dogfood-113, `run-5da56db2-69df-4ffa-9961-1ed65db863a3`, SUCCESS 1 step $0.0527/$30, 3m 42s — MECHANISM LANDED, SEMANTICS INVERTED, WP NOT DONE** (`docs/reports/dogfood-113.md`).
+> 🟢 Works for the target it was built for: gitify `">=24"` → live-probed `provision /nix/store/…-nodejs-24.15.0/bin`; PATH survives `scrubExecutorEnv` and reaches BOTH `spawn("bash")` and `runBounded`. Scope fence perfect (6 files, all under `benchmarks/harness/`), 59/59 tests, harvest byte-IDENTICAL.
+> 🔴 **F-181** `planNodeProvisioning` matches the node major by EXACT EQUALITY → `">=18"` yields `unavailable` (task SKIPPED though ambient v22.22.3 satisfies it — **the corpus SHRINKS**, inverting the WP's own KPI); `">=20"` downgrade-provisions node 20. The delivered tests pin "already satisfied" only at equality, so 59/59 stays green while the requirement is violated.
+> 🔴 **F-182** the run path and the grade path each recompute the plan independently, from TWO DIFFERENT SOURCES (`suite.ts:95` + `adapter.ts:75` read the pinned REMOTE `package.json`; `grade.ts:119` reads the POST-run LOCAL one) — **the F-163 trap the spec explicitly named**. `suite.ts` discards its own `provision` decision; neither adapter nor grader acts on `unavailable`.
+> 🔴 **F-183** every failure path in `getTargetPackageJson` returns `null` → `"no constraint"` → ambient, with NO log line — a network hiccup silently reproduces the toolchain-induced red this WP exists to abolish. · 🟡 **F-184** 2 network clones/task + `temp-git-*` leak into the results dir · 🟡 **F-185** hash-ordered `.find()` → non-deterministic toolchain pick. All → **WP-538**.
+> 🔴 **F-180 — the campaign's highest-value seam, and a ~5-line fix.** The judge NAMED F-181 and F-182 pre-land and the run sealed 🟢 SUCCESS anyway. The design-fix retry loop ALREADY EXISTS (`agent-loop.ts:874-900`) but is SKIPPED on a *first-verdict seal* (`completion-review.ts:38-43`) — i.e. every 1-step run, which 108/112/113 all were — while the sealing verdict's own rubric failure falls through to a PROCEED branch (`verdict.ts:131-149`). Net: on a 1-step run the rubric result has no consumer at all → **WP-537**.
+> 🟡 **F-186** `test/chain/fan-in-handoff.test.ts` is flaky under full-suite parallel load (1 fail inside `scripts/harvest.sh`'s `pnpm test`, 2/2 green in isolation in 6.6 s) — **harvest exits non-zero on a green tree**, which is what made this delivery look unharvested. Track-B: pin concurrency for the chain fan-in suite.
+> ✅ **F-143 recurrence HAND-FIXED 2026-07-26:** the verdict rationale read `"no criteria evaluated"` on a journal whose criteria table read 4/4 ✓; `verdict.ts:140-149` now emits `all N acceptance criteria pass`. 359 judge/runner tests green. ℹ️ **F-167/F-9 recurrence** (5,471 executor tokens at $0.00 — `model: default` is structurally unpriceable).
+> **P3-rung-4 — corpus reach UNMOVED, still 2.** `brownfield-002` stays `status: blocked` by spec mandate, so `isRunnable` skips it at `suite.ts:80` before the new code runs; zodios/zod declare no `engines` → correctly `ambient`. The unblock is LANDED BUT NOT ACTIVATED. Gates remaining: corpus 2/5 (WP-538) + no baseline arm ever run (WP-304).
+> Progression gate = ✅ **PROGRESSING** with a standing ⚠️ LADDER PACE warning (rung 3→3→3; this run is `rung=0`, mode `run`, no suite scored). **NEXT HEADLINE = WP-538** (WP-534 completion), **WP-537** immediately behind it.
+> See §5 (ladders always exist), §7, §8, §1.5, §3. (Earlier — bench suite `20260725-130418` / WP-535 live-proof / F-172 / F-178+F-179 launch-path fixes → PLAN-HISTORY.md.)
+> See §5 (ladders always exist), §7, §8, §1.5, §3. (Earlier — dogfood-112 / WP-536 / WP-533 live-proof + dogfood-110/108/109 → PLAN-HISTORY.md.)
+
+## Archived 2026-07-27 — displaced by dogfood-114 (`run-fc10fe73`, WP-538 range-correct provisioning CLOSED)
+
+Prior plan.md "Top open friction" span for the dogfood-113 provisioning defects, displaced verbatim:
+
+> 🔴 **F-181/F-182/F-183 → WP-538 (WP-534 completion, NEXT HEADLINE):** the landed per-target node provisioner works for gitify (`">=24"` → live-probed `provision …nodejs-24.15.0/bin`) but **matches the node major by EXACT EQUALITY**, so `">=18"` → `unavailable` (task SKIPPED though ambient v22.22.3 satisfies it — the corpus SHRINKS, inverting the WP's own BENCHMARK-CORPUS-REACH KPI) and `">=20"` → downgrade-provisions node 20 (F-181); the run path and grade path each recompute the plan independently **from two different sources** — the F-163 trap the spec explicitly named, half-fallen-into (F-182); an unreadable target `package.json` degrades silently to ambient with no log line, reproducing the very toolchain-induced red WP-534 exists to abolish (F-183). Also 🟡 F-184 (2 network clones/task + `temp-git-*` leak into the results dir) · 🟡 F-185 (hash-ordered `.find()` → non-deterministic toolchain pick) · 🟡 F-186 (`fan-in-handoff.test.ts` flaky under full-suite parallel load — 1 fail in `harvest.sh`'s suite, 2/2 green in isolation; blocks the harvest gate on a green tree).
+
+All of F-181…F-185 are closed by dogfood-114; F-186 remains open track-B (it did not
+recur). See `docs/reports/dogfood-114.md` for the live probes and for F-187…F-190.
+
 ## Archived 2026-07-24 — displaced by dogfood-112 (`run-4bd7ddc0`, WP-535 hermetic judge checks DONE)
 
 Prior DOGFOODING.md header status block (WP-533 live-proof Latest), displaced verbatim:

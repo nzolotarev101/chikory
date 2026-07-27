@@ -6,12 +6,10 @@
  * - **D-SR** (dependency-adjusted): a requirement counts only if it AND its
  *   transitive prerequisites are satisfied.
  */
-import { readFileSync, existsSync } from "node:fs";
-import { join } from "node:path";
 import { DEFAULT_CHECK_TIMEOUT_MS, runBounded, scrubExecutorEnv } from "@chikory/sdk";
 
 import type { BenchmarkRequirement, BenchmarkTask } from "./task.js";
-import { resolveTargetNodeEngine, planNodeProvisioning, discoverNodeToolchains, type NodeEngineConstraint } from "./engine.js";
+import { type ProvisioningDecision } from "./engine.js";
 
 
 export interface RequirementGrade {
@@ -37,6 +35,7 @@ export interface GradeContext {
   workspaceDir: string;
   timeoutMs?: number;
   judge?: JudgeFn;
+  nodeProvisioning?: ProvisioningDecision;
 }
 
 export interface TaskGradeReport {
@@ -116,18 +115,12 @@ function dependencySatisfiedIds(task: BenchmarkTask, gradeById: Map<string, bool
 }
 
 export async function gradeTask(task: BenchmarkTask, ctx: GradeContext): Promise<TaskGradeReport> {
-  const pkgPath = join(ctx.workspaceDir, "package.json");
-  let requiredEngine: NodeEngineConstraint = "no constraint";
-  if (existsSync(pkgPath)) {
-    try {
-      requiredEngine = resolveTargetNodeEngine(readFileSync(pkgPath, "utf8"));
-    } catch {
-      // ignore parse error
-    }
+  const plan = ctx.nodeProvisioning;
+  if (plan?.type === "unavailable") {
+    throw new Error(`Cannot grade task: required Node.js version is unavailable: ${plan.neededVersion}`);
   }
-  const plan = planNodeProvisioning(requiredEngine, discoverNodeToolchains(), process.version);
   const originalPath = process.env.PATH;
-  if (plan.type === "provision") {
+  if (plan?.type === "provision") {
     process.env.PATH = `${plan.binDir}:${originalPath}`;
   }
   try {

@@ -61,6 +61,7 @@ export {
   planNodeProvisioning,
   discoverNodeToolchains,
   getTargetPackageJson,
+  loadTargetEngineSource,
   type NodeEngineConstraint,
   type NodeToolchain,
   type ProvisioningDecision,
