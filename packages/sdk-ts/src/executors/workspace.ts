@@ -60,3 +60,37 @@ export async function captureWorkspaceDiff(workspaceDir: string): Promise<string
   await git(workspaceDir, ["add", "-N", "."]);
   return git(workspaceDir, ["diff"]);
 }
+
+/**
+ * Dirty paths in the repo this workspace was CLONED FROM (F-192).
+ *
+ * The workspace is a clone whose `origin` is a local path, and it lives at
+ * `<dataDir>/runs/<id>/workspace` — i.e. INSIDE that source repo. Nothing
+ * structurally separates the two: an executor launched with
+ * `--dangerously-skip-permissions` can read `origin` out of `.git/config` and
+ * edit the source checkout instead of the sandbox. When it does, the workspace
+ * diff is 0 bytes and the harness cannot tell "the executor did nothing" from
+ * "the executor did everything, somewhere else" — dogfood-115
+ * (`run-c19147fe`) burned 4 steps and sealed FAILED while a complete, all-ACs-
+ * green delivery sat unversioned in the operator's checkout.
+ *
+ * Returns `null` when `origin` is absent or not a local path (nothing to
+ * compare); otherwise the porcelain path set, sampled before and after a step
+ * so a repo that was ALREADY dirty at run start does not read as an escape.
+ */
+export async function sourceRepoDirtyPaths(workspaceDir: string): Promise<Set<string> | null> {
+  try {
+    const origin = (await git(workspaceDir, ["remote", "get-url", "origin"])).trim();
+    if (origin.length === 0 || !isAbsolute(origin)) return null;
+    const porcelain = await git(origin, ["status", "--porcelain"]);
+    return new Set(
+      porcelain
+        .split("\n")
+        .map((line) => line.slice(3).trim())
+        .filter((p) => p.length > 0),
+    );
+  } catch {
+    // No origin / not a repo / unreadable — the detector simply does not arm.
+    return null;
+  }
+}

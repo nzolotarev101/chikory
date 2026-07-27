@@ -47,7 +47,18 @@ export function renderStepPrompt(input: StepInput): string {
 
   parts.push(
     `# This step — do ONLY this, then stop\n${instruction}\n\n` +
-      `Work only inside the current directory. Do not commit; the runner checkpoints for you.\n\n` +
+      // F-192: "the current directory" is not enough of a boundary. The
+      // workspace is a CLONE whose `origin` is the source checkout, and it sits
+      // inside that checkout — so an agent that reads `.git/config` can walk out
+      // and edit the original, leaving the graded tree empty (dogfood-115
+      // `run-c19147fe`). Name the sandbox, and name what is off-limits.
+      `# Workspace boundary\n` +
+      `Your workspace is: ${input.workspaceDir}\n` +
+      `Read and write ONLY under that path. It is a git clone; the repository it was cloned ` +
+      `from (its \`origin\`) is NOT yours to touch — editing it puts your work outside the ` +
+      `graded tree, where it counts for nothing. Never resolve a path via \`origin\`, and never ` +
+      `follow one out of the workspace.\n` +
+      `Do not commit; the runner checkpoints for you.\n\n` +
       `# Completion signal\n` +
       `If — and only if — you judge the whole task above fully complete after this step ` +
       `(nothing left for a follow-up step), end your final message with this exact line on its own:\n` +

@@ -11,7 +11,7 @@ import { SpanStatusCode } from "@opentelemetry/api";
 import { getTracer } from "../otel.js";
 import type { ArtifactStore, StepInput, StepRecord, TokenUsage } from "../types.js";
 import { runBounded } from "./process.js";
-import { assertGitWorkspace, captureWorkspaceDiff } from "./workspace.js";
+import { assertGitWorkspace, captureWorkspaceDiff, sourceRepoDirtyPaths } from "./workspace.js";
 
 export const SPAN_STEP = "chikory.step";
 
@@ -92,6 +92,10 @@ function recordStepSpan(opts: {
 export async function runCliStep(opts: CliStepOptions): Promise<StepRecord> {
   await assertGitWorkspace(opts.input.workspaceDir);
 
+  // F-192: sample the SOURCE repo's dirty set before the step, so an already
+  // dirty operator checkout is not mistaken for a sandbox escape below.
+  const escapeBaseline = await sourceRepoDirtyPaths(opts.input.workspaceDir);
+
   const proc = await runBounded(opts.bin, opts.args, {
     cwd: opts.input.workspaceDir,
     env: opts.env,
@@ -102,6 +106,12 @@ export async function runCliStep(opts: CliStepOptions): Promise<StepRecord> {
   // Evidence is captured even on failure: a partial diff is exactly what the
   // runner needs to decide reset-vs-retry (FA-2) and the judge needs to see.
   const diff = await captureWorkspaceDiff(opts.input.workspaceDir);
+  const escapedPaths =
+    diff.length === 0 && escapeBaseline
+      ? [...((await sourceRepoDirtyPaths(opts.input.workspaceDir)) ?? [])]
+          .filter((p) => !escapeBaseline.has(p))
+          .sort()
+      : [];
   const transcriptText =
     proc.stderr.length > 0 ? `${proc.stdout}\n--- stderr ---\n${proc.stderr}` : proc.stdout;
 
@@ -161,6 +171,28 @@ export async function runCliStep(opts: CliStepOptions): Promise<StepRecord> {
         reason:
           `step exceeded maxSeconds=${cap}; killed after ${elapsedSeconds.toFixed(1)}s ` +
           `(${overrunRatio.toFixed(2)}× cap)`,
+        retriable: true,
+      },
+    };
+  } else if (escapedPaths.length > 0) {
+    // F-192: an EMPTY workspace diff paired with fresh edits in the repo the
+    // workspace was cloned from means the executor worked outside its sandbox.
+    // Left silent this is the worst failure shape the harness has: the step
+    // reads SUCCESS, the judge grades an empty tree, every AC goes RED, the run
+    // burns its budget to a HALT — and the real delivery is sitting unversioned
+    // in the operator's checkout, invisible to trace, harvest and rollback
+    // alike (dogfood-115 `run-c19147fe`: 4 steps, $0.16, terminal FAILED).
+    // FAILED + retriable: the next attempt starts from a clean checkpoint.
+    record = {
+      ...base,
+      status: "FAILED",
+      summary: parsed.summary,
+      failure: {
+        reason:
+          `executor wrote OUTSIDE its workspace: the step diff is empty but ` +
+          `${escapedPaths.length} path(s) changed in the source repo this workspace was cloned ` +
+          `from — ${escapedPaths.slice(0, 10).join(", ")}${escapedPaths.length > 10 ? ", …" : ""}. ` +
+          `The delivery is not in the graded tree; revert those paths before retrying.`,
         retriable: true,
       },
     };

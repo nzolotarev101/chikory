@@ -1,0 +1,291 @@
+# Dogfood-116: WP-537 — a design finding must have a CONSUMER on a one-step run (the F-180 fix)
+#   RE-RUN of dogfood-115. Same WP, same goal, same acceptance criteria, VERBATIM — dogfood-115
+#   (`run-c19147fe-13b6-4964-834d-9d55ccd99484`) never graded a single byte, so nothing about the
+#   task was disproven. `docs/reports/dogfood-115.md` has the full forensics.
+#
+# 🔴 WHY dogfood-115 FAILED — READ THIS BEFORE ASSUMING THE TASK IS HARD:
+#   The executor did the work in the WRONG COPY OF THE REPO. Every Chikory run hands the agent a
+#   private clone at `.chikory/runs/<id>/workspace` and grades THAT. `agy` instead edited the
+#   operator's checkout — the repo the clone was made from, which its own `origin` points at — so
+#   all 4 step diffs were 0 bytes. The judge graded an empty tree, went 1/4 on ACs, and HALTed after
+#   3 stuck verdicts. 4 steps, $0.1576, 7m 27s, nothing landed; a complete, all-4-ACs-green delivery
+#   sat unversioned in the operator's working tree, outside trace/checkpoints/rollback/harvest.
+#   ⚠️ THE JUDGE WAS RIGHT AT EVERY STEP. It refused to seal an empty tree while the executor's own
+#   summary claimed green tsc, green eslint, 10 unit + 4 live tests and a completed 2×2×3 matrix.
+#   The failure was one layer down, in what the harness handed it. That is 🔴 F-192.
+#
+# 🟢 WHAT CHANGED SINCE (landed before this spec, hand-fixed in the dogfood-115 review sitting):
+#   - `executors/workspace.ts:64-96` `sourceRepoDirtyPaths()` + `executors/step.ts:95-97,109-115,
+#     177-199`: an empty-diff step whose SOURCE repo gained paths now FAILs loudly and names them,
+#     instead of reading SUCCESS. Sampled before/after, only when the diff is 0 bytes (zero cost on
+#     any step that produced work), disarmed when `origin` is absent or non-local. 6 tests.
+#   - `executors/prompt.ts:50-61`: the step prompt now names the workspace's absolute path and says
+#     the clone's `origin` is off-limits. ⚠️ HARDENING ONLY — a minimal probe (nested clone, same
+#     `agy` flags) wrote correctly in-workspace WITH and WITHOUT this text, so the escape mechanism
+#     is NOT pinned and this is not a proven cure. Containment is 🔴 WP-539 (clone to `os.tmpdir()`).
+#   - `scripts/dogfood-verify.sh:67-73`/`:160-161` (🔴 F-193): the review pack was flattening
+#     multi-line `check:` bodies and reporting FALSE FAILs. Does not affect the run — the judge's
+#     runner always preserved newlines — but it is why dogfood-115's evidence pack first read as a
+#     bad delivery rather than a missing one.
+#   ⚠️ SO THIS RUN CARRIES A SECOND, FREE PROOF: if the executor escapes again, step 1 FAILs in ~1
+#   minute naming the paths, instead of burning 4 steps to a HALT. Either way the operator learns
+#   something real. If it does escape: `git stash push -m "<run-id> escape" -- <paths>`, then treat
+#   F-192 containment (WP-539) as the next headline.
+#
+# ⚠️ THE STRAY dogfood-115 DELIVERY IS PARKED IN `git stash@{0}` AND MUST NOT BE LANDED.
+#   It passes all 4 ACs and the full sdk-ts suite, but NO JUDGE PASS EVER SAW IT. Hand-landing an
+#   ungraded delivery is the precise failure this WP exists to abolish. It is kept for exactly one
+#   purpose: it is the REFERENCE IMPLEMENTATION that proves AC-1 GREEN (see AC arming below).
+#   🟡 F-194 — learn from it, do not copy it: it added SEVEN optional spellings of "the rubric
+#   failed" to `CompletionReviewState` (because AC-1's probe object sets all seven) and only ONE is
+#   used by the real call site. The other six are dead public API. AC-1 probes many spellings so the
+#   DESIGN stays open, not because many spellings are wanted. One field, wired for real, is better.
+#
+# ⚠️ 🟡 F-190 IS STILL A BINDING DESIGN CONSTRAINT: `gemini-cli` collapses a whole agent session into
+#   ONE Chikory step, so on this arm EVERY run is a first-verdict seal and `judge.cadence: 2` can
+#   never fire twice. The fix must work on a ONE-STEP run and must not assume a second step exists
+#   to be re-judged. This run will very likely seal in one step — which is exactly the shape it is
+#   fixing, so the delivery gets to gate itself on the way in.
+#
+# CLASS / LADDER. class=product — surface is `packages/sdk-ts/src/workflow/`, the durable-execution
+#   + Agent-as-a-Judge core. Trailing-3 harness-meta headlines 0/3, cap intact.
+# Ladder-rung: 4
+# Thesis-KPI: JUDGE GATE INTEGRITY — a design finding the judge records at the moment a run would
+#   seal MUST reach a consumer that can act on it, on EVERY run shape including the one-step run that
+#   is now the only shape a CLI executor produces. A sealing verdict whose acceptance criteria all
+#   pass but whose rubric carries >=1 failing item must grant the ONE bounded design-fix attempt the
+#   machinery already implements, and must still seal SUCCESS afterwards whether or not the finding
+#   was resolved (F-107: never park a run whose criteria all pass). Proven by an AC-owned behavioral
+#   probe over the real built module ACROSS THE WHOLE INPUT MATRIX, plus a live end-to-end run
+#   through the real workflow. Secondary KPI: no cost regression — a first-verdict seal with a CLEAN
+#   rubric must still skip the review, so the common case pays zero extra judge passes.
+#
+# ⚠️ GATE VERDICTS (recorded 2026-07-27, review of dogfood-115 / `run-c19147fe`):
+#   §0 progression  ⛔ **STALLED** (max steps 4 vs 11, rung 0/3/0, resumes 0, looseness 3/3). BINDING:
+#                   the next headline is the CURRENT PHASE's ladder rung or its named unblock — and
+#                   that is unchanged from dogfood-115, because dogfood-115 delivered nothing. P3-rung-4
+#                   (>=5 tasks scored vs a baseline) still CANNOT RUN: runnable corpus is 2,
+#                   `brownfield-002` still carries `status: blocked`, no baseline arm has ever run.
+#                   WP-537 remains the rung's PUBLICATION-INTEGRITY unblock, on the same reading that
+#                   made F-164/WP-535 a headline (dogfood-112): a corpus authored and scored while the
+#                   quality gate cannot gate would have to be thrown away.
+#                   ⚠️ Recorded explicitly: 🔴 F-192 was found THIS review and is NOT headlining —
+#                   its detection half is hand-fixed (TASK-PROTOCOL §4) and its containment half is
+#                   queued as WP-539. A harness-meta headline here would also bust the §1.5 cap.
+#                   ℹ️ F-168 still open: the gate's ⛔ message hard-codes the retired P2/WP-265 ladder.
+#   §1.1 failure-surface ✅ unchanged and genuinely failable; the three naive fixes are real traps,
+#                   all named in the goal and rejected by the ACs. Cross-file: `workflow/completion-
+#                   review.ts` + `workflow/agent-loop.ts` + unit + live tests.
+#   §1.2 product-progress ✅ real open `plan.md` §7 WP-537 on real product code.
+#   §1.3 mission-critical ✅ PROCEED — the named blocker on rung-4/rung-5 publication integrity.
+#   §1.5 friction-budget ✅ class=product, trailing-3 harness-meta 0/3.
+#
+# ⚠️ SCOPE / DETERMINISM. Writes ONLY inside `packages/sdk-ts/`. NO new dependency, NO key material,
+#   NO global tool install, NO `devbox.json` edit. Do NOT touch `benchmarks/`, `examples/dogfood/`,
+#   `scripts/`, or the chain runner's own completion review (`src/chain/completion-review.ts`). Run
+#   project commands sequentially inside the ALREADY-ACTIVATED devbox — do NOT nest `devbox run` (F-105).
+#
+# ⚠️ LAUNCH:
+#   0. Commit this spec + all dogfood-115 review docs to HEAD (the worker clones HEAD at run start),
+#      and confirm `git stash list` still shows the dogfood-115 delivery parked at stash@{0}.
+#   1. Verify the spec-pick glob resolves to THIS file: `sort | tail -n 1` over
+#      `examples/dogfood/dogfood-[0-9][0-9][0-9]*.yaml` → dogfood-116 sorts after dogfood-115.
+#   2. `CHIKORY_PREFLIGHT_ONLY=1 devbox run run-dogfood` dry-runs the guards at $0 (expect AC-2 RED).
+#      ℹ️ The preflight classes AC-1/AC-3/AC-4 as VERIFY-SUITE and does NOT dry-run them. All three
+#      were hand-verified 2026-07-27 in BOTH directions against a real reference implementation —
+#      see the AC arming evidence in `docs/reports/dogfood-115.md`'s NEXT RUN section.
+#   3. `devbox run run-dogfood`
+#   Post-run: `devbox run -- bash scripts/harvest.sh <run-id>` then `/dogfood-review <run-id>`.
+#   ⚠️ FIRST THING POST-RUN, BEFORE ANYTHING ELSE: `git status --short`. If your checkout is dirty
+#      with `packages/sdk-ts/` edits you did not make, F-192 recurred — read dogfood-115 §"the escape".
+
+name: dogfood-116-wp537-design-finding-gates-the-seal
+goal: >
+  Make a design finding matter on a one-step run. Chikory already has the whole machine for this: when a run
+  is about to seal SUCCESS, a run-completion review looks at the cumulative diff, and if the judge's design
+  rubric fails, the failing items are folded into a design-fix brief, the executor gets ONE bounded fix step,
+  the fix is re-reviewed, and the run seals SUCCESS either way. It is live-proven — but only for runs whose
+  seal arrives after several judge passes.
+
+  On a one-step run it never fires. packages/sdk-ts/src/workflow/completion-review.ts skips the whole review
+  whenever the sealing judge pass's diff base is the run's own base commit, on the reasoning that the sealing
+  pass already looked at the same cumulative diff. That is true about what was LOOKED AT and false about what
+  HAPPENS NEXT: in packages/sdk-ts/src/judge/verdict.ts a verdict whose acceptance criteria all pass and whose
+  rubric has failures falls through to PROCEED with the failures recorded only as a note. So on a one-step run
+  a design objection is written to the journal and then nothing reads it — no brief, no fix step, no park.
+  That is how two consecutive dogfood runs sealed green while carrying defects a human found in minutes, and
+  it matters more every day: the CLI executors we run on do a whole agent session inside a single step, so
+  one-step runs are now the normal shape rather than the trivial one.
+
+  Deliver, inside packages/sdk-ts, in whatever design you judge best:
+
+    * A DESIGN OBJECTION AT SEAL TIME MUST REACH A CONSUMER, on every run shape. When the verdict that would
+      seal a run has every acceptance criterion passing AND at least one failing rubric item, the run must
+      take the bounded design-fix path that already exists — the failing items become the brief, the executor
+      gets its one fix attempt, the result is re-reviewed — even when that verdict is the run's FIRST and its
+      diff base is the run's base commit. You may reach this by making the completion-review decision aware
+      of the sealing verdict's rubric outcome, or by routing the objection to the brief directly from the
+      sealing verdict without a redundant second judge pass; the second is cheaper and equally valid. Either
+      way the decision must remain a PURE, separately testable function of its inputs, in the module that
+      owns that decision today, and the run's base commit must still be what the review reads the cumulative
+      diff against.
+
+    * THREE TRAPS, ALL OF WHICH LOOK LIKE THE FIX AND ARE NOT:
+      (A) Do NOT simply stop skipping first-verdict seals. A clean one-step run — every criterion passing,
+          every rubric item passing — is the commonest shape there is, and it must continue to pay ZERO extra
+          judge passes. The skip is correct exactly when there is nothing to act on.
+      (B) Do NOT make a rubric-only failure terminal. It must not FAIL the run, must not park it, must not
+          escalate to a human: a run whose acceptance criteria all pass SEALS SUCCESS, with the finding
+          recorded, whether the bounded fix attempt resolved it or not. That discipline is deliberate and
+          load-bearing; breaking it turns an advisory design pass into a run-killer.
+      (C) Do NOT fire the review and drop the finding. If the objection does not become the executor's next
+          instruction and produce a real fix attempt, nothing has changed — the bug is intact behind a
+          greener test.
+
+    * BOUNDED, AND STILL BOUNDED. The existing cap on how many completion reviews a run may take must keep
+      holding, and exhaustion must keep winning over everything else: once the attempts are used up the
+      decision is to stop, regardless of what the rubric says. There must be no path on which a design
+      finding can cycle the run indefinitely, and no path on which the fix attempt is granted when the run
+      has no steps left.
+
+    * TESTS THAT COVER THE WHOLE INPUT MATRIX, NOT ONE HAPPY CASE. The decision function's inputs are the
+      combination of: whether the sealing verdict is the run's first (its diff base being the base commit) or
+      a later one; whether that verdict's rubric is clean or carries failures; and how many review attempts
+      have already been used, including the exhausted case. Every combination gets a test, and each one
+      asserts what must NOT happen as well as what must — a clean first-verdict seal must still skip, an
+      exhausted run must still skip even with failures present. On top of that, ONE LIVE test through the
+      real workflow (the existing run-completion live tests are the pattern to follow) in which a run seals
+      on its FIRST verdict with a failing rubric item, and which asserts, from the journal, that the design
+      brief was issued, that a real fix step ran, and that the run still reached terminal SUCCESS.
+
+  CONSTRAINTS: strict TypeScript, ESM relative imports with explicit .js specifiers, named exports, no
+  default exports, no new dependency, no key material, no global tool install, no devbox.json edit. Writes
+  only inside packages/sdk-ts; do not touch benchmarks/, examples/dogfood/, scripts/, or the chain-level
+  completion review in src/chain/completion-review.ts. Every delivered test must pass and must not break an
+  existing one — the sdk-ts suite stays green, type-clean and lint-clean.
+
+repos:
+  - url: /Users/nikitazolotarev/repos/chikory
+    writable: true
+
+acceptance_criteria:
+  - id: AC-1
+    description: >
+      THE DECISION IS CORRECT ACROSS THE WHOLE INPUT MATRIX, asserted by the CHECK ITSELF against the real
+      built module — not by tests the executor authored (F-180 is the very bug under repair, so the oracle
+      must not be delegated), and enumerating every INPUT FAMILY with a negative per family (F-187: an
+      oracle-owned AC that probes one family still ships regressions). Probes the run-level completion-review
+      decision over the 2×2×3 matrix of {first-verdict seal, later seal} × {rubric clean, rubric failing} ×
+      {attempts 0, 1, exhausted}: a first-verdict seal with a failing rubric must REVIEW (the F-180 fix); a
+      first-verdict seal with a clean rubric must still SKIP (trap A — no cost regression); a later seal must
+      review regardless of rubric; and exhaustion must SKIP in every combination including a failing rubric
+      (the bound must win). The check discovers the decision entry point by name from the module's own
+      exports and fails loud if the rubric outcome cannot be expressed in its input.
+    check: |
+      cd packages/sdk-ts && pnpm exec tsc && node -e '
+      let A=(c,m)=>{if(!c){console.error("FAIL: "+m);process.exit(1);}};
+      import("file://"+process.cwd()+"/dist/workflow/completion-review.js").then(m=>{
+        let fn=m.decideCompletionReview;
+        A(typeof fn==="function","decideCompletionReview must remain a named export of workflow/completion-review");
+        A(typeof m.MAX_COMPLETION_REVIEWS==="number" && m.MAX_COMPLETION_REVIEWS>=2,"MAX_COMPLETION_REVIEWS must stay exported and >=2");
+        let MAX=m.MAX_COMPLETION_REVIEWS;
+        let fails=[{id:"design_serves_overall_goal",pass:false,justification:"the range grammar misses AND-ranges"}];
+        let clean=[{id:"design_serves_overall_goal",pass:true,justification:"coherent"}];
+        // Probe every spelling a reasonable design might use for "the sealing verdict rubric failed".
+        let ask=(base,sealing,used,rubric)=>{
+          let s={sealingDiffBase:sealing,baseCommit:base,reviewAttemptsUsed:used,
+                 sealingRubricResults:rubric,rubricResults:rubric,
+                 sealingRubricFailures:rubric.filter(r=>!r.pass).length,
+                 sealingVerdictHadRubricFailures:rubric.some(r=>!r.pass)};
+          return fn(s).action;
+        };
+        A(ask("base0","base0",0,fails)==="review","a FIRST-VERDICT seal carrying a failing rubric item must REVIEW — this is F-180");
+        A(ask("base0","base0",1,fails)==="review","a first-verdict seal with a failing rubric must still review with 1 attempt used");
+        A(ask("base0","base0",0,clean)==="skip","trap A: a first-verdict seal with a CLEAN rubric must still SKIP (no extra judge pass)");
+        A(ask("base0","base0",1,clean)==="skip","a clean first-verdict seal must skip at every attempt count");
+        A(ask("base0","step2commit",0,clean)==="review","a LATER seal must review even with a clean rubric (pre-existing behaviour)");
+        A(ask("base0","step2commit",0,fails)==="review","a later seal with a failing rubric must review");
+        A(ask("base0","base0",MAX,fails)==="skip","the bound must win: exhausted attempts skip even with a failing rubric");
+        A(ask("base0","step2commit",MAX,fails)==="skip","exhausted attempts skip on a later seal too");
+        A(ask("base0","step2commit",MAX+1,clean)==="skip","over-exhausted attempts skip");
+        let sk=fn({sealingDiffBase:"base0",baseCommit:"base0",reviewAttemptsUsed:MAX,sealingRubricResults:fails,rubricResults:fails});
+        A(typeof sk.reason==="string" && sk.reason.length>0,"a skip must still carry a human-readable reason");
+        A(typeof m.buildCompletionReviewBrief==="function","buildCompletionReviewBrief must remain exported — the finding must become an instruction");
+        let brief=m.buildCompletionReviewBrief({criterionResults:[],rubricResults:fails,concerns:[]});
+        A(/AND-ranges/.test(brief),"the brief must carry the failing rubric justification verbatim");
+        console.log("AC-1 OK: design-finding matrix correct");
+      }).catch(e=>{console.error("FAIL: "+(e && e.message ? e.message : String(e)));process.exit(1);});'
+  - id: AC-2
+    description: >
+      THE SEALING VERDICT'S RUBRIC OUTCOME REACHES THE DECISION AT THE CALL SITE — the wiring half. On HEAD
+      every `decideCompletionReview({…})` call in `agent-loop.ts` passes exactly the two commits and the
+      attempt count, so no rubric-derived value crosses the boundary: the grep is RED. A design cannot
+      satisfy AC-1 without making the decision rubric-aware, and a rubric-aware decision fed no rubric is a
+      broken loop, so this pins the other end of the same wire without prescribing a field NAME (the goal
+      deliberately leaves the design open). Note `rubricResults` alone is NOT usable here — it already
+      appears in both files on HEAD (`buildCompletionReviewBrief`, and the review verdict's own
+      `designFails`), which is exactly the F-83/F-114 false-green trap.
+    check: >
+      test "$(grep -A6 'decideCompletionReview({' packages/sdk-ts/src/workflow/agent-loop.ts | grep -ci 'ubric')" -ge 1 &&
+      grep -q 'buildCompletionReviewBrief(' packages/sdk-ts/src/workflow/agent-loop.ts &&
+      grep -qE 'export function decideCompletionReview' packages/sdk-ts/src/workflow/completion-review.ts
+  - id: AC-3
+    description: >
+      PROVEN LIVE THROUGH THE REAL WORKFLOW, AND THE MATRIX IS ACTUALLY TESTED — the run-completion unit +
+      live suites pass with net-new cases. HEAD has 5 tests in `test/runner/completion-review.test.ts` and 3
+      in `test/runner/completion-review-live.test.ts` (8 total, 7.2 s wall — F-141-safe, well inside the
+      judge's 120 s per-check cap); the matrix in AC-1 plus the live first-verdict-with-finding case cannot
+      be covered in fewer than 12 combined, so the count is a floor the delivery must clear. RED on HEAD on
+      the count.
+    check: |
+      cd packages/sdk-ts && pnpm exec vitest run test/runner/completion-review.test.ts test/runner/completion-review-live.test.ts --reporter=json --outputFile=/tmp/cr-115.json >/dev/null 2>&1
+      node -e '
+      const r=JSON.parse(require("fs").readFileSync("/tmp/cr-115.json","utf8"));
+      if(r.numFailedTests>0){console.error("FAIL: "+r.numFailedTests+" completion-review test(s) failing");process.exit(1);}
+      if(r.numPassedTests<12){console.error("FAIL: only "+r.numPassedTests+" completion-review tests pass; the input matrix + the live first-verdict-with-finding case need at least 12");process.exit(1);}
+      console.log("AC-3 OK: "+r.numPassedTests+" completion-review tests pass");'
+  - id: AC-4
+    description: >
+      No regression in the judge core and the package stays type- and lint-clean. Deliberately SCOPED to
+      `test/judge` (~4 s wall / 5 s test CPU) — **not** `test/runner`, which is 31 s wall but **219 s of test
+      CPU** because of the live Temporal suites, i.e. squarely inside the F-141 failure mode (dogfood-102: a
+      37 s-wall / 262 s-CPU AC was killed at the judge's ~120 s per-check cap non-deterministically). The
+      agent-loop live regression surface for THIS change is already covered by AC-3's live suite; the whole
+      982-test sdk-ts suite and `test/runner/agent-loop.test.ts` are re-run uncapped by the harvest
+      verify-pack §3. Measured 2026-07-27: tsc + eslint 4.1 s, `test/judge` 4.3 s → ~9 s total.
+    check: >
+      cd packages/sdk-ts &&
+      pnpm exec tsc --noEmit && pnpm exec eslint src &&
+      pnpm exec vitest run test/judge
+
+budget_usd: 30
+max_steps: 12
+
+# CONTEXT-ROT (WP-203/WP-207): auto-calibrated window (F-125 mechanism, live-proven 095-099, 101, 103, 105).
+pacing:
+  mode: auto
+  autoCalibrate: true
+
+# UNATTENDED (WP-271): operator-free; a genuine ESCALATE seals a resumable FAILED (WP-520).
+unattended:
+  escalation: seal_resumable_failed
+
+# DIRECTIVE (F-162/F-165): Gemini executes, Codex judges. Never Claude on a dogfood/benchmark run.
+executor:
+  adapter: gemini-cli
+  family: gemini
+
+judge:
+  family: openai-compat
+  cadence: 2
+  max_cost_share: 0.5
+
+# F-170-safe: the `code` stage drives the gemini-cli executor, so it must NOT name a foreign-family model
+# (a `gpt-`/`claude-` model here is what WP-536's launch preflight refuses). `default` lets the executor
+# pick its own model; plan/review/judge run on the keyless codex proxy.
+routing:
+  stages:
+    plan: { provider: openai-compat, model: gpt-5.6-sol xhigh }
+    code: { provider: gemini, model: default }
+    review: { provider: openai-compat, model: gpt-5.6-sol xhigh }
+    judge: { provider: openai-compat, model: gpt-5.6-sol xhigh }

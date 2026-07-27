@@ -64,7 +64,13 @@ const hostRepo = (spec.repos ?? []).some(
 out.push(`HOSTREPO\t${hostRepo ? 1 : 0}`);
 const criteria = spec.acceptanceCriteria ?? spec.acceptance_criteria ?? [];
 for (const ac of criteria) {
-  out.push(`CHECK\t${ac.id}\t${(ac.check ?? "").replace(/\s+/g, " ").trim()}`);
+  // F-193: the check MUST keep its newlines. Collapsing whitespace turns a
+  // multi-line `check: |` block into one line, which (a) folds a `//` JS
+  // comment over the rest of a `node -e` script (SyntaxError: Unexpected end
+  // of input) and (b) glues consecutive shell commands into one argv. Both
+  // report a FALSE FAIL for a delivery the judge's own (newline-preserving)
+  // runner passes. One line per record, so the body travels base64.
+  out.push(`CHECK\t${ac.id}\t${Buffer.from(ac.check ?? "", "utf8").toString("base64")}`);
 }
 process.stdout.write(out.join("\n") + "\n");
 NODE
@@ -149,8 +155,10 @@ CHECK_LINES="$(printf '%s\n' "$JOURNAL_OUT" | grep '^CHECK')"
 if [ -z "$CHECK_LINES" ]; then
   echo "_(no acceptance_criteria found in journal task_json)_"
 fi
-while IFS=$'\t' read -r _tag ID CHECK; do
+while IFS=$'\t' read -r _tag ID CHECK_B64; do
   [ -z "${ID:-}" ] && continue
+  # F-193: decode back to the EXACT bytes the judge ran, newlines included.
+  CHECK="$(printf '%s' "$CHECK_B64" | base64 -d)"
   set +e
   OUT="$(cd "$AC_CWD" && bash -c "$CHECK" 2>&1)"
   RC=$?
