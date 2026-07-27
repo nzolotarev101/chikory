@@ -13,6 +13,9 @@ import { join } from "node:path";
 import { stringify as stringifyYaml } from "yaml";
 
 import type { BenchmarkTask } from "./task.js";
+import { resolveTargetNodeEngine, planNodeProvisioning, discoverNodeToolchains, getTargetPackageJson } from "./engine.js";
+
+
 
 export interface AdapterContext {
   /** The task workspace the system under test works in and grading runs against. */
@@ -68,6 +71,22 @@ function runShell(
   });
 }
 
+async function withProvisionedPath<T>(task: BenchmarkTask, workspaceDir: string, fn: () => Promise<T>): Promise<T> {
+  const pkgJsonText = getTargetPackageJson(task, workspaceDir);
+  const requiredEngine = pkgJsonText ? resolveTargetNodeEngine(pkgJsonText) : "no constraint";
+  const availableToolchains = discoverNodeToolchains();
+  const plan = planNodeProvisioning(requiredEngine, availableToolchains, process.version);
+  const originalPath = process.env.PATH;
+  if (plan.type === "provision") {
+    process.env.PATH = `${plan.binDir}:${originalPath}`;
+  }
+  try {
+    return await fn();
+  } finally {
+    process.env.PATH = originalPath;
+  }
+}
+
 /**
  * Baseline cell: run a command template in the workspace. Placeholders:
  * `{workspace}`, `{goalFile}` (task goal written to a file — no quoting games),
@@ -77,30 +96,33 @@ export function commandAdapter(name: string, template: string): RunnerAdapter {
   return {
     name,
     async run(task, ctx) {
-      mkdirSync(ctx.outDir, { recursive: true });
-      const goalFile = join(ctx.outDir, "goal.md");
-      writeFileSync(goalFile, task.goal);
-      const command = template
-        .replaceAll("{workspace}", ctx.workspaceDir)
-        .replaceAll("{goalFile}", goalFile)
-        .replaceAll("{taskId}", task.id);
-      const logPath = join(ctx.outDir, "adapter.log");
-      const started = Date.now();
-      const { code, timedOut } = await runShell(
-        command,
-        ctx.workspaceDir,
-        ctx.timeoutMs ?? DEFAULT_ADAPTER_TIMEOUT_MS,
-        logPath,
-      );
-      return {
-        exitCode: code,
-        wallClockMs: Date.now() - started,
-        artifacts: [goalFile, logPath],
-        notes: timedOut ? ["timed out"] : [],
-      };
+      return withProvisionedPath(task, ctx.workspaceDir, async () => {
+        mkdirSync(ctx.outDir, { recursive: true });
+        const goalFile = join(ctx.outDir, "goal.md");
+        writeFileSync(goalFile, task.goal);
+        const command = template
+          .replaceAll("{workspace}", ctx.workspaceDir)
+          .replaceAll("{goalFile}", goalFile)
+          .replaceAll("{taskId}", task.id);
+        const logPath = join(ctx.outDir, "adapter.log");
+        const started = Date.now();
+        const { code, timedOut } = await runShell(
+          command,
+          ctx.workspaceDir,
+          ctx.timeoutMs ?? DEFAULT_ADAPTER_TIMEOUT_MS,
+          logPath,
+        );
+        return {
+          exitCode: code,
+          wallClockMs: Date.now() - started,
+          artifacts: [goalFile, logPath],
+          notes: timedOut ? ["timed out"] : [],
+        };
+      });
     },
   };
 }
+
 
 export interface ChikoryAdapterOptions {
   /** `chikory` binary invocation, default `chikory` on PATH (devbox shell). */
@@ -177,86 +199,88 @@ export function chikoryAdapter(opts: ChikoryAdapterOptions = {}): RunnerAdapter 
   return {
     name: "chikory",
     async run(task, ctx) {
-      mkdirSync(ctx.outDir, { recursive: true });
-      const spec = buildChikorySpec(task, opts, ctx.workspaceDir);
-      const specPath = join(ctx.outDir, "task.yaml");
-      writeFileSync(specPath, stringifyYaml(spec));
-      const dataDir = join(ctx.outDir, ".chikory");
-      const logPath = join(ctx.outDir, "adapter.log");
-      
-      console.log(`\n  [chikory] Running ${task.id}...`);
-      console.log(`  [chikory] Logs are streaming to: tail -f ${logPath}\n`);
+      return withProvisionedPath(task, ctx.workspaceDir, async () => {
+        mkdirSync(ctx.outDir, { recursive: true });
+        const spec = buildChikorySpec(task, opts, ctx.workspaceDir);
+        const specPath = join(ctx.outDir, "task.yaml");
+        writeFileSync(specPath, stringifyYaml(spec));
+        const dataDir = join(ctx.outDir, ".chikory");
+        const logPath = join(ctx.outDir, "adapter.log");
+        
+        console.log(`\n  [chikory] Running ${task.id}...`);
+        console.log(`  [chikory] Logs are streaming to: tail -f ${logPath}\n`);
 
-      const started = Date.now();
-      const { code, timedOut, output } = await runShell(
-        `${bin} run ${JSON.stringify(specPath)} --data-dir ${JSON.stringify(dataDir)}`,
-        ctx.workspaceDir,
-        ctx.timeoutMs ?? DEFAULT_ADAPTER_TIMEOUT_MS,
-        logPath,
-      );
+        const started = Date.now();
+        const { code, timedOut, output } = await runShell(
+          `${bin} run ${JSON.stringify(specPath)} --data-dir ${JSON.stringify(dataDir)}`,
+          ctx.workspaceDir,
+          ctx.timeoutMs ?? DEFAULT_ADAPTER_TIMEOUT_MS,
+          logPath,
+        );
 
-      // Copy the final sandboxed workspace back to the harness workspaceDir for
-      // grading. Authoritative pick: the run-id the CLI announced for THIS
-      // invocation (`run-id: run-<uuid>`). Stale Temporal workflows from earlier
-      // bench invocations can materialize extra run-* dirs in this dataDir
-      // (F-157/F-158) — newest-journal mtime is only the fallback when the
-      // announcement line is missing (e.g. the CLI died before printing it).
-      try {
-        const runsDir = join(dataDir, "runs");
-        if (existsSync(runsDir)) {
-          const announced = [...output.matchAll(/^run-id: (run-[0-9a-f-]+)$/gm)].map(
-            (m) => m[1],
-          );
-          const announcedId = announced[announced.length - 1];
-          let gradedId: string | undefined;
-          if (announcedId !== undefined && existsSync(join(runsDir, announcedId, "workspace"))) {
-            gradedId = announcedId;
-          } else {
-            const runDirs = readdirSync(runsDir)
-              .filter((n) => n.startsWith("run-"))
-              .map((n) => {
-                const journal = join(runsDir, n, "journal.db");
-                return {
-                  name: n,
-                  mtime: existsSync(journal) ? statSync(journal).mtimeMs : 0,
-                };
-              })
-              .sort((a, b) => b.mtime - a.mtime);
-            if (runDirs.length > 1) {
-              console.warn(
-                `  [chikory] ${runDirs.length} run dirs in ${runsDir} and no usable run-id ` +
-                  `announcement (stale Temporal re-attach?); grading newest journal: ${runDirs[0].name}`,
-              );
+        // Copy the final sandboxed workspace back to the harness workspaceDir for
+        // grading. Authoritative pick: the run-id the CLI announced for THIS
+        // invocation (`run-id: run-<uuid>`). Stale Temporal workflows from earlier
+        // bench invocations can materialize extra run-* dirs in this dataDir
+        // (F-157/F-158) — newest-journal mtime is only the fallback when the
+        // announcement line is missing (e.g. the CLI died before printing it).
+        try {
+          const runsDir = join(dataDir, "runs");
+          if (existsSync(runsDir)) {
+            const announced = [...output.matchAll(/^run-id: (run-[0-9a-f-]+)$/gm)].map(
+              (m) => m[1],
+            );
+            const announcedId = announced[announced.length - 1];
+            let gradedId: string | undefined;
+            if (announcedId !== undefined && existsSync(join(runsDir, announcedId, "workspace"))) {
+              gradedId = announcedId;
+            } else {
+              const runDirs = readdirSync(runsDir)
+                .filter((n) => n.startsWith("run-"))
+                .map((n) => {
+                  const journal = join(runsDir, n, "journal.db");
+                  return {
+                    name: n,
+                    mtime: existsSync(journal) ? statSync(journal).mtimeMs : 0,
+                  };
+                })
+                .sort((a, b) => b.mtime - a.mtime);
+              if (runDirs.length > 1) {
+                console.warn(
+                  `  [chikory] ${runDirs.length} run dirs in ${runsDir} and no usable run-id ` +
+                    `announcement (stale Temporal re-attach?); grading newest journal: ${runDirs[0].name}`,
+                );
+              }
+              gradedId = runDirs[0]?.name;
             }
-            gradedId = runDirs[0]?.name;
-          }
-          if (gradedId !== undefined) {
-            const finalWs = join(runsDir, gradedId, "workspace");
-            if (existsSync(finalWs)) {
-              // verbatimSymlinks: node's cpSync otherwise resolves a RELATIVE
-              // symlink against the SOURCE dir and writes it back absolute, so
-              // a target repo's own symlinks (zod's CLAUDE.md/.cursorrules/
-              // README.md) come out pointing into `.chikory/runs/<id>/workspace`
-              // — the graded artifact stops being self-contained and shows 3
-              // phantom ` M` files in every scope review (F-166).
-              cpSync(finalWs, ctx.workspaceDir, {
-                recursive: true,
-                force: true,
-                verbatimSymlinks: true,
-              });
+            if (gradedId !== undefined) {
+              const finalWs = join(runsDir, gradedId, "workspace");
+              if (existsSync(finalWs)) {
+                // verbatimSymlinks: node's cpSync otherwise resolves a RELATIVE
+                // symlink against the SOURCE dir and writes it back absolute, so
+                // a target repo's own symlinks (zod's CLAUDE.md/.cursorrules/
+                // README.md) come out pointing into `.chikory/runs/<id>/workspace`
+                // — the graded artifact stops being self-contained and shows 3
+                // phantom ` M` files in every scope review (F-166).
+                cpSync(finalWs, ctx.workspaceDir, {
+                  recursive: true,
+                  force: true,
+                  verbatimSymlinks: true,
+                });
+              }
             }
           }
+        } catch (err) {
+          console.error("  [chikory] Failed to copy workspace for grading:", err);
         }
-      } catch (err) {
-        console.error("  [chikory] Failed to copy workspace for grading:", err);
-      }
 
-      return {
-        exitCode: code,
-        wallClockMs: Date.now() - started,
-        artifacts: [specPath, logPath, dataDir],
-        notes: timedOut ? ["timed out"] : [],
-      };
+        return {
+          exitCode: code,
+          wallClockMs: Date.now() - started,
+          artifacts: [specPath, logPath, dataDir],
+          notes: timedOut ? ["timed out"] : [],
+        };
+      });
     },
   };
 }

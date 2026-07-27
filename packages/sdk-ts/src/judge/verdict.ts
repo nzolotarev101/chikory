@@ -137,10 +137,16 @@ export function computeVerdict(
       rationale: `all ${form.criterionResults.length} acceptance criteria pass; no rubric failures`,
     };
   }
+  // F-143 (dogfood-103, recurred at run level in dogfood-113): "no criteria
+  // evaluated" must mean exactly that. Conflating it with "zero criteria FAILED"
+  // stamped `no criteria evaluated` onto a journal whose own criteria table read
+  // 4/4 ✓ — a durable forensic string that contradicts the evidence beside it.
   const failNote =
     criteriaFails.length > 0
       ? `unmet criteria: ${criteriaFails.map((c) => c.id).join(", ")}`
-      : "no criteria evaluated";
+      : form.criterionResults.length === 0
+        ? "no criteria evaluated"
+        : `all ${form.criterionResults.length} acceptance criteria pass`;
   const rubricNote =
     rubricFails.length > 0 ? `; non-destructive rubric failures: ${describe(rubricFails)}` : "";
   return {

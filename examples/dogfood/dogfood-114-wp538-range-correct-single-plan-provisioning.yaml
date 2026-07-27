@@ -1,0 +1,259 @@
+# Dogfood-114: WP-538 — WP-534 COMPLETION (range-correct, single-plan, fail-loud node provisioning)
+#   (P3 benchmark/moat track, plan.md §7 WP-538; closes 🔴 F-181/F-182/F-183 + 🟡 F-184/F-185.) This is the
+#   P3-rung-4 UNBLOCK, second attempt — NOT a rung climb. rung-4 = "≥5-task benchmark slice scored vs a
+#   baseline"; the runnable corpus is 2 and dogfood-113's provisioner would make it SMALLER, not larger.
+#
+# 🔴 WHAT dogfood-113 LANDED, AND WHY IT IS NOT DONE (`docs/reports/dogfood-113.md`,
+#   `run-5da56db2-69df-4ffa-9961-1ed65db863a3`, SUCCESS 1 step $0.0527, judge PROCEED 4/4 AC but 5/6 rubric):
+#   The mechanism is REAL — live-probed against the actual Nix store at ambient v22.22.3, gitify's `">=24"`
+#   correctly yields `provision /nix/store/3mvbmkd…-nodejs-24.15.0/bin`, and the injected PATH survives
+#   `scrubExecutorEnv` and reaches both `spawn("bash")` (adapter) and `runBounded` (grader). Keep all of that.
+#   Three defects make it unusable as-is:
+#   - 🔴 F-181 RANGE SEMANTICS INVERTED. `benchmarks/harness/src/engine.ts:99` and `:104-107` compare the node
+#     major by EXACT EQUALITY. Live-probed, ambient v22.22.3, real store:
+#       `">=18"` → `unavailable`  → the task is SKIPPED though ambient v22 satisfies it. THE CORPUS SHRINKS.
+#       `">=20"` → provision node 20.19.6 → a DOWNGRADE below a satisfying ambient.
+#       `">=24"` → correct, and it is the only case the delivered tests pin, which is why 59/59 is green.
+#     `">=18"`/`">=20"` are among the commonest engines pins in the wild, so as landed this code REMOVES
+#     targets from the corpus. The WP's own Thesis-KPI is BENCHMARK CORPUS REACH. It is currently inverted.
+#   - 🔴 F-182 NO SHARED PLAN — the trap dogfood-113's spec explicitly named and forbade. Three sites each
+#     recompute independently, from TWO DIFFERENT SOURCES: `suite.ts:95-98` and `adapter.ts:74-77` read the
+#     PINNED REMOTE `package.json` (the workspace is still empty — the adapter is what clones), while
+#     `grade.ts:119-126` reads the POST-run LOCAL one. An agent edit to `engines.node` therefore splits the
+#     run and grade toolchains. `suite.ts` computes a full plan and discards everything but the `unavailable`
+#     branch; neither `adapter.ts` nor `grade.ts` acts on `unavailable` at all.
+#   - 🔴 F-183 SILENT DEGRADATION. Every failure path in `getTargetPackageJson` (`engine.ts:155-193`: clone
+#     timeout 3×15 s, offline, repo moved, rate limit) returns `null`, which callers map to
+#     "no constraint" → ambient, WITH NO LOG LINE. gitify would then be graded on node 22 and emit the exact
+#     toolchain-induced red — indistinguishable from agent failure, non-reproducible between runs — that
+#     WP-534 exists to abolish.
+#   Folded in: 🟡 F-184 (`suite.ts` and `adapter.ts` each fire a full `git clone --filter=blob:none` against a
+#   still-empty workspace → 2 network round-trips per task, up to 45 s each; the `temp-git-*` dir is created
+#   INSIDE the results artifact dir and `rm -rf`'d only on the success path) · 🟡 F-185 (`engine.ts:104`
+#   `.find()` over hash-ordered `readdirSync("/nix/store")` — `nodejs-24.15.0` and `24.14.1` are both present,
+#   so the winner depends on store hash order and two machines grade the same target on different patches).
+#   F-184 and F-185 both dissolve for free under the single-resolution design this run must deliver.
+#
+# CLASS / LADDER. class=product. Phase 3 IS the benchmark (`plan.md` §7), so `benchmarks/harness/src/` is this
+#   phase's product surface, not harness-meta — §1.5 harness-meta means `scripts/`, `examples/dogfood/`,
+#   launch prechecks, spec hygiene, or verifier plumbing, none of which is the primary surface here.
+#   Trailing-3 harness-meta headlines = 0/3, cap intact.
+# Ladder-rung: 4
+# Thesis-KPI: BENCHMARK CORPUS REACH — a target whose `package.json` declares ANY satisfiable node engine
+#   range is executed AND graded under a node that genuinely satisfies it, resolved EXACTLY ONCE per task and
+#   consumed unchanged by both the run path and the graded-check path (the F-163 parity invariant), with a
+#   requirement the environment cannot meet — or a target whose engine declaration cannot be READ — degrading
+#   to a loud structured skip rather than a red score or a silent ambient fallback. Proven by an
+#   AC-owned behavioral probe over the real built module, not by tests the executor writes for itself.
+#   Secondary KPI: the provisioner stops shrinking the corpus (`">=18"`/`">=20"` must run, not skip).
+#
+# ⚠️ GATE VERDICTS (recorded 2026-07-26, review of dogfood-113 / `run-5da56db2`):
+#   §0 progression  ✅ PROGRESSING (trailing-3 max steps 11 vs 3) with a standing ⚠️ LADDER PACE warning —
+#                   rung still 3. RECORDED WHY NOT CLIMBING: P3-rung-4 needs ≥5 runnable tasks scored against
+#                   a baseline; the runnable corpus is 2, `brownfield-002` is still `status: blocked`, the
+#                   baseline arm (WP-304) has never run, and the rung's named unblock (WP-534) landed
+#                   DEFECTIVE. Under ✅ the default candidate is the next ladder rung; rung-4 CANNOT RUN at a
+#                   2-task corpus, so the headline is the rung's unblock — the same "rung-4 prerequisite beats
+#                   the rung" reading used for dogfood-112 and dogfood-113.
+#   §1.1 failure-surface ✅ genuinely failable, and the naive fix is a REAL trap: flipping `===` to `>=` in
+#                   `engine.ts:99` closes F-181 and leaves F-182 and F-183 wide open, greening nothing that
+#                   matters. The run must ALSO collapse three call sites into one resolution threaded through
+#                   two consumer contexts, and convert a `null`-returning reader into a structured result.
+#                   Cross-file: `engine.ts` + `suite.ts` + `adapter.ts` + `grade.ts` + tests.
+#   §1.2 product-progress ✅ real open `plan.md` §7 WP-538 (WP-534 completion) on real product code. No
+#                   scaffolding, no invented throwaway utility.
+#   §1.3 mission-critical ✅ PROCEED — not busy work, not scaffold-hosted; it is the named blocker on the
+#                   ladder's next rung and on WP-303/304 publication.
+#   §1.5 friction-budget ✅ class=product, trailing-3 harness-meta 0/3.
+#   ⚠️ CARRIED RISK — 🔴 F-180 (→ WP-537) IS STILL OPEN: a rubric-only judge failure does not gate the
+#                   terminal seal (`packages/sdk-ts/src/judge/verdict.ts:131-149`), which is exactly how
+#                   dogfood-113's defects shipped under a 🟢 SUCCESS. The ACs below are therefore written to
+#                   OWN THEIR ORACLE — AC-1 asserts behavior against the built module itself rather than
+#                   trusting tests the executor authors. At review time, READ the `rubric:` block.
+#
+# ⚠️ SCOPE / DETERMINISM. Writes ONLY inside `benchmarks/harness/`. NO new dependency, NO key material, NO
+#   global tool install, NO `devbox.json` edit. Do NOT edit `benchmarks/tasks/*.yaml` (`brownfield-002` stays
+#   `status: blocked` in THIS run — the flip needs a real green-base verification suite, which is the
+#   FOLLOW-UP bench run), `packages/sdk-ts/`, the chain runner, or the harvest scripts. Run project commands
+#   sequentially inside the ALREADY-ACTIVATED devbox environment — do NOT nest `devbox run` (F-105).
+#
+# ⚠️ LAUNCH:
+#   0. Commit this spec + all review docs to HEAD; harness suite green (the worker clones HEAD at run start).
+#   1. Verify the spec-pick glob resolves to THIS file: `dogfood-114` sorts after `dogfood-113` (the newest
+#      other spec in `examples/dogfood/`), and no `.pending` spec is queued ahead of it.
+#   2. `CHIKORY_PREFLIGHT_ONLY=1 devbox run run-dogfood` dry-runs the guards at $0 (expect AC-2/AC-3/AC-4
+#      RED-on-HEAD — the challenge is armed). ℹ️ The preflight classes AC-1 as VERIFY-SUITE (it shells out to
+#      `pnpm exec tsc`) and therefore does NOT dry-run it. AC-1 was verified BY HAND on 2026-07-26, both
+#      directions: RED on HEAD (clean exit 1, `FAIL: decideTargetNode must be a named export of the engine
+#      module`) and GREEN against a reference implementation of the correct satisfaction relation. It runs in
+#      **2.0 s**, far inside the judge's 120 s per-check cap (F-141-safe).
+#   3. `devbox run run-dogfood`
+#   Post-run: `devbox run -- bash scripts/harvest.sh <run-id>` then `/dogfood-review <run-id>`.
+
+name: dogfood-114-wp538-range-correct-single-plan-provisioning
+goal: >
+  Finish the per-target node provisioning the harness already half-has, so that it makes the benchmark corpus
+  BIGGER instead of smaller. Today benchmarks/harness/src/engine.ts resolves a target's engines.node range
+  down to a single major number and then demands an EXACT match, so a target declaring ">=18" is skipped as
+  unsatisfiable even though the ambient node v22 satisfies it, and a target declaring ">=20" is pushed DOWN
+  onto node 20. Only an effectively-exact pin like gitify's ">=24" behaves correctly, which is why the
+  existing 59-test suite is green while the feature is inverted.
+
+  Deliver, inside benchmarks/harness, in whatever design you judge best:
+
+    * A pure, named-export function decideTargetNode(packageJson, availableToolchains, ambientVersion) that
+      composes engine resolution and provisioning planning into ONE decision, and gets the SATISFACTION
+      RELATION right rather than testing for equality. Given the target's package.json (already parsed or as
+      text — your choice, but pure over its input, no I/O), the toolchains actually available (each with a
+      version and the directory its binaries live in), and the ambient node version, it returns exactly one
+      of: a "use the ambient toolchain" outcome when the ambient node ALREADY SATISFIES the declared range
+      (this is the case the current code gets wrong); a "provision" outcome naming the binary directory of a
+      toolchain that genuinely satisfies the range, chosen DETERMINISTICALLY (the newest satisfying one, never
+      whatever the filesystem happened to list first); or a structured UNAVAILABLE outcome that names what was
+      required and what was found. A target declaring no engine constraint, or a range nothing can parse,
+      resolves to the ambient outcome and must never throw. Keep supporting the range forms real repos use —
+      ">=24", ">=24.0.0", "^24.1.0", "24.x", "22 || 24", bare "24" — and note that ">=N" means AT LEAST N, so
+      a newer node satisfies it and an older one does not.
+
+    * THE TRAP THE LAST RUN FELL INTO, WHICH YOU MUST NOT REPEAT: the decision must be computed EXACTLY ONCE
+      PER TASK and then HANDED to both consumers. Right now suite.ts, adapter.ts and grade.ts each recompute
+      it independently — and from two different sources, since the adapter reads the pinned remote
+      package.json while the grader reads the post-run local one, so an agent that edits engines.node splits
+      the run and grade toolchains. That is the F-163 judge/grader-parity bug re-opened in the opposite
+      direction. Resolve once where the task is set up, carry the decision on the context objects the adapter
+      and the grader already receive under the field name nodeProvisioning, and make both consume the value
+      they were handed. Neither the adapter path nor the grading path may derive a provisioning decision of
+      its own. Both must also honour an UNAVAILABLE decision rather than silently running under the ambient
+      toolchain, and the "provision" decision must reach the child processes on both paths exactly as it does
+      today (the PATH injection already works and survives scrubExecutorEnv — preserve that property).
+
+    * FAIL LOUD, NEVER SILENTLY AMBIENT. Reading a target's engine declaration can fail — the clone times out,
+      the network is down, the repo moved. Today every such failure returns null and is mapped to "no
+      constraint", so the target runs under the wrong node and emits a red that is indistinguishable from
+      agent failure. Deliver a named-export loadTargetEngineSource that returns a STRUCTURED result carrying
+      either the package.json contents or the reason it could not be read — never a bare null — and make a
+      target that pins a repo whose engine declaration cannot be read degrade to the same structured
+      skip-with-reason that an UNAVAILABLE engine produces, carrying the read failure as its reason. A target
+      we cannot grade reproducibly must never be scored.
+
+    * Resolving once also means reading the target's package.json once: today suite.ts and adapter.ts each
+      trigger a full network clone against a workspace that is still empty, so every brownfield task pays two
+      round-trips of up to 45 seconds. And the temporary clone directory is created inside the suite's own
+      results artifact directory and only removed on the success path, so a partial clone leaves it in the
+      published results. Both should fall out of the single-resolution design; make sure they do.
+
+    * Focused unit tests covering the new behavior directly, including the cases the current suite lacks:
+      ambient STRICTLY NEWER than the requirement yielding the ambient no-op (">=18" and ">=20" under an
+      ambient v22); a requirement satisfiable only by a toolchain NEWER than the requested major (">=24"
+      satisfied by node 26); deterministic selection when two satisfying toolchains are present; the
+      unavailable outcome naming what was needed; the unreadable-source path producing a structured reason
+      rather than an ambient fallback; and the no-constraint and unparseable cases.
+
+  CONSTRAINTS: strict TypeScript, ESM relative imports with explicit .js specifiers, named exports, no default
+  exports, no new dependency, no key material, no global tool install, no devbox.json edit. Do not edit
+  benchmarks/tasks/*.yaml (brownfield-002 stays status: blocked in this run), packages/sdk-ts, the chain
+  runner, or the harvest scripts. Every delivered test must pass and must not break an existing one — the
+  harness suite stays green, type-clean and lint-clean.
+
+repos:
+  - url: /Users/nikitazolotarev/repos/chikory
+    writable: true
+
+acceptance_criteria:
+  - id: AC-1
+    description: >
+      RANGE SEMANTICS ARE CORRECT, asserted by the CHECK ITSELF against the real built module — not by tests
+      the executor authored (F-180 is still open, so the acceptance oracle must not be delegated). Probes
+      `decideTargetNode` over a synthetic toolchain set: ambient strictly newer than the requirement yields
+      the ambient no-op (`">=18"`, `">=20"`, `">=22"` under ambient v22.22.3 — the exact cases the landed code
+      gets wrong); `">=24"` under ambient v22 provisions a toolchain that genuinely satisfies it; `">=24"`
+      with ONLY node 26 available provisions node 26; nothing satisfying yields `unavailable`; absent and
+      unparseable engine declarations yield ambient without throwing.
+    check: |
+      cd benchmarks/harness && pnpm exec tsc && node -e '
+      let A=(c,m)=>{if(!c){console.error("FAIL: "+m);process.exit(1);}};
+      import("file://"+process.cwd()+"/dist/engine.js").then(m=>{
+        A(typeof m.decideTargetNode==="function","decideTargetNode must be a named export of the engine module");
+        let TC=[{version:"20.19.6",binDir:"/n20/bin"},{version:"24.14.1",binDir:"/n24a/bin"},{version:"24.15.0",binDir:"/n24b/bin"}];
+        let d=(c,tc,amb)=>m.decideTargetNode({engines:{node:c}},tc,amb);
+        A(d(">=18",TC,"v22.22.3").type==="ambient",">=18 under ambient v22 must use the ambient toolchain");
+        A(d(">=20",TC,"v22.22.3").type==="ambient",">=20 under ambient v22 must use the ambient toolchain, not downgrade");
+        A(d(">=22",TC,"v22.22.3").type==="ambient",">=22 under ambient v22 must use the ambient toolchain");
+        let g=d(">=24",TC,"v22.22.3");
+        A(g.type==="provision","24-requiring target under ambient v22 must provision");
+        A(g.binDir==="/n24b/bin","provisioning must deterministically pick the NEWEST satisfying toolchain");
+        let only26=d(">=24",[{version:"26.3.0",binDir:"/n26/bin"}],"v22.22.3");
+        A(only26.type==="provision" && only26.binDir==="/n26/bin","node 26 satisfies >=24 and must be provisioned");
+        A(d(">=30",TC,"v22.22.3").type==="unavailable","nothing satisfying >=30 must be a structured unavailable");
+        A(m.decideTargetNode({},TC,"v22.22.3").type==="ambient","a target with no engines field must be ambient");
+        A(m.decideTargetNode({engines:{node:"total-garbage-range"}},TC,"v22.22.3").type==="ambient","an unparseable range must be ambient, never a throw");
+        console.log("AC-1 OK: range semantics correct");
+      }).catch(e=>{console.error("FAIL: "+(e && e.message ? e.message : String(e)));process.exit(1);});'
+  - id: AC-2
+    description: >
+      THE DECISION IS RESOLVED EXACTLY ONCE — `decideTargetNode` is referenced by exactly two files under
+      `benchmarks/harness/src`: the module that defines it, and the single task-setup site that calls it.
+      (F-119-safe file count via `grep -rl … | wc -l`, never `grep -c`; F-114-safe — greps the function
+      symbol named in the goal, absent on HEAD, not a type name.)
+    check: >
+      test "$(grep -rl 'decideTargetNode' benchmarks/harness/src | wc -l | tr -d ' ')" -eq 2
+  - id: AC-3
+    description: >
+      BOTH CONSUMERS RECEIVE THE PLAN AND NEITHER RE-DERIVES IT — the F-163 judge/grader-parity invariant and
+      the trap dogfood-113 fell into. `adapter.ts` and `grade.ts` each reference the `nodeProvisioning`
+      context field named in the goal, AND neither file contains a call to a provisioning planner of its own.
+      RED on HEAD in both halves: `nodeProvisioning` is absent, and both files currently call
+      `planNodeProvisioning(`. (F-97-safe co-reference; F-119-safe counting.)
+    check: >
+      grep -q 'nodeProvisioning' benchmarks/harness/src/adapter.ts &&
+      grep -q 'nodeProvisioning' benchmarks/harness/src/grade.ts &&
+      test "$(grep -lE 'planNodeProvisioning\(|decideTargetNode\(' benchmarks/harness/src/adapter.ts benchmarks/harness/src/grade.ts 2>/dev/null | wc -l | tr -d ' ')" -eq 0
+  - id: AC-4
+    description: >
+      THE ENGINE SOURCE READER FAILS LOUD — a named-export `loadTargetEngineSource` landed, replacing the
+      `null`-returning reader whose every failure path silently became "no constraint" → ambient. (F-114-safe:
+      greps the function EXPORT symbol named in the goal, absent on HEAD; positive grep only — F-83-safe;
+      no `test -f` — F-82-safe.)
+    check: >
+      grep -rlE 'export (function|const) loadTargetEngineSource' benchmarks/harness/src | head -1 | grep -q .
+  - id: AC-5
+    description: >
+      The harness suite passes with the new tests included and stays type- and lint-clean, with no regression
+      against the 59 tests on HEAD. (Whole harness suite is ~2s — it fits the judge's 120s per-check cap
+      comfortably, F-141-safe; the harvest verify-pack §3 re-runs everything uncapped.)
+    check: >
+      cd benchmarks/harness &&
+      pnpm exec tsc --noEmit && pnpm exec eslint src &&
+      pnpm exec vitest run
+
+budget_usd: 30
+max_steps: 12
+
+# CONTEXT-ROT (WP-203/WP-207): auto-calibrated window (F-125 mechanism, live-proven 095-099, 101, 103, 105).
+pacing:
+  mode: auto
+  autoCalibrate: true
+
+# UNATTENDED (WP-271): operator-free; a genuine ESCALATE seals a resumable FAILED (WP-520).
+unattended:
+  escalation: seal_resumable_failed
+
+# DIRECTIVE (F-162/F-165): Gemini executes, Codex judges. Never Claude on a dogfood/benchmark run.
+executor:
+  adapter: gemini-cli
+  family: gemini
+
+judge:
+  family: openai-compat
+  cadence: 2
+  max_cost_share: 0.5
+
+# F-170-safe: the `code` stage drives the gemini-cli executor, so it must NOT name a foreign-family model
+# (a `gpt-`/`claude-` model here is what WP-536's launch preflight refuses). `default` lets the executor
+# pick its own model; plan/review/judge run on the keyless codex proxy.
+routing:
+  stages:
+    plan: { provider: openai-compat, model: gpt-5.6-sol xhigh }
+    code: { provider: gemini, model: default }
+    review: { provider: openai-compat, model: gpt-5.6-sol xhigh }
+    judge: { provider: openai-compat, model: gpt-5.6-sol xhigh }

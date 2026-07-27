@@ -56,3 +56,13 @@ export {
 } from "./results.js";
 export { loadTaskDir, runSuite, type LoadReport, type RunSuiteOptions } from "./suite.js";
 export { main } from "./main.js";
+export {
+  resolveTargetNodeEngine,
+  planNodeProvisioning,
+  discoverNodeToolchains,
+  getTargetPackageJson,
+  type NodeEngineConstraint,
+  type NodeToolchain,
+  type ProvisioningDecision,
+} from "./engine.js";
+

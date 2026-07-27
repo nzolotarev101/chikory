@@ -6,9 +6,13 @@
  * - **D-SR** (dependency-adjusted): a requirement counts only if it AND its
  *   transitive prerequisites are satisfied.
  */
+import { readFileSync, existsSync } from "node:fs";
+import { join } from "node:path";
 import { DEFAULT_CHECK_TIMEOUT_MS, runBounded, scrubExecutorEnv } from "@chikory/sdk";
 
 import type { BenchmarkRequirement, BenchmarkTask } from "./task.js";
+import { resolveTargetNodeEngine, planNodeProvisioning, discoverNodeToolchains, type NodeEngineConstraint } from "./engine.js";
+
 
 export interface RequirementGrade {
   requirementId: string;
@@ -112,16 +116,34 @@ function dependencySatisfiedIds(task: BenchmarkTask, gradeById: Map<string, bool
 }
 
 export async function gradeTask(task: BenchmarkTask, ctx: GradeContext): Promise<TaskGradeReport> {
-  const grades: RequirementGrade[] = [];
-  for (const req of task.requirements) {
-    grades.push(await gradeOne(req, ctx));
+  const pkgPath = join(ctx.workspaceDir, "package.json");
+  let requiredEngine: NodeEngineConstraint = "no constraint";
+  if (existsSync(pkgPath)) {
+    try {
+      requiredEngine = resolveTargetNodeEngine(readFileSync(pkgPath, "utf8"));
+    } catch {
+      // ignore parse error
+    }
   }
-  const gradeById = new Map(grades.map((g) => [g.requirementId, g.satisfied]));
-  const depOk = dependencySatisfiedIds(task, gradeById);
-  return {
-    grades,
-    total: grades.length,
-    satisfied: grades.filter((g) => g.satisfied).length,
-    dependencySatisfied: depOk.size,
-  };
+  const plan = planNodeProvisioning(requiredEngine, discoverNodeToolchains(), process.version);
+  const originalPath = process.env.PATH;
+  if (plan.type === "provision") {
+    process.env.PATH = `${plan.binDir}:${originalPath}`;
+  }
+  try {
+    const grades: RequirementGrade[] = [];
+    for (const req of task.requirements) {
+      grades.push(await gradeOne(req, ctx));
+    }
+    const gradeById = new Map(grades.map((g) => [g.requirementId, g.satisfied]));
+    const depOk = dependencySatisfiedIds(task, gradeById);
+    return {
+      grades,
+      total: grades.length,
+      satisfied: grades.filter((g) => g.satisfied).length,
+      dependencySatisfied: depOk.size,
+    };
+  } finally {
+    process.env.PATH = originalPath;
+  }
 }

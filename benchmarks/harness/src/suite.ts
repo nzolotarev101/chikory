@@ -19,6 +19,8 @@ import {
 } from "./results.js";
 import { parseDevAITask } from "./devai.js";
 import { isRunnable, validateAuthoredTask, type BenchmarkTask } from "./task.js";
+import { resolveTargetNodeEngine, planNodeProvisioning, discoverNodeToolchains, getTargetPackageJson } from "./engine.js";
+
 
 export interface LoadReport {
   tasks: BenchmarkTask[];
@@ -88,6 +90,18 @@ export async function runSuite(opts: RunSuiteOptions): Promise<{ summary: SuiteS
     const taskOut = join(outDir, sanitizeFileName(task.id));
     const workspaceDir = join(taskOut, "workspace");
     mkdirSync(workspaceDir, { recursive: true });
+
+    // Dynamic Node engine provisioning check
+    const pkgJsonText = getTargetPackageJson(task, workspaceDir);
+    const requiredEngine = pkgJsonText ? resolveTargetNodeEngine(pkgJsonText) : "no constraint";
+    const availableToolchains = discoverNodeToolchains();
+    const plan = planNodeProvisioning(requiredEngine, availableToolchains, process.version);
+
+    if (plan.type === "unavailable") {
+      log(`skip ${task.id} (blocked: required Node.js version ${plan.neededVersion} is unavailable. Found: ${plan.available.join(", ")})`);
+      continue;
+    }
+
     // Brownfield repos are cloned by the system under test (chikory does its
     // own clone from repo.url@ref); for baselines the workspace starts empty.
     if (task.repo === undefined && task.class === "brownfield") {
