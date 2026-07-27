@@ -65,11 +65,18 @@
 #   §1.3 mission-critical ✅ PROCEED — not busy work, not scaffold-hosted; it is the named blocker on the
 #                   ladder's next rung and on WP-303/304 publication.
 #   §1.5 friction-budget ✅ class=product, trailing-3 harness-meta 0/3.
-#   ⚠️ CARRIED RISK — 🔴 F-180 (→ WP-537) IS STILL OPEN: a rubric-only judge failure does not gate the
-#                   terminal seal (`packages/sdk-ts/src/judge/verdict.ts:131-149`), which is exactly how
-#                   dogfood-113's defects shipped under a 🟢 SUCCESS. The ACs below are therefore written to
-#                   OWN THEIR ORACLE — AC-1 asserts behavior against the built module itself rather than
-#                   trusting tests the executor authors. At review time, READ the `rubric:` block.
+#   ⚠️ CARRIED RISK — 🔴 F-180 (→ WP-537) IS STILL OPEN, AND IT BITES ONE-STEP RUNS SPECIFICALLY. The
+#                   design-fix retry loop exists (`workflow/agent-loop.ts:874-900`: completion review →
+#                   design brief → one bounded fix step) but `workflow/completion-review.ts:38-43` SKIPS it
+#                   on a first-verdict seal (`sealingDiffBase === baseCommit`) — exactly what a 1-step run
+#                   is — while the sealing verdict's own rubric failure falls through to a PROCEED branch
+#                   (`judge/verdict.ts:131-149`). Net: on a 1-step run a `design_serves_overall_goal ✗` has
+#                   NO consumer. That is how dogfood-113's defects shipped under a 🟢 SUCCESS.
+#                   TWO MITIGATIONS ARE BUILT INTO THIS SPEC: (1) the ACs OWN THEIR ORACLE — AC-1 asserts
+#                   behavior against the built module itself rather than trusting tests the executor writes
+#                   for itself (dogfood-113's 12 delivered tests were all green and all blind, because they
+#                   pinned only the case it got right); (2) the goal is big enough to plausibly need >1 step,
+#                   which re-arms the completion review. At review time, READ the `rubric:` block regardless.
 #
 # ⚠️ SCOPE / DETERMINISM. Writes ONLY inside `benchmarks/harness/`. NO new dependency, NO key material, NO
 #   global tool install, NO `devbox.json` edit. Do NOT edit `benchmarks/tasks/*.yaml` (`brownfield-002` stays

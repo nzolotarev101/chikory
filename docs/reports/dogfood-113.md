@@ -155,23 +155,53 @@ decision — they only branch on `provision`. The invariant is enforced solely b
 
 ## New friction
 
-### 🔴 F-180 — a rubric-only failure does not gate the terminal seal (WP-311 design judging is non-binding at run level)
+### 🔴 F-180 — the design-fix retry loop is SKIPPED on a first-verdict seal, so a rubric failure has no consumer
 
-- **Evidence:** `packages/sdk-ts/src/judge/verdict.ts:131-149`. The all-clear
-  branch requires `criteriaFails.length === 0 && rubricFails.length === 0`. With
-  4/4 ACs passing and one rubric ✗, control falls to the *fallthrough* — which
-  also returns `kind: "PROCEED"`. The rubric failure changes only the rationale
-  **string**. The runner then seals run-level SUCCESS on all-criteria-pass
-  (comment, `verdict.ts:131-133`), so this run went terminal SUCCESS at step 1.
+**Corrected root cause (post-review code read — the fix is far narrower and
+cheaper than "make the rubric block the seal").** The machinery to act on a
+design finding **already exists and works**:
+`workflow/agent-loop.ts:874-900` runs a completion review over the cumulative
+diff at the moment a run would seal, and when
+`reviewVerdict.form.rubricResults` carries failures it builds a design brief
+(`buildCompletionReviewBrief`) and grants **one bounded fix step**, re-reviewed
+after, cost-bounded by `MAX_COMPLETION_REVIEWS = 2`.
+
+It never ran here. `workflow/completion-review.ts:38-43`:
+
+```ts
+if (state.sealingDiffBase === state.baseCommit) {
+  return { action: "skip", reason: "sealing verdict already judged the cumulative diff (first-verdict seal)" };
+}
+```
+
+dogfood-113 was a **1-step run**, so the sealing judge pass's diff base *was*
+the run's base commit — a first-verdict seal — and the completion review was
+skipped as redundant. The skip's reasoning is correct about **coverage** (the
+judge genuinely did see the whole diff, and genuinely did flag it) but wrong
+about **consequence**: the sealing verdict is produced by `decideVerdict`, where
+a rubric-only failure falls through to a branch that also returns `PROCEED`
+(`judge/verdict.ts:131-149`), changing only the rationale string. So on a
+first-verdict seal the rubric result has **no consumer at all** — the one path
+that would have acted on it was skipped precisely because the other path had
+already looked.
+
+- **Blast radius:** every 1-step dogfood, which is most of them — 108, 112 and
+  113 all sealed in one step. A multi-step run whose sealing pass has a non-base
+  diff base *would* have caught this and granted the fix step.
 - **Why it matters:** the judge's `design_serves_overall_goal ✗` named three
   concrete defects; this review independently **confirmed two of them as real**
-  (F-181, F-182). The thesis mechanism *detected* the problem pre-land and the
-  control plane shipped it anyway. WP-311 added design judging at three
-  altitudes; at the run-seal altitude it is currently inert.
-- **Spawns:** **WP-537** — a `design_serves_overall_goal` failure on a step that
-  would otherwise seal terminal SUCCESS must block the seal (continue, or
-  ESCALATE under `unattended.escalation`). Rubric fails mid-run stay
-  non-destructive; only the *sealing* step is gated.
+  (F-181, F-182). The thesis mechanism *detected* the problem pre-land, and the
+  control plane had a remediation loop ready, and still shipped it — because the
+  two halves were wired past each other.
+- **Spawns:** **WP-537** — `decideCompletionReview` must not skip a
+  first-verdict seal when the **sealing verdict itself carried rubric
+  failures**: skip only when the cumulative diff was covered AND the rubric was
+  clean. `verdict.form.rubricResults` is already in scope at the seal site
+  (`agent-loop.ts:843`), so this is a ~5-line change to a pure, unit-tested
+  function plus one field at the call site. Everything downstream — the brief,
+  the bounded retry, the re-review, the F-107 "never park a run whose criteria
+  all pass" discipline — is already built and needs no change. Mid-run rubric
+  fails stay non-destructive (dogfood-048/112 lineage must not regress).
 
 ### 🔴 F-181 — `planNodeProvisioning` collapses `>=N` to exact-major equality; corpus SHRINKS
 
