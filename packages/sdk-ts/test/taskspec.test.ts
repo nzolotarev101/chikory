@@ -252,6 +252,61 @@ judge:
     }
   });
 
+  // F-178: the code stage under a CLI executor adapter is served by that
+  // adapter's own OAuth session, never by the router — demanding the router's
+  // API key there refused the dogfood-113 launch for a key we never hold.
+  describe("routed-provider env under a keyless CLI executor (F-178)", () => {
+    const keylessEnv = { OPENAI_COMPAT_BASE_URL: "http://127.0.0.1:8787" };
+    const spec = (stages: string, extra = "") => `name: keyless-cli-executor
+goal: Prove the code stage under a CLI executor needs no router key.
+repos:
+  - url: .
+    writable: true
+acceptance_criteria:
+  - id: AC-1
+    description: Something checkable
+budget_usd: 5
+executor:
+  adapter: gemini-cli
+  family: gemini
+judge:
+  family: openai-compat
+routing:
+  stages:
+${stages}${extra}
+`;
+    const geminiCodeStages = `    plan: { provider: openai-compat, model: default }
+    code: { provider: gemini, model: default }
+    review: { provider: openai-compat, model: default }
+    judge: { provider: openai-compat, model: default }`;
+
+    it("accepts code: { provider: gemini } with no GEMINI_API_KEY", () => {
+      const parsed = parseTaskSpec(spec(geminiCodeStages), { env: keylessEnv });
+      expect(parsed.routing.stages.code).toEqual({ provider: "gemini", model: "default" });
+      expect(TaskSpecSchema.safeParse(parsed).success).toBe(true);
+    });
+
+    it("still refuses a ROUTED stage on the same unconfigured provider", () => {
+      const routed = `    plan: { provider: openai-compat, model: default }
+    code: { provider: gemini, model: default }
+    review: { provider: gemini, model: gemini-2.5-pro }
+    judge: { provider: openai-compat, model: default }`;
+      expect(() => parseTaskSpec(spec(routed), { env: keylessEnv })).toThrow(
+        /missing env var GEMINI_API_KEY/,
+      );
+    });
+
+    it("still refuses a code-stage FAILOVER on the same unconfigured provider", () => {
+      const failover = `
+  failover:
+    code:
+      - { provider: gemini, model: gemini-2.5-pro }`;
+      expect(() => parseTaskSpec(spec(geminiCodeStages, failover), { env: keylessEnv })).toThrow(
+        /missing env var GEMINI_API_KEY/,
+      );
+    });
+  });
+
   describe.each(Object.entries(invalidExpectations))("%s", (file, fragment) => {
     it(`fails validation mentioning '${fragment}'`, () => {
       expect(() => parseTaskSpec(read(file), { env })).toThrow(TaskSpecValidationError);

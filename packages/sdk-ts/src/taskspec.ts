@@ -71,13 +71,23 @@ export interface MissingProviderEnv {
  * required env var (§9.3) is absent. Shared by parse-time validation and the
  * F-99 resume precondition — a resume from a shell that never exported the
  * judge/router env must fail fast, not loop silently in activity retries.
+ *
+ * A stage served by a CLI **executor** adapter is exempt (F-178): the adapter
+ * spawns its own binary over a CLI-OAuth session and never touches the router,
+ * so the stage's `provider` entry supplies only the MODEL NAME (see
+ * `executors/gemini-cli.ts` — `RoutingPolicy.stages.code`). Demanding
+ * `GEMINI_API_KEY` for `code: { provider: gemini }` under a keyless
+ * `gemini-cli` executor refused a launch for a key the architecture says we
+ * never hold. Failover choices are NOT exempt — those do route.
  */
 export function missingProviderEnv(
   spec: TaskSpec,
   env: Record<string, string | undefined>,
 ): MissingProviderEnv[] {
+  const capabilities = resolveEndpointCapabilities({ routing: spec.routing, executor: spec.executor });
   const providers = new Set<LLMProvider>();
   for (const stage of Object.keys(spec.routing.stages) as Stage[]) {
+    if (capabilities[stage][0]?.kind === "executor") continue;
     providers.add(spec.routing.stages[stage].provider);
   }
   for (const list of Object.values(spec.routing.failover ?? {})) {

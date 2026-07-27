@@ -135,6 +135,46 @@ if [ -n "$MISSING_ENVS" ]; then
   fi
 fi
 
+# 1c-ter. Routed-provider KEY contract (F-179, dogfood-113 launch burn). `parseTaskSpec`
+# refuses a spec that routes a provider whose API key is unset — but it does so inside
+# `chikory run`, i.e. AFTER the SDK rebuild, Temporal probe and proxy probe, and AFTER a
+# green "✅ Preflight OK … env contract … pass" that only ever inspected CHIKORY_* vars.
+# dogfood-113 died exactly there. Same refusal, same names, at $0, in preflight.
+# Two deliberate exemptions, mirroring `taskspec.ts:missingProviderEnv`:
+#   - openai-compat: THIS script exports OPENAI_COMPAT_BASE_URL itself (step 4, below);
+#   - the `code:` stage under a CLI executor adapter: served by that adapter's own OAuth
+#     session, so its provider entry supplies only the model name (F-178).
+# Keep the provider→env map in sync with `PROVIDER_ENV_VARS` (packages/sdk-ts/src/taskspec.ts).
+ROUTED_BLOCK=$(awk '/^routing:/{blk=1;next} blk && /^[A-Za-z_]/{exit} blk{print}' "$SPEC_FILE")
+if grep -qE '^[[:space:]]*adapter:[[:space:]]*(claude-code|codex|gemini-cli)' "$SPEC_FILE"; then
+  ROUTED_BLOCK=$(printf '%s\n' "$ROUTED_BLOCK" | grep -vE '^[[:space:]]*code:' || true)
+fi
+ROUTED_PROVIDERS=$(printf '%s\n' "$ROUTED_BLOCK" | grep -oE 'provider:[[:space:]]*[a-z-]+' | awk '{print $2}' || true)
+JUDGE_FAMILY=$(awk '/^judge:/{blk=1;next} blk && /^[A-Za-z_]/{exit} blk{print}' "$SPEC_FILE" \
+  | { grep -oE 'family:[[:space:]]*[a-z-]+' || true; } | awk '{print $2}' | head -1)
+MISSING_KEYS=""
+for P in $(printf '%s\n%s\n' "$ROUTED_PROVIDERS" "$JUDGE_FAMILY" | { grep -v '^$' || true; } | sort -u); do
+  case "$P" in
+    anthropic) V=ANTHROPIC_API_KEY ;;
+    openai) V=OPENAI_API_KEY ;;
+    gemini) V=GEMINI_API_KEY ;;
+    *) continue ;;
+  esac
+  if [ -z "${!V:-}" ]; then
+    MISSING_KEYS="$MISSING_KEYS
+     - provider '$P' is routed but not configured: missing env var $V"
+  fi
+done
+if [ -n "$MISSING_KEYS" ]; then
+  echo "⛔ REFUSING LAUNCH (F-179): the spec routes provider(s) with no key in this shell:" >&2
+  echo "$MISSING_KEYS" >&2
+  echo "   \`chikory run\` would refuse this spec anyway — this stops it at \$0, before the" >&2
+  echo "   rebuild/Temporal/proxy setup. This machine holds NO provider API keys by design" >&2
+  echo "   (CLI-OAuth-first): route the stage at the keyless codex proxy (openai-compat) or" >&2
+  echo "   at a CLI executor adapter, then relaunch." >&2
+  exit 5
+fi
+
 # 1d. F-120 window-sizing sanity (dogfood-091). The pacing window compares Chikory's OWN
 # ASSEMBLED-CONTEXT tokens (projected ≈2.1k–3.0k on run-7fca16bc) against
 # `contextWindowTokens * 0.8` — NOT the executor's internal 400k–900k token burn. A
