@@ -1,0 +1,241 @@
+# Dogfood-118: WP-540 — the base-green verification must look at the actual base ref
+#
+# 🟢 PLAIN LEAD. dogfood-117 built a correct base-green verifier and pointed it at an empty
+#   directory. `benchmarks/harness/src/suite.ts` calls it with `cwd: workspaceDir`, but that
+#   directory is empty by contract until the system under test clones into it — the code says so
+#   itself three lines above (`suite.ts:120-121`). So today every benchmark task records the same
+#   verdict, `green:false · "Unparseable suite output"`, whatever its base actually is. This run
+#   makes the verification read the task's real pinned base ref, in a checkout that is not the
+#   agent's workspace, and record a verdict that means something.
+#
+# CLASS / LADDER. class=product — surface is `benchmarks/harness/src/`, same as WP-534/535/538/540.
+#   Trailing-3 harness-meta headlines 0/3, cap intact.
+# Ladder-rung: 4
+# Thesis-KPI: PUBLICATION INTEGRITY, second attempt. A benchmark number is worthless if the base it
+#   is measured against was never verified — and a verification that inspects the wrong directory is
+#   worse than none, because it looks like evidence. Proven by an AC that drives `runSuite` itself
+#   against a local git fixture whose base IS green while the stub adapter makes the workspace RED:
+#   the only delivery that passes is one that verifies the pinned ref out of a checkout the agent
+#   never touches. Secondary KPI: the harness workspace contract stays intact (empty at adapter
+#   start) and no network is required.
+#
+# ⚠️ WHY THIS AND NOT P3-rung-4 ITSELF. `scripts/dogfood-progression.sh` = ⛔ STALLED, which binds
+#   the next headline to the current phase ladder rung. P3-rung-4 (≥5 brownfield tasks vs a
+#   baseline) cannot run: the runnable corpus is 2, and `brownfield-002` has carried
+#   `status: blocked` since 2026-07-23 pending exactly the capability WP-540 was queued to provide.
+#   WP-540 is rung-4's named unblock in plan.md §7; finishing it is the rung's only path.
+#
+# ⚠️ 🔴 F-198 IS THE DEFECT UNDER REPAIR — read it before designing. The workspace passed to the
+#   adapter MUST STILL START EMPTY. "Just clone into `workspaceDir`" is not the fix: it breaks the
+#   documented contract that the system under test does its own clone, and AC-1 fails you for it.
+#
+# ⚠️ 🔴 F-194 — ONE SPELLING PER INPUT. Do not add six optional fields "to keep the design open".
+#   Anything AC-1 does not exercise and no call site passes is dead API and will be deleted in review.
+#
+# ⚠️ 🟡 F-190 IS STILL BINDING: `gemini-cli` collapses a whole agent session into ONE Chikory step,
+#   so this will likely be a one- or two-step run and `judge.cadence: 2` may never fire twice.
+#   Nothing in the delivery may assume a second step exists.
+#
+# ⚠️ SCOPE / DETERMINISM. Writes ONLY inside `benchmarks/harness/`. NO new dependency, NO key
+#   material, NO global tool install, NO `devbox.json` edit. Do NOT touch `packages/`,
+#   `examples/dogfood/`, `scripts/`, or `benchmarks/tasks/` — flipping `brownfield-002` from
+#   `blocked` to `pinned` is the FOLLOW-ON run, gated on a real verification this run makes
+#   possible. AC-1 must pass with NO network access: it builds its own local git fixture. Run
+#   project commands sequentially inside the ALREADY-ACTIVATED devbox — do NOT nest `devbox run`
+#   (F-105).
+#
+# ⚠️ LAUNCH:
+#   0. Commit this spec + all dogfood-117 review docs to HEAD (the worker clones HEAD at run start).
+#   1. Verify the spec-pick glob resolves to THIS file: `sort | tail -n 1` over
+#      `examples/dogfood/dogfood-[0-9][0-9][0-9]*.yaml` → dogfood-118 sorts after dogfood-117.
+#   2. `CHIKORY_PREFLIGHT_ONLY=1 devbox run run-dogfood` dry-runs the guards at $0 (expect AC-2 RED).
+#      ℹ️ The preflight classes AC-1/AC-3/AC-4 as VERIFY-SUITE and does NOT dry-run them. All were
+#      hand-verified in BOTH directions — see the AC arming evidence in `docs/reports/dogfood-117.md`.
+#   3. `devbox run run-dogfood`
+#   Post-run: `devbox run -- bash scripts/harvest.sh <run-id>` then `/dogfood-review <run-id>`.
+#   ⚠️ FIRST THING POST-RUN, BEFORE ANYTHING ELSE: `git status --short`. If your checkout is dirty
+#      with `benchmarks/` edits you did not make, F-192 recurred — read dogfood-115 §"the escape".
+
+name: dogfood-118-wp540-base-ref-materialization
+goal: >
+  Make the benchmark harness verify the base ref it actually pinned — today it verifies an empty directory.
+
+  `benchmarks/harness/src/base-verify.ts` already answers "is this suite green?" correctly: nonzero exit is
+  never green, zero tests collected is never green, an `unavailable` provisioning decision never runs the
+  suite, a `provision` decision prepends its `binDir` to the runner's PATH. That module is not the problem
+  and its behavior must not regress.
+
+  The problem is the consumer. `suite.ts` calls `verifyBaseGreen` with `cwd: workspaceDir`, and that
+  directory is empty at that moment — the comment directly above the call says so: brownfield repos are
+  cloned by the system under test, and for baselines the workspace starts empty. The clone happens inside
+  `opts.adapter.run`, afterwards. So the verification reads nothing, cannot parse nothing, and records
+  `green:false · "Unparseable suite output"` for every task in every suite run. A verdict that never varies
+  is not a verification.
+
+  Deliver, inside benchmarks/harness, in whatever design you judge best:
+
+    * THE BASE REF, MATERIALIZED SOMEWHERE ELSE. Before a task is scored, the harness must obtain the
+      task's `repo.url` at exactly `repo.ref` in a checkout of its own — NOT the per-task `workspaceDir`,
+      which must still be empty when the adapter starts. `engine.ts`'s `loadTargetEngineSource` already
+      does this shape of thing for `package.json` (temp checkout, read, delete); base verification needs the
+      working tree, not one file. Clean up what you create, on success and on failure alike.
+
+    * THE VERDICT, ON THE REAL THING. `verifyBaseGreen` runs against that checkout, under the provisioning
+      decision the harness already computed, and its result is carried into the per-task result record as
+      it is today. A task with NO `repo` pin has no base ref to verify: record NOTHING for it — no
+      fabricated red, no invented "n/a" verdict object. `TaskResult.baseVerification` is already optional;
+      that is the one spelling (F-194).
+
+    * THE COMMAND, DECLARED — NOT GUESSED. `findBaseVerificationCommand` currently keyword-matches the
+      task's GRADING requirements for a description containing "test" or "suite" and, failing that, returns
+      the literal string `"pnpm test"`. Grading checks describe the DELIVERY, not the base, and a
+      capability whose stated rule is "do not guess" must not guess its own input. The base verification
+      command must come from the task's own declaration, and when a task declares none the harness must say
+      so plainly rather than invent a command. Whatever shape you choose must round-trip through the
+      authored-task loader (`task.ts`) and must not break any existing task in `benchmarks/tasks/` —
+      remember you may not EDIT those files, so a required new field is not an option.
+
+    * TWO TRAPS THAT LOOK LIKE THE ANSWER AND ARE NOT:
+      (A) Do NOT clone into `workspaceDir` to "make the existing call work". The workspace must be empty
+          when the adapter runs — the system under test does its own clone, and a pre-populated workspace
+          silently changes what every baseline cell in the matrix is measured on.
+      (B) Do NOT move the verification to AFTER the adapter run. The workspace is populated then, but it is
+          populated with the agent's EDITS. Verifying that is verifying the delivery, not the base, and it
+          will report whatever the agent did — the single most dangerous false signal this harness could
+          publish.
+
+    * TESTS THAT PIN THE WIRING, NOT ONLY THE MODULE. dogfood-117 shipped 92 green tests over a call site
+      that could never work, because every test probed `base-verify.ts` in isolation. Cover the SUITE path:
+      a repo-pinned task gets a verdict read from its pinned ref; a task with no repo pin records nothing;
+      the checkout is removed afterwards; the workspace handed to the adapter is empty. Build a local git
+      fixture in a temp dir — no network, no multi-gigabyte clone.
+
+  CONSTRAINTS: strict TypeScript, ESM relative imports with explicit .js specifiers, named exports, no
+  default exports, no new dependency, no key material, no global tool install, no devbox.json edit. Writes
+  only inside benchmarks/harness; do not touch packages/, examples/dogfood/, scripts/, or benchmarks/tasks/.
+  Every delivered test must pass and must not break an existing one — the harness suite stays green,
+  type-clean and lint-clean.
+
+repos:
+  - url: /Users/nikitazolotarev/repos/chikory
+    writable: true
+
+acceptance_criteria:
+  - id: AC-1
+    description: >
+      THE SUITE PATH IS CORRECT, asserted by the CHECK ITSELF against the real built `runSuite` — not by
+      tests the executor authored, and not against `base-verify.ts` in isolation (F-198 is why: dogfood-117
+      passed a seven-family oracle over the module while the call site read an empty directory). The check
+      builds a LOCAL git repo fixture whose committed base is green (`Tests  3 passed (3)`) and runs
+      `runSuite` with a stub adapter that (a) records whether the workspace it was handed was empty and
+      (b) rewrites the suite output file to a RED one — so a verification reading the workspace, before or
+      after the adapter, cannot produce the green verdict this check demands. Also pins the no-repo case
+      (record nothing) and that no base checkout is left behind.
+    check: |
+      cd benchmarks/harness && pnpm exec tsc && node -e '
+      const {mkdtempSync,mkdirSync,writeFileSync,existsSync,readFileSync,readdirSync}=require("node:fs");
+      const {execSync}=require("node:child_process");
+      const {tmpdir}=require("node:os");
+      const {join}=require("node:path");
+      const A=(c,m)=>{if(!c){console.error("FAIL: "+m);process.exit(1);}};
+      const root=mkdtempSync(join(tmpdir(),"bv118-"));
+      const target=join(root,"target");mkdirSync(target);
+      writeFileSync(join(target,"package.json"),JSON.stringify({name:"fx",version:"1.0.0",private:true}));
+      writeFileSync(join(target,"SUITE_OUTPUT.txt"),"Test Files  1 passed (1)\n     Tests  3 passed (3)\n");
+      writeFileSync(join(target,"BASE_MARKER"),"base\n");
+      const G=(c)=>execSync(c,{cwd:target,stdio:"ignore"});
+      G("git init -q -b main");G("git add -A");
+      G("git -c user.email=a@b.c -c user.name=fx commit -q -m base");
+      const ref=execSync("git rev-parse HEAD",{cwd:target,encoding:"utf8"}).trim();
+      const mkTask=(over)=>Object.assign({
+        id:"fx-brown",source:"authored",class:"brownfield",status:"pinned",goal:"g",
+        requirements:[{id:"R1",description:"the pre-existing test suite is green",prerequisites:[],grading:{kind:"check",command:"cat SUITE_OUTPUT.txt"}}],
+        preferences:[],repo:{url:target,ref},tags:[],flags:{},
+      },over);
+      const seen={};
+      const adapter={name:"stub",run:async(task,ctx)=>{
+        seen[task.id]={marker:existsSync(join(ctx.workspaceDir,"BASE_MARKER")),entries:readdirSync(ctx.workspaceDir).length};
+        writeFileSync(join(ctx.workspaceDir,"SUITE_OUTPUT.txt"),"Tests  7 failed | 0 passed (7)\n");
+        return {exitCode:0,wallClockMs:1,artifacts:[],notes:[]};
+      }};
+      import("file://"+process.cwd()+"/dist/suite.js").then(async(m)=>{
+        const out=await m.runSuite({suite:"fx",tasks:[mkTask({}),mkTask({id:"fx-green",class:"greenfield",repo:undefined})],
+          adapter,resultsDir:join(root,"results"),log:()=>{}});
+        const read=(id)=>JSON.parse(readFileSync(join(out.outDir,id+".json"),"utf8"));
+        const bv=read("fx-brown").baseVerification;
+        A(bv!==undefined,"a repo-pinned task must record a base verification in its result");
+        A(bv.green===true,"the fixture base IS green (3 passed / 0 failed) — got green="+bv.green+" reason="+JSON.stringify(bv.reason));
+        A(bv.testsPassed===3,"testsPassed must come from the BASE ref own suite output (expected 3, got "+bv.testsPassed+")");
+        A(bv.testsFailed===0,"testsFailed must be 0 on the base (got "+bv.testsFailed+")");
+        A(seen["fx-brown"]&&seen["fx-brown"].marker===false,
+          "trap A: the adapter workspace must still start EMPTY — the base checkout goes elsewhere (BASE_MARKER leaked into the workspace)");
+        A(seen["fx-brown"].entries===0,"trap A: the adapter workspace must be empty at adapter start (found "+seen["fx-brown"].entries+" entries)");
+        A(read("fx-green").baseVerification===undefined,
+          "a task with NO repo pin has no base to verify — record nothing, not a fabricated verdict (got "+JSON.stringify(read("fx-green").baseVerification)+")");
+        A(readdirSync(root).filter((e)=>e.startsWith("chikory-base-")).length===0,"no stray base checkout left behind");
+        console.log("AC-1 OK: base verification reads the pinned base ref; workspace untouched; no-repo task records nothing");
+      }).catch((e)=>{console.error("FAIL: "+(e&&e.message?e.message:String(e)));process.exit(1);});'
+  - id: AC-2
+    description: >
+      THE GUESSED COMMAND IS GONE AND THE DECLARATION EXISTS. On HEAD, `findBaseVerificationCommand`
+      keyword-matches the task's grading requirements and falls back to the literal string `"pnpm test"`,
+      and `task.ts` knows nothing about base verification — so both halves are RED on HEAD. The guessing
+      resolver must be gone from `base-verify.ts` AND from its call site, and the authored-task loader must
+      carry a verification declaration (field name deliberately NOT prescribed — F-194: pick one spelling
+      and wire it; an optional field, since `benchmarks/tasks/` may not be edited by this run).
+    check: >
+      ! grep -q 'findBaseVerificationCommand' benchmarks/harness/src/base-verify.ts &&
+      ! grep -q 'findBaseVerificationCommand' benchmarks/harness/src/suite.ts &&
+      grep -qi 'verif' benchmarks/harness/src/task.ts
+  - id: AC-3
+    description: >
+      THE WIRING IS ACTUALLY TESTED, AND NOTHING REGRESSED — the harness suite passes with net-new cases.
+      HEAD has 94 tests across 10 files (measured 2026-07-28: 1.43 s wall for the whole harness suite —
+      F-141-safe, well inside the judge's 120 s per-check cap). The suite-path cases the goal names
+      (verdict from the pinned ref, no-repo records nothing, checkout cleaned up, workspace empty at adapter
+      start) cannot be covered in fewer than 100 total, so the count is a floor the delivery must clear.
+    check: |
+      cd benchmarks/harness && pnpm exec vitest run --reporter=json --outputFile=/tmp/bv-118.json >/dev/null 2>&1
+      node -e '
+      const r=JSON.parse(require("fs").readFileSync("/tmp/bv-118.json","utf8"));
+      if(r.numFailedTests>0){console.error("FAIL: "+r.numFailedTests+" harness test(s) failing");process.exit(1);}
+      if(r.numPassedTests<100){console.error("FAIL: only "+r.numPassedTests+" harness tests pass; the suite-path cases need at least 100");process.exit(1);}
+      console.log("AC-3 OK: "+r.numPassedTests+" harness tests pass");'
+  - id: AC-4
+    description: >
+      The harness package stays type- and lint-clean. Deliberately SCOPED to `benchmarks/harness` (measured
+      2026-07-28: tsc + eslint 3.2 s) — the sdk-ts suite is untouched by this run's scope and is re-run
+      uncapped by the harvest verify-pack §3 regardless.
+    check: >
+      cd benchmarks/harness &&
+      pnpm exec tsc --noEmit && pnpm exec eslint src
+
+budget_usd: 30
+max_steps: 12
+
+# CONTEXT-ROT (WP-203/WP-207): auto-calibrated window (F-125 mechanism, live-proven 095-099, 101, 103, 105).
+pacing:
+  mode: auto
+  autoCalibrate: true
+
+# UNATTENDED (WP-271): operator-free; a genuine ESCALATE seals a resumable FAILED (WP-520).
+unattended:
+  escalation: seal_resumable_failed
+
+# DIRECTIVE (F-162/F-165): Gemini executes, Codex judges. Never Claude on a dogfood/benchmark run.
+executor:
+  adapter: gemini-cli
+  family: gemini
+
+judge:
+  family: openai-compat
+  cadence: 2
+  max_cost_share: 0.5
+
+# F-170-safe: the `code` stage drives the gemini-cli executor, so it must NOT name a foreign-family model.
+routing:
+  stages:
+    plan: { provider: openai-compat, model: gpt-5.6-sol xhigh }
+    code: { provider: gemini, model: default }
+    review: { provider: openai-compat, model: gpt-5.6-sol xhigh }
+    judge: { provider: openai-compat, model: gpt-5.6-sol xhigh }

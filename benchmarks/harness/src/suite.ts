@@ -20,6 +20,8 @@ import {
 import { parseDevAITask } from "./devai.js";
 import { isRunnable, validateAuthoredTask, type BenchmarkTask } from "./task.js";
 import { decideTargetNode, loadTargetEngineSource, discoverNodeToolchains, type ProvisioningDecision } from "./engine.js";
+import { verifyBaseGreen, findBaseVerificationCommand } from "./base-verify.js";
+
 
 
 export interface LoadReport {
@@ -118,6 +120,14 @@ export async function runSuite(opts: RunSuiteOptions): Promise<{ summary: SuiteS
     if (task.repo === undefined && task.class === "brownfield") {
       log(`warn ${task.id}: brownfield without repo pin`);
     }
+
+    const baseCommand = findBaseVerificationCommand(task);
+    const baseVerification = await verifyBaseGreen({
+      command: baseCommand,
+      cwd: workspaceDir,
+      provisioning: nodeProvisioning,
+    });
+
     log(`run ${task.id} via ${opts.adapter.name}`);
     const taskStarted = now().toISOString();
     const run: AdapterResult = await opts.adapter.run(task, {
@@ -142,7 +152,9 @@ export async function runSuite(opts: RunSuiteOptions): Promise<{ summary: SuiteS
       endedAt: now().toISOString(),
       run,
       grading,
+      baseVerification,
     };
+
     writeTaskResult(outDir, result);
     results.push(result);
     log(

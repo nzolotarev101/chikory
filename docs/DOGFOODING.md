@@ -8,16 +8,16 @@ recover a run, and how to land the result as a normal PR.
 **Status (2026-07-28, bounded — update discipline: REPLACE this block, ≤15 lines;
 displaced prose moves verbatim to [`PLAN-HISTORY.md`](PLAN-HISTORY.md); per-run detail:
 `docs/reports/`; queue + course correction: `plan.md` §6/§7).**
-**✅ WP-537 (a design finding must gate the seal) DONE 2026-07-27 — dogfood-116, `run-688134b0-f6f0-41ed-a831-cab9dc9a8c38`, SUCCESS 1 step $0.0591/$30, 2m 58s, judge PROCEED 4/4 AC, harvested + hand-completed (`docs/reports/dogfood-116.md`).**
-🟢 A first-verdict seal whose rubric carries a failure now takes the bounded design-fix path instead of skipping; a CLEAN first-verdict seal still skips (trap A — zero extra judge passes), a rubric-only failure still seals SUCCESS (trap B / F-107), and exhaustion still wins over everything (`MAX_COMPLETION_REVIEWS = 2`). Matrix + live proofs: **27 completion-review tests**, sdk-ts **1007 passed / 23 skipped**, tsc + eslint clean. 🟢 **F-192 did NOT recur** — `git status` clean before harvest; the new escape detector was never armed in anger.
-🔴 **F-196 — AN AC MATRIX OWNED THE DECISION ORACLE AND STILL SHIPPED HALF A FIX, hand-fixed this sitting.** AC-1 proved across a 2×2×3 matrix that `decideCompletionReview` returns `"review"` — and could not prove that returning `"review"` *does* anything. The delivery fired the extra judge pass and then DROPPED the sealing verdict's objection whenever the second, independent review came back clean: the goal's own trap C, named in prose, tested by nothing. **The judge's `design_serves_overall_goal ✗` caught it, naming the exact control-flow path and the test that masked it.** Fixed: net-new pure `mergeDesignFindings` (`workflow/completion-review.ts`) unions both sides' failing items deduped by id, and `agent-loop.ts:895-906` builds the brief from the union. 6 net-new tests; the new live case is proven RED with the merge reverted (`expected undefined to be defined` — no brief ever issued).
-⚠️ **THE AC LESSON (new, §3.4):** F-187 said an oracle-owned AC must enumerate every INPUT family. F-196 adds the other axis — it must also pin the OUTPUT's CONSUMER. When a change's value is "X now causes Y", one AC must assert **Y**, not X. A pure-decision probe is necessary and never sufficient.
-🔴 **F-194 RECURRENCE — a prose warning does not counteract an AC's incentive.** The spec carried an explicit ⚠️ *"do not copy this, one field wired for real is better"*; the executor shipped **six** spellings of the rubric input anyway, four reachable by nothing, plus a test asserting the dead aliases work. Only editing the AC changes behavior. Hand-fixed to the two wired spellings (`completion-review.ts:27-40`) with 3 precedence tests.
-🟡 **F-197 (NEW) — A RUN CANNOT EXERCISE THE HARNESS FIX IT DELIVERS.** The Temporal worker is built from HEAD at launch, so the run that fixed "a rubric ✗ must reach a consumer" itself sealed SUCCESS on a rubric ✗ with nothing gating it (trace: 1 judge pass, no completion review). Four consecutive behavior WPs have this shape (534/535/537/538). **Standing review rule (§7):** the proof of a behavior WP is the FIRST SUBSEQUENT run on the new HEAD, and that run's review must go read the journal for the mechanism's signature.
-✅ **F-195 CLOSED** — this run: `pacing events 1 · peak window 75% (compact 0 · park 0)`. The dogfood-115 phantom compactions were an F-192 artifact (pressure computed over a context that never received work).
-ℹ️ Recurrences, no new id: **F-167/F-9** ($0.0000 over 6,419 metered tokens) · **F-190** (one step per agent session → every run a first-verdict seal) · **F-176** (`toolCalls: 0` on a 14,386-byte diff) · **F-168** (gate ⛔ message still cites the retired P2/WP-265 ladder) · **F-180** (rubric ✗ → PROCEED → SUCCESS, **fifth consecutive** — fixed by this delivery, unproven in the wild until dogfood-117).
-Progression gate = ⛔ **STALLED**. Next headline = **dogfood-117 / WP-540 (base-green verification)** — P3-rung-4's named unblock, quoted from `brownfield-002`'s own `blocked_reason`; corpus reach still 2 runnable. It is also WP-537's first live test.
-See §5 (ladders always exist; the AC-enumeration rule), §3.4, §7, §8, §1.5, §3. (Earlier — dogfood-113/114/115, WP-534/538, F-180…F-195, bench suite `20260725-130418` → PLAN-HISTORY.md.)
+**⚠️ WP-540 (base-green verification) RAN 2026-07-28 AND IS NOT DONE — dogfood-117, `run-80af3eb7-02ab-41fe-9077-fe13251933a3`, SUCCESS 2 steps $0.1268/$30, 4m 9s, executor `gemini-cli`, judge `openai-compat`, 4/4 ACs PROCEED, harvest byte-IDENTICAL.**
+🟢 `benchmarks/harness/src/base-verify.ts` is correct: nonzero exit never green, zero tests collected never green, `unavailable` never invokes the runner, `provision` prepends its `binDir` to PATH; injected runner honored; 92 tests; every export has a caller (F-194 held).
+🔴 **F-198 — THE CALL SITE VERIFIES A DIRECTORY THAT IS EMPTY BY CONTRACT.** `suite.ts:123-129` passes `cwd: workspaceDir`; `suite.ts:120-121` documents that the workspace stays empty until the system under test clones into it (`adapter.ts:178`/`:265`). Measured verdict, every task, forever: `green:false · "Unparseable suite output"`. Corpus stays 2 runnable; `brownfield-002` stays blocked.
+⚠️ **THE AC LESSON (new, §3.4):** F-187 said an oracle-owned AC must enumerate every INPUT family; F-196 added that it must pin the OUTPUT's CONSEQUENCE. F-198 adds the third axis — **it must probe at the ALTITUDE the defect can live at.** A seven-family oracle over the MODULE cannot see a broken CALL SITE. dogfood-118's AC-1 drives real `runSuite` against a local git fixture instead.
+🟡 **F-201 — the design judge read structure, not data flow.** The WP-537 completion review passed `design_serves_overall_goal` citing *"invokes it from the suite before adapter execution and grading"* — the defect itself. Three gates (AC-2's grep, the sealing rubric, the completion review) each asked *is there a call?*; none asked *what does the callee see?* → track-B against WP-311/WP-537.
+🟡 **F-200** — the base command is keyword-matched from the task's GRADING requirements and falls back to the literal `"pnpm test"`; a capability whose rule is *do not guess* guesses its own input. → dogfood-118.
+🟡 **F-199 HAND-FIXED THIS SITTING** — `scrubExecutorEnv` was unreachable (the call site always supplied its own env), so the target's base suite would have run with `*_API_KEY` in scope. `base-verify.ts:133-139`, +2 tests, harness suite 94 pass, tsc + eslint clean.
+🟡 **F-197 half-paid** — WP-537's completion review fired live for the first time (3rd judge pass, $0.0397 = **31% of run cost**), came back clean, merged nothing, sealed SUCCESS. The no-finding path is proven; a SEALING verdict carrying a rubric ✗ is still owed.
+ℹ️ Recurrences, no new id: **F-167/F-9** ($0.0000 over 10,880 metered executor tokens) · **F-190** (one agent session = one step) · **F-123** (`pressure fired for 1 step(s), but no pacing folds were recorded`).
+Progression gate = ⛔ **STALLED**. Next headline = **dogfood-118 / WP-540 completion (base-ref materialization)** — P3-rung-4 cannot run at corpus 2, and this is the rung's named unblock. Launch: `devbox run run-dogfood`.
 
 Related docs: [`docs/spec/task-spec.md`](spec/task-spec.md) (schema
 reference) · [`docs/TASK-PROTOCOL.md`](TASK-PROTOCOL.md) (WP etiquette, §7 is
@@ -765,6 +765,15 @@ broken (a false-green, not a follow-on fix).
 
 ## 8. Known P1 limitations (so you don't fight them)
 
+- **`TaskResult.baseVerification` is meaningless until dogfood-118 lands** (🔴 F-198,
+  dogfood-117). `benchmarks/harness/src/suite.ts:123-129` runs the base-green
+  verification with `cwd: workspaceDir`, and that directory is empty by contract
+  until the system under test clones into it (`suite.ts:120-121`, `adapter.ts:178`).
+  Every task therefore records the constant `green:false ·
+  "Unparseable suite output: could not find test summary"` — measured, not inferred.
+  Nothing gates on the field yet, so no published number is affected; do not start
+  reading it, and do not flip a task out of `status: blocked` on its say-so. The
+  module itself (`base-verify.ts`) is correct and stays.
 - **~~A benchmark "fix-until-green" task cannot terminally SUCCEED~~ ✅ FIXED AND
   LIVE-PROVEN (WP-533/F-159; landed `b0ec0cb`, proven 2026-07-23 by suite
   `20260723-222341` — `brownfield-001` 2/3 → 3/3, `brownfield-003` 4/4, suite 7/7 at

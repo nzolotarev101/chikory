@@ -8,6 +8,7 @@ import { join } from "node:path";
 
 import type { AdapterResult } from "./adapter.js";
 import type { TaskGradeReport } from "./grade.js";
+import type { VerifyBaseGreenResult } from "./base-verify.js";
 
 export interface TaskResult {
   taskId: string;
@@ -18,7 +19,9 @@ export interface TaskResult {
   endedAt: string;
   run: AdapterResult;
   grading: TaskGradeReport;
+  baseVerification?: VerifyBaseGreenResult;
 }
+
 
 export interface SuiteSummary {
   suite: string;
