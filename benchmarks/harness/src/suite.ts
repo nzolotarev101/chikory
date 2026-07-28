@@ -3,7 +3,9 @@
  * (DevAI instance JSONs and/or authored YAMLs), run each through an adapter
  * in an isolated workspace, grade, and write artifacts.
  */
-import { mkdirSync, readdirSync, readFileSync } from "node:fs";
+import { execSync } from "node:child_process";
+import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { extname, join } from "node:path";
 
 import type { AdapterResult, RunnerAdapter } from "./adapter.js";
@@ -20,7 +22,7 @@ import {
 import { parseDevAITask } from "./devai.js";
 import { isRunnable, validateAuthoredTask, type BenchmarkTask } from "./task.js";
 import { decideTargetNode, loadTargetEngineSource, discoverNodeToolchains, type ProvisioningDecision } from "./engine.js";
-import { verifyBaseGreen, findBaseVerificationCommand } from "./base-verify.js";
+import { verifyBaseGreen, type VerifyBaseGreenResult } from "./base-verify.js";
 
 
 
@@ -121,12 +123,52 @@ export async function runSuite(opts: RunSuiteOptions): Promise<{ summary: SuiteS
       log(`warn ${task.id}: brownfield without repo pin`);
     }
 
-    const baseCommand = findBaseVerificationCommand(task);
-    const baseVerification = await verifyBaseGreen({
-      command: baseCommand,
-      cwd: workspaceDir,
-      provisioning: nodeProvisioning,
-    });
+    let baseVerification: VerifyBaseGreenResult | undefined;
+    if (task.repo !== undefined) {
+      if (!task.baseVerificationCommand) {
+        baseVerification = {
+          green: false,
+          reason: "No base verification command declared (base_verification_command is missing)",
+          testsPassed: 0,
+          testsFailed: 0,
+        };
+      } else {
+        const tempDir = join(
+          tmpdir(),
+          `base-verify-${task.id}-${Date.now()}-${Math.random().toString(36).slice(2)}`,
+        );
+        try {
+          execSync(`git clone ${JSON.stringify(task.repo.url)} ${JSON.stringify(tempDir)}`, {
+            stdio: "ignore",
+            timeout: 30000,
+          });
+          execSync(`git -C ${JSON.stringify(tempDir)} checkout ${JSON.stringify(task.repo.ref)}`, {
+            stdio: "ignore",
+            timeout: 15000,
+          });
+          baseVerification = await verifyBaseGreen({
+            command: task.baseVerificationCommand,
+            cwd: tempDir,
+            provisioning: nodeProvisioning,
+          });
+        } catch (err) {
+          baseVerification = {
+            green: false,
+            reason: `Failed to materialize base ref: ${(err as Error).message}`,
+            testsPassed: 0,
+            testsFailed: 0,
+          };
+        } finally {
+          if (existsSync(tempDir)) {
+            try {
+              rmSync(tempDir, { recursive: true, force: true });
+            } catch {
+              // ignore cleanup errors
+            }
+          }
+        }
+      }
+    }
 
     log(`run ${task.id} via ${opts.adapter.name}`);
     const taskStarted = now().toISOString();

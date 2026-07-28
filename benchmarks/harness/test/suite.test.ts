@@ -1,9 +1,10 @@
-import { mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { execSync } from "node:child_process";
+import { mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 
-import { commandAdapter } from "../src/adapter.js";
+import { commandAdapter, type RunnerAdapter } from "../src/adapter.js";
 import { loadTaskDir, runSuite } from "../src/suite.js";
 
 const PINNED_YAML = `
@@ -135,4 +136,226 @@ describe("runSuite", () => {
     expect(summary.requirementsSatisfied).toBe(0);
     expect(summary.iSr).toBe(0);
   });
+
+  it("verifies base ref materialized in separate checkout: declared + repo-pinned gets green verdict from base ref", async () => {
+    const fixture = createGitRepoFixture();
+    try {
+      const taskYaml = `
+id: brownfield-001
+class: brownfield
+status: pinned
+repo:
+  url: ${JSON.stringify(fixture.repoDir)}
+  ref: ${fixture.commitSha}
+base_verification_command: ./test.sh
+goal: test goal
+requirements:
+  - id: R1
+    description: requirement 1
+    check: test -f result.txt
+`;
+      const dir = mkdtempSync(join(tmpdir(), "bench-suite-"));
+      writeFileSync(join(dir, "brownfield-001.yaml"), taskYaml);
+      const { tasks, invalid } = loadTaskDir(dir);
+      expect(invalid).toEqual({});
+      expect(tasks[0].baseVerificationCommand).toBe("./test.sh");
+
+      let workspaceWasEmptyAtStart = false;
+      const stubAdapter: RunnerAdapter = {
+        name: "stub-adapter",
+        run: async (t, ctx) => {
+          const entries = readdirSync(ctx.workspaceDir);
+          workspaceWasEmptyAtStart = entries.length === 0;
+          // Rewrite workspace to a RED output file / state
+          writeFileSync(join(ctx.workspaceDir, "test.sh"), '#!/bin/sh\necho "Tests  0 passed (0)"\nexit 1\n', { mode: 0o755 });
+          return { exitCode: 0, wallClockMs: 10 };
+        },
+      };
+
+      const resultsDir = mkdtempSync(join(tmpdir(), "bench-results-"));
+      const { outDir } = await runSuite({
+        suite: "unit",
+        tasks,
+        adapter: stubAdapter,
+        resultsDir,
+      });
+
+      expect(workspaceWasEmptyAtStart).toBe(true);
+
+      const taskResult = JSON.parse(readFileSync(join(outDir, "brownfield-001.json"), "utf8"));
+      expect(taskResult.baseVerification).toBeDefined();
+      expect(taskResult.baseVerification.green).toBe(true);
+      expect(taskResult.baseVerification.testsPassed).toBe(3);
+      expect(taskResult.baseVerification.testsFailed).toBe(0);
+      expect(taskResult.baseVerification.reason).toContain("green");
+
+      // Verify no base checkout directory was left behind in temp
+      const baseVerifyTempDirs = readdirSync(tmpdir()).filter((name) => name.startsWith("base-verify-brownfield-001"));
+      expect(baseVerifyTempDirs).toEqual([]);
+    } finally {
+      fixture.cleanup();
+    }
+  });
+
+  it("task with no repo pin records no baseVerification verdict in result", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "bench-suite-"));
+    writeFileSync(join(dir, "greenfield-001.yaml"), PINNED_YAML);
+    const { tasks } = loadTaskDir(dir);
+
+    const resultsDir = mkdtempSync(join(tmpdir(), "bench-results-"));
+    const { outDir } = await runSuite({
+      suite: "unit",
+      tasks,
+      adapter: commandAdapter("solver", "echo hello > hello.txt"),
+      resultsDir,
+    });
+
+    const taskResult = JSON.parse(readFileSync(join(outDir, "greenfield-001.json"), "utf8"));
+    expect(taskResult.baseVerification).toBeUndefined();
+  });
+
+  it("repo-pinned task with no declared base_verification_command records a non-green verdict", async () => {
+    const fixture = createGitRepoFixture();
+    try {
+      const taskYaml = `
+id: brownfield-002
+class: brownfield
+status: pinned
+repo:
+  url: ${JSON.stringify(fixture.repoDir)}
+  ref: ${fixture.commitSha}
+goal: test goal
+requirements:
+  - id: R1
+    description: requirement 1
+    check: "true"
+`;
+      const dir = mkdtempSync(join(tmpdir(), "bench-suite-"));
+      writeFileSync(join(dir, "brownfield-002.yaml"), taskYaml);
+      const { tasks } = loadTaskDir(dir);
+
+      const resultsDir = mkdtempSync(join(tmpdir(), "bench-results-"));
+      const { outDir } = await runSuite({
+        suite: "unit",
+        tasks,
+        adapter: commandAdapter("solver", "true"),
+        resultsDir,
+      });
+
+      const taskResult = JSON.parse(readFileSync(join(outDir, "brownfield-002.json"), "utf8"));
+      expect(taskResult.baseVerification).toBeDefined();
+      expect(taskResult.baseVerification.green).toBe(false);
+      expect(taskResult.baseVerification.reason).toMatch(/No base verification command declared/i);
+    } finally {
+      fixture.cleanup();
+    }
+  });
+
+  it("handles base verification command execution failure gracefully and records non-green verdict", async () => {
+    const fixture = createGitRepoFixture();
+    try {
+      const taskYaml = `
+id: brownfield-003
+class: brownfield
+status: pinned
+repo:
+  url: ${JSON.stringify(fixture.repoDir)}
+  ref: ${fixture.commitSha}
+base_verification_command: ./nonexistent-script.sh
+goal: test goal
+requirements:
+  - id: R1
+    description: requirement 1
+    check: "true"
+`;
+      const dir = mkdtempSync(join(tmpdir(), "bench-suite-"));
+      writeFileSync(join(dir, "brownfield-003.yaml"), taskYaml);
+      const { tasks } = loadTaskDir(dir);
+
+      const resultsDir = mkdtempSync(join(tmpdir(), "bench-results-"));
+      const { outDir } = await runSuite({
+        suite: "unit",
+        tasks,
+        adapter: commandAdapter("solver", "true"),
+        resultsDir,
+      });
+
+      const taskResult = JSON.parse(readFileSync(join(outDir, "brownfield-003.json"), "utf8"));
+      expect(taskResult.baseVerification).toBeDefined();
+      expect(taskResult.baseVerification.green).toBe(false);
+      expect(taskResult.baseVerification.reason).toMatch(/Verification command failed|Unparseable/i);
+    } finally {
+      fixture.cleanup();
+    }
+  });
+
+  it("records non-green verdict when base verification command outputs failing tests on base ref", async () => {
+    const fixture = createGitRepoFixture();
+    try {
+      // Overwrite test script to return failing summary
+      const testScript = join(fixture.repoDir, "test.sh");
+      writeFileSync(testScript, '#!/bin/sh\necho "Tests  2 failed | 1 passed (3)"\nexit 1\n', { mode: 0o755 });
+      execSync(`git -C ${JSON.stringify(fixture.repoDir)} commit -am "failing test script"`, { stdio: "ignore" });
+      const failSha = execSync(`git -C ${JSON.stringify(fixture.repoDir)} rev-parse HEAD`, { encoding: "utf8" }).trim();
+
+      const taskYaml = `
+id: brownfield-004
+class: brownfield
+status: pinned
+repo:
+  url: ${JSON.stringify(fixture.repoDir)}
+  ref: ${failSha}
+base_verification_command: ./test.sh
+goal: test goal
+requirements:
+  - id: R1
+    description: requirement 1
+    check: "true"
+`;
+      const dir = mkdtempSync(join(tmpdir(), "bench-suite-"));
+      writeFileSync(join(dir, "brownfield-004.yaml"), taskYaml);
+      const { tasks } = loadTaskDir(dir);
+
+      const resultsDir = mkdtempSync(join(tmpdir(), "bench-results-"));
+      const { outDir } = await runSuite({
+        suite: "unit",
+        tasks,
+        adapter: commandAdapter("solver", "true"),
+        resultsDir,
+      });
+
+      const taskResult = JSON.parse(readFileSync(join(outDir, "brownfield-004.json"), "utf8"));
+      expect(taskResult.baseVerification).toBeDefined();
+      expect(taskResult.baseVerification.green).toBe(false);
+      expect(taskResult.baseVerification.testsPassed).toBe(1);
+      expect(taskResult.baseVerification.testsFailed).toBe(2);
+    } finally {
+      fixture.cleanup();
+    }
+  });
 });
+
+function createGitRepoFixture(): { repoDir: string; commitSha: string; cleanup: () => void } {
+  const repoDir = mkdtempSync(join(tmpdir(), "git-fixture-"));
+  execSync(`git init ${JSON.stringify(repoDir)}`, { stdio: "ignore" });
+  execSync(`git -C ${JSON.stringify(repoDir)} config user.name "Test"`, { stdio: "ignore" });
+  execSync(`git -C ${JSON.stringify(repoDir)} config user.email "test@example.com"`, { stdio: "ignore" });
+
+  const testScript = join(repoDir, "test.sh");
+  writeFileSync(testScript, '#!/bin/sh\necho "Tests  3 passed (3)"\nexit 0\n', { mode: 0o755 });
+
+  execSync(`git -C ${JSON.stringify(repoDir)} add .`, { stdio: "ignore" });
+  execSync(`git -C ${JSON.stringify(repoDir)} commit -m "initial commit"`, { stdio: "ignore" });
+
+  const commitSha = execSync(`git -C ${JSON.stringify(repoDir)} rev-parse HEAD`, { encoding: "utf8" }).trim();
+
+  const cleanup = () => {
+    try {
+      rmSync(repoDir, { recursive: true, force: true });
+    } catch {
+      // ignore
+    }
+  };
+
+  return { repoDir, commitSha, cleanup };
+}

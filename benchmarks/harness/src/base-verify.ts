@@ -5,7 +5,6 @@
  */
 import { DEFAULT_CHECK_TIMEOUT_MS, runBounded, scrubExecutorEnv } from "@chikory/sdk";
 import type { ProvisioningDecision } from "./engine.js";
-import type { BenchmarkTask } from "./task.js";
 
 export type BaseVerifyRunner = (input: {
   command: string;
@@ -90,28 +89,6 @@ export function parseTestSummary(output: string): { testsPassed: number; testsFa
   }
 
   return null;
-}
-
-/**
- * Extract the base verification command from a BenchmarkTask.
- * Looks for requirement checks that mention test or suite, falling back
- * to any check requirement or a default "pnpm test".
- */
-export function findBaseVerificationCommand(task: BenchmarkTask): string {
-  for (const req of task.requirements) {
-    if (req.grading.kind === "check") {
-      const desc = req.description.toLowerCase();
-      if (desc.includes("suite") || desc.includes("test")) {
-        return req.grading.command;
-      }
-    }
-  }
-  for (const req of task.requirements) {
-    if (req.grading.kind === "check") {
-      return req.grading.command;
-    }
-  }
-  return "pnpm test";
 }
 
 /**

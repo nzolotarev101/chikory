@@ -52,6 +52,7 @@ export interface BenchmarkTask {
   requirements: BenchmarkRequirement[];
   preferences: BenchmarkPreference[];
   repo?: { url: string; ref: string };
+  baseVerificationCommand?: string;
   horizon?: string;
   metricsNotes?: string;
   tags: string[];
@@ -81,6 +82,7 @@ const AuthoredTaskYaml = z
     status: z.enum(["draft", "pinned", "blocked"]),
     blocked_reason: z.string().min(1).optional(),
     repo: z.object({ url: z.string().min(1), ref: z.string().min(1) }).strict().optional(),
+    base_verification_command: z.string().min(1).optional(),
     horizon: z.union([z.string(), z.number()]).optional(),
     goal: z.string().min(1),
     requirements: z.array(AuthoredRequirementYaml).min(1),
@@ -209,6 +211,7 @@ export function validateAuthoredTask(
     requirements,
     preferences: [],
     repo: t.repo && t.repo.url !== "TBD" ? { url: t.repo.url, ref: t.repo.ref } : undefined,
+    baseVerificationCommand: t.base_verification_command,
     horizon: t.horizon === undefined ? undefined : String(t.horizon),
     metricsNotes: t.metrics_notes,
     tags: t.tags ?? [],

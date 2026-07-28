@@ -1,0 +1,298 @@
+# Dogfood-119: WP-541 — a base that was never proven green must invalidate the number computed on it
+#
+# 🟢 PLAIN LEAD. dogfood-118 made the base-green verification REAL: the harness now checks out each
+#   task's pinned commit in a scratch directory of its own and runs the target's declared test command
+#   there, before the agent touches anything. The verdict lands in the per-task JSON — and nothing
+#   reads it. `grep -n baseVerification benchmarks/harness/src/*.ts` returns write sites only;
+#   `SuiteSummary` has no field for it (`results.ts:26-45`); `summarize()` computes the published
+#   I-SR/D-SR over every task regardless. A suite whose every base is red publishes the same headline
+#   numbers as one whose bases are all proven green. This run makes the verdict count.
+#
+# CLASS / LADDER. class=product — surface is `benchmarks/harness/src/` + `benchmarks/tasks/`, same as
+#   WP-534/535/538/540. Trailing-3 harness-meta headlines 0/3, cap intact.
+# Ladder-rung: 4
+# Thesis-KPI: PUBLICATION INTEGRITY, third and final attempt — and the CORPUS moves this time.
+#   WP-540 answered "is this base green?"; this run makes the answer able to STOP a number from being
+#   published, and takes the runnable brownfield corpus from 2 to 3. Proven by an AC that drives
+#   `runSuite` over four tasks at once — verified-green, verified-red, undeclared, and no-repo-pin —
+#   and asserts what the SUMMARY says: the headline rates, the named exclusions, the total count.
+#
+# ⚠️ WHY THIS AND NOT P3-rung-4 ITSELF. `scripts/dogfood-progression.sh` reads ⛔ STALLED (3rd
+#   consecutive `rung=0`, trailing-3 max steps 2 vs 4), so the headline MUST be the phase ladder rung
+#   or its named unblock. P3-rung-4 (≥5 brownfield tasks vs a baseline) cannot run: the runnable
+#   corpus is 2. This run takes it to 3 — the remaining gap is `brownfield-004`/`005`, which do not
+#   exist (WP-302), plus the WP-304 baseline arm, which has never run.
+#
+# ⚠️ 🔴 F-203 — `brownfield-002` IS NOT ACTUALLY BLOCKED, AND ITS `blocked_reason` IS THE PROOF THAT
+#   NOBODY RE-MEASURED. That comment (F-163, 2026-07-23) claims the target pins `engines.node >=24`,
+#   devbox pins node 22, and the base ref is therefore systemically red — *"354/1128 tests fail"*.
+#   Re-measured 2026-07-28 on a clean clone of the exact pinned ref `a061eaa1`, no harness involved:
+#     git clone https://github.com/gitify-app/gitify   → 2.08s, 27 MB
+#     git checkout a061eaa112fa18885dd4de0cea6c0e51094cad0c
+#     pnpm install --frozen-lockfile                   → 5.2s (warm store)
+#     pnpm test                                        → 153/153 files, 1128/1128 PASSED, 13.13s
+#   under ambient node v22.22.3. And `decideTargetNode(">=24", discoverNodeToolchains(), v22)` returns
+#   `provision` → `/nix/store/3mvbmkd7…-nodejs-24.15.0/bin`, so the supported engine is available too.
+#   The flip is a data change justified by measurement — but it must land BEHIND the gate this run
+#   builds, so the harness's own verdict is what pins it, not a comment.
+#
+# ⚠️ 🔴 F-206 — A BARE CLONE HAS NO `node_modules`. `verifyBaseGreen` runs the declared command in the
+#   fresh checkout with nothing installed, bounded by `DEFAULT_CHECK_TIMEOUT_MS` = 120 s. Every
+#   declaration must therefore fold its install in. Measured for gitify: install 5.2s + suite 13.1s =
+#   18.3s, comfortably inside the cap — so do NOT add a per-task timeout field (F-194: no field until
+#   a target needs one). Package managers in the corpus: gitify `pnpm@11.9.0`, zod `pnpm@10.12.1`,
+#   zodios Yarn Berry (🟠 F-173 — running `npm install` there is a known self-inflicted failure).
+#
+# ⚠️ 🟡 F-190 IS STILL BINDING: `gemini-cli` collapses a whole agent session into ONE Chikory step, so
+#   this will likely be a one- or two-step run and `judge.cadence: 2` may never fire twice. Nothing in
+#   the delivery may assume a second step exists.
+#
+# ⚠️ SCOPE / DETERMINISM. Writes ONLY inside `benchmarks/harness/` and `benchmarks/tasks/`. NO new
+#   dependency, NO key material, NO global tool install, NO `devbox.json` edit. Do NOT touch
+#   `packages/`, `examples/dogfood/`, or `scripts/`. AC-1 must pass with NO network access: it builds
+#   its own local git fixtures. Run project commands sequentially inside the ALREADY-ACTIVATED devbox
+#   — do NOT nest `devbox run` (F-105).
+#
+# ⚠️ LAUNCH:
+#   0. Commit this spec + all dogfood-118 review docs to HEAD (the worker clones HEAD at run start).
+#   1. Verify the spec-pick glob resolves to THIS file: `sort | tail -n 1` over
+#      `examples/dogfood/dogfood-[0-9][0-9][0-9]*.yaml` → dogfood-119 sorts after dogfood-118.
+#   2. `CHIKORY_PREFLIGHT_ONLY=1 devbox run run-dogfood` dry-runs the guards at $0 (expect AC-2 RED).
+#      ℹ️ The preflight classes AC-1/AC-3/AC-4 as VERIFY-SUITE and does NOT dry-run them. All were
+#      hand-verified in BOTH directions — see the AC arming evidence in `docs/reports/dogfood-118.md`.
+#   3. `devbox run run-dogfood`
+#   Post-run: `devbox run -- bash scripts/harvest.sh <run-id>` then `/dogfood-review <run-id>`.
+#   ⚠️ FIRST THING POST-RUN, BEFORE ANYTHING ELSE: `git status --short`. If your checkout is dirty
+#      with `benchmarks/` edits you did not make, F-192 recurred — read dogfood-115 §"the escape".
+
+name: dogfood-119-wp541-unverified-base-invalidates-the-score
+goal: >
+  Make an unverified base ref invalidate the benchmark number computed on it — today the verdict is
+  written down and no code reads it.
+
+  `benchmarks/harness/src/suite.ts:126-170` now produces a real base-green verdict per task and
+  records it at `suite.ts:197` as `TaskResult.baseVerification`. That is where it stops.
+  `SuiteSummary` (`results.ts:26-45`) has no field for it, `summarize()` (`results.ts:52-84`) averages
+  `grading.satisfied / grading.total` across every result it is handed, and `writeSuiteSummary` writes
+  that out as the published artifact. So the headline I-SR and D-SR are identical whether the bases
+  were all proven green, all proven red, or — as is true of the corpus TODAY — never declared at all.
+
+  Deliver, inside benchmarks/harness and benchmarks/tasks, in whatever design you judge best:
+
+    * THE VERDICT REACHES THE SUMMARY. `SuiteSummary` must carry, per task, whether that task's base
+      was verified, and must NAME the ones that were not. The spellings ARE prescribed so the AC can
+      probe them (F-194 — three fields, all wired, all exercised, no speculative siblings):
+        - `SuiteSummary.perTask[].baseVerified: boolean`
+        - `SuiteSummary.unverifiedTasks: { taskId: string; reason: string }[]`
+        - `SuiteSummary.tasksVerified: number`
+      `tasks` keeps its current meaning: the TOTAL number of results, unverified included.
+
+    * THE HEADLINE RATES ARE COMPUTED OVER VERIFIED TASKS ONLY. `iSr` and `dSr` must be the
+      satisfaction rates across tasks whose base was verified — the requirements of an unverified task
+      contribute to NEITHER the numerator NOR the denominator. `requirementsTotal` /
+      `requirementsSatisfied` keep counting everything, so the two views stay reconcilable.
+
+    * WHAT "VERIFIED" MEANS, EXACTLY. A task is verified when it has no `repo` pin at all (a
+      greenfield task has no base ref; it is not unverifiable, it is not applicable — and if you
+      exclude these, every greenfield task vanishes from the published rate), OR when its recorded
+      `baseVerification.green === true`. Everything else is unverified: a red base, a failed
+      materialization, and — this is the case that matters — a repo-pinned task that declared no
+      command at all. Its `reason` is the recorded verdict's reason.
+
+    * THE CORPUS DECLARES ITS COMMANDS. Every task in `benchmarks/tasks/` with a real `repo` pin must
+      declare `base_verification_command`, and that command must INSTALL the target's dependencies
+      before running its suite — the base checkout is a bare clone (F-206). Use each target's own
+      package manager (gitify `pnpm@11.9.0`, zod `pnpm@10.12.1`, zodios Yarn Berry — `npm install`
+      there is 🟠 F-173, a known self-inflicted failure), and a lockfile-respecting install
+      (`--frozen-lockfile` / `--immutable`), never a resolving one.
+
+    * `brownfield-002` FLIPS TO `pinned`. Its `blocked_reason` is false as of 2026-07-28: the pinned
+      base ref `a061eaa1` passes 1128/1128 tests in 13.13s under ambient node v22.22.3, and the
+      harness can provision node 24 for it besides. Change `status: blocked` → `status: pinned`,
+      remove the now-wrong `blocked_reason`, and replace the stale F-163 comment block with the
+      measurement and its date. Leave the task's goal, requirements and pins otherwise untouched —
+      this is a status correction, not a re-authoring.
+
+    * THREE TRAPS THAT LOOK LIKE THE ANSWER AND ARE NOT:
+      (A) Gating on a RED base while letting an UNDECLARED one through. Every repo-pinned task in the
+          corpus is undeclared on HEAD, so that gate would change nothing at all while looking like a
+          fix. "Not proven green" and "proven red" are the same thing to a published number.
+      (B) Dropping unverified tasks from the summary. A silently shorter `perTask` list shrinks the
+          corpus invisibly and INFLATES I-SR — the exact failure this WP exists to prevent. Excluded
+          tasks stay in `perTask`, are counted in `tasks`, and are named in `unverifiedTasks`.
+      (C) Adding the fields and leaving `iSr`/`dSr` unchanged. Reporting the exclusion beside an
+          unchanged number is not a gate; it is a footnote nobody reads.
+
+    * TESTS THAT PIN THE PUBLISHED NUMBER, NOT ONLY THE FIELD. Cover the summary path: a mixed suite
+      where a verified-green task and a verified-red task have DIFFERENT satisfaction rates, so a
+      delivery that forgets to exclude produces a visibly different `iSr`; a no-repo-pin task counted
+      as verified; an undeclared repo-pinned task excluded and named; `tasks` unchanged by exclusion.
+      Build local git fixtures in temp dirs — no network.
+
+  CONSTRAINTS: strict TypeScript, ESM relative imports with explicit .js specifiers, named exports, no
+  default exports, no new dependency, no key material, no global tool install, no devbox.json edit.
+  Writes only inside benchmarks/harness and benchmarks/tasks; do not touch packages/, examples/dogfood/
+  or scripts/. Every delivered test must pass and must not break an existing one — the harness suite
+  stays green, type-clean and lint-clean.
+
+repos:
+  - url: /Users/nikitazolotarev/repos/chikory
+    writable: true
+
+acceptance_criteria:
+  - id: AC-1
+    description: >
+      THE PUBLISHED NUMBER IS GATED, asserted by the CHECK ITSELF against the real built `runSuite` —
+      not by tests the executor authored (F-198/F-202 are why: two consecutive runs shipped code whose
+      every AC passed while the defect sat one altitude out). The check builds TWO local git repo
+      fixtures — one whose committed base is GREEN, one whose committed base is RED — and runs a
+      four-task suite through `runSuite` with a stub adapter that satisfies EVERY requirement of the
+      green-base task and NONE of the red-base task. If unverified tasks were excluded correctly, the
+      published `iSr` is 1 (only the green-base and no-repo tasks count); if they leak in, it is
+      visibly lower. Four families with negatives: verified-green (counts), verified-red (excluded,
+      named), repo-pinned-but-undeclared (excluded, named — trap A), no-repo-pin (counts, trap on
+      over-exclusion). Also pins that exclusion does NOT shorten `perTask` or `tasks` (trap B).
+    check: |
+      cd benchmarks/harness && pnpm exec tsc && node -e '
+      const {mkdtempSync,mkdirSync,writeFileSync,readFileSync}=require("node:fs");
+      const {execSync}=require("node:child_process");
+      const {tmpdir}=require("node:os");
+      const {join}=require("node:path");
+      const A=(c,m)=>{if(!c){console.error("FAIL: "+m);process.exit(1);}};
+      const root=mkdtempSync(join(tmpdir(),"bv119-"));
+      const mkRepo=(name,summary)=>{
+        const d=join(root,name);mkdirSync(d);
+        writeFileSync(join(d,"package.json"),JSON.stringify({name:"fx",version:"1.0.0",private:true}));
+        writeFileSync(join(d,"SUITE_OUTPUT.txt"),summary);
+        const G=(c)=>execSync(c,{cwd:d,stdio:"ignore"});
+        G("git init -q -b main");G("git add -A");
+        G("git -c user.email=a@b.c -c user.name=fx commit -q -m base");
+        return {dir:d,ref:execSync("git rev-parse HEAD",{cwd:d,encoding:"utf8"}).trim()};
+      };
+      const green=mkRepo("green","Test Files  1 passed (1)\n     Tests  3 passed (3)\n");
+      const red=mkRepo("red","Test Files  1 failed (1)\n     Tests  2 failed | 1 passed (3)\n");
+      const CMD="cat SUITE_OUTPUT.txt";
+      const req=(id,cmd)=>({id,description:"req "+id,prerequisites:[],grading:{kind:"check",command:cmd}});
+      const mkTask=(o)=>Object.assign({
+        id:"t",source:"authored",class:"brownfield",status:"pinned",goal:"g",
+        requirements:[req("R1","true"),req("R2","true")],preferences:[],tags:[],flags:{},
+      },o);
+      const tasks=[
+        mkTask({id:"brownfield-901",repo:{url:green.dir,ref:green.ref},baseVerificationCommand:CMD}),
+        mkTask({id:"brownfield-902",repo:{url:red.dir,ref:red.ref},baseVerificationCommand:CMD,
+                requirements:[req("R1","false"),req("R2","false")]}),
+        mkTask({id:"brownfield-903",repo:{url:green.dir,ref:green.ref},baseVerificationCommand:undefined,
+                requirements:[req("R1","false"),req("R2","false")]}),
+        mkTask({id:"greenfield-904",class:"greenfield",repo:undefined}),
+      ];
+      const adapter={name:"stub",run:async()=>({exitCode:0,wallClockMs:1,artifacts:[],notes:[]})};
+      import("file://"+process.cwd()+"/dist/suite.js").then(async(m)=>{
+        const out=await m.runSuite({suite:"fx",tasks,adapter,resultsDir:join(root,"results"),log:()=>{}});
+        const s=JSON.parse(readFileSync(join(out.outDir,"summary.json"),"utf8"));
+        A(Array.isArray(s.perTask)&&s.perTask.length===4,
+          "trap B: exclusion must NOT shorten perTask — every task stays visible (got "+(s.perTask&&s.perTask.length)+")");
+        A(s.tasks===4,"trap B: `tasks` counts every result, unverified included (got "+s.tasks+")");
+        const by=Object.fromEntries(s.perTask.map((p)=>[p.taskId,p]));
+        A(by["brownfield-901"].baseVerified===true,"a green base is verified");
+        A(by["brownfield-902"].baseVerified===false,"a RED base is not verified");
+        A(by["brownfield-903"].baseVerified===false,
+          "trap A: a repo-pinned task that declared NO command is NOT verified — undeclared and red are the same to a published number");
+        A(by["greenfield-904"].baseVerified===true,
+          "a task with no repo pin has no base ref: not applicable, not unverified — excluding it deletes every greenfield task from the rate");
+        A(s.tasksVerified===2,"exactly 2 of 4 tasks are verified (got "+s.tasksVerified+")");
+        const un=s.unverifiedTasks;
+        A(Array.isArray(un)&&un.length===2,"the unverified tasks must be NAMED, not just counted (got "+JSON.stringify(un)+")");
+        const ids=un.map((u)=>u.taskId).sort();
+        A(ids[0]==="brownfield-902"&&ids[1]==="brownfield-903","unverifiedTasks must name 902 and 903 (got "+JSON.stringify(ids)+")");
+        A(un.every((u)=>typeof u.reason==="string"&&u.reason.length>0),"every unverified entry carries the recorded verdict reason");
+        A(s.requirementsTotal===8,"requirementsTotal keeps counting every requirement so the views reconcile (got "+s.requirementsTotal+")");
+        A(s.iSr===1,"trap C: iSr must be computed over VERIFIED tasks only — 901 (2/2) + 904 (2/2) = 1; leaking 902/903 in gives 0.5 (got "+s.iSr+")");
+        A(s.dSr===1,"dSr must be gated the same way as iSr (got "+s.dSr+")");
+        console.log("AC-1 OK: unverified bases are named, counted, kept visible, and excluded from the published rate");
+      }).catch((e)=>{console.error("FAIL: "+(e&&e.message?e.message:String(e)));process.exit(1);});'
+  - id: AC-2
+    description: >
+      THE SUMMARY CARRIES THE VERDICT AND THE CORPUS DECLARES ITS COMMANDS. On HEAD `SuiteSummary` has
+      no base-verification field, no corpus task declares `base_verification_command`, and
+      `brownfield-002` is `status: blocked` — so every half is RED on HEAD. Anchored to declaration
+      FORMS and to YAML keys, not bare words, so a comment mentioning an old name cannot false-FAIL a
+      correct delivery (F-83). Note the `brownfield-002` check is `^status: pinned` at line start:
+      the word `blocked` may still legitimately appear in the historical comment block.
+    check: >
+      grep -qE 'unverifiedTasks[?]?:' benchmarks/harness/src/results.ts &&
+      grep -qE 'tasksVerified[?]?:' benchmarks/harness/src/results.ts &&
+      grep -qE 'baseVerified[?]?:' benchmarks/harness/src/results.ts &&
+      grep -qE '^base_verification_command: .+' benchmarks/tasks/brownfield-001-dependency-major-upgrade.yaml &&
+      grep -qE '^base_verification_command: .+' benchmarks/tasks/brownfield-002-cross-cutting-refactor.yaml &&
+      grep -qE '^base_verification_command: .+' benchmarks/tasks/brownfield-003-bug-archaeology.yaml &&
+      grep -qE '^status: pinned' benchmarks/tasks/brownfield-002-cross-cutting-refactor.yaml
+  - id: AC-3
+    description: >
+      THE SUMMARY PATH IS ACTUALLY TESTED, THE CORPUS STILL LOADS, AND NOTHING REGRESSED. HEAD has 102
+      tests across 10 files (measured 2026-07-28: 3.17 s wall for the whole harness suite — F-141-safe,
+      well inside the judge's 120 s per-check cap). The summary-path cases the goal names (mixed
+      verified/unverified rates, no-repo counted, undeclared excluded and named, `tasks` unchanged)
+      cannot be covered in fewer than 110 total, so the count is a floor the delivery must clear. The
+      check ALSO loads the real corpus through `loadTaskDir`, so a YAML edit that breaks parsing — or a
+      `brownfield-002` flip that leaves the task unrunnable — fails here rather than at the next
+      benchmark launch.
+    check: |
+      cd benchmarks/harness && pnpm exec vitest run --reporter=json --outputFile=/tmp/bv-119.json >/dev/null 2>&1
+      node -e '
+      const r=JSON.parse(require("fs").readFileSync("/tmp/bv-119.json","utf8"));
+      if(r.numFailedTests>0){console.error("FAIL: "+r.numFailedTests+" harness test(s) failing");process.exit(1);}
+      if(r.numPassedTests<110){console.error("FAIL: only "+r.numPassedTests+" harness tests pass; the summary-path cases need at least 110");process.exit(1);}
+      console.log("AC-3 pt1 OK: "+r.numPassedTests+" harness tests pass");' &&
+      node -e '
+      const A=(c,m)=>{if(!c){console.error("FAIL: "+m);process.exit(1);}};
+      Promise.all([import("file://"+process.cwd()+"/dist/suite.js"),import("file://"+process.cwd()+"/dist/task.js")]).then(([s,t])=>{
+        const {tasks,invalid}=s.loadTaskDir("../tasks");
+        A(Object.keys(invalid).length===0,"the real corpus must still parse (invalid: "+JSON.stringify(invalid)+")");
+        const by=Object.fromEntries(tasks.map((x)=>[x.id,x]));
+        for(const id of ["brownfield-001","brownfield-002","brownfield-003"]){
+          A(by[id],"corpus task "+id+" must load");
+          A(typeof by[id].baseVerificationCommand==="string"&&by[id].baseVerificationCommand.length>0,
+            id+" must declare a base_verification_command that survives the loader");
+        }
+        A(by["brownfield-002"].status==="pinned","brownfield-002 must be pinned (got "+by["brownfield-002"].status+")");
+        A(t.isRunnable(by["brownfield-002"]),"brownfield-002 must be RUNNABLE after the flip — the corpus goes 2 -> 3");
+        console.log("AC-3 pt2 OK: corpus loads, 3 tasks declare a base command, brownfield-002 is runnable");
+      }).catch((e)=>{console.error("FAIL: "+(e&&e.message?e.message:String(e)));process.exit(1);});'
+  - id: AC-4
+    description: >
+      The harness package stays type- and lint-clean. Deliberately SCOPED to `benchmarks/harness`
+      (measured 2026-07-28: tsc + eslint 3.2 s) — the sdk-ts suite is untouched by this run's scope and
+      is re-run uncapped by the harvest verify-pack §3 regardless.
+    check: >
+      cd benchmarks/harness &&
+      pnpm exec tsc --noEmit && pnpm exec eslint src
+
+budget_usd: 30
+max_steps: 12
+
+# CONTEXT-ROT (WP-203/WP-207): auto-calibrated window (F-125 mechanism, live-proven 095-099, 101, 103, 105).
+pacing:
+  mode: auto
+  autoCalibrate: true
+
+# UNATTENDED (WP-271): operator-free; a genuine ESCALATE seals a resumable FAILED (WP-520).
+unattended:
+  escalation: seal_resumable_failed
+
+# DIRECTIVE (F-162/F-165): Gemini executes, Codex judges. Never Claude on a dogfood/benchmark run.
+executor:
+  adapter: gemini-cli
+  family: gemini
+
+judge:
+  family: openai-compat
+  cadence: 2
+  max_cost_share: 0.5
+
+# F-170-safe: the `code` stage drives the gemini-cli executor, so it must NOT name a foreign-family model.
+routing:
+  stages:
+    plan: { provider: openai-compat, model: gpt-5.6-sol xhigh }
+    code: { provider: gemini, model: default }
+    review: { provider: openai-compat, model: gpt-5.6-sol xhigh }
+    judge: { provider: openai-compat, model: gpt-5.6-sol xhigh }

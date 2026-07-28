@@ -98,4 +98,16 @@ describe("authored task format v1 (WP-301 freeze)", () => {
     const noRepo = VALID_PINNED.replace(/repo:\n.*\n.*\n/, "");
     expect(validateAuthoredTask(noRepo, "r.yaml").issues.join()).toMatch(/requires repo/);
   });
+
+  it("parses optional base_verification_command from authored YAML", () => {
+    const withCmd = `${VALID_PINNED}base_verification_command: pnpm test --run\n`;
+    const task = parseAuthoredTask(withCmd, "bvc.yaml");
+    expect(task.baseVerificationCommand).toBe("pnpm test --run");
+  });
+
+  it("rejects empty base_verification_command string in authored task", () => {
+    const emptyCmd = `${VALID_PINNED}base_verification_command: ""\n`;
+    const { issues } = validateAuthoredTask(emptyCmd, "empty.yaml");
+    expect(issues.join()).toMatch(/base_verification_command/);
+  });
 });

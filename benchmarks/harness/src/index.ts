@@ -68,7 +68,6 @@ export {
 } from "./engine.js";
 export {
   verifyBaseGreen,
-  findBaseVerificationCommand,
   type BaseVerifyRunner,
   type VerifyBaseGreenOptions,
   type VerifyBaseGreenResult,

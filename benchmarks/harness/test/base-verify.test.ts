@@ -1,12 +1,10 @@
 import { describe, expect, it } from "vitest";
 import {
   verifyBaseGreen,
-  findBaseVerificationCommand,
   parseTestSummary,
   type BaseVerifyRunner,
 } from "../src/base-verify.js";
 import type { ProvisioningDecision } from "../src/engine.js";
-import type { BenchmarkTask } from "../src/task.js";
 
 const GREEN_OUTPUT = "Test Files  9 passed (9)\n     Tests  1128 passed (1128)";
 const RED_OUTPUT = "Test Files  4 failed | 5 passed (9)\n     Tests  354 failed | 774 passed (1128)";
@@ -166,29 +164,22 @@ describe("verifyBaseGreen", () => {
   });
 
   // Helper tests
-  it("findBaseVerificationCommand extracts test check command from task", () => {
-    const task: BenchmarkTask = {
-      id: "brownfield-001",
-      source: "authored",
-      class: "brownfield",
-      status: "pinned",
-      goal: "test goal",
-      requirements: [
-        { id: "R1", description: "install", prerequisites: [], grading: { kind: "check", command: "npm install" } },
-        { id: "R2", description: "full pre-existing test suite is green", prerequisites: [], grading: { kind: "check", command: "npx jest" } },
-      ],
-      preferences: [],
-      tags: [],
-      flags: {},
-    };
-    expect(findBaseVerificationCommand(task)).toBe("npx jest");
-  });
-
   it("parseTestSummary strips ANSI codes and handles various Vitest/Jest output shapes", () => {
     const ansiOutput = "\u001b[32mTests  10 passed (10)\u001b[0m";
     expect(parseTestSummary(ansiOutput)).toEqual({ testsPassed: 10, testsFailed: 0 });
 
     const jestOutput = "Tests: 2 failed, 5 passed, 7 total";
     expect(parseTestSummary(jestOutput)).toEqual({ testsPassed: 5, testsFailed: 2 });
+  });
+
+  it("parseTestSummary returns null for output without test summary", () => {
+    expect(parseTestSummary("Random log output line")).toBeNull();
+  });
+
+  it("verifyBaseGreen handles null exit code by treating as exit 1 failure", async () => {
+    const mock = createMockRunner(null as unknown as number, GREEN_OUTPUT);
+    const res = await verifyBaseGreen({ command: "pnpm test", cwd: "/w", provisioning: amb, run: mock.run });
+    expect(res.green).toBe(false);
+    expect(res.reason).toContain("exit code 1");
   });
 });
