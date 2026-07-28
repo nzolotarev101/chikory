@@ -17,7 +17,7 @@ displaced prose moves verbatim to [`PLAN-HISTORY.md`](PLAN-HISTORY.md); per-run 
 🟡 **F-199 HAND-FIXED THIS SITTING** — `scrubExecutorEnv` was unreachable (the call site always supplied its own env), so the target's base suite would have run with `*_API_KEY` in scope. `base-verify.ts:133-139`, +2 tests, harness suite 94 pass, tsc + eslint clean.
 🟡 **F-197 half-paid** — WP-537's completion review fired live for the first time (3rd judge pass, $0.0397 = **31% of run cost**), came back clean, merged nothing, sealed SUCCESS. The no-finding path is proven; a SEALING verdict carrying a rubric ✗ is still owed.
 ℹ️ Recurrences, no new id: **F-167/F-9** ($0.0000 over 10,880 metered executor tokens) · **F-190** (one agent session = one step) · **F-123** (`pressure fired for 1 step(s), but no pacing folds were recorded`).
-Progression gate = ⛔ **STALLED**. Next headline = **dogfood-118 / WP-540 completion (base-ref materialization)** — P3-rung-4 cannot run at corpus 2, and this is the rung's named unblock. Launch: `devbox run run-dogfood`.
+Progression gate = ✅ **PROGRESSING** with dogfood-117's row in the ledger (⛔ STALLED without it; max steps 4 vs 2). Next headline = **dogfood-118 / WP-540 completion (base-ref materialization)** — P3-rung-4 cannot run at corpus 2, and this is the rung's named unblock. Launch: `devbox run run-dogfood`.
 
 Related docs: [`docs/spec/task-spec.md`](spec/task-spec.md) (schema
 reference) · [`docs/TASK-PROTOCOL.md`](TASK-PROTOCOL.md) (WP etiquette, §7 is

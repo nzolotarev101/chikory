@@ -19,9 +19,10 @@
 #   never touches. Secondary KPI: the harness workspace contract stays intact (empty at adapter
 #   start) and no network is required.
 #
-# ⚠️ WHY THIS AND NOT P3-rung-4 ITSELF. `scripts/dogfood-progression.sh` = ⛔ STALLED, which binds
-#   the next headline to the current phase ladder rung. P3-rung-4 (≥5 brownfield tasks vs a
-#   baseline) cannot run: the runnable corpus is 2, and `brownfield-002` has carried
+# ⚠️ WHY THIS AND NOT P3-rung-4 ITSELF. `scripts/dogfood-progression.sh` read ⛔ STALLED before
+#   dogfood-117's ledger row and ✅ PROGRESSING after it (max steps 4 vs 2); the candidate is the same
+#   either way, because the default candidate IS the phase ladder rung. P3-rung-4 (≥5 brownfield tasks
+#   vs a baseline) cannot run: the runnable corpus is 2, and `brownfield-002` has carried
 #   `status: blocked` since 2026-07-23 pending exactly the capability WP-540 was queued to provide.
 #   WP-540 is rung-4's named unblock in plan.md §7; finishing it is the rung's only path.
 #
@@ -89,11 +90,12 @@ goal: >
     * THE COMMAND, DECLARED — NOT GUESSED. `findBaseVerificationCommand` currently keyword-matches the
       task's GRADING requirements for a description containing "test" or "suite" and, failing that, returns
       the literal string `"pnpm test"`. Grading checks describe the DELIVERY, not the base, and a
-      capability whose stated rule is "do not guess" must not guess its own input. The base verification
-      command must come from the task's own declaration, and when a task declares none the harness must say
-      so plainly rather than invent a command. Whatever shape you choose must round-trip through the
-      authored-task loader (`task.ts`) and must not break any existing task in `benchmarks/tasks/` —
-      remember you may not EDIT those files, so a required new field is not an option.
+      capability whose stated rule is "do not guess" must not guess its own input. Delete that resolver and
+      replace it with ONE declared field (the spelling IS prescribed, so the AC can probe it — F-194: one
+      field, wired for real): authored task YAML key `base_verification_command`, surfaced on
+      `BenchmarkTask` as OPTIONAL `baseVerificationCommand?: string`. Optional, because this run may not
+      edit `benchmarks/tasks/` and the existing corpus declares nothing. A repo-pinned task that declares
+      NO command must record a NON-GREEN verdict saying so — never an invented command, never a fake green.
 
     * TWO TRAPS THAT LOOK LIKE THE ANSWER AND ARE NOT:
       (A) Do NOT clone into `workspaceDir` to "make the existing call work". The workspace must be empty
@@ -107,8 +109,9 @@ goal: >
     * TESTS THAT PIN THE WIRING, NOT ONLY THE MODULE. dogfood-117 shipped 92 green tests over a call site
       that could never work, because every test probed `base-verify.ts` in isolation. Cover the SUITE path:
       a repo-pinned task gets a verdict read from its pinned ref; a task with no repo pin records nothing;
-      the checkout is removed afterwards; the workspace handed to the adapter is empty. Build a local git
-      fixture in a temp dir — no network, no multi-gigabyte clone.
+      a repo-pinned task declaring no command is non-green; the checkout is removed afterwards; the
+      workspace handed to the adapter is empty; `base_verification_command` round-trips through
+      `validateAuthoredTask`. Build a local git fixture in a temp dir — no network, no multi-gigabyte clone.
 
   CONSTRAINTS: strict TypeScript, ESM relative imports with explicit .js specifiers, named exports, no
   default exports, no new dependency, no key material, no global tool install, no devbox.json edit. Writes
@@ -129,8 +132,10 @@ acceptance_criteria:
       builds a LOCAL git repo fixture whose committed base is green (`Tests  3 passed (3)`) and runs
       `runSuite` with a stub adapter that (a) records whether the workspace it was handed was empty and
       (b) rewrites the suite output file to a RED one — so a verification reading the workspace, before or
-      after the adapter, cannot produce the green verdict this check demands. Also pins the no-repo case
-      (record nothing) and that no base checkout is left behind.
+      after the adapter, cannot produce the green verdict this check demands. Four families with negatives:
+      declared + repo-pinned (green, counts from the BASE ref), no repo pin (record nothing), repo-pinned
+      but undeclared (non-green, no invented command), and the loader round-trip for
+      `base_verification_command`. Also pins that no base checkout is left behind.
     check: |
       cd benchmarks/harness && pnpm exec tsc && node -e '
       const {mkdtempSync,mkdirSync,writeFileSync,existsSync,readFileSync,readdirSync}=require("node:fs");
@@ -147,10 +152,11 @@ acceptance_criteria:
       G("git init -q -b main");G("git add -A");
       G("git -c user.email=a@b.c -c user.name=fx commit -q -m base");
       const ref=execSync("git rev-parse HEAD",{cwd:target,encoding:"utf8"}).trim();
+      const CMD="cat SUITE_OUTPUT.txt";
       const mkTask=(over)=>Object.assign({
-        id:"fx-brown",source:"authored",class:"brownfield",status:"pinned",goal:"g",
-        requirements:[{id:"R1",description:"the pre-existing test suite is green",prerequisites:[],grading:{kind:"check",command:"cat SUITE_OUTPUT.txt"}}],
-        preferences:[],repo:{url:target,ref},tags:[],flags:{},
+        id:"brownfield-901",source:"authored",class:"brownfield",status:"pinned",goal:"g",
+        requirements:[{id:"R1",description:"the delivery keeps the suite green",prerequisites:[],grading:{kind:"check",command:"true"}}],
+        preferences:[],repo:{url:target,ref},baseVerificationCommand:CMD,tags:[],flags:{},
       },over);
       const seen={};
       const adapter={name:"stub",run:async(task,ctx)=>{
@@ -158,35 +164,49 @@ acceptance_criteria:
         writeFileSync(join(ctx.workspaceDir,"SUITE_OUTPUT.txt"),"Tests  7 failed | 0 passed (7)\n");
         return {exitCode:0,wallClockMs:1,artifacts:[],notes:[]};
       }};
-      import("file://"+process.cwd()+"/dist/suite.js").then(async(m)=>{
-        const out=await m.runSuite({suite:"fx",tasks:[mkTask({}),mkTask({id:"fx-green",class:"greenfield",repo:undefined})],
-          adapter,resultsDir:join(root,"results"),log:()=>{}});
+      const YAML=["id: brownfield-902","class: brownfield","status: pinned",
+        "goal: fixture","repo:","  url: "+JSON.stringify(target),"  ref: "+ref,
+        "base_verification_command: "+JSON.stringify(CMD),
+        "requirements:","  - id: R1","    description: the delivery keeps the suite green","    check: \"true\"",""].join("\n");
+      Promise.all([import("file://"+process.cwd()+"/dist/suite.js"),import("file://"+process.cwd()+"/dist/task.js")]).then(async([m,t])=>{
+        const loaded=t.validateAuthoredTask(YAML,"fixture.yaml");
+        A(loaded.issues.length===0,"the authored-task loader must accept `base_verification_command` (issues: "+JSON.stringify(loaded.issues)+")");
+        A(loaded.task&&loaded.task.baseVerificationCommand===CMD,
+          "the loader must carry the declaration through as `baseVerificationCommand` (got "+JSON.stringify(loaded.task&&loaded.task.baseVerificationCommand)+")");
+        const out=await m.runSuite({suite:"fx",tasks:[
+          mkTask({}),
+          mkTask({id:"greenfield-903",class:"greenfield",repo:undefined}),
+          mkTask({id:"brownfield-904",baseVerificationCommand:undefined}),
+        ],adapter,resultsDir:join(root,"results"),log:()=>{}});
         const read=(id)=>JSON.parse(readFileSync(join(out.outDir,id+".json"),"utf8"));
-        const bv=read("fx-brown").baseVerification;
-        A(bv!==undefined,"a repo-pinned task must record a base verification in its result");
+        const bv=read("brownfield-901").baseVerification;
+        A(bv!==undefined,"a repo-pinned task with a declared command must record a base verification");
         A(bv.green===true,"the fixture base IS green (3 passed / 0 failed) — got green="+bv.green+" reason="+JSON.stringify(bv.reason));
         A(bv.testsPassed===3,"testsPassed must come from the BASE ref own suite output (expected 3, got "+bv.testsPassed+")");
         A(bv.testsFailed===0,"testsFailed must be 0 on the base (got "+bv.testsFailed+")");
-        A(seen["fx-brown"]&&seen["fx-brown"].marker===false,
+        A(seen["brownfield-901"]&&seen["brownfield-901"].marker===false,
           "trap A: the adapter workspace must still start EMPTY — the base checkout goes elsewhere (BASE_MARKER leaked into the workspace)");
-        A(seen["fx-brown"].entries===0,"trap A: the adapter workspace must be empty at adapter start (found "+seen["fx-brown"].entries+" entries)");
-        A(read("fx-green").baseVerification===undefined,
-          "a task with NO repo pin has no base to verify — record nothing, not a fabricated verdict (got "+JSON.stringify(read("fx-green").baseVerification)+")");
+        A(seen["brownfield-901"].entries===0,"trap A: the adapter workspace must be empty at adapter start (found "+seen["brownfield-901"].entries+" entries)");
+        A(read("greenfield-903").baseVerification===undefined,
+          "a task with NO repo pin has no base to verify — record nothing, not a fabricated verdict (got "+JSON.stringify(read("greenfield-903").baseVerification)+")");
+        const undeclared=read("brownfield-904").baseVerification;
+        A(undeclared!==undefined&&undeclared.green===false,
+          "a repo-pinned task that declares NO verification command must not be green — say so, do not invent a command (got "+JSON.stringify(undeclared)+")");
         A(readdirSync(root).filter((e)=>e.startsWith("chikory-base-")).length===0,"no stray base checkout left behind");
-        console.log("AC-1 OK: base verification reads the pinned base ref; workspace untouched; no-repo task records nothing");
+        console.log("AC-1 OK: declaration round-trips; base verification reads the pinned ref; workspace untouched; no-repo and undeclared cases honest");
       }).catch((e)=>{console.error("FAIL: "+(e&&e.message?e.message:String(e)));process.exit(1);});'
   - id: AC-2
     description: >
       THE GUESSED COMMAND IS GONE AND THE DECLARATION EXISTS. On HEAD, `findBaseVerificationCommand`
       keyword-matches the task's grading requirements and falls back to the literal string `"pnpm test"`,
       and `task.ts` knows nothing about base verification — so both halves are RED on HEAD. The guessing
-      resolver must be gone from `base-verify.ts` AND from its call site, and the authored-task loader must
-      carry a verification declaration (field name deliberately NOT prescribed — F-194: pick one spelling
-      and wire it; an optional field, since `benchmarks/tasks/` may not be edited by this run).
+      resolver must be GONE from `base-verify.ts` and from its call site, and `BenchmarkTask` must carry the
+      declared `baseVerificationCommand?: string` (anchored to declaration/call FORMS, not bare words, so a
+      comment mentioning the old name cannot false-FAIL a correct delivery — F-83).
     check: >
-      ! grep -q 'findBaseVerificationCommand' benchmarks/harness/src/base-verify.ts &&
-      ! grep -q 'findBaseVerificationCommand' benchmarks/harness/src/suite.ts &&
-      grep -qi 'verif' benchmarks/harness/src/task.ts
+      ! grep -qE 'function findBaseVerificationCommand' benchmarks/harness/src/base-verify.ts &&
+      ! grep -qE 'findBaseVerificationCommand\(' benchmarks/harness/src/suite.ts &&
+      grep -qE 'baseVerificationCommand[?]?:' benchmarks/harness/src/task.ts
   - id: AC-3
     description: >
       THE WIRING IS ACTUALLY TESTED, AND NOTHING REGRESSED — the harness suite passes with net-new cases.
