@@ -73,6 +73,7 @@ import {
 import {
   buildCompletionReviewBrief,
   decideCompletionReview,
+  mergeDesignFindings,
 } from "./completion-review.js";
 import { decideSoakDelay } from "./soak.js";
 import { decideStepForcing } from "./step-forcing.js";
@@ -872,10 +873,13 @@ export async function agentLoop(spec: TaskSpec): Promise<RunStatus> {
           // still failing — or any review-pass ESCALATE/failure — seals SUCCESS
           // with the finding recorded, never parking a run whose criteria all
           // pass (the F-107 discipline).
+          const sealingRubricFails = verdict.form.rubricResults.filter((r) => !r.pass);
+          const sealingVerdictHasRubricFailures = sealingRubricFails.length > 0;
           const review = decideCompletionReview({
             sealingDiffBase,
             baseCommit,
             reviewAttemptsUsed: completionReviewAttempts,
+            sealingVerdictHasRubricFailures,
           });
           if (review.action === "review") {
             completionReviewAttempts += 1;
@@ -889,16 +893,26 @@ export async function agentLoop(spec: TaskSpec): Promise<RunStatus> {
               lastGoodCheckpointId,
             });
             spentUsd += reviewVerdict.costUsd;
-            const designFails = reviewVerdict.form.rubricResults.filter((r) => !r.pass);
+            // The objection the SEALING verdict raised is carried into the brief
+            // alongside the review's own — an independent review that comes back
+            // clean must not silently drop it (the goal's trap C).
+            const designFails = mergeDesignFindings(
+              sealingRubricFails,
+              reviewVerdict.form.rubricResults,
+            );
             if (designFails.length > 0) {
               const canRetry =
                 decideCompletionReview({
                   sealingDiffBase,
                   baseCommit,
                   reviewAttemptsUsed: completionReviewAttempts,
+                  sealingVerdictHasRubricFailures: true,
                 }).action === "review" && stepIndex < maxSteps;
               if (canRetry) {
-                judgeFeedback = buildCompletionReviewBrief(reviewVerdict.form);
+                judgeFeedback = buildCompletionReviewBrief({
+                  ...reviewVerdict.form,
+                  rubricResults: designFails,
+                });
                 remediationPending = true; // re-judge the fix off-cadence
                 const soakTerminal = await soakBeforeNextStep();
                 if (soakTerminal !== undefined) return soakTerminal;

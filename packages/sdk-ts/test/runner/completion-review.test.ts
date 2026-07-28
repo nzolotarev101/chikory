@@ -9,47 +9,227 @@ import {
   buildCompletionReviewBrief,
   decideCompletionReview,
   MAX_COMPLETION_REVIEWS,
+  mergeDesignFindings,
+  type RubricResult,
 } from "../../src/workflow/completion-review.js";
 import type { JudgeForm } from "../../src/types.js";
 
 const BASE = "commit-base";
 const LATER = "commit-later";
 
-describe("decideCompletionReview", () => {
-  it("reviews at the first seal moment when earlier verdicts advanced the diff base", () => {
-    const decision = decideCompletionReview({
-      sealingDiffBase: LATER,
-      baseCommit: BASE,
-      reviewAttemptsUsed: 0,
-    });
-    expect(decision).toEqual({ action: "review" });
-  });
+describe("decideCompletionReview — 2x2x3 input matrix", () => {
+  // Dimension 1: { first-verdict seal (sealingDiffBase === baseCommit), later seal (sealingDiffBase !== baseCommit) }
+  // Dimension 2: { rubric clean, rubric failing }
+  // Dimension 3: { attempts 0, 1, MAX_COMPLETION_REVIEWS (2) }
 
-  it("skips a first-verdict seal — the sealing pass already judged the cumulative diff", () => {
+  // ─── First-verdict seals (sealingDiffBase === baseCommit) ─────────────────
+  it("first-verdict seal + clean rubric + attempts 0 => skip (trap A: zero extra passes for clean 1-step run)", () => {
     const decision = decideCompletionReview({
       sealingDiffBase: BASE,
       baseCommit: BASE,
       reviewAttemptsUsed: 0,
+      sealingVerdictHasRubricFailures: false,
     });
     expect(decision.action).toBe("skip");
     if (decision.action === "skip") expect(decision.reason).toContain("first-verdict seal");
   });
 
-  it("grants the post-fix re-review, then exhausts", () => {
-    expect(
-      decideCompletionReview({
-        sealingDiffBase: LATER,
-        baseCommit: BASE,
-        reviewAttemptsUsed: 1,
-      }).action,
-    ).toBe("review");
-    const exhausted = decideCompletionReview({
+  it("first-verdict seal + clean rubric + attempts 1 => skip", () => {
+    const decision = decideCompletionReview({
+      sealingDiffBase: BASE,
+      baseCommit: BASE,
+      reviewAttemptsUsed: 1,
+      sealingVerdictHasRubricFailures: false,
+    });
+    expect(decision.action).toBe("skip");
+    if (decision.action === "skip") expect(decision.reason).toContain("first-verdict seal");
+  });
+
+  it("first-verdict seal + clean rubric + attempts 2 (exhausted) => skip", () => {
+    const decision = decideCompletionReview({
+      sealingDiffBase: BASE,
+      baseCommit: BASE,
+      reviewAttemptsUsed: MAX_COMPLETION_REVIEWS,
+      sealingVerdictHasRubricFailures: false,
+    });
+    expect(decision.action).toBe("skip");
+    if (decision.action === "skip") expect(decision.reason).toContain("exhausted");
+  });
+
+  it("first-verdict seal + failing rubric + attempts 0 => review (the F-180 fix)", () => {
+    const decision = decideCompletionReview({
+      sealingDiffBase: BASE,
+      baseCommit: BASE,
+      reviewAttemptsUsed: 0,
+      sealingVerdictHasRubricFailures: true,
+    });
+    expect(decision.action).toBe("review");
+  });
+
+  it("first-verdict seal + failing rubric + attempts 1 => review", () => {
+    const decision = decideCompletionReview({
+      sealingDiffBase: BASE,
+      baseCommit: BASE,
+      reviewAttemptsUsed: 1,
+      sealingVerdictHasRubricFailures: true,
+    });
+    expect(decision.action).toBe("review");
+  });
+
+  it("first-verdict seal + failing rubric + attempts 2 (exhausted) => skip (bound wins over rubric failure)", () => {
+    const decision = decideCompletionReview({
+      sealingDiffBase: BASE,
+      baseCommit: BASE,
+      reviewAttemptsUsed: MAX_COMPLETION_REVIEWS,
+      sealingVerdictHasRubricFailures: true,
+    });
+    expect(decision.action).toBe("skip");
+    if (decision.action === "skip") expect(decision.reason).toContain("exhausted");
+  });
+
+  // ─── Later seals (sealingDiffBase !== baseCommit) ─────────────────────────
+  it("later seal + clean rubric + attempts 0 => review", () => {
+    const decision = decideCompletionReview({
+      sealingDiffBase: LATER,
+      baseCommit: BASE,
+      reviewAttemptsUsed: 0,
+      sealingVerdictHasRubricFailures: false,
+    });
+    expect(decision.action).toBe("review");
+  });
+
+  it("later seal + clean rubric + attempts 1 => review", () => {
+    const decision = decideCompletionReview({
+      sealingDiffBase: LATER,
+      baseCommit: BASE,
+      reviewAttemptsUsed: 1,
+      sealingVerdictHasRubricFailures: false,
+    });
+    expect(decision.action).toBe("review");
+  });
+
+  it("later seal + clean rubric + attempts 2 (exhausted) => skip", () => {
+    const decision = decideCompletionReview({
       sealingDiffBase: LATER,
       baseCommit: BASE,
       reviewAttemptsUsed: MAX_COMPLETION_REVIEWS,
+      sealingVerdictHasRubricFailures: false,
     });
-    expect(exhausted.action).toBe("skip");
-    if (exhausted.action === "skip") expect(exhausted.reason).toContain("exhausted");
+    expect(decision.action).toBe("skip");
+    if (decision.action === "skip") expect(decision.reason).toContain("exhausted");
+  });
+
+  it("later seal + failing rubric + attempts 0 => review", () => {
+    const decision = decideCompletionReview({
+      sealingDiffBase: LATER,
+      baseCommit: BASE,
+      reviewAttemptsUsed: 0,
+      sealingVerdictHasRubricFailures: true,
+    });
+    expect(decision.action).toBe("review");
+  });
+
+  it("later seal + failing rubric + attempts 1 => review", () => {
+    const decision = decideCompletionReview({
+      sealingDiffBase: LATER,
+      baseCommit: BASE,
+      reviewAttemptsUsed: 1,
+      sealingVerdictHasRubricFailures: true,
+    });
+    expect(decision.action).toBe("review");
+  });
+
+  it("later seal + failing rubric + attempts 2 (exhausted) => skip (bound wins over rubric failure)", () => {
+    const decision = decideCompletionReview({
+      sealingDiffBase: LATER,
+      baseCommit: BASE,
+      reviewAttemptsUsed: MAX_COMPLETION_REVIEWS,
+      sealingVerdictHasRubricFailures: true,
+    });
+    expect(decision.action).toBe("skip");
+    if (decision.action === "skip") expect(decision.reason).toContain("exhausted");
+  });
+
+  // ─── Rubric input spellings (F-194: exactly two, both wired) ──────────────
+  it("derives the rubric outcome from a raw rubricResults array when no boolean is given", () => {
+    expect(
+      decideCompletionReview({
+        sealingDiffBase: BASE,
+        baseCommit: BASE,
+        reviewAttemptsUsed: 0,
+        rubricResults: [{ pass: false }],
+      }).action,
+    ).toBe("review");
+
+    expect(
+      decideCompletionReview({
+        sealingDiffBase: BASE,
+        baseCommit: BASE,
+        reviewAttemptsUsed: 0,
+        rubricResults: [{ pass: true }],
+      }).action,
+    ).toBe("skip");
+  });
+
+  it("the explicit boolean wins over the array when both are supplied", () => {
+    expect(
+      decideCompletionReview({
+        sealingDiffBase: BASE,
+        baseCommit: BASE,
+        reviewAttemptsUsed: 0,
+        sealingVerdictHasRubricFailures: false,
+        rubricResults: [{ pass: false }],
+      }).action,
+    ).toBe("skip");
+  });
+
+  it("treats an absent rubric outcome as clean — the pre-F-180 default", () => {
+    expect(
+      decideCompletionReview({
+        sealingDiffBase: BASE,
+        baseCommit: BASE,
+        reviewAttemptsUsed: 0,
+      }).action,
+    ).toBe("skip");
+  });
+});
+
+describe("mergeDesignFindings (trap C: the sealing objection must survive a clean review)", () => {
+  const fail = (id: string): RubricResult => ({
+    id,
+    pass: false,
+    justification: `${id} is unsound`,
+  });
+  const pass = (id: string): RubricResult => ({ id, pass: true, justification: "fine" });
+
+  it("keeps the sealing objection when the completion review comes back clean", () => {
+    const merged = mergeDesignFindings([fail("design_serves_overall_goal")], [pass("cumulative")]);
+    expect(merged.map((r) => r.id)).toEqual(["design_serves_overall_goal"]);
+  });
+
+  it("unions both sides, sealing objections first", () => {
+    const merged = mergeDesignFindings([fail("sealing")], [pass("ok"), fail("review")]);
+    expect(merged.map((r) => r.id)).toEqual(["sealing", "review"]);
+  });
+
+  it("dedupes by rubric id — one finding, not two", () => {
+    const merged = mergeDesignFindings([fail("same")], [fail("same")]);
+    expect(merged).toHaveLength(1);
+    expect(merged[0]!.justification).toBe("same is unsound");
+  });
+
+  it("returns empty when nothing failed on either side", () => {
+    expect(mergeDesignFindings([pass("a")], [pass("b")])).toEqual([]);
+  });
+
+  it("carries the merged findings into the brief verbatim", () => {
+    const merged = mergeDesignFindings([fail("design_serves_overall_goal")], []);
+    const brief = buildCompletionReviewBrief({
+      criterionResults: [],
+      rubricResults: merged,
+      concerns: [],
+    } as unknown as JudgeForm);
+    expect(brief).toContain("design_serves_overall_goal is unsound");
   });
 });
 

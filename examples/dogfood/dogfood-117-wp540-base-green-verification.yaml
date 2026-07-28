@@ -1,0 +1,259 @@
+# Dogfood-117: WP-540 — prove a benchmark task's UNTOUCHED base is green before anyone scores it
+#
+# 🟢 PLAIN LEAD. The benchmark corpus has a task (`brownfield-002`) that has been unscorable for
+#   five days because its target repo's test suite is red on the untouched base ref under the wrong
+#   Node. The toolchain half of that is fixed (WP-538 landed 2026-07-27). The half that is missing
+#   is the ability to ASK the question mechanically: "with the right Node provisioned, is this
+#   task's base actually green?" Today that answer exists only as a human assertion in a YAML
+#   comment. This run makes it a harness capability that returns a verdict with evidence.
+#
+# CLASS / LADDER. class=product — surface is `benchmarks/harness/src/`, same surface as WP-534 /
+#   WP-535 / WP-536 / WP-538, all class=product. Trailing-3 harness-meta headlines 0/3, cap intact.
+# Ladder-rung: 4
+# Thesis-KPI: PUBLICATION INTEGRITY — a benchmark number is worthless if the base it is measured
+#   against was never verified. The harness must be able to answer "is this task's untouched base
+#   green, under the Node its own `engines` field demands?" and must answer NO in every way the
+#   question can fail: the suite reported failures, the suite collected nothing, or the required
+#   toolchain is not available at all. Proven by an AC-owned behavioral probe over the real built
+#   module across EVERY input family with a negative per family (F-187), plus the wiring into the
+#   suite runner. Secondary KPI: hermetic — the verification's command execution is injected, so
+#   the whole decision is testable with no network and no 4 GB clone.
+#
+# ⚠️ SECOND, FREE PROOF — THE FIRST RUN ON A HEAD CARRYING WP-537 (🟡 F-197).
+#   dogfood-116 delivered WP-537 (a design finding must gate the seal) but could NOT exercise it:
+#   the Temporal worker runs the code that was on HEAD at launch, so the run that fixes "a rubric ✗
+#   must reach a consumer" itself sealed SUCCESS on a rubric ✗ with nothing gating it. THIS run is
+#   the first that carries the fix. So, whatever the delivery does, the review of this run MUST
+#   read the journal for one of these two signatures and state which it saw:
+#     - rubric carries ≥1 ✗  → expect a `completion-review` judge pass AND a step summary containing
+#       `DESIGN REVIEW BRIEF` AND terminal SUCCESS (the F-107 discipline holds).
+#     - rubric fully clean    → expect EXACTLY ONE judge pass, no completion review (trap A: a clean
+#       first-verdict seal must still pay zero extra judge passes).
+#   Either way WP-537 gets its first live datum. `docs/reports/dogfood-116.md` has the forensics.
+#
+# ⚠️ 🟡 F-190 IS STILL A BINDING DESIGN CONSTRAINT: `gemini-cli` collapses a whole agent session
+#   into ONE Chikory step, so this will very likely be a one-step run and `judge.cadence: 2` can
+#   never fire twice. Nothing in the delivery may assume a second step exists.
+#
+# ⚠️ 🔴 F-194 — DO NOT IMPLEMENT MULTIPLE SPELLINGS OF THE SAME INPUT. AC-1 below names ONE shape
+#   for its input and ONE for its output. It is not inviting you to accept six synonyms "to leave
+#   the design open"; dogfood-115 and dogfood-116 both shipped 6 dead public fields that way. One
+#   field, wired for real, is the delivery. Anything the AC does not exercise and the call site does
+#   not pass is dead API and will be deleted in review.
+#
+# ⚠️ SCOPE / DETERMINISM. Writes ONLY inside `benchmarks/harness/`. NO new dependency, NO key
+#   material, NO global tool install, NO `devbox.json` edit. Do NOT touch `packages/`,
+#   `examples/dogfood/`, `scripts/`, or any file under `benchmarks/tasks/` — flipping
+#   `brownfield-002` from `blocked` to `pinned` is the FOLLOW-ON run, gated on a real gitify
+#   verification this capability makes possible; this run builds the capability, not the flip. Run
+#   project commands sequentially inside the ALREADY-ACTIVATED devbox — do NOT nest `devbox run`
+#   (F-105).
+#
+# ⚠️ LAUNCH:
+#   0. Commit this spec + all dogfood-116 review docs to HEAD (the worker clones HEAD at run start).
+#   1. Verify the spec-pick glob resolves to THIS file: `sort | tail -n 1` over
+#      `examples/dogfood/dogfood-[0-9][0-9][0-9]*.yaml` → dogfood-117 sorts after dogfood-116.
+#   2. `CHIKORY_PREFLIGHT_ONLY=1 devbox run run-dogfood` dry-runs the guards at $0 (expect AC-2 RED).
+#      ℹ️ The preflight classes AC-1/AC-3/AC-4 as VERIFY-SUITE and does NOT dry-run them. All three
+#      were hand-verified in BOTH directions — see the AC arming evidence in
+#      `docs/reports/dogfood-116.md`'s NEXT RUN section.
+#   3. `devbox run run-dogfood`
+#   Post-run: `devbox run -- bash scripts/harvest.sh <run-id>` then `/dogfood-review <run-id>`.
+#   ⚠️ FIRST THING POST-RUN, BEFORE ANYTHING ELSE: `git status --short`. If your checkout is dirty
+#      with `benchmarks/` edits you did not make, F-192 recurred — read dogfood-115 §"the escape".
+
+name: dogfood-117-wp540-base-green-verification
+goal: >
+  Give the benchmark harness the ability to prove, by itself, that a task's UNTOUCHED base ref is green —
+  and to say precisely why not when it isn't.
+
+  Today this question has no mechanical answer. `benchmarks/tasks/brownfield-002-cross-cutting-refactor.yaml`
+  carries `status: blocked` and a hand-written `blocked_reason` explaining that the target's suite is red on
+  the base ref under Node 22. The toolchain half of that problem is solved — `benchmarks/harness/src/engine.ts`
+  now resolves each target's declared `engines.node` range and returns a provisioning decision (`ambient` /
+  `provision` / `unavailable`). What is missing is the consumer: nothing runs the target's own verification
+  command under that decision and reports a verdict. So a task's scorability is an assertion in a comment,
+  and the corpus cannot grow to the five runnable tasks the benchmark needs without a human vouching for each
+  base by hand.
+
+  Deliver, inside benchmarks/harness, in whatever design you judge best:
+
+    * A BASE-GREEN VERIFICATION with a real verdict. A new module `benchmarks/harness/src/base-verify.ts`
+      exports an async function `verifyBaseGreen` that takes ONE options object and resolves to ONE result
+      object. The options carry: the verification command to run (a string), the directory to run it in, the
+      `ProvisioningDecision` from `engine.ts`, and — so the whole thing is testable with no network and no
+      multi-gigabyte clone — an INJECTED command runner, `run`, an async function receiving
+      `{ command, cwd, env }` and resolving to `{ code, output }` exactly as `grade.ts`'s own `runCheck`
+      does. The result object carries at minimum a boolean `green`, a human-readable `reason`, and the
+      observed `testsPassed` / `testsFailed` counts. Nothing else about the design is prescribed; the
+      injected `run` is a requirement because a verification that can only be tested by cloning a real repo
+      is a verification nobody will test.
+
+    * THREE TRAPS, ALL OF WHICH LOOK LIKE THE ANSWER AND ARE NOT:
+      (A) Do NOT confuse "the command ran" with "the suite passed". A nonzero exit is never green, no matter
+          what the output says. This is the whole point of the capability.
+      (B) Do NOT treat a suite that collected ZERO tests as green. Exit 0 with nothing run is the single most
+          dangerous false green a benchmark can have — it turns an empty or misconfigured target into a
+          perfect baseline. Green requires at least one test reported passed AND zero reported failed.
+      (C) Do NOT run the suite under the ambient toolchain when the provisioning decision says otherwise.
+          A `provision` decision means the runner is invoked with that decision's `binDir` PREPENDED to
+          `PATH` in the env it passes to `run`; an `unavailable` decision means the suite MUST NOT BE RUN AT
+          ALL — return a non-green result naming the missing version, without invoking `run` even once.
+          Running the base under the wrong Node is exactly the F-163 mistake that blocked `brownfield-002`
+          in the first place, and it fails SILENTLY: the numbers look real.
+
+    * COUNTS READ FROM THE SUITE OUTPUT. Derive `testsPassed` / `testsFailed` from the runner's output in the
+      Vitest/Jest summary shapes the corpus actually produces — `Tests  1128 passed (1128)`,
+      `Tests  354 failed | 774 passed (1128)`, and `Tests  0 passed (0)`. Output that matches no known shape
+      is NOT green: an unparseable summary means the verification could not establish the base, and saying so
+      is the correct answer. Do not guess.
+
+    * WIRED INTO THE SUITE RUNNER, NOT LEFT ON A SHELF. `benchmarks/harness/src/suite.ts` must call
+      `verifyBaseGreen` for a task before that task is scored, pass it the provisioning decision the harness
+      already computes, and carry the outcome into the per-task result record so a published number can be
+      traced back to a verified base. A capability nothing calls has not changed anything.
+
+    * TESTS THAT COVER EVERY INPUT FAMILY, NOT ONE HAPPY CASE. Every family gets a test AND a negative:
+      suite green, suite red, zero tests collected, unparseable output, `provision` (assert the binDir
+      reaches the runner's PATH), `ambient` (assert PATH is not mangled), and `unavailable` (assert `run` is
+      never invoked). Assert what must NOT happen as well as what must.
+
+  CONSTRAINTS: strict TypeScript, ESM relative imports with explicit .js specifiers, named exports, no
+  default exports, no new dependency, no key material, no global tool install, no devbox.json edit. Writes
+  only inside benchmarks/harness; do not touch packages/, examples/dogfood/, scripts/, or benchmarks/tasks/.
+  Every delivered test must pass and must not break an existing one — the harness suite stays green,
+  type-clean and lint-clean.
+
+repos:
+  - url: /Users/nikitazolotarev/repos/chikory
+    writable: true
+
+acceptance_criteria:
+  - id: AC-1
+    description: >
+      THE VERDICT IS CORRECT ACROSS EVERY INPUT FAMILY, asserted by the CHECK ITSELF against the real built
+      module — not by tests the executor authored (F-180 is why: a delivery whose only behavioral evidence is
+      its own tests pins the one case it got right), and with a NEGATIVE per family (F-187: an oracle-owned
+      AC that probes one family still ships regressions). Probes `verifyBaseGreen` over seven families: a
+      green suite, a red suite, a zero-test suite that exits 0 (trap B), unparseable output, a `provision`
+      decision (trap C — the binDir must reach the runner's PATH), an `ambient` decision (PATH untouched),
+      and an `unavailable` decision (the runner must never be invoked). Also pins trap A directly: a nonzero
+      exit whose output claims tests passed is NOT green.
+    check: |
+      cd benchmarks/harness && pnpm exec tsc && node -e '
+      let A=(c,m)=>{if(!c){console.error("FAIL: "+m);process.exit(1);}};
+      let GREEN="Test Files  9 passed (9)\n     Tests  1128 passed (1128)";
+      let RED="Test Files  4 failed | 5 passed (9)\n     Tests  354 failed | 774 passed (1128)";
+      let EMPTY="Test Files  no test files\n     Tests  0 passed (0)";
+      let JUNK="Segmentation fault (core dumped)";
+      let mk=(code,output)=>{let calls=[];return {calls,run:async(o)=>{calls.push(o);return {code,output};}};};
+      import("file://"+process.cwd()+"/dist/base-verify.js").then(async(m)=>{
+        let fn=m.verifyBaseGreen;
+        A(typeof fn==="function","verifyBaseGreen must be a named export of harness/base-verify");
+        let ask=async(code,output,prov)=>{
+          let r=mk(code,output);
+          let res=await fn({command:"pnpm test",cwd:"/w",provisioning:prov,run:r.run});
+          return {res,calls:r.calls};
+        };
+        let amb={type:"ambient"};
+        // family 1: a green suite
+        let g=await ask(0,GREEN,amb);
+        A(g.res.green===true,"a suite reporting 1128 passed / 0 failed at exit 0 must be GREEN");
+        A(g.res.testsPassed===1128,"testsPassed must be read from the summary (expected 1128, got "+g.res.testsPassed+")");
+        A(g.res.testsFailed===0,"testsFailed must be 0 on a green suite");
+        // family 2: a red suite (negative)
+        let r2=await ask(1,RED,amb);
+        A(r2.res.green===false,"a suite reporting 354 failed must NOT be green");
+        A(r2.res.testsFailed===354,"testsFailed must be read from the summary (expected 354, got "+r2.res.testsFailed+")");
+        // family 3 / trap B: exit 0, zero tests collected (negative)
+        let z=await ask(0,EMPTY,amb);
+        A(z.res.green===false,"trap B: a suite that collected ZERO tests must NOT be green even at exit 0");
+        // family 4: unparseable output (negative)
+        let j=await ask(0,JUNK,amb);
+        A(j.res.green===false,"unparseable suite output must NOT be green — the base was not established");
+        // trap A: nonzero exit, output claims passes (negative)
+        let t=await ask(1,GREEN,amb);
+        A(t.res.green===false,"trap A: a NONZERO exit is never green, whatever the output says");
+        // family 5 / trap C: provision — the binDir must reach the runner PATH
+        let p=await ask(0,GREEN,{type:"provision",binDir:"/nix/store/fake-node-24/bin"});
+        A(p.calls.length===1,"a provision decision must still run the suite exactly once");
+        let penv=p.calls[0].env||{};
+        A(typeof penv.PATH==="string" && penv.PATH.split(":")[0]==="/nix/store/fake-node-24/bin",
+          "trap C: the provisioned binDir must be PREPENDED to the PATH handed to the runner (got "+String(penv.PATH).slice(0,80)+")");
+        A(p.res.green===true,"a provisioned green suite is green");
+        // family 6: ambient — PATH not mangled (negative for trap C)
+        A(g.calls.length===1,"an ambient decision runs the suite exactly once");
+        let aenv=g.calls[0].env||{};
+        A(aenv.PATH===undefined || aenv.PATH===process.env.PATH,
+          "an ambient decision must not rewrite PATH");
+        // family 7: unavailable — the suite must NOT be run at all (negative)
+        let u=await ask(0,GREEN,{type:"unavailable",neededVersion:24,available:["v22.14.0"]});
+        A(u.calls.length===0,"an unavailable toolchain must NOT invoke the runner even once");
+        A(u.res.green===false,"an unavailable toolchain must NOT be green");
+        A(/24/.test(String(u.res.reason)),"the unavailable reason must name the missing version");
+        A(typeof g.res.reason==="string" && g.res.reason.length>0,"every result must carry a human-readable reason");
+        console.log("AC-1 OK: base-green verdict correct across 7 input families");
+      }).catch(e=>{console.error("FAIL: "+(e && e.message ? e.message : String(e)));process.exit(1);});'
+  - id: AC-2
+    description: >
+      THE CAPABILITY IS WIRED INTO THE SUITE RUNNER — the consumer half. On HEAD `suite.ts` never mentions
+      base verification, so the grep is RED. A module nothing calls has changed nothing (the dogfood-116
+      lesson: proving the decision is correct does not prove the decision is consumed). Pins the call site
+      and that the provisioning decision crosses it, without prescribing the record's field names.
+    check: >
+      grep -q 'verifyBaseGreen' benchmarks/harness/src/suite.ts &&
+      test "$(grep -A8 'verifyBaseGreen(' benchmarks/harness/src/suite.ts | grep -ci 'provision')" -ge 1 &&
+      grep -qE 'export (async )?function verifyBaseGreen' benchmarks/harness/src/base-verify.ts
+  - id: AC-3
+    description: >
+      THE FAMILIES ARE ACTUALLY TESTED, AND NOTHING REGRESSED — the harness suite passes with net-new cases.
+      HEAD has 78 tests across 9 files (measured 2026-07-27: 2.05 s wall for the whole harness suite — F-141-safe, three orders of headroom inside the judge's 120 s per-check cap);
+      the seven families in AC-1 each with a negative cannot be covered in fewer than 90 total, so the count
+      is a floor the delivery must clear. RED on HEAD on the count.
+    check: |
+      cd benchmarks/harness && pnpm exec vitest run --reporter=json --outputFile=/tmp/bv-117.json >/dev/null 2>&1
+      node -e '
+      const r=JSON.parse(require("fs").readFileSync("/tmp/bv-117.json","utf8"));
+      if(r.numFailedTests>0){console.error("FAIL: "+r.numFailedTests+" harness test(s) failing");process.exit(1);}
+      if(r.numPassedTests<90){console.error("FAIL: only "+r.numPassedTests+" harness tests pass; the seven input families each with a negative need at least 90");process.exit(1);}
+      console.log("AC-3 OK: "+r.numPassedTests+" harness tests pass");'
+  - id: AC-4
+    description: >
+      The harness package stays type- and lint-clean. Deliberately SCOPED to `benchmarks/harness` (measured
+      2026-07-27: tsc + eslint 3.19 s) — the sdk-ts suite is untouched by this run's scope and is re-run
+      uncapped by the harvest verify-pack §3 regardless.
+    check: >
+      cd benchmarks/harness &&
+      pnpm exec tsc --noEmit && pnpm exec eslint src
+
+budget_usd: 30
+max_steps: 12
+
+# CONTEXT-ROT (WP-203/WP-207): auto-calibrated window (F-125 mechanism, live-proven 095-099, 101, 103, 105).
+pacing:
+  mode: auto
+  autoCalibrate: true
+
+# UNATTENDED (WP-271): operator-free; a genuine ESCALATE seals a resumable FAILED (WP-520).
+unattended:
+  escalation: seal_resumable_failed
+
+# DIRECTIVE (F-162/F-165): Gemini executes, Codex judges. Never Claude on a dogfood/benchmark run.
+executor:
+  adapter: gemini-cli
+  family: gemini
+
+judge:
+  family: openai-compat
+  cadence: 2
+  max_cost_share: 0.5
+
+# F-170-safe: the `code` stage drives the gemini-cli executor, so it must NOT name a foreign-family model
+# (a `gpt-`/`claude-` model here is what WP-536's launch preflight refuses). `default` lets the executor
+# pick its own model; plan/review/judge run on the keyless codex proxy.
+routing:
+  stages:
+    plan: { provider: openai-compat, model: gpt-5.6-sol xhigh }
+    code: { provider: gemini, model: default }
+    review: { provider: openai-compat, model: gpt-5.6-sol xhigh }
+    judge: { provider: openai-compat, model: gpt-5.6-sol xhigh }

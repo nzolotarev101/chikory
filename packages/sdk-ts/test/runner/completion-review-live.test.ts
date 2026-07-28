@@ -21,6 +21,7 @@ import {
   Journal,
   journalPath,
   RUBRIC_CUMULATIVE_DESIGN_COHERENT,
+  RUBRIC_DESIGN_SERVES_OVERALL_GOAL,
   type RunHandle,
   type RunStatusReport,
   type VerdictPayload,
@@ -178,6 +179,100 @@ describe.skipIf(address === null)("run-completion holistic review", () => {
       };
       expect(terminal.status).toBe("SUCCESS");
       expect(terminal.reason).toContain(RUBRIC_CUMULATIVE_DESIGN_COHERENT);
+    } finally {
+      journal.close();
+    }
+  }, 120_000);
+
+  test("first-verdict seal with a failing rubric item fires review, issues brief, runs fix step, and seals SUCCESS", async () => {
+    // 1-step run (claimsCompleteSteps: [1]), AC-1 true on pass 1, but the sealing
+    // verdict carries a failing rubric item (RUBRIC_DESIGN_SERVES_OVERALL_GOAL).
+    // The F-180 fix ensures the review fires, issues the design brief, grants ONE
+    // bounded fix step, re-reviews, and seals SUCCESS.
+    const wire = await startFakeJudgeWire(
+      [
+        judgeForm({
+          criteria: { "AC-1": true },
+          rubricFails: [RUBRIC_DESIGN_SERVES_OVERALL_GOAL],
+        }),
+        judgeForm({ criteria: { "AC-1": true } }),
+      ],
+      {
+        reviewForms: [
+          completionReviewForm({ rubricFails: [RUBRIC_CUMULATIVE_DESIGN_COHERENT] }),
+          completionReviewForm(),
+        ],
+      },
+    );
+    cleanups.push(() => wire.close());
+    const { repoUrl, dataDir, runner } = await setup(wire, {
+      claimsCompleteSteps: [1],
+      echoJudgeFeedback: true,
+    });
+    const spec = makeJudgedSpec({ repoUrl, cadence: 1, maxSteps: 4 });
+
+    const handle = await runner.start(spec);
+    const report = await awaitTerminal(handle);
+
+    expect(report.status).toBe("SUCCESS");
+    expect(wire.reviewHits).toBeGreaterThanOrEqual(1);
+
+    const reviews = reviewVerdicts(dataDir, handle.runId);
+    expect(reviews.length).toBeGreaterThanOrEqual(1);
+
+    const journal = new Journal(journalPath(dataDir, handle.runId));
+    try {
+      const summaries = journal
+        .entries("step")
+        .map((entry) => (entry.payload as { record: { summary: string } }).record.summary);
+      expect(summaries.some((summary) => summary.includes("DESIGN REVIEW BRIEF"))).toBe(true);
+      const terminal = journal.entries("terminal").at(-1)!.payload as {
+        status: string;
+        reason?: string;
+      };
+      expect(terminal.status).toBe("SUCCESS");
+    } finally {
+      journal.close();
+    }
+  }, 120_000);
+
+  test("a CLEAN completion review does not drop the sealing verdict's own objection (trap C)", async () => {
+    // The half of F-180 the first live case cannot see: the sealing verdict
+    // objects, the independent completion review comes back CLEAN. Without
+    // mergeDesignFindings the run pays the extra judge pass and then seals with
+    // the objection discarded — no brief, no fix step, bug intact behind green.
+    const wire = await startFakeJudgeWire(
+      [
+        judgeForm({
+          criteria: { "AC-1": true },
+          rubricFails: [RUBRIC_DESIGN_SERVES_OVERALL_GOAL],
+        }),
+        judgeForm({ criteria: { "AC-1": true } }),
+      ],
+      { reviewForms: [completionReviewForm(), completionReviewForm()] },
+    );
+    cleanups.push(() => wire.close());
+    const { repoUrl, dataDir, runner } = await setup(wire, {
+      claimsCompleteSteps: [1],
+      echoJudgeFeedback: true,
+    });
+    const spec = makeJudgedSpec({ repoUrl, cadence: 1, maxSteps: 4 });
+
+    const handle = await runner.start(spec);
+    const report = await awaitTerminal(handle);
+
+    expect(report.status).toBe("SUCCESS");
+
+    const journal = new Journal(journalPath(dataDir, handle.runId));
+    try {
+      const summaries = journal
+        .entries("step")
+        .map((entry) => (entry.payload as { record: { summary: string } }).record.summary);
+      const brief = summaries.find((summary) => summary.includes("DESIGN REVIEW BRIEF"));
+      expect(brief).toBeDefined();
+      // The brief carries the SEALING verdict's rubric id, not the review's.
+      expect(brief).toContain(RUBRIC_DESIGN_SERVES_OVERALL_GOAL);
+      expect(journal.entries("terminal").at(-1)!.payload).toMatchObject({ status: "SUCCESS" });
     } finally {
       journal.close();
     }

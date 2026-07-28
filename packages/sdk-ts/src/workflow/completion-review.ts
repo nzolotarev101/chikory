@@ -24,11 +24,37 @@ export interface CompletionReviewState {
   baseCommit: string;
   /** Completion reviews already run since the last terminal seal. */
   reviewAttemptsUsed: number;
+  /**
+   * Whether the sealing verdict's design rubric had any failing items.
+   * When true on a first-verdict seal, the run must take the bounded design-fix
+   * review path instead of skipping (the F-180 fix).
+   */
+  sealingVerdictHasRubricFailures?: boolean;
+  /**
+   * The sealing verdict's rubric results, when the caller holds the array
+   * rather than a precomputed boolean. Equivalent to
+   * `sealingVerdictHasRubricFailures: rubricResults.some((r) => !r.pass)`,
+   * which wins when both are given.
+   */
+  rubricResults?: ReadonlyArray<{ pass: boolean }>;
 }
 
 export type CompletionReviewDecision =
   | { action: "review" }
   | { action: "skip"; reason: string };
+
+/** One filled rubric row of a judge form. */
+export type RubricResult = JudgeForm["rubricResults"][number];
+
+function extractHasRubricFailures(state: CompletionReviewState): boolean {
+  if (typeof state.sealingVerdictHasRubricFailures === "boolean") {
+    return state.sealingVerdictHasRubricFailures;
+  }
+  if (Array.isArray(state.rubricResults)) {
+    return state.rubricResults.some((r) => !r.pass);
+  }
+  return false;
+}
 
 export function decideCompletionReview(
   state: CompletionReviewState,
@@ -36,13 +62,40 @@ export function decideCompletionReview(
   if (state.reviewAttemptsUsed >= MAX_COMPLETION_REVIEWS) {
     return { action: "skip", reason: "completion reviews exhausted" };
   }
-  if (state.sealingDiffBase === state.baseCommit) {
+  const isFirstVerdictSeal = state.sealingDiffBase === state.baseCommit;
+  const failingRubric = extractHasRubricFailures(state);
+
+  if (isFirstVerdictSeal && !failingRubric) {
     return {
       action: "skip",
       reason: "sealing verdict already judged the cumulative diff (first-verdict seal)",
     };
   }
   return { action: "review" };
+}
+
+/**
+ * Union the design objections the SEALING verdict raised with the ones the
+ * completion review raised, deduped by rubric id, sealing-verdict-first.
+ *
+ * Without this the F-180 fix is only half wired: a first-verdict seal with a
+ * failing rubric would fire the review, and then — if that second, independent
+ * review came back clean — drop the original objection and seal, having paid an
+ * extra judge pass to change nothing (the goal's trap C). Every objection
+ * raised at seal time reaches the executor's brief.
+ */
+export function mergeDesignFindings(
+  sealingRubric: ReadonlyArray<RubricResult>,
+  reviewRubric: ReadonlyArray<RubricResult>,
+): RubricResult[] {
+  const merged: RubricResult[] = [];
+  const seen = new Set<string>();
+  for (const result of [...sealingRubric, ...reviewRubric]) {
+    if (result.pass || seen.has(result.id)) continue;
+    seen.add(result.id);
+    merged.push(result);
+  }
+  return merged;
 }
 
 /**
