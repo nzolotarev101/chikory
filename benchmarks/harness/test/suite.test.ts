@@ -163,12 +163,12 @@ requirements:
       let workspaceWasEmptyAtStart = false;
       const stubAdapter: RunnerAdapter = {
         name: "stub-adapter",
-        run: async (t, ctx) => {
+        run: async (_task, ctx) => {
           const entries = readdirSync(ctx.workspaceDir);
           workspaceWasEmptyAtStart = entries.length === 0;
           // Rewrite workspace to a RED output file / state
           writeFileSync(join(ctx.workspaceDir, "test.sh"), '#!/bin/sh\necho "Tests  0 passed (0)"\nexit 1\n', { mode: 0o755 });
-          return { exitCode: 0, wallClockMs: 10 };
+          return { exitCode: 0, wallClockMs: 10, artifacts: [], notes: [] };
         },
       };
 
