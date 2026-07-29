@@ -28,6 +28,7 @@ import {
   chainJournalPath,
   chainRecordFrom,
   childRunId,
+  createTemporalRunner,
   journalPath,
   type ChainNodeTemplate,
   type Plan,
@@ -80,7 +81,7 @@ describe.skipIf(address === null)("live chain node resume (F-214)", () => {
     while (cleanups.length > 0) await cleanups.pop()!();
   });
 
-  test("re-enters the resumable child run and never replans the node", async () => {
+  async function harness() {
     const tmp = await mkdtemp(join(tmpdir(), "chikory-node-resume-"));
     cleanups.push(() => rm(tmp, { recursive: true, force: true }));
     const repoUrl = await initSourceRepo(join(tmp, "src"));
@@ -113,6 +114,31 @@ describe.skipIf(address === null)("live chain node resume (F-214)", () => {
       await connection.close();
     });
 
+    return { dataDir, taskQueue, repoUrl, client };
+  }
+
+  /** One journal, sealed twice, reopened in between — not a fresh run. */
+  function assertOneRunContinued(dataDir: string, chainId: string) {
+    const runJournal = new Journal(journalPath(dataDir, childRunId(chainId, "N-1")));
+    try {
+      const terminals = runJournal
+        .entries("terminal")
+        .map((e) => e.payload as { status: string; resumable?: boolean });
+      expect(terminals.map((t) => t.status)).toEqual(["FAILED", "SUCCESS"]);
+      expect(terminals[0]!.resumable).toBe(true);
+      expect(
+        runJournal.entries("control_event").map((e) => e.payload as { event: string; source?: string }),
+      ).toContainEqual(expect.objectContaining({ event: "resume", source: "failed_seal" }));
+      // Both incarnations' steps are in one journal — the work carried over
+      // rather than starting from an empty workspace.
+      expect(runJournal.entries("step").length).toBeGreaterThan(1);
+    } finally {
+      runJournal.close();
+    }
+  }
+
+  test("re-enters the resumable child run and never replans the node", async () => {
+    const { dataDir, taskQueue, repoUrl, client } = await harness();
     const chainId = `chain-${randomUUID()}`;
     const status = await client.workflow.execute("chainLoop", {
       workflowId: chainId,
@@ -138,22 +164,40 @@ describe.skipIf(address === null)("live chain node resume (F-214)", () => {
       chain.close();
     }
 
-    // …and it is the SAME run: one journal, sealed twice, reopened in between.
-    const runJournal = new Journal(journalPath(dataDir, childRunId(chainId, "N-1")));
+    assertOneRunContinued(dataDir, chainId);
+  }, 150_000);
+
+  test("the OPERATOR resume re-enters the child too, instead of rewriting the node", async () => {
+    const { dataDir, taskQueue, repoUrl, client } = await harness();
+    const chainId = `chain-${randomUUID()}`;
+
+    // `maxReplans: 0` turns the in-loop heal off entirely, so the chain seals
+    // FAILED with a child that is nonetheless resumable — the exact shape
+    // dogfood-120's `chain-0723ac0b` sat in when its operator reached for
+    // `chikory chain resume`.
+    const first = await client.workflow.execute("chainLoop", {
+      workflowId: chainId,
+      taskQueue,
+      args: [{ plan: onePlan(), template: template(repoUrl), maxReplans: 0 }],
+      workflowExecutionTimeout: "2 minutes",
+    });
+    expect(first).toBe("FAILED");
+
+    const runner = createTemporalRunner({ address: address!, taskQueue, dataDir });
+    cleanups.push(() => runner.close());
+    await runner.resumeChain(chainId);
+    expect(await client.workflow.getHandle(chainId).result()).toBe("SUCCESS");
+
+    const chain = new ChainJournal(chainJournalPath(dataDir, chainId));
     try {
-      const terminals = runJournal.entries("terminal").map((e) => e.payload as { status: string; resumable?: boolean });
-      expect(terminals.map((t) => t.status)).toEqual(["FAILED", "SUCCESS"]);
-      expect(terminals[0]!.resumable).toBe(true);
-      expect(
-        runJournal
-          .entries("control_event")
-          .map((e) => e.payload as { event: string; source?: string }),
-      ).toContainEqual(expect.objectContaining({ event: "resume", source: "failed_seal" }));
-      // Both incarnations' steps are in one journal — the work carried over
-      // rather than starting from an empty workspace.
-      expect(runJournal.entries("step").length).toBeGreaterThan(1);
+      expect(chain.entries("node_resumed")).toHaveLength(1);
+      // The operator asked to continue, not to start over.
+      expect(chain.entries("node_replanned")).toEqual([]);
+      expect(chainRecordFrom(chain)!.plan.id).toBe("plan-node-resume-live");
     } finally {
-      runJournal.close();
+      chain.close();
     }
+
+    assertOneRunContinued(dataDir, chainId);
   }, 150_000);
 });

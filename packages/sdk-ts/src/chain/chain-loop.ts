@@ -42,7 +42,7 @@ import {
   planNodeToTaskSpec,
   type ChainNodeTemplate,
 } from "./node-spec.js";
-import { decideNodeHeal } from "./node-heal.js";
+import { decideNodeHeal, MAX_CHILD_RESUMES_PER_NODE } from "./node-heal.js";
 import { decideReplan, resumeGrantBounds, type ReplanBounds } from "./replan.js";
 import { readyNodes } from "./sequencing.js";
 
@@ -92,6 +92,18 @@ export interface ChainLoopInput {
   planAttempts?: PlanAttemptRecord[];
 }
 
+/**
+ * The outcome map without one node's seal — putting that node back in the
+ * loop's ready set so its child run is re-executed (F-214). `chainRecordFrom`
+ * folds `node_sealed` last-wins, so the re-seal supersedes cleanly.
+ */
+function withoutNode(
+  outcomes: ChainRecord["nodeOutcomes"],
+  nodeId: string,
+): ChainRecord["nodeOutcomes"] {
+  return Object.fromEntries(Object.entries(outcomes).filter(([id]) => id !== nodeId));
+}
+
 /** workflowId = chain-id (mirrors agentLoop's workflowId = run-id mapping). */
 export async function chainLoop(input: ChainLoopInput): Promise<ChainStatus> {
   const { workflowId: chainId, taskQueue } = workflowInfo();
@@ -130,23 +142,47 @@ export async function chainLoop(input: ChainLoopInput): Promise<ChainStatus> {
   let resumableSeal = false;
 
   // WP-521(c) operator resume grants ONE fresh heal attempt to the blocking
-  // failed node (the operator-triggered analog of heal-by-default): replan it
-  // before the loop so the retry node dispatches. If the retry also fails, the
-  // loop's own `decideReplan` governs and re-seals a resumable FAILED for
-  // another resume. Carries the failed child's seal reason as the retry brief.
+  // failed node (the operator-triggered analog of heal-by-default), through the
+  // same ADR-009 tier order the loop uses: RE-ENTER the child if its run said it
+  // could continue (F-214), and only rewrite the node when it could not. If the
+  // attempt also fails, the loop's own decisions govern and re-seal a resumable
+  // FAILED for another resume.
   if (restored.resumed) {
     const failedNode = plan.nodes.find(
       (node) => record.nodeOutcomes[node.id]?.status === "FAILED",
     );
     if (failedNode !== undefined) {
+      const failedRunId = record.nodeRuns[failedNode.id];
+      const failedResult =
+        failedRunId !== undefined
+          ? await activities.readNodeResult({ childRunId: failedRunId })
+          : undefined;
+      // The operator's resume IS the grant, so this tier starts from zero.
+      const heal = decideNodeHeal({
+        childStatus: "FAILED",
+        childResumable: failedResult?.resumable === true,
+        resumesUsed: 0,
+      });
       // Fresh grant sized to what is already spent → exactly one REPLAN here.
       const decision = decideReplan(record, failedNode.id, resumeGrantBounds(record, failedNode.id));
-      if (decision.action === "REPLAN") {
-        const failedRunId = record.nodeRuns[failedNode.id];
-        const failedResult =
-          failedRunId !== undefined
-            ? await activities.readNodeResult({ childRunId: failedRunId })
-            : undefined;
+      if (heal.action === "resume_child" && failedRunId !== undefined) {
+        await activities.recordNodeResumed({
+          chainId,
+          nodeId: failedNode.id,
+          childRunId: failedRunId,
+          attempt: heal.attempt,
+          reason: failedResult?.reason ?? heal.reason,
+        });
+        // Dropping the sealed outcome puts the node back in the loop's ready
+        // set; the loop re-executes the SAME child workflow id, whose own
+        // `restoreWorkflowState` reopens the seal and carries the remediation
+        // brief forward. The node's work is never discarded to heal it.
+        record = {
+          ...record,
+          nodeOutcomes: withoutNode(record.nodeOutcomes, failedNode.id),
+          status: "RUNNING",
+        };
+      } else if (decision.action === "REPLAN") {
         const replanned = await activities.replanRemaining({
           chainId,
           plan,
@@ -262,11 +298,17 @@ export async function chainLoop(input: ChainLoopInput): Promise<ChainStatus> {
     // replan tier below, unchanged.
     let childResumes = 0;
     for (;;) {
-      const heal = decideNodeHeal({
-        childStatus: result.outcome.status,
-        childResumable: result.resumable === true,
-        resumesUsed: childResumes,
-      });
+      const heal = decideNodeHeal(
+        {
+          childStatus: result.outcome.status,
+          childResumable: result.resumable === true,
+          resumesUsed: childResumes,
+        },
+        // `maxReplans: 0` is the documented heal-off opt-out (WP-521, and the
+        // WP-532 drill's `CHIKORY_CHAIN_MAX_REPLANS=0`). It means "do not heal
+        // a failed node", so it governs every tier, not just the replan one.
+        maxReplans > 0 ? MAX_CHILD_RESUMES_PER_NODE : 0,
+      );
       if (heal.action !== "resume_child") break;
       childResumes = heal.attempt;
       await activities.recordNodeResumed({
