@@ -87,6 +87,12 @@ goal: >
   benchmark launcher script/devbox entry, and the rung-4 report/publication bundle. Every existing
   test remains green.
 
+  Decomposition guidance for the planner:
+    - The raw-Claude-Code baseline arm node MUST depend on and run sequentially AFTER the Chikory arm node (never concurrent, per Devbox sequential command execution constraints).
+    - The tooling/harness node MUST explicitly require running strict TypeScript checking (`pnpm exec tsc --noEmit`), linting (`pnpm exec eslint`), and the full vitest test suite to satisfy AC-5.
+    - The publication node MUST copy ONLY `chikory-summary.json`, `raw-claude-code-summary.json`, and `comparison.json` into `benchmarks/publications/p3-rung-4/` (no extra report files).
+    - Every generated node task text MUST retain all exact mandated goal literal strings verbatim: `status: pinned`, `base_verification_command`, `summary.json`, `tasksVerified === tasks === 5`, `unverifiedTasks`, `benchmarks/results/`, `benchmarks/publications/p3-rung-4/`, `node_modules`, `any`, `devbox run`, and `benchmarks/`.
+
 repos:
   - url: /Users/nikitazolotarev/repos/chikory
     writable: true
