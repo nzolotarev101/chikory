@@ -9,8 +9,10 @@
  *      `judge` / `routing` / `repos` the per-node template);
  *   2. decompose the goal into a `Plan` (`runPlannerPass`, one `plan`-stage
  *      call) and gate it with the different-family plan meta-judge
- *      (`runPlanJudgePass`, ADR-005 D2) — a non-PROCEED verdict stops here
- *      (v1: no auto-replan, the D3 follow-up);
+ *      (`runPlanJudgePass`, ADR-005 D2) — a REPAIRABLE rejection feeds the
+ *      gate's own evidence back to the planner and re-decomposes, bounded by
+ *      attempts and cost (WP-542/F-207, ADR-009 D1); only an unrepairable
+ *      class or an exhausted budget stops here;
  *   3. start the durable `chainLoop` workflow over the gated plan and follow
  *      the `ChainJournal` to a terminal `ChainStatus`.
  *
@@ -30,16 +32,40 @@ import { ChainJournal, chainRecordFrom, type ChainEntry } from "../chain/store.j
 import { serializeWriteConflicts } from "../chain/write-set.js";
 import type { ChainNodeTemplate } from "../chain/node-spec.js";
 import { renderChainTrace } from "../chain/trace.js";
+import {
+  decideGateRepair,
+  gateRepairCostCap,
+  MAX_GATE_REPAIR_ATTEMPTS,
+} from "../heal/gate-repair.js";
 import { Journal } from "../journal/journal.js";
 import { FamilyDiversityError } from "../judge/family.js";
 import { runPlannerPass } from "../planner/harness.js";
 import { runPlanJudgePass } from "../planner/meta-judge-harness.js";
+import {
+  buildPlanRepairBrief,
+  describeRepairTarget,
+  familyDiversityFailure,
+  gateFailure,
+  minNodesFailure,
+  plannerTransportFailure,
+  writeSetFailure,
+  type PlanPhaseFailure,
+  type PlanPhaseFailureKind,
+} from "../planner/plan-repair.js";
 import { createRouter } from "../router.js";
 import { createTemporalRunner, describeWorkflowTaskQueue } from "../runner.js";
 import { createRunnerWorker } from "../runner/worker.js";
 import { chainJournalPath, journalPath } from "../runner/paths.js";
 import { parseTaskSpec, TaskSpecValidationError } from "../taskspec.js";
-import type { ChainRecord, ChainStatus, Plan, PlanVerdict, Router, TaskSpec } from "../types.js";
+import type {
+  ChainRecord,
+  ChainStatus,
+  Plan,
+  PlanVerdict,
+  PlanVerdictKind,
+  Router,
+  TaskSpec,
+} from "../types.js";
 import { DEFAULT_ADAPTERS, type CliDeps, type CommonFlags } from "./commands.js";
 import { assessLaunchModeMismatch, detectIntendedSingleRun } from "./launch-mode-precheck.js";
 
@@ -68,20 +94,71 @@ function actionable(err: unknown): string {
 }
 
 /**
- * Host-side decompose → gate. Pure of Temporal (just LLM calls), so it is the
- * unit-testable seam: a fake `Router` drives planner + plan-judge replies.
- * Returns the gated plan on PROCEED, or a stop reason (a failed decomposition,
- * a non-PROCEED meta-judge verdict, or a family-diversity config error).
+ * Host-side decompose → gate, with the WP-542 bounded repair loop. Pure of
+ * Temporal (just LLM calls), so it is the unit-testable seam: a fake `Router`
+ * drives planner + plan-judge replies.
+ *
+ * ADR-009 D1 is binding — every non-infra failure class gets at least one
+ * bounded, journaled, automated heal attempt before a terminal seal — and the
+ * plan gate used to be the one layer with no tier at all: any rejection ended
+ * the launch and the human hand-edited the goal spec (F-207, five times on
+ * dogfood-120). Now every repairable rejection composes the gate's own evidence
+ * into a repair brief and re-decomposes against it; `onAttempt` surfaces each
+ * pass so the self-heal is visible rather than a silent pause.
+ *
+ * Returns the gated plan on PROCEED, or a stop reason with the full attempt
+ * trail. It never returns an ungated plan: an exhausted repair budget stops the
+ * launch, because a gate that does not gate is not a gate.
  */
-export type PlanGateResult =
-  | { ok: true; plan: Plan; verdict: PlanVerdict; costUsd: number }
-  | { ok: false; phase: "plan" | "gate"; message: string; verdict?: PlanVerdict; costUsd: number };
+export interface PlanRepairAttempt {
+  /** 1-based; attempt 1 is the original pass, 2+ are repairs. */
+  attempt: number;
+  phase: "plan" | "gate";
+  kind: PlanPhaseFailureKind | "PROCEED";
+  verdictKind?: PlanVerdictKind;
+  /** Independently checkable defects this attempt was rejected for. */
+  machineGaps: string[];
+  /** USD this attempt spent (planner + plan-judge). */
+  costUsd: number;
+  reason: string;
+}
 
-export async function planAndGateChain(
+export type PlanGateResult =
+  | {
+      ok: true;
+      plan: Plan;
+      verdict: PlanVerdict;
+      costUsd: number;
+      attempts: PlanRepairAttempt[];
+    }
+  | {
+      ok: false;
+      phase: "plan" | "gate";
+      message: string;
+      verdict?: PlanVerdict;
+      costUsd: number;
+      attempts: PlanRepairAttempt[];
+    };
+
+export interface PlanGateOptions {
+  /** Repair attempts beyond the first pass; `0` = the pre-WP-542 single shot. */
+  maxRepairAttempts?: number;
+  /** Absolute USD ceiling for the whole plan phase; `0` disables the cost stop. */
+  repairCostCapUsd?: number;
+  /** Per-attempt operator callback — the visible half of the self-heal. */
+  onAttempt?: (attempt: PlanRepairAttempt, maxAttempts: number) => void;
+}
+
+/** One decompose → normalize → floor → gate pass. Failures are values. */
+async function planGatePass(
   spec: TaskSpec,
   router: Router,
   ids: { newPlanId: () => string; now: () => string },
-): Promise<PlanGateResult> {
+  repairBrief: string | undefined,
+): Promise<
+  | { ok: true; plan: Plan; verdict: PlanVerdict; costUsd: number }
+  | { ok: false; failure: PlanPhaseFailure; plan?: Plan; costUsd: number }
+> {
   const planned = await runPlannerPass({
     router,
     input: {
@@ -90,12 +167,17 @@ export async function planAndGateChain(
       budgetUsd: spec.budgetUsd,
       family: spec.executor.family,
       ...(spec.minNodes !== undefined ? { minNodes: spec.minNodes } : {}),
+      ...(repairBrief !== undefined ? { repairBrief } : {}),
     },
     planId: ids.newPlanId(),
     createdAt: ids.now(),
   });
   if (planned.status === "FAILED") {
-    return { ok: false, phase: "plan", message: planned.reason, costUsd: planned.costUsd };
+    return {
+      ok: false,
+      failure: plannerTransportFailure(planned.reason),
+      costUsd: planned.costUsd,
+    };
   }
 
   let normalizedPlan: Plan;
@@ -104,23 +186,21 @@ export async function planAndGateChain(
   } catch (err) {
     return {
       ok: false,
-      phase: "plan",
-      message: err instanceof Error ? err.message : String(err),
+      failure: writeSetFailure(err instanceof Error ? err.message : String(err)),
+      plan: planned.plan,
       costUsd: planned.costUsd,
     };
   }
 
   // WP-509/F-88: deterministic decomposition floor. A planner that collapses a
   // decomposable goal into too few nodes is caught here — before any judge
-  // budget is spent — and surfaced as an actionable stop instead of silently
-  // shipping a one-node "chain" with no horizon.
+  // budget is spent — and now feeds the shortfall back as repair evidence
+  // instead of ending the launch.
   if (spec.minNodes !== undefined && normalizedPlan.nodes.length < spec.minNodes) {
     return {
       ok: false,
-      phase: "plan",
-      message:
-        `planner under-decomposed: ${normalizedPlan.nodes.length} node(s) < min_nodes ` +
-        `${spec.minNodes} — the goal was collapsed too coarsely; re-run or lower min_nodes`,
+      failure: minNodesFailure(normalizedPlan.nodes.length, spec.minNodes),
+      plan: normalizedPlan,
       costUsd: planned.costUsd,
     };
   }
@@ -139,20 +219,150 @@ export async function planAndGateChain(
     });
   } catch (err) {
     // FamilyDiversityError is a config error (same-family plan-judge, no opt-in)
-    // — fail fast, before any node spends budget (invariant #2, ADR-005 D2).
+    // — fail fast, never repaired, before any node spends budget (invariant #2,
+    // ADR-005 D2).
     if (err instanceof FamilyDiversityError) {
-      return { ok: false, phase: "gate", message: err.message, costUsd: planned.costUsd };
+      return {
+        ok: false,
+        failure: familyDiversityFailure(err.message),
+        plan: normalizedPlan,
+        costUsd: planned.costUsd,
+      };
     }
     throw err;
   }
 
   const costUsd = planned.costUsd + gated.costUsd;
   if (gated.verdict.kind !== "PROCEED") {
-    const failureClass = classifyPlanGateFailure(gated.verdict);
-    const message = failureClass ? renderPlanGateFailureNotice(failureClass) : gated.verdict.rationale;
-    return { ok: false, phase: "gate", message, verdict: gated.verdict, costUsd };
+    return {
+      ok: false,
+      failure: gateFailure(gated.verdict, normalizedPlan),
+      plan: normalizedPlan,
+      costUsd,
+    };
   }
   return { ok: true, plan: normalizedPlan, verdict: gated.verdict, costUsd };
+}
+
+export async function planAndGateChain(
+  spec: TaskSpec,
+  router: Router,
+  ids: { newPlanId: () => string; now: () => string },
+  options: PlanGateOptions = {},
+): Promise<PlanGateResult> {
+  const maxRepairAttempts = options.maxRepairAttempts ?? MAX_GATE_REPAIR_ATTEMPTS;
+  const costCapUsd = options.repairCostCapUsd ?? gateRepairCostCap(spec.budgetUsd);
+  const attempts: PlanRepairAttempt[] = [];
+  // Total passes = the original + the repairs, so the operator-facing "k of n"
+  // counts what a human would count.
+  const maxPasses = maxRepairAttempts + 1;
+
+  let costUsd = 0;
+  let repairBrief: string | undefined;
+
+  for (;;) {
+    const passIndex = attempts.length + 1;
+    const pass = await planGatePass(spec, router, ids, repairBrief);
+    costUsd += pass.costUsd;
+
+    if (pass.ok) {
+      const record: PlanRepairAttempt = {
+        attempt: passIndex,
+        phase: "gate",
+        kind: "PROCEED",
+        verdictKind: pass.verdict.kind,
+        machineGaps: [],
+        costUsd: pass.costUsd,
+        reason: pass.verdict.rationale,
+      };
+      attempts.push(record);
+      options.onAttempt?.(record, maxPasses);
+      return { ok: true, plan: pass.plan, verdict: pass.verdict, costUsd, attempts };
+    }
+
+    const { failure } = pass;
+    const record: PlanRepairAttempt = {
+      attempt: passIndex,
+      phase: failure.phase,
+      kind: failure.kind,
+      ...(failure.verdict !== undefined ? { verdictKind: failure.verdict.kind } : {}),
+      machineGaps: failure.machineGaps,
+      costUsd: pass.costUsd,
+      reason: failure.message,
+    };
+    attempts.push(record);
+    options.onAttempt?.(record, maxPasses);
+
+    const decision = decideGateRepair(
+      { attemptsUsed: attempts.length - 1, costUsdSpent: costUsd, repairable: failure.repairable },
+      { maxAttempts: maxRepairAttempts, costCapUsd },
+    );
+    if (decision.action === "stop") {
+      return {
+        ok: false,
+        phase: failure.phase,
+        message: renderPlanPhaseStop(failure, attempts.length - 1),
+        ...(failure.verdict !== undefined ? { verdict: failure.verdict } : {}),
+        costUsd,
+        attempts,
+      };
+    }
+
+    repairBrief = buildPlanRepairBrief({
+      failure,
+      attempt: decision.attempt,
+      maxAttempts: maxRepairAttempts,
+      ...(pass.plan !== undefined ? { priorPlan: pass.plan } : {}),
+    });
+  }
+}
+
+/** The operator-facing stop line: the pre-WP-542 wording, plus what repair did. */
+function renderPlanPhaseStop(failure: PlanPhaseFailure, repairsUsed: number): string {
+  if (failure.verdict === undefined) return failure.message;
+  const failureClass = classifyPlanGateFailure(failure.verdict);
+  return failureClass
+    ? renderPlanGateFailureNotice(failureClass, repairsUsed)
+    : failure.verdict.rationale;
+}
+
+/**
+ * The exhausted-repair trail (WP-542/F-207). When the loop gives up, the
+ * operator gets every attempt, what each was rejected for, and what the phase
+ * cost — one read instead of one re-launch per data point.
+ */
+export function renderPlanRepairTrail(
+  attempts: readonly PlanRepairAttempt[],
+  costUsd: number,
+): string[] {
+  if (attempts.length === 0) return [];
+  const lines = [`plan repair trail (${attempts.length} attempt(s), $${costUsd.toFixed(4)}):`];
+  for (const attempt of attempts) {
+    const verdict = attempt.verdictKind ?? attempt.kind;
+    lines.push(
+      `  attempt ${attempt.attempt} · ${attempt.phase} · ${verdict} · $${attempt.costUsd.toFixed(4)}`,
+    );
+    for (const gap of attempt.machineGaps) lines.push(`    - ${gap}`);
+    if (attempt.machineGaps.length === 0) {
+      lines.push(`    ${attempt.reason.replace(/\s+/g, " ").trim().slice(0, 300)}`);
+    }
+  }
+  return lines;
+}
+
+/**
+ * WP-542 repair budget. `CHIKORY_PLAN_REPAIR_ATTEMPTS=0` restores the
+ * pre-WP-542 single-shot stop (the seam the unit tests and any "prove the old
+ * dead end" drill use); unset applies the `MAX_GATE_REPAIR_ATTEMPTS` default.
+ * Read host-side only — the plan phase never runs inside a workflow body.
+ */
+export function planRepairBudgetFromEnv(
+  raw = process.env["CHIKORY_PLAN_REPAIR_ATTEMPTS"],
+): number {
+  if (raw === undefined || raw.trim() === "") return MAX_GATE_REPAIR_ATTEMPTS;
+  const parsed = Number(raw);
+  if (!Number.isInteger(parsed) || parsed < 0) return MAX_GATE_REPAIR_ATTEMPTS;
+  return parsed;
 }
 
 function templateFromSpec(spec: TaskSpec): ChainNodeTemplate {
@@ -561,14 +771,31 @@ export async function cmdChain(
     return 1;
   }
 
-  // 1+2: decompose the goal and gate the plan (different-family meta-judge).
+  // 1+2: decompose the goal and gate the plan (different-family meta-judge),
+  // repairing a repairable rejection in-loop rather than ending the launch
+  // (WP-542/F-207).
   let gate: PlanGateResult;
   try {
     const router = createRouter(spec.routing, deps.routerOptions);
-    gate = await planAndGateChain(spec, router, {
-      newPlanId: () => `plan-${cryptoRandomId()}`,
-      now: () => new Date().toISOString(),
-    });
+    gate = await planAndGateChain(
+      spec,
+      router,
+      {
+        newPlanId: () => `plan-${cryptoRandomId()}`,
+        now: () => new Date().toISOString(),
+      },
+      {
+        maxRepairAttempts: planRepairBudgetFromEnv(),
+        onAttempt: (attempt, maxPasses) => {
+          if (args.json || attempt.kind === "PROCEED") return;
+          ioPair.err(
+            `plan gate ${attempt.verdictKind ?? attempt.kind} ` +
+              `(attempt ${attempt.attempt}/${maxPasses}) — repairing: ` +
+              describeRepairTarget({ message: attempt.reason, machineGaps: attempt.machineGaps }),
+          );
+        },
+      },
+    );
   } catch (err) {
     ioPair.err(`chikory: ${actionable(err)}`);
     return 1;
@@ -580,11 +807,19 @@ export async function cmdChain(
     if (gate.verdict && gate.verdict.uncoveredCriteria.length > 0) {
       ioPair.err(`uncovered goal criteria: ${gate.verdict.uncoveredCriteria.join(", ")}`);
     }
+    // The whole repair trail, so the residual failure is diagnosable in one read
+    // instead of one line per re-launch (F-207).
+    for (const line of renderPlanRepairTrail(gate.attempts, gate.costUsd)) ioPair.err(line);
     return 1;
   }
 
   if (!args.json) {
-    ioPair.out(`plan ${gate.plan.id} · ${gate.plan.nodes.length} nodes · plan-judge PROCEED`);
+    const repairs = gate.attempts.length - 1;
+    const healed = repairs > 0 ? ` (healed in ${repairs} repair attempt(s))` : "";
+    ioPair.out(
+      `plan ${gate.plan.id} · ${gate.plan.nodes.length} nodes · plan-judge PROCEED${healed} · ` +
+        `plan phase $${gate.costUsd.toFixed(4)}`,
+    );
     for (const node of gate.plan.nodes) {
       const deps_ = node.dependsOn.length > 0 ? ` (after ${node.dependsOn.join(", ")})` : "";
       ioPair.out(`  ${node.id}${deps_} — ${node.goal}`);
@@ -601,6 +836,7 @@ export async function cmdChain(
       gate.plan,
       templateFromSpec(spec),
       replanBudgetFromEnv(),
+      gate.attempts,
     );
   } catch (err) {
     ioPair.err(`chikory: ${actionable(err)}`);
@@ -631,6 +867,7 @@ async function hostChainAndFollow(
   plan: Plan,
   template: ChainNodeTemplate,
   maxReplans?: number,
+  planAttempts?: PlanRepairAttempt[],
 ): Promise<number> {
   // Chain-scoped task queue (F-158, mirrors cmdRun): queue = chain-id; node
   // child workflows inherit it via workflowInfo().taskQueue. An orphaned chain
@@ -657,6 +894,7 @@ async function hostChainAndFollow(
       template,
       chainId,
       ...(maxReplans !== undefined ? { maxReplans } : {}),
+      ...(planAttempts !== undefined ? { planAttempts } : {}),
     });
     if (!flags.json) {
       ioPair.out(`chain-id: ${chainId}`);

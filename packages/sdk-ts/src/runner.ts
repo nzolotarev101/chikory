@@ -28,7 +28,14 @@ import { forkRunAtCheckpoint } from "./runner/branch.js";
 import { DEFAULT_DATA_DIR, chainJournalPath, journalPath } from "./runner/paths.js";
 import { ChainJournal } from "./chain/store.js";
 import type { ChainNodeTemplate } from "./chain/node-spec.js";
-import type { DurableRunner, Plan, RunHandle, RunStatusReport, TaskSpec } from "./types.js";
+import type {
+  DurableRunner,
+  Plan,
+  PlanAttemptRecord,
+  RunHandle,
+  RunStatusReport,
+  TaskSpec,
+} from "./types.js";
 
 export interface TemporalRunnerOptions {
   address?: string;
@@ -58,6 +65,8 @@ export interface TemporalRunner extends DurableRunner {
     maxReplans?: number;
     /** Pre-generated chain-id — the CLI's chain-scoped task queue (F-158, mirrors `start`). */
     chainId?: string;
+    /** WP-542/F-207: the host-side plan-phase repair trail, journaled at init. */
+    planAttempts?: PlanAttemptRecord[];
   }): Promise<{ chainId: string }>;
   /**
    * WP-521(c) / P3-rung-2: re-enter a sealed-FAILED, resumable chain — the chain
@@ -225,7 +234,14 @@ export function createTemporalRunner(opts: TemporalRunnerOptions = {}): Temporal
         // WP-521 heal-by-default: a real chain replans ONCE by default (opt-out
         // is an explicit `maxReplans: 0`). Direct `chainLoop` callers/tests keep
         // the legacy `?? 0` halt-on-FAILED unless they opt in.
-        args: [{ plan: input.plan, template: input.template, maxReplans: input.maxReplans ?? 1 }],
+        args: [
+          {
+            plan: input.plan,
+            template: input.template,
+            maxReplans: input.maxReplans ?? 1,
+            ...(input.planAttempts !== undefined ? { planAttempts: input.planAttempts } : {}),
+          },
+        ],
       });
       return { chainId };
     },

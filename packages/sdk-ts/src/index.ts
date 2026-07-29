@@ -149,6 +149,33 @@ export { buildPlannerMessages, PLANNER_SYSTEM_PROMPT, PLAN_RESPONSE_SCHEMA } fro
 export { buildPlan, type BuildPlanOptions } from "./planner/assemble.js";
 export { buildPlanJudgeMessages, PLAN_JUDGE_SYSTEM_PROMPT, PLAN_VERDICT_RESPONSE_SCHEMA } from "./planner/meta-judge-prompt.js";
 export { buildPlanVerdict, type PlanJudgeReply } from "./planner/meta-judge-verdict.js";
+// WP-542/F-207 — the gate-repair tier and its plan-phase binding.
+export {
+  buildGateRepairBrief,
+  decideGateRepair,
+  gateRepairCostCap,
+  GATE_REPAIR_BRIEF_MAX_CHARS,
+  GATE_REPAIR_COST_SHARE,
+  MAX_GATE_REPAIR_ATTEMPTS,
+  type GateRepairBounds,
+  type GateRepairBriefInput,
+  type GateRepairDecision,
+  type GateRepairState,
+} from "./heal/gate-repair.js";
+export {
+  buildPlanRepairBrief,
+  describeRepairTarget,
+  familyDiversityFailure,
+  gateFailure,
+  minNodesFailure,
+  planOutline,
+  plannerTransportFailure,
+  writeSetFailure,
+  PLAN_GATE_NAME,
+  type PlanPhaseFailure,
+  type PlanPhaseFailureKind,
+  type PlanRepairBriefInput,
+} from "./planner/plan-repair.js";
 export { advanceChain, deriveChainStatus } from "./chain/advance.js";
 export { decideReplan, type ReplanDecision } from "./chain/replan.js";
 export {

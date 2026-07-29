@@ -83,6 +83,31 @@ describe("planner prompt (WP-219 S2, ADR-005 D1)", () => {
     expect(messages[1]?.content).toContain("(none defined)");
   });
 
+  // WP-542/F-207: `buildPlanVerdict` rejects a plan that drops a mandated
+  // backtick literal, but the prompt never stated the rule — the floor enforced
+  // something the planner was never told (one of the five dogfood-120 stops).
+  it("states the backtick-literal preservation rule the verdict floor enforces", () => {
+    expect(PLANNER_SYSTEM_PROMPT).toContain("PRESERVE EVERY BACKTICKED LITERAL");
+    expect(PLANNER_SYSTEM_PROMPT).toContain("VERBATIM");
+    expect(PLANNER_SYSTEM_PROMPT).toContain("checked automatically");
+  });
+
+  it("renders the repair brief last on a repair pass, and omits it otherwise", () => {
+    expect(buildPlannerMessages(input)[1]?.content).not.toContain("PLAN REVISION REQUIRED");
+
+    const repaired = buildPlannerMessages({
+      ...input,
+      repairBrief: "REPAIR BRIEF — the plan meta-judge gate rejected your previous attempt.",
+    });
+    const content = repaired[1]?.content ?? "";
+
+    expect(content).toContain("## PLAN REVISION REQUIRED");
+    expect(content).toContain("REPAIR BRIEF");
+    expect(content.indexOf("PLAN REVISION REQUIRED")).toBeGreaterThan(
+      content.indexOf("CHAIN BUDGET"),
+    );
+  });
+
   it("requires nodes and every PlanNode field in the response schema", () => {
     expect(PLAN_RESPONSE_SCHEMA.required).toContain("nodes");
     expect(PLAN_RESPONSE_SCHEMA.properties.nodes.items.required).toEqual([

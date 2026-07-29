@@ -26,6 +26,7 @@ import type {
   ModelChoice,
   NodeOutcome,
   Plan,
+  PlanAttemptRecord,
   RepoSpec,
   RoutingPolicy,
 } from "../types.js";
@@ -97,12 +98,25 @@ export function createChainActivities(deps: ChainActivityDeps) {
      * Idempotent chain setup: the chain row + the durable `plan` entry. Safe to
      * re-run on a workflow replay — the plan is journaled at most once.
      */
-    async initChain(input: { chainId: string; plan: Plan; template?: unknown }): Promise<void> {
+    async initChain(input: {
+      chainId: string;
+      plan: Plan;
+      template?: unknown;
+      /** WP-542/F-207: the host-side plan-phase attempt trail (ADR-009 D1). */
+      planAttempts?: PlanAttemptRecord[];
+    }): Promise<void> {
       const journal = openChain(deps, input.chainId);
       try {
         journal.createChain(input.chainId, input.plan, input.template);
         if (journal.entries("plan").length === 0) {
           journal.append("plan", input.plan);
+        }
+        // The plan gate runs before the chain exists, so its repair loop is
+        // journaled here — once, on the first init (a replay must not double it).
+        if (input.planAttempts !== undefined && journal.entries("plan_verdict").length === 0) {
+          for (const attempt of input.planAttempts) {
+            journal.append("plan_verdict", attempt);
+          }
         }
         journal.setStatus("RUNNING");
       } finally {

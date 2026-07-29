@@ -36,6 +36,13 @@ export const PLANNER_SYSTEM_PROMPT: string = [
   "  all nodes every goal criterion id must appear at least once.",
   "- Copy a covered goal criterion's description and executable `check` verbatim.",
   "  Do not translate package managers, paths, flags, or working directories.",
+  "- PRESERVE EVERY BACKTICKED LITERAL. Any text the goal wraps in backticks —",
+  "  a path, a command, a field name, a flag, an exact value — is mandated, and",
+  "  the goal of the node that owns it must contain it VERBATIM, character for",
+  "  character. This is checked automatically against every node goal: a literal",
+  "  that survives nowhere is a rejected plan, however good the prose is. Do not",
+  "  paraphrase, pluralize, abbreviate, re-case, or summarize these; when a node",
+  "  inherits a constraint, restate the literal instead of referring to it.",
   "- `dependsOn` lists the ids of nodes that must reach SUCCESS before the node",
   "  can start.",
   "- `writeSet` lists every repo-relative file path the node may create, modify,",
@@ -116,6 +123,11 @@ export function buildPlannerMessages(input: PlanInput): Message[] {
     "",
     "## CHAIN BUDGET (node `budgetUsd` values must sum within this amount)",
     String(input.budgetUsd),
+    // WP-542/F-207: on a repair pass the rejection evidence goes LAST, so it is
+    // the final thing the planner reads before answering.
+    ...(input.repairBrief !== undefined
+      ? ["", "## PLAN REVISION REQUIRED", input.repairBrief]
+      : []),
   ].join("\n");
 
   return [

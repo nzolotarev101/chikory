@@ -19,7 +19,14 @@
  */
 import { executeChild, proxyActivities, workflowInfo } from "@temporalio/workflow";
 
-import type { ChainRecord, ChainStatus, NodeOutcome, Plan, RunStatus } from "../types.js";
+import type {
+  ChainRecord,
+  ChainStatus,
+  NodeOutcome,
+  Plan,
+  PlanAttemptRecord,
+  RunStatus,
+} from "../types.js";
 import { agentLoop } from "../workflow/agent-loop.js";
 import type { ChainActivities } from "./activities.js";
 import { advanceChain, deriveChainStatus } from "./advance.js";
@@ -65,6 +72,12 @@ export interface ChainLoopInput {
   template: ChainNodeTemplate;
   /** D3 guardrail: absent/zero keeps the legacy halt-on-FAILED path. */
   maxReplans?: number;
+  /**
+   * WP-542/F-207: the host-side plan-phase attempt trail (the plan gate's own
+   * repair loop). Frozen into the workflow input like every other host-read —
+   * the workflow body only hands it to `initChain` to journal.
+   */
+  planAttempts?: PlanAttemptRecord[];
 }
 
 /** workflowId = chain-id (mirrors agentLoop's workflowId = run-id mapping). */
@@ -74,7 +87,12 @@ export async function chainLoop(input: ChainLoopInput): Promise<ChainStatus> {
   let plan = input.plan;
   const maxReplans = input.maxReplans ?? 0;
 
-  await activities.initChain({ chainId, plan, template });
+  await activities.initChain({
+    chainId,
+    plan,
+    template,
+    ...(input.planAttempts !== undefined ? { planAttempts: input.planAttempts } : {}),
+  });
 
   // WP-521(c): rebuild state from the journal. A fresh chain restores an empty
   // record; a `chikory chain resume` re-start restores the sealed record and

@@ -107,7 +107,7 @@ layer *above* the run loop — never a change to it.**
 | # | Fork | Decision |
 |---|---|---|
 | D1 | Planner home: reuse `plan` routing stage vs dedicated component. | **Dedicated `planner/` component.** Its own module (mirrors `judge/`); calls the router for the decomposition LLM call but owns the logic, isolation, and tests. |
-| D2 | Is the plan judged in v1? | **Yes — a plan meta-judge gates the decomposition** (plan-as-evidence, a *different family than the planner*). Agent-as-a-Judge applies to the plan, not just the code. Verdicts: PROCEED / REVISE / ESCALATE. |
+| D2 | Is the plan judged in v1? | **Yes — a plan meta-judge gates the decomposition** (plan-as-evidence, a *different family than the planner*). Agent-as-a-Judge applies to the plan, not just the code. Verdicts: PROCEED / REVISE / ESCALATE. **WP-542 implements the REVISE half:** a repairable rejection feeds the gate's own evidence back and re-decomposes, bounded by attempts and cost (ADR-009 D5b, tier 0). Only a substantive ESCALATE or an exhausted budget stops the launch. |
 | D3 | Static vs adaptive plan. | **Static decomposition + halt-and-replan on node failure.** Decompose once; on failure re-plan from the failed node with the failure as evidence. |
 | D4 | Plan storage. | **Chain-level record** referencing child run-ids (mirrors the per-run SQLite journal pattern). A chain spans runs, so plan state lives above any one run's journal. |
 

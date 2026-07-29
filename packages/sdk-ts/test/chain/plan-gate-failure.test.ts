@@ -57,11 +57,29 @@ describe("classifyPlanGateFailure (WP-233(a), F-33)", () => {
     expect(result?.safeToReRun).toBe(true);
   });
 
-  it("classifies a substantive coverage-floor REVISE as not safe to re-run", () => {
+  // WP-542/F-207 reverses the pre-existing expectation on purpose: a REVISE is
+  // the gate saying the plan has FIXABLE gaps (ADR-005 D2: "REVISE → re-plan"),
+  // so calling it "not safe to re-run" was backwards — and it is what taught the
+  // operator to hand-edit the goal spec between launches instead of re-running.
+  it("classifies a coverage-floor REVISE as revisable and safe to re-run", () => {
     const verdict: PlanVerdict = {
       kind: "REVISE",
       rationale: "plan leaves goal criteria uncovered: AC-1, AC-2",
       uncoveredCriteria: ["AC-1", "AC-2"],
+    };
+
+    const result = classifyPlanGateFailure(verdict);
+
+    expect(result?.kind).toBe("revisable");
+    expect(result?.safeToReRun).toBe(true);
+    expect(result?.reason).toBe(verdict.rationale);
+  });
+
+  it("still classifies a substantive ESCALATE as not safe to re-run (a human decides)", () => {
+    const verdict: PlanVerdict = {
+      kind: "ESCALATE",
+      rationale: "the goal contradicts itself; a human must resolve the scope",
+      uncoveredCriteria: [],
     };
 
     const result = classifyPlanGateFailure(verdict);

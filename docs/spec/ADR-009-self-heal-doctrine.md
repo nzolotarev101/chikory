@@ -66,6 +66,10 @@ heal-attempt records enrich the trace dataset, the moat.
 Recovery proceeds through named tiers; each tier is tried (within its bound)
 before falling to the next:
 
+0. **Repair** — a gate rejected an artifact *before* any durable execution
+   exists (the plan meta-judge on a decomposition, ADR-005 D2). The gate's own
+   evidence is fed back and the artifact is re-produced, bounded by attempts and
+   cost (WP-542, new). Applies to launches, so it precedes every tier below.
 1. **Prevent** — judge gates the bad diff before it lands (WP-132, existing).
 2. **Correct** — ROLLBACK: checkpoint restore + rationale feedback (existing).
 3. **Remediate** — bounded retry against an explicit remediation brief
@@ -74,6 +78,19 @@ before falling to the next:
    (ADR-005 D3, existing but off by default — WP-521 turns it on).
 5. **Escalate** — park for the human (existing ESCALATE machinery), or seal
    **resumable** FAILED (WP-520) so recovery remains possible later.
+
+**Binding on every future gate.** D1 says *every* non-infra failure class gets a
+heal attempt; a gate that consumes an LLM-produced artifact and can reject it is
+a failure class. Any such gate routes through the tier-0 primitives
+(`heal/gate-repair.ts`) rather than ending the launch. Two exclusions, and only
+two: a **config error** (a same-family judge — invariant #2 fails fast, at no
+cost) and a **substantive ESCALATE** (the verdict whose meaning is "a human must
+decide"). Deterministic `$0` prechecks that refuse a malformed *input* — a
+broken spec, a stale WP, an unarmed seam — are not gates in this sense and stay
+fail-closed: repairing them would defeat the F-119/120/121 launch guards.
+
+Repair never softens the gate. An exhausted budget stops the launch with the
+full attempt trail; it never proceeds on the rejected artifact.
 
 ### D3 — WP-519: Remediation-before-HALT (run level, P2)
 
@@ -116,6 +133,28 @@ The F-110 follow-through:
 - Depends on WP-232 (chain-autonomy rung C-1, ADR-008) — no chain healing is
   built on a chain layer without end-to-end evidence.
 
+### D5b — WP-542: Plan-time gate repair (tier 0, P3)
+
+The plan gate sits above both loops and had no tier at all: any rejection — a
+planner transport fault, an unserializable write-set topology, the WP-509
+`min_nodes` floor, the coverage/literal floors, or the meta-judge's own REVISE —
+discarded the decomposition and ended the launch. Measured cost: five launches
+of `dogfood-120` with zero nodes run, each one repaired by a human editing the
+goal spec (F-207). ADR-005 D2 already named the fix in the verdict's own name —
+"REVISE → re-plan" — and nothing consumed it that way.
+
+- **(a)** `planAndGateChain` loops: classify → decide → brief → re-decompose.
+  Default 3 repair attempts, stopping early above 10% of the chain budget;
+  `CHIKORY_PLAN_REPAIR_ATTEMPTS=0` restores the single-shot stop.
+- **(b)** The brief is composed deterministically from evidence the gate already
+  produced (`verdict.uncoveredCriteria`, `planLiteralGaps`, the node-count
+  shortfall) plus the rejected plan's outline — no extra LLM call, machine-checked
+  defects listed before the prose so a paraphrasing retry cannot lose them.
+- **(c)** Journaled per D1: one `plan_verdict` chain entry per attempt, written
+  at `initChain` (the gate runs before the chain exists).
+- **(d)** Prevention first: the planner prompt now states the backtick-literal
+  rule the verdict floor was already enforcing silently.
+
 ### D6 — Sequencing rule (binding)
 
 - **P2 now**: WP-519 + WP-520 — prerequisites for the 24h unattended
@@ -130,6 +169,7 @@ The F-110 follow-through:
 - Rollback + feedback carry: `packages/sdk-ts/src/workflow/agent-loop.ts:615–618`, `:689`
 - Escalate park + approval wait: `agent-loop.ts:694–714`; unattended seal: WP-271 `seal_resumable_failed`
 - Chain replan: `packages/sdk-ts/src/chain/replan.ts`, `chain-loop.ts:55` (`maxReplans`), `activities.ts` `replanRemaining`
+- Gate repair (tier 0): `packages/sdk-ts/src/heal/gate-repair.ts`; plan-phase binding `packages/sdk-ts/src/planner/plan-repair.ts`; loop `packages/sdk-ts/src/cli/chain.ts` `planAndGateChain`
 - Chunk-aware judge rules: WP-273
 
 ## Consequences

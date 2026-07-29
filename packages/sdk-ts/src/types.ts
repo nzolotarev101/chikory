@@ -635,6 +635,14 @@ export interface PlanInput {
   family: LLMProvider;
   /** WP-509/F-88 — decomposition floor surfaced to the planner; absent = none. */
   minNodes?: number;
+  /**
+   * WP-542/F-207 — the plan-time repair brief. Present only on a repair pass:
+   * the previous attempt's machine-derived gaps plus the plan-judge's rationale,
+   * composed deterministically (no extra LLM call) so the planner REVISES the
+   * rejected plan instead of re-rolling blind. Absent on the first attempt.
+   * Carries the rejected plan's own outline, so there is no second field.
+   */
+  repairBrief?: string;
 }
 
 /**
@@ -657,6 +665,27 @@ export interface PlanVerdict {
   rationale: string;
   /** Goal criteria the plan fails to cover (empty on PROCEED). */
   uncoveredCriteria: string[];
+}
+
+/**
+ * One plan-phase attempt (WP-542/F-207) — the `plan_verdict` chain-journal
+ * payload. The plan gate runs host-side before the chain exists, so its repair
+ * loop is journaled at `initChain`: one entry per attempt, in order, the last
+ * being the PROCEED the chain launched on. ADR-009 D1 requires every heal
+ * attempt to be journaled with its trigger, evidence, and outcome; this is that
+ * record for the layer above the run and chain loops.
+ */
+export interface PlanAttemptRecord {
+  /** 1-based; attempt 1 is the original pass, 2+ are repairs. */
+  attempt: number;
+  phase: "plan" | "gate";
+  /** The failure class, or `PROCEED` for the attempt that passed. */
+  kind: string;
+  verdictKind?: PlanVerdictKind;
+  /** The independently checkable defects this attempt was rejected for. */
+  machineGaps: string[];
+  costUsd: number;
+  reason: string;
 }
 
 /** Run → chain back-reference; persisted with the run. */
