@@ -4,10 +4,10 @@
  */
 import {
   DEFAULT_MAX_TOKENS,
-  DEFAULT_TIMEOUT_MS,
   postJson,
   ProviderCallError,
   requireEnv,
+  resolveTimeoutMs,
   splitSystem,
   type AdapterOptions,
   type ProviderAdapter,
@@ -26,7 +26,7 @@ export function createAnthropicAdapter(opts: AdapterOptions = {}): ProviderAdapt
   const env = opts.env ?? process.env;
   const apiKey = requireEnv(env, "ANTHROPIC_API_KEY", "anthropic");
   const baseUrl = (opts.baseUrl ?? "https://api.anthropic.com").replace(/\/$/, "");
-  const timeoutMs = opts.timeoutMs ?? DEFAULT_TIMEOUT_MS;
+  const timeoutMs = resolveTimeoutMs(opts);
 
   return {
     provider: "anthropic",

@@ -4,10 +4,10 @@
  */
 import {
   DEFAULT_MAX_TOKENS,
-  DEFAULT_TIMEOUT_MS,
   postJson,
   ProviderCallError,
   requireEnv,
+  resolveTimeoutMs,
   type AdapterOptions,
   type ProviderAdapter,
   type ProviderRequest,
@@ -23,7 +23,7 @@ export function createOpenAIAdapter(opts: AdapterOptions = {}): ProviderAdapter 
   const env = opts.env ?? process.env;
   const apiKey = requireEnv(env, "OPENAI_API_KEY", "openai");
   const baseUrl = (opts.baseUrl ?? "https://api.openai.com").replace(/\/$/, "");
-  const timeoutMs = opts.timeoutMs ?? DEFAULT_TIMEOUT_MS;
+  const timeoutMs = resolveTimeoutMs(opts);
 
   return {
     provider: "openai",

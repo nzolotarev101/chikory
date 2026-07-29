@@ -7,10 +7,10 @@
  */
 import {
   DEFAULT_MAX_TOKENS,
-  DEFAULT_TIMEOUT_MS,
   postJson,
   ProviderCallError,
   requireEnv,
+  resolveTimeoutMs,
   schemaInstruction,
   splitSystem,
   type AdapterOptions,
@@ -28,7 +28,7 @@ export function createGeminiAdapter(opts: AdapterOptions = {}): ProviderAdapter 
   const env = opts.env ?? process.env;
   const apiKey = requireEnv(env, "GEMINI_API_KEY", "gemini");
   const baseUrl = (opts.baseUrl ?? "https://generativelanguage.googleapis.com").replace(/\/$/, "");
-  const timeoutMs = opts.timeoutMs ?? DEFAULT_TIMEOUT_MS;
+  const timeoutMs = resolveTimeoutMs(opts);
 
   return {
     provider: "gemini",

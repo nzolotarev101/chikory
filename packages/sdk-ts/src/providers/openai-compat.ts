@@ -9,10 +9,10 @@
  */
 import {
   DEFAULT_MAX_TOKENS,
-  DEFAULT_TIMEOUT_MS,
   postJson,
   ProviderCallError,
   requireEnv,
+  resolveTimeoutMs,
   schemaInstruction,
   type AdapterOptions,
   type ProviderAdapter,
@@ -30,7 +30,7 @@ export function createOpenAICompatAdapter(opts: AdapterOptions = {}): ProviderAd
   const baseUrl = (opts.baseUrl ?? requireEnv(env, "OPENAI_COMPAT_BASE_URL", "openai-compat"))
     .replace(/\/$/, "");
   const apiKey = env.OPENAI_COMPAT_API_KEY;
-  const timeoutMs = opts.timeoutMs ?? DEFAULT_TIMEOUT_MS;
+  const timeoutMs = resolveTimeoutMs(opts);
 
   return {
     provider: "openai-compat",

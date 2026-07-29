@@ -37,7 +37,18 @@ export interface AdapterOptions {
   timeoutMs?: number;
 }
 
-export const DEFAULT_TIMEOUT_MS = 120_000;
+export const DEFAULT_TIMEOUT_MS = 600_000;
+
+export function resolveTimeoutMs(opts?: AdapterOptions): number {
+  if (opts?.timeoutMs !== undefined) return opts.timeoutMs;
+  const env = opts?.env ?? process.env;
+  const envTimeout = env.CHIKORY_PROVIDER_TIMEOUT_MS;
+  if (envTimeout) {
+    const parsed = Number(envTimeout);
+    if (!Number.isNaN(parsed) && parsed > 0) return parsed;
+  }
+  return DEFAULT_TIMEOUT_MS;
+}
 
 /**
  * Typed provider failure (CG-1). `retriable` drives the router's policy:
