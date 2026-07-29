@@ -11,11 +11,15 @@ import type {
   ChainLink,
   JudgePolicy,
   NodeOutcome,
+  NotificationPolicy,
+  PacingPolicy,
   PlanNode,
   RepoSpec,
   RoutingPolicy,
   RunStatus,
+  SoakPolicy,
   TaskSpec,
+  UnattendedPolicy,
   VerdictKind,
 } from "../types.js";
 
@@ -33,6 +37,22 @@ export interface ChainNodeTemplate {
   routing: RoutingPolicy;
   budgetTokens?: number;
   maxSteps?: number;
+  /**
+   * F-209: the execution-surface policies a chain node needs and, before
+   * WP-544, silently never received. dogfood-120 declared
+   * `step_limits.max_seconds: 840` and `unattended.escalation:
+   * seal_resumable_failed`; the template carried neither, so every node ran the
+   * 600s `DEFAULT_STEP_LIMITS` (killing `N-2` step 0 at 602.9s and spending a
+   * rule-3 strike on it) and `N-1` parked `AWAITING_APPROVAL` for a human the
+   * spec had told it not to wait for. `CHAIN_TEMPLATE_FIELDS` below is the
+   * enumerated contract that keeps the next added field from going silent too.
+   */
+  stepLimits?: TaskSpec["stepLimits"];
+  pacing?: PacingPolicy;
+  unattended?: UnattendedPolicy;
+  soak?: SoakPolicy;
+  notifications?: NotificationPolicy;
+  horizon?: TaskSpec["horizon"];
   /**
    * WP-243 dogfood/test-only: force a deterministic SUSPEND park. `nodeIndex`
    * (0-based dispatch order) targets a single node — node A = 0, node B = 1 —
@@ -58,6 +78,64 @@ export interface ChainNodeTemplate {
    */
   debugSeedBadDiff?: { atStep: number; path: string; content: string; nodeIndex?: number };
 }
+
+/**
+ * F-209 recurrence guard: every `TaskSpec` field, classified by who owns it on
+ * a chain node. A field can only be dropped SILENTLY because nothing enumerates
+ * the contract — that is exactly how `stepLimits` / `unattended` / `pacing`
+ * were lost between `templateFromSpec` and `planNodeToTaskSpec` for the whole
+ * life of WP-219. `test/chain/template-passthrough.test.ts` asserts this union
+ * equals `keyof TaskSpec`, so adding a TaskSpec field without deciding what a
+ * node should see turns the suite RED instead of quietly ignoring the operator.
+ */
+export const CHAIN_TEMPLATE_FIELDS = {
+  /** Owned by the `PlanNode` / the chain itself — never sourced from the template. */
+  nodeOwned: ["name", "goal", "acceptanceCriteria", "budgetUsd", "chainLink"],
+  /** The shared execution surface every node inherits from the goal spec. */
+  templateForwarded: [
+    "repos",
+    "executor",
+    "judge",
+    "routing",
+    "budgetTokens",
+    "maxSteps",
+    "stepLimits",
+    "pacing",
+    "unattended",
+    "soak",
+    "notifications",
+    "horizon",
+  ],
+  /**
+   * Deliberately not forwarded, each for a stated reason:
+   * - `minNodes` is a plan-shape floor consumed by the plan gate; a node has no plan.
+   * - `chain` is the chain's own heal budget, consumed by `decideReplan` in the
+   *   orchestrator; a node neither reads nor replans itself.
+   * - `boundedWorkUnit` carries `workChunks` authored as ordered directives for ONE
+   *   task's work — replaying a chain-wide chunk list against every node's own goal
+   *   would hand each node the wrong sub-goals (F-112's chunk scoping assumes the
+   *   chunks belong to the run consuming them).
+   * - `debug` seams are armed PER NODE from env (`debugPark`, `debugSeedBadDiff`,
+   *   `seedFailNodeId`), which is why they have their own template fields.
+   */
+  deliberatelyExcluded: ["minNodes", "chain", "boundedWorkUnit", "debug"],
+} as const satisfies Record<string, readonly (keyof TaskSpec)[]>;
+
+type ClassifiedTaskSpecField =
+  (typeof CHAIN_TEMPLATE_FIELDS)[keyof typeof CHAIN_TEMPLATE_FIELDS][number];
+
+/** `A ⊆ B`, in the `schemas.ts` `AssertAccepts` house style. */
+type AssertCovers<_Subset extends Superset, Superset> = true;
+
+/**
+ * The teeth on `CHAIN_TEMPLATE_FIELDS`: both directions, so a new `TaskSpec`
+ * field fails `tsc --noEmit` until it is classified, and a classification that
+ * names a field `TaskSpec` no longer has fails too.
+ */
+export type ChainTemplateFieldChecks = [
+  AssertCovers<ClassifiedTaskSpecField, keyof TaskSpec>,
+  AssertCovers<keyof TaskSpec, ClassifiedTaskSpecField>,
+];
 
 /**
  * Deterministic child workflow id for a chain node — `chikory trace` and
@@ -143,6 +221,14 @@ export function planNodeToTaskSpec(
   };
   if (template.budgetTokens !== undefined) spec.budgetTokens = template.budgetTokens;
   if (template.maxSteps !== undefined) spec.maxSteps = template.maxSteps;
+  // F-209: the rest of the execution surface. Keep this block in step with
+  // `CHAIN_TEMPLATE_FIELDS.templateForwarded` — the passthrough test reads both.
+  if (template.stepLimits !== undefined) spec.stepLimits = template.stepLimits;
+  if (template.pacing !== undefined) spec.pacing = template.pacing;
+  if (template.unattended !== undefined) spec.unattended = template.unattended;
+  if (template.soak !== undefined) spec.soak = template.soak;
+  if (template.notifications !== undefined) spec.notifications = template.notifications;
+  if (template.horizon !== undefined) spec.horizon = template.horizon;
   // WP-243/WP-246: arm the dogfood debug seams on the targeted node (or all
   // nodes when `nodeIndex` is absent). Deterministic — dispatch order is fixed.
   // Both seams can be armed at once, so build `spec.debug` additively.

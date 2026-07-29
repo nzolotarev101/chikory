@@ -145,6 +145,13 @@ const RawTaskSpecYaml = z
     budget_usd: z.number().gt(0),
     max_steps: z.number().int().positive().optional(),
     min_nodes: z.number().int().positive().optional(),
+    chain: z
+      .object({
+        max_replans_per_node: z.number().int().nonnegative().optional(),
+        max_replans: z.number().int().nonnegative().optional(),
+      })
+      .strict()
+      .optional(),
     step_limits: z
       .object({
         max_seconds: z.number().positive().optional(),
@@ -277,6 +284,16 @@ export function parseTaskSpec(yamlText: string, opts: ParseTaskSpecOptions = {})
     budgetUsd: raw.budget_usd,
     maxSteps: raw.max_steps ?? DEFAULT_MAX_STEPS,
     ...(raw.min_nodes !== undefined ? { minNodes: raw.min_nodes } : {}),
+    ...(raw.chain !== undefined
+      ? {
+          chain: {
+            ...(raw.chain.max_replans_per_node !== undefined
+              ? { maxReplansPerNode: raw.chain.max_replans_per_node }
+              : {}),
+            ...(raw.chain.max_replans !== undefined ? { maxReplans: raw.chain.max_replans } : {}),
+          },
+        }
+      : {}),
     ...(raw.step_limits !== undefined
       ? {
           stepLimits: {

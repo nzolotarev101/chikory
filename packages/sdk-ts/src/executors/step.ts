@@ -167,6 +167,9 @@ export async function runCliStep(opts: CliStepOptions): Promise<StepRecord> {
       ...base,
       status: "FAILED",
       summary: parsed.summary || "step killed: exceeded maxSeconds",
+      // F-210: the cap killed the step — the judge may still report on whatever
+      // landed, but this outcome must not spend a rule-3 strike.
+      infraFailed: true,
       failure: {
         reason:
           `step exceeded maxSeconds=${cap}; killed after ${elapsedSeconds.toFixed(1)}s ` +

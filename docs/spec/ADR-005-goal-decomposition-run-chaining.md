@@ -45,6 +45,18 @@ layer *above* the run loop — never a change to it.**
    templates) a normal `TaskSpec`: scope, acceptance criteria, budget, routing.
    No node bypasses the judge; no node uses a new execution path.
 
+   **"A normal TaskSpec" is a total claim, and it is enumerated** (F-209,
+   WP-544). The plan owns goal / acceptance criteria / budget per node; the
+   chain template owns the shared execution surface — and every remaining
+   `TaskSpec` field is classified `nodeOwned` / `templateForwarded` /
+   `deliberatelyExcluded` in `CHAIN_TEMPLATE_FIELDS` (`chain/node-spec.ts`),
+   with a compile-time assertion that the classification covers `keyof
+   TaskSpec` exactly. Before this, `step_limits` / `unattended` / `pacing` were
+   parsed off the goal spec and then dropped, so nodes ran under defaults their
+   operator had explicitly overridden — invisibly, because nothing enumerated
+   what a node was owed. A new `TaskSpec` field now fails `tsc` until someone
+   decides what a node should see.
+
 2. **A dedicated `planner/` component emits the tree, and the plan is judged
    before execution** (D1, D2). The planner is its own module (mirrors the
    `judge/` shape) that calls the router to decompose goal → tree, then a

@@ -87,6 +87,13 @@ export interface TaskSpec {
    */
   minNodes?: number;
   /**
+   * F-213 (WP-544) — chain-only heal budget. `maxReplansPerNode` is what one
+   * node lineage may spend; `maxReplans` is the chain-wide thrash ceiling
+   * counted over nodes the current plan still contains. Absent = heal-by-default
+   * (one attempt per node, ceiling = plan size). Ignored by single `chikory run`.
+   */
+  chain?: { maxReplansPerNode?: number; maxReplans?: number };
+  /**
    * Per-step executor bounds override (dogfood-111): partial — anything unset
    * falls back to `DEFAULT_STEP_LIMITS` / the adapter default (e.g. claude-code's
    * 25-turn cap). `maxSeconds` must stay under the executeStep activity's
@@ -310,6 +317,15 @@ export interface StepRecord {
   durationMs: number;
   transcriptRef: ArtifactRef;
   failure?: { reason: string; retriable: boolean };
+  /**
+   * F-210 (additive): the step did not complete for an INFRASTRUCTURE reason —
+   * killed at its `maxSeconds` cap — so its outcome says nothing about the
+   * code. The judge still runs and still reports; the flag keeps the verdict
+   * out of the rule-3 stuck-criterion sequence, exactly as WP-263(b)'s
+   * `JudgeForm` `infraFailed` does for a killed judge CHECK. Absent = a
+   * substantive step outcome.
+   */
+  infraFailed?: boolean;
   /**
    * P2 (WP-221) — executor's explicit "task done" signal from its final
    * summary. OR'd into the WP-217 empty-diff trigger so the *productive* step

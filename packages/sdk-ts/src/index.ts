@@ -189,7 +189,14 @@ export {
   type ChainWorkflowLiveness,
   type ParkResolution,
 } from "./chain/escalation-park.js";
-export { decideReplan, type ReplanDecision } from "./chain/replan.js";
+export {
+  DEFAULT_MAX_REPLANS_PER_NODE,
+  decideReplan,
+  nodeLineageRoot,
+  resumeGrantBounds,
+  type ReplanBounds,
+  type ReplanDecision,
+} from "./chain/replan.js";
 export {
   decideChainCompletionReview,
   MIN_CHAIN_NODES_FOR_REVIEW,
@@ -223,12 +230,25 @@ export {
   type NodeSealedPayload,
 } from "./chain/store.js";
 export {
+  CHAIN_TEMPLATE_FIELDS,
   childRunId,
   deriveNodeOutcome,
   isSeededFailNode,
   planNodeToTaskSpec,
   type ChainNodeTemplate,
 } from "./chain/node-spec.js";
+export {
+  MAX_CHILD_RESUMES_PER_NODE,
+  decideNodeHeal,
+  type NodeHealDecision,
+  type NodeHealState,
+} from "./chain/node-heal.js";
+export {
+  historyCutoffIdx,
+  isInfraStepFailure,
+  markInfraFailedPass,
+  type SequenceEvent,
+} from "./runner/strike-accounting.js";
 export {
   createChainActivities,
   type ChainActivities,

@@ -225,6 +225,8 @@ async function buildRecord(opts: {
   tokens: TokenUsage;
   costUsd: number;
   failure?: { reason: string; retriable: boolean };
+  /** F-210: killed at the wall-clock cap — inconclusive, not a code red. */
+  infraFailed?: boolean;
 }): Promise<StepRecord> {
   const durationMs = Math.max(0, Date.now() - opts.startedAt);
   const diff = await captureWorkspaceDiff(opts.input.workspaceDir);
@@ -256,6 +258,7 @@ async function buildRecord(opts: {
       : {
           ...base,
           status: "FAILED",
+          ...(opts.infraFailed === true ? { infraFailed: true } : {}),
           failure: opts.failure ?? { reason: opts.summary || "native executor failed", retriable: true },
         };
 
@@ -321,6 +324,7 @@ export function createNativeAdapter(opts: NativeAdapterOptions): ExecutorAdapter
             toolCalls,
             tokens,
             costUsd,
+            infraFailed: true,
             failure: { reason: `step exceeded maxSeconds=${input.limits.maxSeconds}`, retriable: true },
           });
         }

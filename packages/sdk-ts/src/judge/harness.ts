@@ -7,6 +7,7 @@
  * yields an ESCALATE verdict, never a throw — a throw here would mean
  * unbounded Temporal activity retries, each one spending judge LLM cost.
  */
+import { markInfraFailedPass } from "../runner/strike-accounting.js";
 import { JudgeFormSchema } from "../schemas.js";
 import type {
   AcceptanceCriterion,
@@ -210,6 +211,12 @@ export interface RunJudgePassInput {
    * terminal AC that a later chunk is designed to satisfy (F-112).
    */
   workChunkInProgress?: boolean;
+  /**
+   * F-210a: the step being judged was killed at its `maxSeconds` cap. The pass
+   * still runs and still reports; its criterion results are flagged
+   * `infraFailed` so the rule-3 stuck-criterion sequence skips them.
+   */
+  stepInfraFailed?: boolean;
   lastGoodCheckpointId?: CheckpointId;
   rubric?: RubricItem[];
   /** "cumulative" marks the run-completion review over the whole-run diff. */
@@ -300,8 +307,9 @@ export async function runJudgePass(input: RunJudgePassInput): Promise<JudgePassR
     };
   }
 
+  const form = markInfraFailedPass(overridden.form, input.stepInfraFailed ?? false);
   return {
-    verdict: buildVerdict(overridden.form, input.criteriaHistory, spent),
+    verdict: buildVerdict(form, input.criteriaHistory, spent),
     collected,
     durationMs: Date.now() - started,
   };

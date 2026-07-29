@@ -42,7 +42,8 @@ import {
   planNodeToTaskSpec,
   type ChainNodeTemplate,
 } from "./node-spec.js";
-import { decideReplan } from "./replan.js";
+import { decideNodeHeal } from "./node-heal.js";
+import { decideReplan, resumeGrantBounds, type ReplanBounds } from "./replan.js";
 import { readyNodes } from "./sequencing.js";
 
 const activities = proxyActivities<ChainActivities>({
@@ -74,8 +75,15 @@ export interface ChainLoopInput {
   plan: Plan;
   /** Shared per-chain TaskSpec surface every node run inherits. */
   template: ChainNodeTemplate;
-  /** D3 guardrail: absent/zero keeps the legacy halt-on-FAILED path. */
+  /** D3 guardrail: attempts ONE node lineage may consume. Absent/zero keeps the
+   * legacy halt-on-FAILED path. */
   maxReplans?: number;
+  /**
+   * F-213 chain-wide thrash ceiling, counted over nodes the CURRENT plan still
+   * contains. Absent = one heal per node in the plan, which is the bound the
+   * per-node budget already implies.
+   */
+  maxChainReplans?: number;
   /**
    * WP-542/F-207: the host-side plan-phase attempt trail (the plan gate's own
    * repair loop). Frozen into the workflow input like every other host-read —
@@ -90,6 +98,10 @@ export async function chainLoop(input: ChainLoopInput): Promise<ChainStatus> {
   const { template } = input;
   let plan = input.plan;
   const maxReplans = input.maxReplans ?? 0;
+  const replanBounds: ReplanBounds = {
+    maxPerNode: maxReplans,
+    maxChain: input.maxChainReplans ?? input.plan.nodes.length,
+  };
 
   await activities.initChain({
     chainId,
@@ -127,11 +139,8 @@ export async function chainLoop(input: ChainLoopInput): Promise<ChainStatus> {
       (node) => record.nodeOutcomes[node.id]?.status === "FAILED",
     );
     if (failedNode !== undefined) {
-      const failedCount = Object.values(record.nodeOutcomes).filter(
-        (outcome) => outcome.status === "FAILED",
-      ).length;
-      // Fresh budget (failedCount + 1) forces exactly one REPLAN this incarnation.
-      const decision = decideReplan(record, failedNode.id, failedCount + 1);
+      // Fresh grant sized to what is already spent → exactly one REPLAN here.
+      const decision = decideReplan(record, failedNode.id, resumeGrantBounds(record, failedNode.id));
       if (decision.action === "REPLAN") {
         const failedRunId = record.nodeRuns[failedNode.id];
         const failedResult =
@@ -237,13 +246,43 @@ export async function chainLoop(input: ChainLoopInput): Promise<ChainStatus> {
         outline: plan.nodes.map((planNode) => `${planNode.id}: ${planNode.goal}`),
       },
     );
-    const runStatus: RunStatus = await executeChild(agentLoop, {
+    let runStatus: RunStatus = await executeChild(agentLoop, {
       workflowId: runId,
       args: [childSpec],
       taskQueue,
     });
 
-    const result = await activities.readNodeResult({ childRunId: runId });
+    let result = await activities.readNodeResult({ childRunId: runId });
+    // F-214: before rewriting the node, re-enter it. A child that sealed
+    // `resumable: true` kept its checkpoint and its failure evidence, and
+    // `restoreWorkflowState` reopens the seal, carries the remediation brief
+    // into the next step, and grants a fresh bounded remediation budget
+    // (WP-520) — the whole run-level heal tier the chain used to skip past.
+    // Bounded per node; a dead FAILED or a spent budget falls through to the
+    // replan tier below, unchanged.
+    let childResumes = 0;
+    for (;;) {
+      const heal = decideNodeHeal({
+        childStatus: result.outcome.status,
+        childResumable: result.resumable === true,
+        resumesUsed: childResumes,
+      });
+      if (heal.action !== "resume_child") break;
+      childResumes = heal.attempt;
+      await activities.recordNodeResumed({
+        chainId,
+        nodeId: node.id,
+        childRunId: runId,
+        attempt: heal.attempt,
+        reason: result.reason ?? heal.reason,
+      });
+      runStatus = await executeChild(agentLoop, {
+        workflowId: runId,
+        args: [childSpec],
+        taskQueue,
+      });
+      result = await activities.readNodeResult({ childRunId: runId });
+    }
     // WP-521 dogfood/test-only seam: force the targeted node's FIRST incarnation
     // to seal FAILED so heal-by-default replan is exercised deterministically on
     // a real chain. The retry node's id is `${id}-r${n}` (≠ the seeded id), so
@@ -275,7 +314,7 @@ export async function chainLoop(input: ChainLoopInput): Promise<ChainStatus> {
       outcome,
     );
     if (outcome.status === "FAILED") {
-      const decision = decideReplan(record, node.id, maxReplans);
+      const decision = decideReplan(record, node.id, replanBounds);
       if (decision.action === "REPLAN") {
         const replanned = await activities.replanRemaining({
           chainId,

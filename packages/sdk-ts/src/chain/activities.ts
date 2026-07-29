@@ -31,6 +31,16 @@ import type {
   RoutingPolicy,
 } from "../types.js";
 import { deriveNodeOutcome } from "./node-spec.js";
+
+/** What the chain learns from a sealed child run. */
+export interface NodeResult {
+  outcome: NodeOutcome;
+  handoff?: ChainNodeHandoff;
+  reason?: string;
+  /** F-214: the child sealed a WP-520 resumable FAILED — re-enterable. */
+  resumable?: boolean;
+}
+
 import { buildReplanBrief, buildRetryPlan } from "./replan-plan.js";
 import type { ReplanDecision } from "./replan.js";
 import { ChainJournal, chainRecordFrom, type ChainCompletionReviewFinding } from "./store.js";
@@ -188,9 +198,7 @@ export function createChainActivities(deps: ChainActivityDeps) {
      * map it to the `NodeOutcome` the reducer folds. The chain never re-judges;
      * it records what the child run already sealed.
      */
-    async readNodeResult(input: {
-      childRunId: string;
-    }): Promise<{ outcome: NodeOutcome; handoff?: ChainNodeHandoff; reason?: string }> {
+    async readNodeResult(input: { childRunId: string }): Promise<NodeResult> {
       const journal = new Journal(journalPath(deps.dataDir, input.childRunId));
       try {
         const report = reportFromJournal(journal);
@@ -198,15 +206,39 @@ export function createChainActivities(deps: ChainActivityDeps) {
           throw new Error(`child run ${input.childRunId} has no journal — cannot seal node`);
         }
         const terminal = journal.entries("terminal").at(-1)?.payload as
-          | { handoff?: ChainNodeHandoff; reason?: string }
+          | { handoff?: ChainNodeHandoff; reason?: string; resumable?: boolean }
           | undefined;
-        const result: { outcome: NodeOutcome; handoff?: ChainNodeHandoff; reason?: string } = {
+        const result: NodeResult = {
           outcome: deriveNodeOutcome(report.status, report.lastVerdict?.kind),
         };
         if (terminal?.handoff !== undefined) result.handoff = terminal.handoff;
         // WP-521: the seal reason is the retry brief's evidence on a FAILED node.
         if (terminal?.reason !== undefined) result.reason = terminal.reason;
+        // F-214: the run's own answer to "can I continue?" — WP-520 writes it,
+        // `chikory resume` has always honored it, and the chain used to ignore it.
+        if (terminal?.resumable === true) result.resumable = true;
         return result;
+      } finally {
+        journal.close();
+      }
+    },
+
+    /** F-214: journal a chain-level re-entry of a resumable child (ADR-009 D1). */
+    async recordNodeResumed(input: {
+      chainId: string;
+      nodeId: string;
+      childRunId: string;
+      attempt: number;
+      reason: string;
+    }): Promise<void> {
+      const journal = new ChainJournal(chainJournalPath(deps.dataDir, input.chainId));
+      try {
+        journal.append("node_resumed", {
+          nodeId: input.nodeId,
+          childRunId: input.childRunId,
+          attempt: input.attempt,
+          reason: input.reason,
+        });
       } finally {
         journal.close();
       }

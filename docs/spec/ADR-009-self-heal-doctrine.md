@@ -74,10 +74,18 @@ before falling to the next:
 2. **Correct** — ROLLBACK: checkpoint restore + rationale feedback (existing).
 3. **Remediate** — bounded retry against an explicit remediation brief
    (WP-519, new).
-4. **Replan** — chain-level: re-decompose from the failure as evidence
+4. **Re-enter** — chain-level, before any rewrite: a child that sealed
+   `resumable` FAILED is re-executed under the SAME run id, so its checkpoint,
+   its journal and its remediation brief carry forward (WP-544, new).
+5. **Replan** — chain-level: re-decompose from the failure as evidence
    (ADR-005 D3, existing but off by default — WP-521 turns it on).
-5. **Escalate** — park for the human (existing ESCALATE machinery), or seal
+6. **Escalate** — park for the human (existing ESCALATE machinery), or seal
    **resumable** FAILED (WP-520) so recovery remains possible later.
+
+**Tier order is cheapest-first, and "cheap" means work preserved.** Tier 4
+precedes tier 5 because a replan discards a workspace the run had already
+earned; answering "this run can continue" by deleting the run is a regression
+dressed as a heal (F-214).
 
 **Binding on every future gate.** D1 says *every* non-infra failure class gets a
 heal attempt; a gate that consumes an LLM-produced artifact and can reject it is
@@ -184,6 +192,34 @@ reaches the same state with no human involved.
   (`recover with: chikory chain resume <id> --watch`), and every refusal names
   the command that does work.
 
+### D5d — WP-544: A heal budget must measure the right thing (F-209…F-214)
+
+Every tier above assumes the run it is healing was configured as the operator
+declared, and that the strikes triggering a heal were actually earned. On
+dogfood-120's `N-2`, neither held: the chain node template forwarded six spec
+fields and silently dropped `step_limits` / `unattended` / `pacing`, so a
+cap-kill at the *default* 600s became strike 1 of the three that HALTed the node
+on $0.20 of a $15 budget — and the chain-wide replan budget, still charging for
+a lineage that had since succeeded, then refused it a heal entirely.
+
+- **(a)** Binding: **a bound is only legitimate over what the agent controls.**
+  An infrastructure kill (`StepRecord.infraFailed`) and a verdict whose diff was
+  reverted are inconclusive; the rule-3 sequence skips both. The finding is
+  never suppressed — only the strike.
+- **(b)** Binding: **a heal budget is per unit-of-work, not per chain.** Node
+  lineages (`N-1` → `N-1-r1` → …) carry their own count; the chain-wide ceiling
+  is measured over nodes the CURRENT plan contains, so a lineage that healed
+  stops debiting the nodes after it.
+- **(c)** A rewind's anchor must contain work: a PROCEED covering a FAILED step
+  never becomes `lastGoodCheckpointId`.
+- **(d)** A restore does not clear the counter that triggered it. Remediation
+  (tier 3) fires *because* a criterion is three verdicts stuck; resetting its own
+  trigger would turn one bounded attempt into three more judge passes.
+- **(e)** The chain template's coverage of `TaskSpec` is **enumerated**
+  (`CHAIN_TEMPLATE_FIELDS`) and asserted at compile time. A policy an operator
+  declared and the system ignored is indistinguishable, from the outside, from a
+  policy that does not work.
+
 ### D6 — Sequencing rule (binding)
 
 - **P2 now**: WP-519 + WP-520 — prerequisites for the 24h unattended
@@ -200,6 +236,8 @@ reaches the same state with no human involved.
 - Chain replan: `packages/sdk-ts/src/chain/replan.ts`, `chain-loop.ts:55` (`maxReplans`), `activities.ts` `replanRemaining`
 - Gate repair (tier 0): `packages/sdk-ts/src/heal/gate-repair.ts`; plan-phase binding `packages/sdk-ts/src/planner/plan-repair.ts`; loop `packages/sdk-ts/src/cli/chain.ts` `planAndGateChain`
 - Answered-escalation seal: `packages/sdk-ts/src/chain/escalation-park.ts`; orchestrator use `chain-loop.ts`; orphan repair `cli/chain.ts` `repairOrphanedChainSeal`
+- Strike accounting (what a bound may count): `packages/sdk-ts/src/runner/strike-accounting.ts`
+- Chain→run re-entry (tier 4): `packages/sdk-ts/src/chain/node-heal.ts`; template contract `chain/node-spec.ts` `CHAIN_TEMPLATE_FIELDS`
 - Chunk-aware judge rules: WP-273
 
 ## Consequences

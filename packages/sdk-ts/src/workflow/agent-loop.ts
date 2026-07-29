@@ -130,6 +130,19 @@ function allCriteriaPass(verdict: JudgeVerdict | undefined): boolean {
   );
 }
 
+/**
+ * F-212: the rationale PLUS the failing acceptance criteria. A rule-1 ROLLBACK
+ * rationale names only the destructive rubric item, so on dogfood-120 `N-2` the
+ * executor was told "the evidence report is outside the allowed write scope"
+ * and nothing about the substantive gap the same form had recorded. It moved
+ * the file, and the strike it was already carrying killed the node one verdict
+ * later. A mechanical violation must never mask the substantive one.
+ */
+function withCriterionFeedback(verdict: JudgeVerdict): string {
+  const criteria = buildCriterionFeedback(verdict.form);
+  return criteria === undefined ? verdict.rationale : `${verdict.rationale}\n\n${criteria}`;
+}
+
 function projectMemoryRefs(
   refs: ArtifactRef[],
   policy: MemoryEvictionPolicy | undefined,
@@ -781,9 +794,16 @@ export async function agentLoop(spec: TaskSpec): Promise<RunStatus> {
       // verified-good state (judge.md verdict table).
       if (verdict.kind === "ROLLBACK") {
         await activities.restoreCheckpoint({ runId, checkpointId: verdict.rollbackTo! });
-        judgeFeedback = verdict.rationale;
+        judgeFeedback = withCriterionFeedback(verdict);
       }
     }
+
+    // F-211: "last good" must mean a state worth returning to. A PROCEED over a
+    // step the executor never finished (killed at its cap → empty diff) is a
+    // healthy-looking verdict covering NOTHING, and anchoring on it is how
+    // dogfood-120 `N-2`'s single remediation attempt got rolled back to an
+    // empty tree and had to redo two steps of work before it could start.
+    const stepDelivered = record.status === "SUCCESS";
 
     // Checkpoint after the (optional) judge pass so the persisted lastGood
     // flag reflects the verdict that covers exactly this state (WP-122).
@@ -792,7 +812,7 @@ export async function agentLoop(spec: TaskSpec): Promise<RunStatus> {
       stepIndex: stepIndex - 1,
       context,
       budgetSpentUsd: spentUsd,
-      lastGood: verdict?.kind === "PROCEED",
+      lastGood: verdict?.kind === "PROCEED" && stepDelivered,
       memoryCounters: { recalls: memoryRecalls, evicted: memoryEvictions },
     });
     checkpoints.push(checkpoint);
@@ -836,7 +856,10 @@ export async function agentLoop(spec: TaskSpec): Promise<RunStatus> {
       const sealingDiffBase = sinceCommit;
       sinceCommit = Object.values(checkpoint.gitCommits)[0] ?? sinceCommit;
       if (verdict.kind === "PROCEED") {
-        lastGoodCheckpointId = checkpoint.id;
+        // F-211: only a checkpoint that captured delivered work becomes the
+        // rollback anchor; otherwise `lastGoodCheckpointId` stays where it was
+        // (or absent → the run base, which is what "last good" already means).
+        if (stepDelivered) lastGoodCheckpointId = checkpoint.id;
         if (activeWorkChunk.action === "use_chunk") consumedWorkChunks++;
         // Run-level SUCCESS needs PROCEED *and* every criterion passing — a
         // non-PROCEED verdict with passing criteria (e.g. a secret in the
@@ -982,9 +1005,9 @@ export async function agentLoop(spec: TaskSpec): Promise<RunStatus> {
           },
         );
       } else if (verdict.kind === "BRANCH") {
-        judgeFeedback = verdict.rationale;
+        judgeFeedback = withCriterionFeedback(verdict);
       } else if (verdict.kind === "ESCALATE") {
-        judgeFeedback = verdict.rationale;
+        judgeFeedback = withCriterionFeedback(verdict);
         const escalationWait = decideEscalationWait(
           { source: "judge", reason: verdict.escalateReason ?? verdict.rationale },
           spec.unattended,

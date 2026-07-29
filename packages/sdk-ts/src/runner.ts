@@ -61,8 +61,10 @@ export interface TemporalRunner extends DurableRunner {
   startChain(input: {
     plan: Plan;
     template: ChainNodeTemplate;
-    /** WP-521: replan budget; defaults to 1 (heal-by-default). Explicit 0 = legacy halt. */
+    /** WP-521: per-node lineage replan budget; defaults to 1 (heal-by-default). Explicit 0 = legacy halt. */
     maxReplans?: number;
+    /** F-213: chain-wide thrash ceiling; defaults to the plan's node count. */
+    maxChainReplans?: number;
     /** Pre-generated chain-id — the CLI's chain-scoped task queue (F-158, mirrors `start`). */
     chainId?: string;
     /** WP-542/F-207: the host-side plan-phase repair trail, journaled at init. */
@@ -239,6 +241,9 @@ export function createTemporalRunner(opts: TemporalRunnerOptions = {}): Temporal
             plan: input.plan,
             template: input.template,
             maxReplans: input.maxReplans ?? 1,
+            ...(input.maxChainReplans !== undefined
+              ? { maxChainReplans: input.maxChainReplans }
+              : {}),
             ...(input.planAttempts !== undefined ? { planAttempts: input.planAttempts } : {}),
           },
         ],

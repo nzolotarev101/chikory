@@ -93,6 +93,11 @@ import {
   workspaceDir,
 } from "./paths.js";
 import {
+  historyCutoffIdx,
+  isInfraStepFailure,
+  markInfraFailedPass,
+} from "./strike-accounting.js";
+import {
   collectWorkspaceRepos,
   workspaceRepoCheckpointId,
   type WorkspaceRepo,
@@ -679,14 +684,30 @@ async function restoreWorkspaceReposToCheckpoint(input: {
  * (rule 3/5 inputs). Runner-sourced loop-breaker escalations carry no form
  * and are skipped.
  */
-function criteriaHistoryFromJournal(journal: Journal): Record<string, boolean[]> {
+export function criteriaHistoryFromJournal(journal: Journal): Record<string, boolean[]> {
+  // F-210b: a workspace restore ERASES the work every prior verdict judged, so
+  // the stuck-criterion sequence starts after the last one. Without this, a
+  // ROLLBACK charges the executor a strike for the very diff the judge told it
+  // to abandon — two of dogfood-120 `N-2`'s three fatal strikes were of this
+  // kind (one reverted diff, one cap-killed step).
+  const cutoff = historyCutoffIdx(
+    journal.entries("verdict").map((entry) => ({
+      idx: entry.idx,
+      restoresWorkspace:
+        (entry.payload as VerdictPayload).verdict.kind === "ROLLBACK" &&
+        (entry.payload as VerdictPayload & { source?: string }).source !== "runner",
+    })),
+  );
+
   const history: Record<string, boolean[]> = {};
   for (const entry of journal.entries("verdict")) {
+    if (entry.idx <= cutoff) continue;
     const payload = entry.payload as VerdictPayload & { source?: string };
     if (payload.source === "runner") continue;
     for (const r of payload.verdict.form.criterionResults) {
       // WP-263(b): an INFRA-failed result (check killed at its cap) is
-      // inconclusive — it never enters the rule-3/5 sequence.
+      // inconclusive — it never enters the rule-3/5 sequence. F-210a extends
+      // the same flag to a verdict whose STEP was killed at its cap.
       if (r.infraFailed === true) continue;
       (history[r.id] ??= []).push(r.pass);
     }
@@ -1367,6 +1388,7 @@ export function createRunnerActivities(deps: RunnerActivityDeps) {
         let workspaceRepos: WorkspaceRepo[];
         let repoDiffBases: Record<string, string>;
         let criteriaHistory: Record<string, boolean[]>;
+        let stepInfraFailed: boolean;
         let stepSummaries: string[];
         let journaledForm: JudgePayload | undefined;
         try {
@@ -1378,6 +1400,16 @@ export function createRunnerActivities(deps: RunnerActivityDeps) {
             ? repoDiffBasesAtRunBase(workspaceRepos)
             : repoDiffBasesSinceLastVerdict(reader, input.atStep, workspaceRepos);
           criteriaHistory = criteriaHistoryFromJournal(reader);
+          // F-210a: was the step this pass is judging killed at its cap? Its
+          // verdict is inconclusive — the harness ran out of time, which says
+          // nothing about the code — so it must not spend a rule-3 strike.
+          stepInfraFailed = reader
+            .entries("step")
+            .some(
+              (entry) =>
+                (entry.payload as StepPayload).stepIndex === input.atStep &&
+                isInfraStepFailure((entry.payload as StepPayload).record),
+            );
           stepSummaries = summariesSinceLastVerdict(reader, input.atStep);
           journaledForm = reader.findByKey("judge", "judgeIndex", input.judgeIndex)?.payload as
             | JudgePayload
@@ -1392,7 +1424,7 @@ export function createRunnerActivities(deps: RunnerActivityDeps) {
         if (journaledForm) {
           // Crash window: form persisted, verdict not yet — recompute
           // deterministically, never re-ask the LLM (zero duplicate spend).
-          verdict = buildVerdict(journaledForm.form, criteriaHistory, {
+          verdict = buildVerdict(markInfraFailedPass(journaledForm.form, stepInfraFailed), criteriaHistory, {
             runId: input.runId,
             judgeModel: journaledForm.judgeModel,
             costUsd: journaledForm.costUsd,
@@ -1453,6 +1485,7 @@ export function createRunnerActivities(deps: RunnerActivityDeps) {
               ? { activeWorkChunkDirective: input.activeWorkChunkDirective }
               : {}),
             workChunkInProgress: input.workChunkInProgress ?? false,
+            stepInfraFailed,
             ...(input.completionReview
               ? { rubric: COMPLETION_REVIEW_RUBRIC, reviewScope: "cumulative" as const }
               : {}),

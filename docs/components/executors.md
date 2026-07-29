@@ -40,6 +40,7 @@ export interface StepRecord {
   durationMs: number;
   transcriptRef: ArtifactRef;    // full raw transcript, stored outside context (CM-3 pattern from day 1)
   failure?: { reason: string; retriable: boolean };
+  infraFailed?: boolean;           // F-210 — killed at the maxSeconds cap: inconclusive, spends no rule-3 strike
   claimsComplete?: boolean;        // P2 (WP-221) — executor's explicit "task done" signal
 }
 ```

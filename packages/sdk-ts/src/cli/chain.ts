@@ -384,6 +384,15 @@ function templateFromSpec(spec: TaskSpec): ChainNodeTemplate {
   };
   if (spec.budgetTokens !== undefined) template.budgetTokens = spec.budgetTokens;
   if (spec.maxSteps !== undefined) template.maxSteps = spec.maxSteps;
+  // F-209: forward the execution-surface policies the operator declared. Before
+  // WP-544 these stopped here, so a goal spec's `step_limits` / `unattended` /
+  // `pacing` blocks were parsed, validated, and then thrown away.
+  if (spec.stepLimits !== undefined) template.stepLimits = spec.stepLimits;
+  if (spec.pacing !== undefined) template.pacing = spec.pacing;
+  if (spec.unattended !== undefined) template.unattended = spec.unattended;
+  if (spec.soak !== undefined) template.soak = spec.soak;
+  if (spec.notifications !== undefined) template.notifications = spec.notifications;
+  if (spec.horizon !== undefined) template.horizon = spec.horizon;
   // WP-243 dogfood/test-only park seam: armed host-side from env so the dogfood
   // spec stays unchanged. `CHIKORY_PARK_BEFORE_STEP=N` parks before step N;
   // `CHIKORY_PARK_NODE_INDEX=K` (optional) restricts the park to the K-th
@@ -438,6 +447,13 @@ function formatChainEntryLine(entry: ChainEntry): string {
     case "node_replanned": {
       const p = entry.payload as { failedNodeId: string; revisedPlan?: { id: string } };
       return `[${entry.ts}] node ${p.failedNodeId} replanned → ${p.revisedPlan?.id ?? "revised plan"}`;
+    }
+    case "node_resumed": {
+      const p = entry.payload as { nodeId: string; attempt: number; reason?: string };
+      return (
+        `[${entry.ts}] node ${p.nodeId} resumed (attempt ${p.attempt}) — work preserved` +
+        (p.reason ? `: ${p.reason}` : "")
+      );
     }
     case "chain_completion_review": {
       const p = entry.payload as {
@@ -855,8 +871,11 @@ export async function cmdChain(
       ioPair,
       gate.plan,
       templateFromSpec(spec),
-      replanBudgetFromEnv(),
+      // F-213: the env seam still wins (it exists to force 0 for the WP-532
+      // drill); otherwise the goal spec's declared budget, then heal-by-default.
+      replanBudgetFromEnv() ?? spec.chain?.maxReplansPerNode,
       gate.attempts,
+      spec.chain?.maxReplans,
     );
   } catch (err) {
     ioPair.err(`chikory: ${actionable(err)}`);
@@ -888,6 +907,7 @@ async function hostChainAndFollow(
   template: ChainNodeTemplate,
   maxReplans?: number,
   planAttempts?: PlanRepairAttempt[],
+  maxChainReplans?: number,
 ): Promise<number> {
   // Chain-scoped task queue (F-158, mirrors cmdRun): queue = chain-id; node
   // child workflows inherit it via workflowInfo().taskQueue. An orphaned chain
@@ -914,6 +934,7 @@ async function hostChainAndFollow(
       template,
       chainId,
       ...(maxReplans !== undefined ? { maxReplans } : {}),
+      ...(maxChainReplans !== undefined ? { maxChainReplans } : {}),
       ...(planAttempts !== undefined ? { planAttempts } : {}),
     });
     if (!flags.json) {

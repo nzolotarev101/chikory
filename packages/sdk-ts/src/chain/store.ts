@@ -33,6 +33,8 @@ export type ChainEntryKind =
   | "node_started"
   | "node_sealed"
   | "node_replanned"
+  /** F-214: a chain-level re-entry of a resumable child run, before any replan. */
+  | "node_resumed"
   | "chain_completion_review"
   | "control_event"
   | "terminal";

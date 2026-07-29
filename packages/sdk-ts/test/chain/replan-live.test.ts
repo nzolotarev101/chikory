@@ -101,7 +101,7 @@ describe.skipIf(address === null)("live chain replan (WP-219 D3)", () => {
               status: "FAILED",
             },
             input.failedNodeId,
-            input.decision.maxReplans,
+            { maxPerNode: input.decision.maxReplans, maxChain: input.decision.maxReplans },
           );
           if (decision.action !== "REPLAN") return { status: "HALT", reason: decision.reason };
           return { status: "SUCCESS", plan: revisedPlan() };
