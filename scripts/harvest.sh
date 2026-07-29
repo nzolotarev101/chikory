@@ -16,7 +16,9 @@ cd "$(dirname "$0")/.."
 
 # ── 1. Locate the run or chain ───────────────────────────────────────
 TARGET_ID="${1:-}"
+EXPLICIT_TARGET=1
 if [ -z "$TARGET_ID" ]; then
+  EXPLICIT_TARGET=0
   LATEST_DIR=$(ls -td .chikory/runs/run-* .chikory/runs/chain-* .chikory/chains/chain-* 2>/dev/null | head -n 1)
   [ -n "$LATEST_DIR" ] && [ -d "$LATEST_DIR" ] || {
     echo "Error: no run or chain artifact under .chikory/" >&2
@@ -28,7 +30,13 @@ fi
 # A terminal child directory is commonly newer than its owning chain
 # directory. Promote it back to the chain so bare `devbox run harvest` cannot
 # accidentally harvest only the last node.
-if [ ! -f ".chikory/chains/$TARGET_ID/chain.db" ] && [[ "$TARGET_ID" == chain-*-node-* ]]; then
+#
+# F-222: promote ONLY the auto-discovered default. An explicitly named node run
+# id is the operator's deliberate choice, and promoting it made the sealed
+# SUCCESS node of a FAILED chain unharvestable — the chain path refuses any
+# non-SUCCESS chain, so dogfood-120's `N-1-r1-r2` (716 insertions, sealed
+# SUCCESS, its handoff already recorded) had no supported harvest path at all.
+if [ "$EXPLICIT_TARGET" -eq 0 ] && [ ! -f ".chikory/chains/$TARGET_ID/chain.db" ] && [[ "$TARGET_ID" == chain-*-node-* ]]; then
   CANDIDATE_CHAIN_ID="${TARGET_ID%%-node-*}"
   if [ -f ".chikory/chains/$CANDIDATE_CHAIN_ID/chain.db" ]; then
     TARGET_ID="$CANDIDATE_CHAIN_ID"

@@ -98,4 +98,50 @@ if (cd "$TMP/repo" && bash scripts/harvest.sh chain-test main >/dev/null 2>&1); 
   exit 1
 fi
 
+unset HARVEST_CHAIN_JSON
+
+# ── F-222: a sealed-SUCCESS node of a FAILED chain is harvestable BY NAME ─────
+# dogfood-120 died with `N-1-r1-r2` sealed SUCCESS inside a FAILED chain. The
+# chain path (rightly) refuses a non-SUCCESS chain, and the node id used to be
+# promoted to that chain id, so the delivery had no harvest path at all.
+failnode="$TMP/repo/.chikory/runs/chain-fail-node-N-1/workspace"
+mkdir -p "$(dirname "$failnode")" "$TMP/repo/.chikory/chains/chain-fail"
+git clone -q "$TMP/repo" "$failnode"
+git -C "$failnode" config user.name chikory
+git -C "$failnode" config user.email runner@chikory.local
+git -C "$failnode" checkout -q -b chikory/run-chain-fail-node-N-1
+git -C "$failnode" tag chikory-base
+mkdir -p "$failnode/packages"
+printf 'sealed inside a failed chain\n' > "$failnode/packages/d.txt"
+git -C "$failnode" add -A
+git -C "$failnode" commit -q -m 'chikory: step 0'
+
+node --input-type=module -e '
+  import { DatabaseSync } from "node:sqlite";
+  const db = new DatabaseSync(process.argv[1]);
+  db.exec("CREATE TABLE chains (chain_id TEXT PRIMARY KEY, plan_json TEXT, started_at TEXT, ended_at TEXT, status TEXT); CREATE TABLE chain_entries (idx INTEGER PRIMARY KEY, ts TEXT, kind TEXT, payload_json TEXT)");
+  const plan = { nodes: [{ id: "N-1", dependsOn: [] }] };
+  db.prepare("INSERT INTO chains VALUES (?, ?, ?, ?, ?)").run("chain-fail", JSON.stringify(plan), "now", "now", "FAILED");
+  db.prepare("INSERT INTO chain_entries VALUES (?, ?, ?, ?)").run(0, "now", "node_started", JSON.stringify({ nodeId: "N-1", childRunId: "chain-fail-node-N-1" }));
+  db.prepare("INSERT INTO chain_entries VALUES (?, ?, ?, ?)").run(1, "now", "node_sealed", JSON.stringify({ nodeId: "N-1", outcome: { status: "SUCCESS" } }));
+  db.close();
+' "$TMP/repo/.chikory/chains/chain-fail/chain.db"
+
+(cd "$TMP/repo" && bash scripts/harvest.sh chain-fail-node-N-1 main >/dev/null)
+cmp -s "$TMP/repo/packages/d.txt" "$failnode/packages/d.txt"
+
+# The chain id itself still refuses — only SUCCESS chains harvest whole.
+if (cd "$TMP/repo" && bash scripts/harvest.sh chain-fail main >/dev/null 2>&1); then
+  echo "expected FAILED chain harvest to be refused" >&2
+  exit 1
+fi
+
+# And the bare default still promotes a node dir to its chain (so
+# `devbox run harvest` cannot silently harvest only the last node).
+touch "$(dirname "$failnode")"
+if (cd "$TMP/repo" && bash scripts/harvest.sh >/dev/null 2>&1); then
+  echo "expected the bare default to promote to the FAILED chain and refuse" >&2
+  exit 1
+fi
+
 echo "chain-aware harvest integration: PASS"
