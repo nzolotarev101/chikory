@@ -4,7 +4,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 
-import { commandAdapter, type RunnerAdapter } from "../src/adapter.js";
+import { commandAdapter, ensureGitWorkspace, type RunnerAdapter } from "../src/adapter.js";
+import { verifyBaseGreen } from "../src/base-verify.js";
 import { loadTaskDir, runSuite } from "../src/suite.js";
 
 const PINNED_YAML = `
@@ -137,7 +138,7 @@ describe("runSuite", () => {
     expect(summary.iSr).toBe(0);
   });
 
-  it("verifies base ref materialized in separate checkout: declared + repo-pinned gets green verdict from base ref", async () => {
+  it("verifies base ref materialized in workspace: declared + repo-pinned gets green verdict from base ref", async () => {
     const fixture = createGitRepoFixture();
     try {
       const taskYaml = `
@@ -160,15 +161,25 @@ requirements:
       expect(invalid).toEqual({});
       expect(tasks[0].baseVerificationCommand).toBe("./test.sh");
 
-      let workspaceWasEmptyAtStart = false;
+      let workspaceHasBaseScriptAtStart = false;
       const stubAdapter: RunnerAdapter = {
         name: "stub-adapter",
         run: async (_task, ctx) => {
+          if (_task.repo) {
+            ensureGitWorkspace(ctx.workspaceDir, _task.repo.url, _task.repo.ref);
+          }
           const entries = readdirSync(ctx.workspaceDir);
-          workspaceWasEmptyAtStart = entries.length === 0;
+          workspaceHasBaseScriptAtStart = entries.includes("test.sh");
+          const baseVerification = _task.baseVerificationCommand
+            ? await verifyBaseGreen({
+                command: _task.baseVerificationCommand,
+                cwd: ctx.workspaceDir,
+                provisioning: ctx.nodeProvisioning ?? { type: "ambient" },
+              })
+            : undefined;
           // Rewrite workspace to a RED output file / state
           writeFileSync(join(ctx.workspaceDir, "test.sh"), '#!/bin/sh\necho "Tests  0 passed (0)"\nexit 1\n', { mode: 0o755 });
-          return { exitCode: 0, wallClockMs: 10, artifacts: [], notes: [] };
+          return { exitCode: 0, wallClockMs: 10, artifacts: [], notes: [], baseVerification };
         },
       };
 
@@ -180,7 +191,7 @@ requirements:
         resultsDir,
       });
 
-      expect(workspaceWasEmptyAtStart).toBe(true);
+      expect(workspaceHasBaseScriptAtStart).toBe(true);
 
       const taskResult = JSON.parse(readFileSync(join(outDir, "brownfield-001.json"), "utf8"));
       expect(taskResult.baseVerification).toBeDefined();
@@ -189,7 +200,7 @@ requirements:
       expect(taskResult.baseVerification.testsFailed).toBe(0);
       expect(taskResult.baseVerification.reason).toContain("green");
 
-      // Verify no base checkout directory was left behind in temp
+      // Verify no separate base checkout directory was created in temp
       const baseVerifyTempDirs = readdirSync(tmpdir()).filter((name) => name.startsWith("base-verify-brownfield-001"));
       expect(baseVerifyTempDirs).toEqual([]);
     } finally {
@@ -391,6 +402,9 @@ requirements:
       const adapter: RunnerAdapter = {
         name: "test-adapter",
         run: async (task, ctx) => {
+          if (task.repo) {
+            ensureGitWorkspace(ctx.workspaceDir, task.repo.url, task.repo.ref);
+          }
           if (task.id === "brownfield-901") {
             writeFileSync(join(ctx.workspaceDir, "green.txt"), "ok");
           }

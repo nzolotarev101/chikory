@@ -2,8 +2,8 @@
  * `chikory-bench` — WP-301 harness CLI (entry: `bin.ts`). Runs inside devbox
  * (`devbox run bench -- <command>`), never against host toolchains.
  */
-import { mkdirSync, writeFileSync } from "node:fs";
-import { join, resolve } from "node:path";
+import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { dirname, join, resolve } from "node:path";
 
 import { chikoryAdapter, commandAdapter, type RunnerAdapter } from "./adapter.js";
 import { fetchDevAIInstances } from "./devai.js";
@@ -13,6 +13,7 @@ import {
   resolveBenchFamilies,
 } from "./family-preflight.js";
 import { commandComplete, makeJudgeGrader } from "./judge-grader.js";
+import { compareSummaries, type SuiteSummary } from "./results.js";
 import { loadTaskDir, runSuite } from "./suite.js";
 import { isRunnable } from "./task.js";
 
@@ -38,6 +39,13 @@ commands:
       [--out <dir>]          results root (default benchmarks/results)
       [--filter <substr>]    only tasks whose id contains substr
       [--suite <name>]       summary label (default the tasks dir)
+  compare <summary-a.json> <summary-b.json>
+                           compare two 5-task run summaries with 95% Wilson CIs
+      [--arm-a <file>] / [--left <file>]    path to summary A
+      [--arm-b <file>] / [--right <file>]   path to summary B
+      [--left-label <str>]                  label for left arm
+      [--right-label <str>]                 label for right arm
+      [--out <file>]                        output path to save comparison JSON
 
 exit codes: 0 ok · 1 invalid input or failed run
 `;
@@ -223,6 +231,72 @@ export async function main(argv: string[], io = { out: console.log, err: console
     );
     io.out(`artifacts: ${outDir}`);
     return 0;
+  }
+
+  if (command === "compare") {
+    const fileA = values["arm-a"] ?? values["left"] ?? positionals[0];
+    const fileB = values["arm-b"] ?? values["right"] ?? positionals[1];
+    const labelA = values["left-label"] ?? values["arm-a-label"];
+    const labelB = values["right-label"] ?? values["arm-b-label"];
+    const outFile = values["out"];
+
+    if (!fileA || !fileB) {
+      io.err("chikory-bench compare: two summary.json inputs required");
+      return 1;
+    }
+    let summaryA: SuiteSummary;
+    let summaryB: SuiteSummary;
+    try {
+      summaryA = JSON.parse(readFileSync(resolve(fileA), "utf8")) as SuiteSummary;
+      summaryB = JSON.parse(readFileSync(resolve(fileB), "utf8")) as SuiteSummary;
+    } catch (err) {
+      io.err(`chikory-bench compare: failed to read summary inputs: ${(err as Error).message}`);
+      return 1;
+    }
+
+    try {
+      const res = compareSummaries(summaryA, summaryB, {
+        refA: fileA,
+        refB: fileB,
+        labelA,
+        labelB,
+      });
+
+      if (outFile) {
+        mkdirSync(dirname(resolve(outFile)), { recursive: true });
+        writeFileSync(resolve(outFile), JSON.stringify(res, null, 2));
+      }
+
+      io.out(`Arm A (${res.armA.label}): ${fileA}`);
+      io.out(
+        `  I-SR: ${(res.armA.iSr * 100).toFixed(1)}% ` +
+          `[95% CI: ${(res.armA.iSrCi.lower * 100).toFixed(1)}%, ${(res.armA.iSrCi.upper * 100).toFixed(1)}%] ` +
+          `(${res.armA.requirementsSatisfied}/${res.armA.requirementsTotal})`,
+      );
+      io.out(
+        `  D-SR: ${(res.armA.dSr * 100).toFixed(1)}% ` +
+          `[95% CI: ${(res.armA.dSrCi.lower * 100).toFixed(1)}%, ${(res.armA.dSrCi.upper * 100).toFixed(1)}%] ` +
+          `(${res.armA.dependencySatisfied}/${res.armA.requirementsTotal})`,
+      );
+
+      io.out(`Arm B (${res.armB.label}): ${fileB}`);
+      io.out(
+        `  I-SR: ${(res.armB.iSr * 100).toFixed(1)}% ` +
+          `[95% CI: ${(res.armB.iSrCi.lower * 100).toFixed(1)}%, ${(res.armB.iSrCi.upper * 100).toFixed(1)}%] ` +
+          `(${res.armB.requirementsSatisfied}/${res.armB.requirementsTotal})`,
+      );
+      io.out(
+        `  D-SR: ${(res.armB.dSr * 100).toFixed(1)}% ` +
+          `[95% CI: ${(res.armB.dSrCi.lower * 100).toFixed(1)}%, ${(res.armB.dSrCi.upper * 100).toFixed(1)}%] ` +
+          `(${res.armB.dependencySatisfied}/${res.armB.requirementsTotal})`,
+      );
+
+      io.out(`Tasks (${res.taskIds.length}): ${res.taskIds.join(", ")}`);
+      return 0;
+    } catch (err) {
+      io.err(`chikory-bench compare: ${(err as Error).message}`);
+      return 1;
+    }
   }
 
   io.err(`chikory-bench: unknown command '${command}'`);

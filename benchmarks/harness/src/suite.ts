@@ -3,12 +3,10 @@
  * (DevAI instance JSONs and/or authored YAMLs), run each through an adapter
  * in an isolated workspace, grade, and write artifacts.
  */
-import { execSync } from "node:child_process";
-import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { existsSync, mkdirSync, readdirSync, readFileSync } from "node:fs";
 import { extname, join } from "node:path";
 
-import type { AdapterResult, RunnerAdapter } from "./adapter.js";
+import { type AdapterResult, type RunnerAdapter } from "./adapter.js";
 import { gradeTask, type GradeContext, type JudgeFn } from "./grade.js";
 import {
   summarize,
@@ -22,9 +20,7 @@ import {
 import { parseDevAITask } from "./devai.js";
 import { isRunnable, validateAuthoredTask, type BenchmarkTask } from "./task.js";
 import { decideTargetNode, loadTargetEngineSource, discoverNodeToolchains, type ProvisioningDecision } from "./engine.js";
-import { verifyBaseGreen, type VerifyBaseGreenResult } from "./base-verify.js";
-
-
+import { verifyBaseGreen } from "./base-verify.js";
 
 export interface LoadReport {
   tasks: BenchmarkTask[];
@@ -123,53 +119,6 @@ export async function runSuite(opts: RunSuiteOptions): Promise<{ summary: SuiteS
       log(`warn ${task.id}: brownfield without repo pin`);
     }
 
-    let baseVerification: VerifyBaseGreenResult | undefined;
-    if (task.repo !== undefined) {
-      if (!task.baseVerificationCommand) {
-        baseVerification = {
-          green: false,
-          reason: "No base verification command declared (base_verification_command is missing)",
-          testsPassed: 0,
-          testsFailed: 0,
-        };
-      } else {
-        const tempDir = join(
-          tmpdir(),
-          `base-verify-${task.id}-${Date.now()}-${Math.random().toString(36).slice(2)}`,
-        );
-        try {
-          execSync(`git clone ${JSON.stringify(task.repo.url)} ${JSON.stringify(tempDir)}`, {
-            stdio: "ignore",
-            timeout: 30000,
-          });
-          execSync(`git -C ${JSON.stringify(tempDir)} checkout ${JSON.stringify(task.repo.ref)}`, {
-            stdio: "ignore",
-            timeout: 15000,
-          });
-          baseVerification = await verifyBaseGreen({
-            command: task.baseVerificationCommand,
-            cwd: tempDir,
-            provisioning: nodeProvisioning,
-          });
-        } catch (err) {
-          baseVerification = {
-            green: false,
-            reason: `Failed to materialize base ref: ${(err as Error).message}`,
-            testsPassed: 0,
-            testsFailed: 0,
-          };
-        } finally {
-          if (existsSync(tempDir)) {
-            try {
-              rmSync(tempDir, { recursive: true, force: true });
-            } catch {
-              // ignore cleanup errors
-            }
-          }
-        }
-      }
-    }
-
     log(`run ${task.id} via ${opts.adapter.name}`);
     const taskStarted = now().toISOString();
     const run: AdapterResult = await opts.adapter.run(task, {
@@ -178,6 +127,40 @@ export async function runSuite(opts: RunSuiteOptions): Promise<{ summary: SuiteS
       timeoutMs: opts.adapterTimeoutMs,
       nodeProvisioning,
     });
+
+    let baseVerification = run.baseVerification;
+    if (baseVerification === undefined && task.repo !== undefined) {
+      if (!task.baseVerificationCommand) {
+        baseVerification = {
+          green: false,
+          reason: "No base verification command declared (base_verification_command is missing)",
+          testsPassed: 0,
+          testsFailed: 0,
+        };
+      } else if (existsSync(join(workspaceDir, ".git"))) {
+        try {
+          baseVerification = await verifyBaseGreen({
+            command: task.baseVerificationCommand,
+            cwd: workspaceDir,
+            provisioning: nodeProvisioning,
+          });
+        } catch (err) {
+          baseVerification = {
+            green: false,
+            reason: `Failed to verify base ref: ${(err as Error).message}`,
+            testsPassed: 0,
+            testsFailed: 0,
+          };
+        }
+      } else {
+        baseVerification = {
+          green: false,
+          reason: "Failed to materialize base ref: git workspace not present",
+          testsPassed: 0,
+          testsFailed: 0,
+        };
+      }
+    }
     const gradeCtx: GradeContext = {
       workspaceDir,
       timeoutMs: opts.checkTimeoutMs,

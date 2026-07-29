@@ -1,4 +1,4 @@
-import { mkdtempSync, writeFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
@@ -109,6 +109,145 @@ describe("chikory-bench CLI", () => {
       if (prevOverride === undefined) delete process.env.CHIKORY_BENCH_ALLOW_FAMILY_OVERRIDE;
       else process.env.CHIKORY_BENCH_ALLOW_FAMILY_OVERRIDE = prevOverride;
     }
+  });
+
+  it("compare: compares two valid summary.json files and emits Wilson intervals", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "bench-cli-compare-"));
+    const makeSummary = (adapter: string, taskIds: string[]) => ({
+      suite: "test-suite",
+      adapter,
+      startedAt: "2026-01-01T00:00:00.000Z",
+      endedAt: "2026-01-01T01:00:00.000Z",
+      tasks: 5,
+      tasksVerified: 5,
+      unverifiedTasks: [],
+      requirementsTotal: 20,
+      requirementsSatisfied: 15,
+      iSr: 0.75,
+      dSr: 0.75,
+      perTask: taskIds.map((id) => ({
+        taskId: id,
+        satisfied: 3,
+        dependencySatisfied: 3,
+        total: 4,
+        exitCode: 0,
+        wallClockMs: 100,
+        baseVerified: true,
+      })),
+    });
+
+    const tasks = ["task-1", "task-2", "task-3", "task-4", "task-5"];
+    const fileA = join(dir, "summaryA.json");
+    const fileB = join(dir, "summaryB.json");
+    writeFileSync(fileA, JSON.stringify(makeSummary("chikory", tasks)));
+    writeFileSync(fileB, JSON.stringify(makeSummary("command", tasks)));
+
+    const o = io();
+    const code = await main(["compare", fileA, fileB], o);
+    expect(code).toBe(0);
+    const text = o.lines.out.join("\n");
+    expect(text).toContain("Arm A (chikory)");
+    expect(text).toContain("Arm B (command)");
+    expect(text).toContain("I-SR: 75.0% [95% CI: 53.1%, 88.8%]");
+    expect(text).toContain("Tasks (5): task-1, task-2, task-3, task-4, task-5");
+  });
+
+  it("compare: exits 1 on mismatched or invalid inputs", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "bench-cli-compare-bad-"));
+    const makeSummary = (taskIds: string[]) => ({
+      suite: "test",
+      adapter: "chikory",
+      startedAt: "2026-01-01T00:00:00.000Z",
+      endedAt: "2026-01-01T01:00:00.000Z",
+      tasks: 5,
+      tasksVerified: 5,
+      unverifiedTasks: [],
+      requirementsTotal: 20,
+      requirementsSatisfied: 15,
+      iSr: 0.75,
+      dSr: 0.75,
+      perTask: taskIds.map((id) => ({
+        taskId: id,
+        satisfied: 3,
+        dependencySatisfied: 3,
+        total: 4,
+        exitCode: 0,
+        wallClockMs: 100,
+        baseVerified: true,
+      })),
+    });
+
+    const fileA = join(dir, "summaryA.json");
+    const fileB = join(dir, "summaryB.json");
+    writeFileSync(fileA, JSON.stringify(makeSummary(["t1", "t2", "t3", "t4", "t5"])));
+    writeFileSync(fileB, JSON.stringify(makeSummary(["t1", "t2", "t3", "t4", "t999"])));
+
+    const o = io();
+    const code = await main(["compare", fileA, fileB], o);
+    expect(code).toBe(1);
+    expect(o.lines.err.join("\n")).toContain("identical five-task sets");
+  });
+
+  it("compare: supports --left, --right, --left-label, --right-label, and --out flags", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "bench-cli-compare-flags-"));
+    const makeSummary = (adapter: string, taskIds: string[]) => ({
+      suite: "test-suite",
+      adapter,
+      startedAt: "2026-01-01T00:00:00.000Z",
+      endedAt: "2026-01-01T01:00:00.000Z",
+      tasks: 5,
+      tasksVerified: 5,
+      unverifiedTasks: [],
+      requirementsTotal: 10,
+      requirementsSatisfied: 8,
+      iSr: 0.8,
+      dSr: 0.8,
+      perTask: taskIds.map((id) => ({
+        taskId: id,
+        satisfied: 1,
+        dependencySatisfied: 1,
+        total: 1,
+        exitCode: 0,
+        wallClockMs: 100,
+        baseVerified: true,
+      })),
+    });
+
+    const tasks = ["b-1", "b-2", "b-3", "b-4", "b-5"];
+    const leftFile = join(dir, "left.json");
+    const rightFile = join(dir, "right.json");
+    const outFile = join(dir, "out.json");
+    writeFileSync(leftFile, JSON.stringify(makeSummary("chikory", tasks)));
+    writeFileSync(rightFile, JSON.stringify(makeSummary("command", tasks)));
+
+    const o = io();
+    const code = await main(
+      [
+        "compare",
+        "--left",
+        leftFile,
+        "--right",
+        rightFile,
+        "--left-label",
+        "custom-left",
+        "--right-label",
+        "custom-right",
+        "--out",
+        outFile,
+      ],
+      o,
+    );
+    expect(code).toBe(0);
+    const text = o.lines.out.join("\n");
+    expect(text).toContain("Arm A (custom-left)");
+    expect(text).toContain("Arm B (custom-right)");
+
+    const outJson = JSON.parse(readFileSync(outFile, "utf8"));
+    expect(outJson.taskIds).toEqual(tasks);
+    expect(outJson.arms).toHaveLength(2);
+    expect(outJson.arms[0].label).toBe("custom-left");
+    expect(outJson.arms[1].label).toBe("custom-right");
+    expect(outJson.arms[0].iSrRange.low).toBeCloseTo(0.49, 2);
   });
 
   it("rejects unknown commands and missing flags", async () => {

@@ -39,6 +39,7 @@ export {
   buildChikorySpec,
   chikoryAdapter,
   commandAdapter,
+  ensureGitWorkspace,
   DEFAULT_ADAPTER_TIMEOUT_MS,
   type AdapterContext,
   type AdapterResult,
@@ -46,11 +47,16 @@ export {
   type RunnerAdapter,
 } from "./adapter.js";
 export {
+  compareSummaries,
   sanitizeFileName,
   suiteOutDirName,
   summarize,
+  wilsonScoreInterval,
   writeSuiteSummary,
   writeTaskResult,
+  type ArmComparisonDetail,
+  type ConfidenceInterval,
+  type SuiteComparisonResult,
   type SuiteSummary,
   type TaskResult,
 } from "./results.js";

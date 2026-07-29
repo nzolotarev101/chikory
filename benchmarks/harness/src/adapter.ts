@@ -7,15 +7,14 @@
  * - `chikoryAdapter`: `chikory run` on a generated task.yaml; the journal
  *   (`chikory trace --json`, the JIF interchange) is kept as the run artifact.
  */
-import { spawn } from "node:child_process";
+import { execFileSync, spawn } from "node:child_process";
 import { createWriteStream, cpSync, existsSync, mkdirSync, readdirSync, statSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { stringify as stringifyYaml } from "yaml";
 
 import type { BenchmarkTask } from "./task.js";
 import { type ProvisioningDecision } from "./engine.js";
-
-
+import { verifyBaseGreen, type VerifyBaseGreenResult } from "./base-verify.js";
 
 export interface AdapterContext {
   /** The task workspace the system under test works in and grading runs against. */
@@ -32,6 +31,7 @@ export interface AdapterResult {
   /** Paths of artifacts the adapter produced (relative meaning left to adapter). */
   artifacts: string[];
   notes: string[];
+  baseVerification?: VerifyBaseGreenResult;
 }
 
 export interface RunnerAdapter {
@@ -88,9 +88,76 @@ async function withProvisionedPath<T>(nodeProvisioning: ProvisioningDecision | u
 }
 
 /**
+ * Materialize repo.url at repo.ref in workspaceDir. If .git exists, verify origin URL and HEAD;
+ * re-fetch and checkout repo.ref if mismatched, or fail closed.
+ *
+ * Every git call goes through `execFileSync` with an ARGUMENT ARRAY, never an
+ * interpolated shell string: `url` and `ref` come from a task YAML, and a task
+ * file is not a trusted shell author.
+ */
+export function ensureGitWorkspace(workspaceDir: string, repoUrl: string, repoRef: string): void {
+  const gitDir = join(workspaceDir, ".git");
+  const normalizedUrl = repoUrl.trim();
+  const normalizedRef = repoRef.trim();
+  const git = (args: string[]): string =>
+    execFileSync("git", args, { cwd: workspaceDir, encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] });
+
+  if (!existsSync(gitDir)) {
+    git(["clone", normalizedUrl, "."]);
+    git(["checkout", normalizedRef]);
+  } else {
+    let originUrl = "";
+    try {
+      originUrl = git(["config", "--get", "remote.origin.url"]).trim();
+    } catch {
+      // origin remote might not exist
+    }
+
+    let currentHead = "";
+    try {
+      currentHead = git(["rev-parse", "HEAD"]).trim();
+    } catch {
+      // HEAD ref might not be valid
+    }
+
+    const urlMatches = originUrl === normalizedUrl;
+    const headMatches = currentHead === normalizedRef;
+
+    if (!urlMatches || !headMatches) {
+      if (!urlMatches) {
+        try {
+          git(["remote", "set-url", "origin", normalizedUrl]);
+        } catch {
+          git(["remote", "add", "origin", normalizedUrl]);
+        }
+      }
+      try {
+        git(["fetch", "origin"]);
+      } catch {
+        git(["fetch", "origin", normalizedRef]);
+      }
+      git(["checkout", "-f", normalizedRef]);
+    }
+  }
+
+  const verifyHead = git(["rev-parse", "HEAD"]).trim();
+  if (verifyHead !== normalizedRef) {
+    let expectedSha = normalizedRef;
+    try {
+      expectedSha = git(["rev-parse", normalizedRef]).trim();
+    } catch {
+      // ignore
+    }
+    if (verifyHead !== expectedSha) {
+      throw new Error(`Workspace HEAD (${verifyHead}) does not match expected repo ref (${normalizedRef})`);
+    }
+  }
+}
+
+/**
  * Baseline cell: run a command template in the workspace. Placeholders:
  * `{workspace}`, `{goalFile}` (task goal written to a file — no quoting games),
- * `{taskId}`.
+ * `{taskId}`. Materializes brownfield repo.url@ref if specified.
  */
 export function commandAdapter(name: string, template: string): RunnerAdapter {
   return {
@@ -100,12 +167,57 @@ export function commandAdapter(name: string, template: string): RunnerAdapter {
         mkdirSync(ctx.outDir, { recursive: true });
         const goalFile = join(ctx.outDir, "goal.md");
         writeFileSync(goalFile, task.goal);
+        const logPath = join(ctx.outDir, "adapter.log");
+        const started = Date.now();
+
+        let baseVerification: VerifyBaseGreenResult | undefined;
+        if (task.repo) {
+          try {
+            ensureGitWorkspace(ctx.workspaceDir, task.repo.url, task.repo.ref);
+          } catch (err) {
+            return {
+              exitCode: 1,
+              wallClockMs: Date.now() - started,
+              artifacts: [goalFile, logPath],
+              notes: [`Failed to materialize repo base: ${(err as Error).message}`],
+              baseVerification: {
+                green: false,
+                reason: `Failed to materialize base ref: ${(err as Error).message}`,
+                testsPassed: 0,
+                testsFailed: 0,
+              },
+            };
+          }
+
+          if (!task.baseVerificationCommand) {
+            baseVerification = {
+              green: false,
+              reason: "No base verification command declared (base_verification_command is missing)",
+              testsPassed: 0,
+              testsFailed: 0,
+            };
+          } else {
+            try {
+              baseVerification = await verifyBaseGreen({
+                command: task.baseVerificationCommand,
+                cwd: ctx.workspaceDir,
+                provisioning: ctx.nodeProvisioning ?? { type: "ambient" },
+              });
+            } catch (err) {
+              baseVerification = {
+                green: false,
+                reason: `Failed to verify base ref: ${(err as Error).message}`,
+                testsPassed: 0,
+                testsFailed: 0,
+              };
+            }
+          }
+        }
+
         const command = template
           .replaceAll("{workspace}", ctx.workspaceDir)
           .replaceAll("{goalFile}", goalFile)
           .replaceAll("{taskId}", task.id);
-        const logPath = join(ctx.outDir, "adapter.log");
-        const started = Date.now();
         const { code, timedOut } = await runShell(
           command,
           ctx.workspaceDir,
@@ -117,6 +229,7 @@ export function commandAdapter(name: string, template: string): RunnerAdapter {
           wallClockMs: Date.now() - started,
           artifacts: [goalFile, logPath],
           notes: timedOut ? ["timed out"] : [],
+          ...(baseVerification !== undefined ? { baseVerification } : {}),
         };
       });
     },
