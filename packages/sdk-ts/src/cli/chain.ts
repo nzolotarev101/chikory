@@ -25,6 +25,12 @@ import { randomUUID } from "node:crypto";
 import { existsSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 
+import {
+  decideChainOrphanRepair,
+  failedActiveNodeIds,
+  type ChainWorkflowLiveness,
+  type ParkResolution,
+} from "../chain/escalation-park.js";
 import { classifyPlanGateFailure } from "../chain/plan-gate-failure.js";
 import { renderPlanGateFailureNotice } from "../chain/plan-gate-notice.js";
 import { renderChainReadTrace } from "../chain/read-trace.js";
@@ -53,7 +59,11 @@ import {
   type PlanPhaseFailureKind,
 } from "../planner/plan-repair.js";
 import { createRouter } from "../router.js";
-import { createTemporalRunner, describeWorkflowTaskQueue } from "../runner.js";
+import {
+  createTemporalRunner,
+  describeWorkflowLiveness,
+  describeWorkflowTaskQueue,
+} from "../runner.js";
 import { createRunnerWorker } from "../runner/worker.js";
 import { chainJournalPath, journalPath } from "../runner/paths.js";
 import { parseTaskSpec, TaskSpecValidationError } from "../taskspec.js";
@@ -718,10 +728,20 @@ function finishChain(
     out(JSON.stringify({ chainId, ...record }));
   } else {
     const journal = new ChainJournal(chainJournalPath(flags.dataDir, chainId));
+    let resumable = false;
     try {
       out(renderChainTrace(record, journal.entries()));
+      const terminal = journal.entries("terminal").at(-1)?.payload as
+        | { resumable?: boolean }
+        | undefined;
+      resumable = terminal?.resumable === true;
     } finally {
       journal.close();
+    }
+    // F-208: a resumable seal is the chain's heal seam — say so at the seal,
+    // not only in the docs. WP-521(c) grants the failed node a fresh attempt.
+    if (record.status === "FAILED" && resumable) {
+      out(`recover with: chikory chain resume ${chainId} --watch`);
     }
     out(`forensics: chikory trace ${chainId}-node-<node-id>  (per-node run journals)`);
   }
@@ -938,7 +958,16 @@ async function hostChainControlAndFollow(
   }
   const inflight = inflightNode(record);
   if (!inflight) {
-    ioPair.err(`chikory: chain ${chainId} has no in-flight node awaiting a decision`);
+    // F-208: every dispatched node is sealed, so there is nothing to signal.
+    // Name the ONE command that can still move the chain rather than leaving
+    // the operator at a bare refusal (the approve/resume hints point here).
+    ioPair.err(
+      `chikory: chain ${chainId} has no in-flight node awaiting a decision (status ${record.status})`,
+    );
+    ioPair.err(
+      `chikory: every dispatched node is sealed — re-enter the chain with: ` +
+        `chikory chain resume ${chainId} --watch`,
+    );
     return 1;
   }
 
@@ -1011,10 +1040,12 @@ export async function cmdChainApprove(
 }
 
 /**
- * `chikory chain resume <chain-id>` — resume a chain past a park. Two cases:
+ * `chikory chain resume <chain-id>` — resume a chain past a park. Three cases:
  * a RUNNING chain with a parked in-flight child clears its budget cap (WP-241);
  * a sealed-FAILED, resumable chain re-enters `chainLoop` to retry the failed
- * node (WP-521(c) / P3-rung-2).
+ * node (WP-521(c) / P3-rung-2); an ORPHANED chain — no in-flight node, no live
+ * workflow, no terminal entry — is first repaired into that resumable seal and
+ * then re-entered (F-208).
  */
 export async function cmdChainResume(
   args: { chainId: string; addBudgetUsd?: number; watch: boolean } & CommonFlags,
@@ -1030,6 +1061,15 @@ export async function cmdChainResume(
       if (record.status === "FAILED") {
         return await hostChainResumeAndFollow(args.chainId, args, deps, ioPair);
       }
+    } else if (record) {
+      const repaired = await repairAndResumeOrphanedChain(
+        args.chainId,
+        record,
+        args,
+        deps,
+        ioPair,
+      );
+      if (repaired !== undefined) return repaired;
     }
     return await hostChainControlAndFollow(args.chainId, args, deps, ioPair, {
       kind: "resume",
@@ -1039,6 +1079,76 @@ export async function cmdChainResume(
     ioPair.err(`chikory: ${actionable(err)}`);
     return 1;
   }
+}
+
+/**
+ * F-208 repair for a chain the workflow abandoned un-sealed: write the terminal
+ * seal `chainLoop` failed to write, so the WP-521(c) resume path has a sealed
+ * state to re-enter. Returns the resolution so the caller can route (and so the
+ * decision is observable without a Temporal server).
+ *
+ * Every write is fail-closed: an in-flight node (there is something to signal),
+ * a live workflow, or an unreachable server all decline. Chains orphaned by the
+ * pre-fix `chainLoop` are recovered here; new ones never reach this state
+ * because the workflow now always seals.
+ */
+export async function repairOrphanedChainSeal(
+  chainId: string,
+  record: ChainRecord,
+  flags: CommonFlags,
+  deps: CliDeps,
+  ioPair: Io,
+): Promise<ParkResolution> {
+  const probe = deps.workflowLiveness ?? describeWorkflowLiveness;
+  const workflow: ChainWorkflowLiveness = await probe(chainId, {
+    ...(flags.address !== undefined ? { address: flags.address } : {}),
+  });
+  const decision = decideChainOrphanRepair({
+    status: record.status,
+    hasInflightNode: inflightNode(record) !== undefined,
+    workflow,
+    failedNodeIds: failedActiveNodeIds({
+      nodeIds: record.plan.nodes.map((node) => node.id),
+      outcomeStatusById: Object.fromEntries(
+        Object.entries(record.nodeOutcomes).map(([id, outcome]) => [id, outcome.status]),
+      ),
+    }),
+  });
+  if (decision.action === "none") return decision;
+
+  const journal = new ChainJournal(chainJournalPath(flags.dataDir, chainId));
+  try {
+    journal.append("terminal", {
+      status: decision.status,
+      reason: decision.reason,
+      ...(decision.resumable ? { resumable: true } : {}),
+    });
+    journal.setStatus(decision.status, true);
+  } finally {
+    journal.close();
+  }
+  ioPair.out(`chain ${chainId} was orphaned un-sealed — repaired to FAILED (${decision.reason})`);
+  return decision;
+}
+
+/** Repair an orphaned chain and re-enter it; `undefined` when it is no orphan. */
+async function repairAndResumeOrphanedChain(
+  chainId: string,
+  record: ChainRecord,
+  flags: CommonFlags & { watch: boolean },
+  deps: CliDeps,
+  ioPair: Io,
+): Promise<number | undefined> {
+  const decision = await repairOrphanedChainSeal(chainId, record, flags, deps, ioPair);
+  if (decision.action === "none") return undefined;
+  if (!decision.resumable) {
+    ioPair.err(
+      `chikory: chain ${chainId} has no failed node to heal — nothing to resume; ` +
+        `fork a node checkpoint instead: chikory branch <node-run-id>@<journalIdx>`,
+    );
+    return 1;
+  }
+  return await hostChainResumeAndFollow(chainId, flags, deps, ioPair);
 }
 
 /**

@@ -389,3 +389,33 @@ export async function describeWorkflowTaskQueue(
     await connection?.close().catch(() => {});
   }
 }
+
+/**
+ * Whether a workflow execution is still running (F-208). `"gone"` covers both
+ * a completed/terminated execution and one the server has never heard of;
+ * `"unknown"` means the server could not be reached, and every caller that
+ * writes on the answer must treat it as "do not write" — a chain whose worker
+ * we simply cannot see is not an orphan.
+ */
+export async function describeWorkflowLiveness(
+  workflowId: string,
+  opts: { address?: string; namespace?: string } = {},
+): Promise<"live" | "gone" | "unknown"> {
+  const address = opts.address ?? process.env["TEMPORAL_ADDRESS"] ?? "localhost:7233";
+  let connection: Connection | undefined;
+  try {
+    connection = await Connection.connect({ address });
+  } catch {
+    return "unknown"; // server unreachable — we know nothing about the execution
+  }
+  try {
+    const client = new Client({ connection, namespace: opts.namespace });
+    const description = await client.workflow.getHandle(workflowId).describe();
+    return description.status.name === "RUNNING" ? "live" : "gone";
+  } catch {
+    // The server answered and has no such execution → gone, not unreachable.
+    return "gone";
+  } finally {
+    await connection.close().catch(() => {});
+  }
+}

@@ -177,6 +177,18 @@ export {
   type PlanRepairBriefInput,
 } from "./planner/plan-repair.js";
 export { advanceChain, deriveChainStatus } from "./chain/advance.js";
+// F-208 — an answered escalation park never dead-ends a chain.
+export {
+  ANSWERED_ESCALATION_REASON,
+  ORPHANED_CHAIN_REASON,
+  decideChainOrphanRepair,
+  failedActiveNodeIds,
+  resolveAnsweredEscalationPark,
+  type AnsweredEscalationPark,
+  type ChainOrphanState,
+  type ChainWorkflowLiveness,
+  type ParkResolution,
+} from "./chain/escalation-park.js";
 export { decideReplan, type ReplanDecision } from "./chain/replan.js";
 export {
   decideChainCompletionReview,

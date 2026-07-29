@@ -155,6 +155,35 @@ goal spec (F-207). ADR-005 D2 already named the fix in the verdict's own name �
 - **(d)** Prevention first: the planner prompt now states the backtick-literal
   rule the verdict floor was already enforcing silently.
 
+### D5c — WP-543: No incarnation ends without a terminal seal (F-208)
+
+D1's "before any terminal seal" assumes a seal is always written. `chainLoop`
+could exit without one: `deriveChainStatus` rule 1 parks the chain in
+`AWAITING_PLAN_APPROVAL` on any node outcome carrying `verdict === "ESCALATE"`,
+the loop seals only `SUCCESS`/`FAILED`, and a *sealed* escalation has already
+been answered — so nothing could unpark it. The result was strictly worse than a
+dead end: no `terminal` entry, `chains.status` stuck `RUNNING`, `chain resume`
+reporting "no journal or is still live", `chain approve` finding nothing to
+signal, `--watch` waiting forever, with the plan and every node attempt intact
+on disk (dogfood-120, `chain-0723ac0b`). The unattended escalation policy
+reaches the same state with no human involved.
+
+- **(a)** Binding: **every workflow incarnation ends in a terminal status.** A
+  status the orchestrator cannot leave is a bug in the orchestrator, never a
+  state for an operator to discover.
+- **(b)** Pure `resolveAnsweredEscalationPark` (`src/chain/escalation-park.ts`)
+  converts the answered park into a `FAILED` + `resumable` seal — the WP-521(c)
+  resume entry point, so the failed node gets its fresh heal attempt. ADR-005
+  §S3 reserves non-node transitions for the orchestrator, so the pure four-rule
+  reducer and its Python parity port are unchanged.
+- **(c)** Recovery for chains ALREADY orphaned by a pre-fix build:
+  `chikory chain resume` writes the missing seal and re-enters. Fail-closed —
+  an in-flight node, a live workflow, or an unreachable Temporal all decline the
+  write; a chain we merely cannot see is not an orphan.
+- **(d)** Every terminal that a heal path can re-enter says so at the seal
+  (`recover with: chikory chain resume <id> --watch`), and every refusal names
+  the command that does work.
+
 ### D6 — Sequencing rule (binding)
 
 - **P2 now**: WP-519 + WP-520 — prerequisites for the 24h unattended
@@ -170,6 +199,7 @@ goal spec (F-207). ADR-005 D2 already named the fix in the verdict's own name �
 - Escalate park + approval wait: `agent-loop.ts:694–714`; unattended seal: WP-271 `seal_resumable_failed`
 - Chain replan: `packages/sdk-ts/src/chain/replan.ts`, `chain-loop.ts:55` (`maxReplans`), `activities.ts` `replanRemaining`
 - Gate repair (tier 0): `packages/sdk-ts/src/heal/gate-repair.ts`; plan-phase binding `packages/sdk-ts/src/planner/plan-repair.ts`; loop `packages/sdk-ts/src/cli/chain.ts` `planAndGateChain`
+- Answered-escalation seal: `packages/sdk-ts/src/chain/escalation-park.ts`; orchestrator use `chain-loop.ts`; orphan repair `cli/chain.ts` `repairOrphanedChainSeal`
 - Chunk-aware judge rules: WP-273
 
 ## Consequences

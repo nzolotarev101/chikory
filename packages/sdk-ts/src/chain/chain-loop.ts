@@ -33,6 +33,10 @@ import { advanceChain, deriveChainStatus } from "./advance.js";
 import { decideChainCompletionReview } from "./completion-review.js";
 import { buildStructuredCompactionNote } from "./compaction-note.js";
 import {
+  failedActiveNodeIds,
+  resolveAnsweredEscalationPark,
+} from "./escalation-park.js";
+import {
   childRunId,
   isSeededFailNode,
   planNodeToTaskSpec,
@@ -308,6 +312,30 @@ export async function chainLoop(input: ChainLoopInput): Promise<ChainStatus> {
       }
     }
     void runStatus; // terminal status is sourced from the journal via readNodeOutcome
+  }
+
+  // F-208: the loop can exit in `AWAITING_PLAN_APPROVAL` — the reducer's rule-1
+  // park, raised by a node whose SEALED outcome carries verdict ESCALATE. That
+  // escalation was already answered (the child blocks until a human decides, or
+  // an unattended policy seals it), so no signal is coming and the seal block
+  // below would skip the status entirely: no terminal entry, `chain approve`
+  // finds no in-flight node, `chain resume` finds no sealed state, and a
+  // `--watch` follow never returns. Resolve it into the resumable FAILED seal
+  // WP-521(c) already knows how to re-enter (ADR-009 D1: no dead ends). The pure
+  // reducer is untouched — ADR-005 §S3 puts non-node transitions here.
+  const park = resolveAnsweredEscalationPark({
+    status: record.status,
+    failedNodeIds: failedActiveNodeIds({
+      nodeIds: plan.nodes.map((node) => node.id),
+      outcomeStatusById: Object.fromEntries(
+        Object.entries(record.nodeOutcomes).map(([id, outcome]) => [id, outcome.status]),
+      ),
+    }),
+  });
+  if (park.action === "seal") {
+    record = { ...record, status: park.status };
+    reason ??= park.reason;
+    resumableSeal ||= park.resumable;
   }
 
   // WP-311 chain-completion aggregate design review: at the SUCCESS seal, ONE

@@ -140,6 +140,15 @@ the child run id stays in `nodeRuns`). Two pure functions consume it:
   1. **any node `verdict === "ESCALATE"` → `AWAITING_PLAN_APPROVAL`.** A node's
      ESCALATE parks the *whole* chain for the human gate (§8). Highest
      precedence: a human question outranks a mechanical failure.
+     **Rule-1 exit (WP-543, F-208):** this rule reads a *sealed* outcome, and a
+     sealed escalation has already been answered — the child run blocks inside
+     `executeChild` while it is `AWAITING_APPROVAL` and only seals once a human
+     decides (or an unattended policy seals it). So nothing can ever unpark the
+     status the rule derives. The **orchestrator** resolves it, per the boundary
+     stated below: `chainLoop` runs the pure `resolveAnsweredEscalationPark`
+     (`src/chain/escalation-park.ts`) and seals `FAILED` + `resumable` — the
+     WP-521(c) `chikory chain resume` entry point — so no chain incarnation ever
+     ends without a `terminal` entry (ADR-009 D1). The reducer is unchanged.
   2. **else any node `status === "FAILED"` → `FAILED`.** The chain halts at the
      failed node, resumable — identical to how a single run seals (§4). The
      planner re-invoke ("halt-and-replan", D3) is the **non-pure S3-wiring**

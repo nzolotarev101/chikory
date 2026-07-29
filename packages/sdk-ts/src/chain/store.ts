@@ -303,7 +303,13 @@ export function chainRecordFrom(journal: ChainJournal): ChainRecord | undefined 
     }
   }
 
-  const verdicts = journal.entries("plan_verdict");
+  // WP-542 also writes the plan-phase REPAIR TRAIL under `plan_verdict` — one
+  // `PlanAttemptRecord` per attempt, which is NOT a `PlanVerdict`. Keep the
+  // frozen `ChainRecord.planVerdict` shape honest by taking only real verdicts
+  // (an attempt record has `attempt`/`reason`, a verdict has `rationale`).
+  const verdicts = journal
+    .entries("plan_verdict")
+    .filter((entry) => (entry.payload as { rationale?: unknown }).rationale !== undefined);
   const lastVerdict = verdicts[verdicts.length - 1]?.payload as PlanVerdict | undefined;
 
   const record: ChainRecord = {

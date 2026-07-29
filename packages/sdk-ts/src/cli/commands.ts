@@ -72,6 +72,11 @@ export interface CliDeps {
   taskQueue?: string;
   /** Optional plan.md reader for launch prechecks (tests can inject fixture text). */
   readPlanText?: () => Promise<string>;
+  /** F-208 workflow-liveness seam for the orphaned-chain repair (tests inject). */
+  workflowLiveness?: (
+    workflowId: string,
+    opts: { address?: string },
+  ) => Promise<"live" | "gone" | "unknown">;
   /** Branch seam for unit tests; production delegates to TemporalRunner.branch. */
   branchRun?: (target: BranchTarget, flags: CommonFlags) => Promise<{ runId: string }>;
   out?: (line: string) => void;
