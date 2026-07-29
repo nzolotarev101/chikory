@@ -37,8 +37,10 @@ commands:
                       chain record and journal
   chain approve <chain-id>  answer a parked chain node's ESCALATE and follow the
                       chain to its terminal state (default approves; WP-241)
-  chain resume <chain-id>   clear a parked chain node's budget cap (--add-budget)
-                      and follow the chain to its terminal state (WP-241)
+  chain resume <chain-id>   clear a parked chain node's budget cap (--add-budget),
+                      re-enter a sealed-FAILED chain to retry its failed node
+                      (WP-521(c)), or repair one left un-sealed (F-208), then
+                      follow the chain to its terminal state
   resume <run-id>     reattach a worker and continue a run from its last
                       checkpoint (budget halts, escalations, machine moves)
   branch <run-id@step|run-id@base>
