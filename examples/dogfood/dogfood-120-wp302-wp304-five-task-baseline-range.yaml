@@ -1,0 +1,258 @@
+# Plain: Grow the real brownfield corpus to five tasks, score the same five with Chikory and raw Claude Code, and produce an auditable score range.
+# WP: WP-302 (brownfield task authoring) + WP-304 (baseline runs and publication)
+# Ladder-rung: 4
+# Thesis-KPI: benchmark slice vs a baseline — five verified brownfield tasks, identical task set in both arms, score ranges linked to raw results
+# Format: loose — the outcome and comparison contract are fixed; repository choices, task designs, and implementation layout remain the executor's decisions
+#
+# Launch mode: CHAIN. This campaign genuinely decomposes into benchmark tooling, two independent
+# task-authoring slices, the Chikory arm, the raw-Claude-Code arm, and comparison/publication.
+# Launch only after committing dogfood-119's harvest and review:
+#   CHIKORY_PREFLIGHT_ONLY=1 devbox run chain-dogfood
+#   devbox run chain-dogfood
+#
+# Gate verdicts from the dogfood-119 review:
+#   §0 (progression): ⛔ STALLED — the next headline must attempt the current Phase-3 rung.
+#   §1.1 (failure surface): ✅ — two real OSS tasks, two multi-hour agent arms, cross-arm identity,
+#     base-green gating, and range computation have several plausible silent-failure paths.
+#   §1.2 (product progress): ✅ — advances open WP-302 and WP-304 on the real benchmark surface.
+#   §1.3 (mission critical): ✅ PROCEED — this is the current moat-ladder rung, not scaffolding.
+#   §1.5 (friction budget): ✅ — class=product; trailing-three harness-meta ratio is 0:3.
+#
+# Designed traps:
+#   A. The command baseline starts from an empty workspace and grades that empty tree instead of the
+#      task's pinned base ref. A green-looking baseline number from the wrong tree is invalid.
+#   B. One arm silently scores fewer or different task ids, making the comparison non-like-for-like.
+#   C. A red or undeclared base is hidden by shortening perTask instead of failing the campaign.
+#   D. A single point estimate is presented as a range, or the range math uses the wrong denominator.
+#   E. The two new tasks are fixtures/trivia, or their checks are green on the untouched base.
+#
+# Cost note: the outer chain budget is USD 80. The five nested Chikory benchmark tasks retain the
+# harness's own per-task cap (currently USD 25 each); those child-run caps are separate from the
+# outer chain ledger. Raw Claude Code uses the local CLI subscription and may remain unpriced.
+
+name: dogfood-120-wp302-wp304-five-task-baseline-range
+goal: >
+  Climb Phase-3 rung 4 in one decomposed campaign: leave the repository with FIVE real, pinned,
+  runnable brownfield benchmark tasks; run the SAME five-task set once through Chikory's directive
+  arm (Gemini executes, Codex judges) and once through raw Claude Code as the baseline; and produce
+  a small auditable comparison bundle that reports score RANGES rather than point claims and links
+  each arm back to its raw result directory.
+
+  This is outcome-shaped work, not a prescribed edit list. The planner should decompose it into
+  independent nodes for the baseline/comparison capability, brownfield-004, brownfield-005, the
+  Chikory arm, the raw-Claude-Code arm, and the final comparison bundle. Do not collapse the two
+  task-authoring slices into one node: each task requires independent upstream research,
+  RED-on-pinned-base evidence, GREEN-on-known-fix evidence, and review.
+
+  The finished campaign must make all of the following true:
+
+    * The authored corpus contains exactly the existing brownfield-001/002/003 plus net-new
+      brownfield-004 and brownfield-005 as `status: pinned`. Each new task targets a real public OSS
+      repository at a full 40-hex pre-fix commit, represents a real multi-hour bug/refactor/upgrade
+      with a plausible wrong turn, has an outcome-shaped goal, independently checkable requirements,
+      and a lockfile-respecting `base_verification_command` that installs with the target's own
+      package manager. Every new check is proven RED on the untouched pin for the intended reason
+      and GREEN on a known-good fix. No invented fixture repository and no trivial leaf utility.
+
+    * The raw command baseline is valid for brownfield work. Before invoking the baseline CLI, its
+      adapter materializes `repo.url` at exactly `repo.ref` into the task workspace. It fails closed
+      on clone/checkout failure, never mutates the separate base-verification checkout, and leaves
+      the Chikory adapter's existing empty-workspace contract unchanged. Raw Claude Code then edits
+      that materialized tree using the task goal.
+
+    * The benchmark CLI has a `compare` outcome that consumes two real `summary.json` artifacts,
+      verifies both arms contain the same five task ids with `tasksVerified === tasks === 5` and
+      no `unverifiedTasks`, and refuses mismatched, shortened, or unverified arms. It writes a
+      machine-readable comparison containing arm labels, task ids, raw result-directory references,
+      I-SR and D-SR point estimates, and 95% Wilson score intervals computed from each arm's
+      satisfied/total requirement counts. The interval, not the point alone, is the headline.
+
+    * The Chikory arm is launched through the repository's one-stop benchmark path with the
+      directive family preflight intact: Gemini executes and Codex judges. The raw baseline uses
+      Claude Code directly through the command adapter, with no in-loop Chikory judge. Both arms
+      score the identical five pinned tasks. Never substitute a synthetic fixture, upstream known
+      fix, or second Chikory configuration for the raw-agent baseline.
+
+    * Preserve raw artifacts under `benchmarks/results/`. Copy only the two small suite summaries
+      plus the generated comparison into
+      `benchmarks/publications/p3-rung-4/` for landing. The comparison records the raw result
+      directories, exact task ids, adapter/executor/judge families, wall-clock totals, requirement
+      counts, point estimates, and intervals. Do not commit provider credentials, full transcripts,
+      target `node_modules`, or cloned target repositories.
+
+  Constraints: TypeScript remains strict ESM with named exports and no `any`; no new dependency,
+  provider SDK, API key, global install, frozen contract change, or unrelated package edit. Project
+  commands run sequentially inside the already-activated Devbox environment, so invoke pinned tools
+  directly and do not nest `devbox run`. Writes stay within `benchmarks/`, the narrowly required
+  benchmark launcher script/devbox entry, and the rung-4 report/publication bundle. Every existing
+  test remains green.
+
+repos:
+  - url: /Users/nikitazolotarev/repos/chikory
+    writable: true
+
+acceptance_criteria:
+  - id: AC-1
+    description: >
+      The comparison CLI owns the statistical oracle. Against two synthetic five-task summaries it
+      emits 95% Wilson intervals from satisfied/total requirement counts, keeps the identical task
+      set, and rejects a mismatched arm. This check specifies the inputs and expected interval
+      endpoints itself; executor-authored tests are not the correctness oracle.
+    check: |
+      cd benchmarks/harness && pnpm exec tsc && node -e '
+      const {mkdtempSync,writeFileSync,readFileSync}=require("node:fs");
+      const {execFileSync,spawnSync}=require("node:child_process");
+      const {tmpdir}=require("node:os");
+      const {join}=require("node:path");
+      const A=(c,m)=>{if(!c){console.error("FAIL: "+m);process.exit(1);}};
+      const d=mkdtempSync(join(tmpdir(),"rung4-compare-"));
+      const ids=["brownfield-001","brownfield-002","brownfield-003","brownfield-004","brownfield-005"];
+      const summary=(adapter,sat,total)=>({
+        suite:"rung4",adapter,startedAt:"2026-01-01T00:00:00Z",endedAt:"2026-01-01T01:00:00Z",
+        tasks:5,tasksVerified:5,unverifiedTasks:[],requirementsTotal:total,
+        requirementsSatisfied:sat,iSr:sat/total,dSr:sat/total,
+        perTask:ids.map((taskId)=>({taskId,satisfied:1,dependencySatisfied:1,total:1,exitCode:0,wallClockMs:1,baseVerified:true}))
+      });
+      const left=join(d,"left.json"),right=join(d,"right.json"),out=join(d,"comparison.json");
+      writeFileSync(left,JSON.stringify(summary("chikory",8,10)));
+      writeFileSync(right,JSON.stringify(summary("raw-claude-code",5,10)));
+      execFileSync("node",["dist/bin.js","compare","--left",left,"--left-label","chikory",
+        "--right",right,"--right-label","raw-claude-code","--out",out],{stdio:"inherit"});
+      const r=JSON.parse(readFileSync(out,"utf8"));
+      A(JSON.stringify(r.taskIds)===JSON.stringify(ids),"task ids must stay identical and ordered");
+      const by=Object.fromEntries(r.arms.map((x)=>[x.label,x]));
+      const near=(a,b)=>Math.abs(a-b)<0.001;
+      A(near(by.chikory.iSrRange.low,0.490)&&near(by.chikory.iSrRange.high,0.943),
+        "8/10 Wilson interval must be approximately [0.490,0.943]");
+      A(near(by["raw-claude-code"].iSrRange.low,0.237)&&near(by["raw-claude-code"].iSrRange.high,0.763),
+        "5/10 Wilson interval must be approximately [0.237,0.763]");
+      const bad={...summary("raw-claude-code",5,10),perTask:summary("raw-claude-code",5,10).perTask.slice(1),tasks:4,tasksVerified:4};
+      writeFileSync(right,JSON.stringify(bad));
+      const p=spawnSync("node",["dist/bin.js","compare","--left",left,"--left-label","chikory",
+        "--right",right,"--right-label","raw-claude-code","--out",out],{encoding:"utf8"});
+      A(p.status!==0,"mismatched/shortened task sets must fail closed");
+      console.log("AC-1 OK: compare emits the specified ranges and rejects a mismatched arm");
+      '
+
+  - id: AC-2
+    description: >
+      The raw command adapter materializes the exact pinned brownfield base before invoking the
+      agent command. The check creates a local git fixture and an empty workspace, then proves the
+      command can read a committed base file and edit that workspace; HEAD's empty-workspace
+      command adapter fails this oracle.
+    check: |
+      cd benchmarks/harness && pnpm exec tsc && node --input-type=module -e '
+      import {execFileSync} from "node:child_process";
+      import {mkdtempSync,mkdirSync,writeFileSync,existsSync,readFileSync} from "node:fs";
+      import {tmpdir} from "node:os";
+      import {join} from "node:path";
+      import {commandAdapter} from "./dist/adapter.js";
+      const A=(c,m)=>{if(!c){console.error("FAIL: "+m);process.exit(1);}};
+      const root=mkdtempSync(join(tmpdir(),"rung4-baseline-"));
+      const repo=join(root,"repo"),workspace=join(root,"workspace"),out=join(root,"out");
+      mkdirSync(repo);mkdirSync(workspace);
+      writeFileSync(join(repo,"seed.txt"),"from pinned base\n");
+      execFileSync("git",["init","-q","-b","main"],{cwd:repo});
+      execFileSync("git",["add","-A"],{cwd:repo});
+      execFileSync("git",["-c","user.email=a@b.c","-c","user.name=fx","commit","-q","-m","base"],{cwd:repo});
+      const ref=execFileSync("git",["rev-parse","HEAD"],{cwd:repo,encoding:"utf8"}).trim();
+      const task={id:"brownfield-999",source:"authored",class:"brownfield",status:"pinned",
+        repo:{url:repo,ref},goal:"edit the pinned tree",requirements:[],preferences:[],tags:[],flags:{}};
+      const adapter=commandAdapter("raw-baseline","grep -q \"from pinned base\" seed.txt && printf solved > solved.txt");
+      const r=await adapter.run(task,{workspaceDir:workspace,outDir:out});
+      A(r.exitCode===0,"baseline command must run on the materialized pin (exit "+r.exitCode+")");
+      A(readFileSync(join(workspace,"seed.txt"),"utf8")==="from pinned base\n","exact pinned file survives");
+      A(existsSync(join(workspace,"solved.txt")),"baseline edit must land in the graded workspace");
+      console.log("AC-2 OK: raw baseline receives and edits the exact pinned base");
+      '
+
+  - id: AC-3
+    description: >
+      The real authored corpus contains five valid, runnable, repo-pinned brownfield tasks. Every
+      task has a full commit pin and a declared base verification command; no task is silently
+      excluded. The loader, not a filename grep, owns this oracle.
+    check: |
+      cd benchmarks/harness && pnpm exec tsc && node --input-type=module -e '
+      import {loadTaskDir} from "./dist/suite.js";
+      import {isRunnable} from "./dist/task.js";
+      const A=(c,m)=>{if(!c){console.error("FAIL: "+m);process.exit(1);}};
+      const {tasks,invalid}=loadTaskDir("../tasks");
+      A(Object.keys(invalid).length===0,"corpus must parse: "+JSON.stringify(invalid));
+      const brown=tasks.filter((t)=>t.class==="brownfield");
+      A(brown.length===5,"expected exactly five brownfield tasks, got "+brown.length);
+      A(brown.every((t)=>t.status==="pinned"&&isRunnable(t)),"all five must be pinned and runnable");
+      A(brown.every((t)=>t.repo&&/^[0-9a-f]{40}$/.test(t.repo.ref)),"all five need full 40-hex pins");
+      A(brown.every((t)=>typeof t.baseVerificationCommand==="string"&&t.baseVerificationCommand.length>0),
+        "all five need base_verification_command");
+      console.log("AC-3 OK: five pinned runnable brownfield tasks load");
+      '
+
+  - id: AC-4
+    description: >
+      The landed rung-4 publication bundle proves the actual campaign, not just tooling: two
+      summaries contain the same five verified task ids, one is the Chikory directive arm, one is
+      raw Claude Code, and the comparison carries finite intervals plus raw result references.
+    check: |
+      node -e '
+      const {readFileSync}=require("node:fs");
+      const P="benchmarks/publications/p3-rung-4/";
+      const A=(c,m)=>{if(!c){console.error("FAIL: "+m);process.exit(1);}};
+      const load=(f)=>JSON.parse(readFileSync(P+f,"utf8"));
+      const c=load("chikory-summary.json"),b=load("raw-claude-code-summary.json"),r=load("comparison.json");
+      const ids=(s)=>s.perTask.map((x)=>x.taskId).sort();
+      A(c.tasks===5&&c.tasksVerified===5&&c.unverifiedTasks.length===0,"Chikory arm must verify 5/5 bases");
+      A(b.tasks===5&&b.tasksVerified===5&&b.unverifiedTasks.length===0,"baseline arm must verify 5/5 bases");
+      A(JSON.stringify(ids(c))===JSON.stringify(ids(b)),"both arms must score the identical task set");
+      A(r.arms.some((x)=>x.label==="chikory")&&r.arms.some((x)=>x.label==="raw-claude-code"),
+        "comparison must name both real arms");
+      A(r.arms.every((x)=>Number.isFinite(x.iSrRange.low)&&Number.isFinite(x.iSrRange.high)&&
+        x.iSrRange.low<=x.iSrRange.high&&typeof x.rawResultsDir==="string"&&x.rawResultsDir.length>0),
+        "every arm needs a finite range and raw-results reference");
+      console.log("AC-4 OK: two like-for-like five-task arms and auditable ranges are published");
+      '
+
+  - id: AC-5
+    description: >
+      The benchmark harness remains type- and lint-clean, and its scoped suite contains the new
+      baseline/comparison coverage without weakening the existing 113-test floor.
+    check: |
+      cd benchmarks/harness &&
+      pnpm exec tsc --noEmit &&
+      pnpm exec eslint src &&
+      pnpm exec vitest run --reporter=json --outputFile=/tmp/rung4-120.json >/dev/null 2>&1 &&
+      node -e 'const r=require("/tmp/rung4-120.json");
+      if(r.numFailedTests||r.numPassedTests<120){
+        console.error("FAIL: "+r.numFailedTests+" failed / "+r.numPassedTests+" passed; need 0 / >=120");
+        process.exit(1)
+      }
+      console.log("AC-5 OK: "+r.numPassedTests+" harness tests pass")'
+
+budget_usd: 80
+max_steps: 30
+
+step_limits:
+  max_turns: 50
+  max_seconds: 840
+
+pacing:
+  mode: auto
+  autoCalibrate: true
+
+unattended:
+  escalation: seal_resumable_failed
+
+executor:
+  adapter: gemini-cli
+  family: gemini
+
+judge:
+  family: openai-compat
+  cadence: 1
+  max_cost_share: 0.5
+
+routing:
+  stages:
+    plan: { provider: openai-compat, model: gpt-5.6-sol xhigh }
+    code: { provider: openai-compat, model: default }
+    review: { provider: openai-compat, model: gpt-5.6-sol xhigh }
+    judge: { provider: openai-compat, model: gpt-5.6-sol xhigh }
