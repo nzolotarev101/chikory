@@ -25,6 +25,7 @@ status: pinned
 repo:
   url: https://github.com/ecyrbe/zodios
   ref: 6e6f3b3dbc3fdd62bc2c043efbdcd0254823fcb4 # zod-3 HEAD, before any v4 upgrade attempt (upstream never did this migration)
+base_verification_command: yarn install --immutable && yarn test
 horizon: 3-6h
 goal: |
   Upgrade the `zod` dependency (currently pinned to `3.22.4` via both

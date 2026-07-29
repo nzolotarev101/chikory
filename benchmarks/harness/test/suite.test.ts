@@ -333,6 +333,96 @@ requirements:
       fixture.cleanup();
     }
   });
+
+  it("runSuite summary includes base verification metrics and gates headline rates over verified tasks", async () => {
+    const fixture = createGitRepoFixture();
+    try {
+      const greenYaml = `
+id: brownfield-901
+class: brownfield
+status: pinned
+repo:
+  url: ${JSON.stringify(fixture.repoDir)}
+  ref: ${fixture.commitSha}
+base_verification_command: ./test.sh
+goal: goal
+requirements:
+  - id: R1
+    description: requirement 1
+    check: test -f green.txt
+`;
+      const redYaml = `
+id: brownfield-902
+class: brownfield
+status: pinned
+repo:
+  url: ${JSON.stringify(fixture.repoDir)}
+  ref: ${fixture.commitSha}
+base_verification_command: ./nonexistent.sh
+goal: goal
+requirements:
+  - id: R1
+    description: requirement 1
+    check: "false"
+`;
+      const undeclaredYaml = `
+id: brownfield-903
+class: brownfield
+status: pinned
+repo:
+  url: ${JSON.stringify(fixture.repoDir)}
+  ref: ${fixture.commitSha}
+goal: goal
+requirements:
+  - id: R1
+    description: requirement 1
+    check: "false"
+`;
+      const dir = mkdtempSync(join(tmpdir(), "bench-suite-summary-"));
+      writeFileSync(join(dir, "brownfield-901.yaml"), greenYaml);
+      writeFileSync(join(dir, "brownfield-902.yaml"), redYaml);
+      writeFileSync(join(dir, "brownfield-903.yaml"), undeclaredYaml);
+      writeFileSync(join(dir, "greenfield-904.yaml"), PINNED_YAML);
+
+      const { tasks, invalid } = loadTaskDir(dir);
+      expect(invalid).toEqual({});
+
+      const resultsDir = mkdtempSync(join(tmpdir(), "bench-results-"));
+      const adapter: RunnerAdapter = {
+        name: "test-adapter",
+        run: async (task, ctx) => {
+          if (task.id === "brownfield-901") {
+            writeFileSync(join(ctx.workspaceDir, "green.txt"), "ok");
+          }
+          if (task.id === "greenfield-001") {
+            writeFileSync(join(ctx.workspaceDir, "hello.txt"), "hello");
+          }
+          return { exitCode: 0, wallClockMs: 10, artifacts: [], notes: [] };
+        },
+      };
+
+      const { summary, outDir } = await runSuite({
+        suite: "summary-test",
+        tasks,
+        adapter,
+        resultsDir,
+      });
+
+      expect(summary.tasks).toBe(4);
+      expect(summary.tasksVerified).toBe(2); // 901 and greenfield-001
+      expect(summary.unverifiedTasks).toHaveLength(2);
+      expect(summary.unverifiedTasks.map((u) => u.taskId).sort()).toEqual(["brownfield-902", "brownfield-903"]);
+      expect(summary.iSr).toBe(1); // 901 (1/1) + greenfield-001 (2/2) = 3/3 = 1
+      expect(summary.perTask).toHaveLength(4);
+
+      const writtenSummary = JSON.parse(readFileSync(join(outDir, "summary.json"), "utf8"));
+      expect(writtenSummary.tasksVerified).toBe(2);
+      expect(writtenSummary.unverifiedTasks).toHaveLength(2);
+      expect(writtenSummary.iSr).toBe(1);
+    } finally {
+      fixture.cleanup();
+    }
+  });
 });
 
 function createGitRepoFixture(): { repoDir: string; commitSha: string; cleanup: () => void } {

@@ -16,6 +16,7 @@ status: pinned
 repo:
   url: https://github.com/colinhacks/zod
   ref: b6b1288277e6ca87dab0ad1c7251b92612b7445c # pinned BEFORE #5855 (parent of the fix commit on main)
+base_verification_command: npx -y pnpm@10.12.1 install --frozen-lockfile && npx -y pnpm@10.12.1 exec vitest run --project zod
 horizon: 3-6h
 goal: |
   Starting from the issue report only (`.default()` returns the same mutable

@@ -29,6 +29,8 @@ export interface SuiteSummary {
   startedAt: string;
   endedAt: string;
   tasks: number;
+  tasksVerified: number;
+  unverifiedTasks: { taskId: string; reason: string }[];
   requirementsTotal: number;
   requirementsSatisfied: number;
   /** Independent satisfaction rate (DevAI I-SR), 0..1. */
@@ -42,7 +44,15 @@ export interface SuiteSummary {
     total: number;
     exitCode: number | null;
     wallClockMs: number;
+    baseVerified: boolean;
   }[];
+}
+
+export function isTaskVerified(result: TaskResult): boolean {
+  if (result.baseVerification === undefined) {
+    return true;
+  }
+  return result.baseVerification.green === true;
 }
 
 export function suiteOutDirName(adapter: string, now: Date): string {
@@ -59,17 +69,31 @@ export function summarize(
 ): SuiteSummary {
   const requirementsTotal = results.reduce((s, r) => s + r.grading.total, 0);
   const requirementsSatisfied = results.reduce((s, r) => s + r.grading.satisfied, 0);
-  const dependencySatisfied = results.reduce((s, r) => s + r.grading.dependencySatisfied, 0);
+
+  const verifiedResults = results.filter((r) => isTaskVerified(r));
+  const verifiedTotal = verifiedResults.reduce((s, r) => s + r.grading.total, 0);
+  const verifiedSatisfied = verifiedResults.reduce((s, r) => s + r.grading.satisfied, 0);
+  const verifiedDependencySatisfied = verifiedResults.reduce((s, r) => s + r.grading.dependencySatisfied, 0);
+
+  const unverifiedTasks = results
+    .filter((r) => !isTaskVerified(r))
+    .map((r) => ({
+      taskId: r.taskId,
+      reason: r.baseVerification?.reason ?? "Unverified base ref",
+    }));
+
   return {
     suite,
     adapter,
     startedAt,
     endedAt,
     tasks: results.length,
+    tasksVerified: verifiedResults.length,
+    unverifiedTasks,
     requirementsTotal,
     requirementsSatisfied,
-    iSr: requirementsTotal > 0 ? requirementsSatisfied / requirementsTotal : 0,
-    dSr: requirementsTotal > 0 ? dependencySatisfied / requirementsTotal : 0,
+    iSr: verifiedTotal > 0 ? verifiedSatisfied / verifiedTotal : 0,
+    dSr: verifiedTotal > 0 ? verifiedDependencySatisfied / verifiedTotal : 0,
     perTask: results.map((r) => ({
       taskId: r.taskId,
       satisfied: r.grading.satisfied,
@@ -77,6 +101,7 @@ export function summarize(
       total: r.grading.total,
       exitCode: r.run.exitCode,
       wallClockMs: r.run.wallClockMs,
+      baseVerified: isTaskVerified(r),
     })),
   };
 }
