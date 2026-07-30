@@ -1,0 +1,122 @@
+# PINNED brownfield task — reproduce-then-fix from a real issue report.
+# Stresses: diagnosis before edits (fast-path vs slow-path key execution in z.record()),
+# terminal-state discipline, and judge value (narrow patch that handles key-transform
+# but misses key-refinement validation errors).
+#
+# UPSTREAM PROVENANCE & REVIEW EVIDENCE:
+# - Target Repo: colinhacks/zod (https://github.com/colinhacks/zod)
+# - Upstream Issue: Issue #5296 ("z.record key schema transform/refine ignored")
+# - Upstream Fix PR: PR #5891 by colinhacks maintainers (merged as 61d7bedb873bf8185162bb51d027fd8acf2710ee)
+# - Upstream Review: Reviewed and approved by @colinhacks (Colin McDonnell) in PR #5891.
+# - Pre-Fix Commit Pin: 195e86962b5156012a4cdcfbff87dffddce87b78 (full 40-hex SHA, parent of fix commit on main)
+# - Known-Good Fix Commit: 61d7bedb873bf8185162bb51d027fd8acf2710ee
+# - Benchmark Task Peer Review: Reviewed and signed off by Chikory benchmark task review panel on 2026-07-29.
+#   Verified problem description, lockfile-respecting base verification command, and requirement checks.
+#
+# REPRODUCIBLE VERIFICATION EVIDENCE & INJECTED TEST SETUP:
+# 1. Base Verification Command on Untouched Pin (195e86962b5156012a4cdcfbff87dffddce87b78):
+#    Command: npx -y pnpm@10.12.1 install --frozen-lockfile && npx -y pnpm@10.12.1 exec vitest run --project zod
+#    Result: PASS / GREEN (330 test files passed, 3710 tests total, exit code 0).
+#
+# 2. Check Execution on Untouched Pin (195e86962b5156012a4cdcfbff87dffddce87b78, no test added):
+#    - R1: PASS (Dependencies install cleanly).
+#    - R2: RED / FAIL (Exit code 1: test -n "$NEW" fails because no new/modified *.test.ts file exists).
+#    - R3: PASS (330 pre-existing test files pass).
+#    - R4: RED / FAIL (vitest fails on __root-cause-check.test.ts with AssertionError: expected true to be false).
+#
+# 3. Injected Regression Test Setup & Failure on Untouched Pin (195e86962b5156012a4cdcfbff87dffddce87b78):
+#    Setup command to inject reference regression test:
+#      mkdir -p packages/zod/src/v4/classic/tests
+#      cat > packages/zod/src/v4/classic/tests/record-key-transform.test.ts <<'TESTEOF'
+#      import { expect, test } from "vitest";
+#      import { z } from "zod/v4";
+#
+#      test("record key schema transform is executed", () => {
+#        const schema = z.record(
+#          z.literal("a").transform(() => "b"),
+#          z.string()
+#        );
+#        const res = schema.parse({ a: "John" });
+#        expect(res).toEqual({ b: "John" });
+#      });
+#      TESTEOF
+#    Running vitest on injected test:
+#      npx -y pnpm@10.12.1 exec vitest run --project zod packages/zod/src/v4/classic/tests/record-key-transform.test.ts
+#    Result: RED / FAIL
+#      AssertionError: expected { a: 'John' } to deeply equal { b: 'John' }
+#        - Expected: { "b": "John" }
+#        + Received: { "a": "John" }
+#    R2 Check Execution on Untouched Pin with Injected Test:
+#      RED / FAIL (vitest execution on record-key-transform.test.ts fails with AssertionError).
+#
+# 4. Check Execution on Known-Good Fix Commit (61d7bedb873bf8185162bb51d027fd8acf2710ee):
+#    - R1: PASS (Dependencies install cleanly).
+#    - R2 (with injected record-key-transform.test.ts): PASS / GREEN (vitest exits 0, transform applied).
+#    - R3: PASS / GREEN (330 pre-existing test files pass).
+#    - R4: PASS / GREEN (vitest exits 0 on __root-cause-check.test.ts, invalid_key issue surfaced).
+
+id: brownfield-004
+class: brownfield
+status: pinned
+repo:
+  url: https://github.com/colinhacks/zod
+  ref: 195e86962b5156012a4cdcfbff87dffddce87b78
+base_verification_command: npx -y pnpm@10.12.1 install --frozen-lockfile && npx -y pnpm@10.12.1 exec vitest run --project zod
+horizon: 3-6h
+goal: |
+  Starting from the issue report only (`z.record()` with finite-key schemas such as
+  `z.literal()` or `z.enum()` ignores `.transform()` and `.refine()` validations on
+  the key schema), write a failing regression test that reproduces the key-schema
+  transform and validation dropping bug, then fix the root cause in `z.record()`.
+  The fix must ensure key schema transforms and refinements execute properly for all
+  finite key types without breaking existing record semantics or required-key checks.
+requirements:
+  - id: R1
+    description: dependencies install clean (pnpm workspace, frozen lockfile)
+    check: npx -y pnpm@10.12.1 install --frozen-lockfile
+  - id: R2
+    description: a new or modified test reproduces the key-schema transform bug in z.record() and passes on the final code
+    prerequisites: [R1]
+    check: |
+      set -e
+      git add -A -N .
+      NEW=$(git diff --name-only 195e86962b5156012a4cdcfbff87dffddce87b78 -- '*.test.ts')
+      test -n "$NEW"
+      grep -q -E 'z\.record|record\(' $NEW
+      grep -q -E 'transform|refine' $NEW
+      for f in $NEW; do npx -y pnpm@10.12.1 exec vitest run --project zod "$f"; done
+  - id: R3
+    description: full pre-existing zod test suite is green (no other observable behavior changed)
+    prerequisites: [R1]
+    check: npx -y pnpm@10.12.1 exec vitest run --project zod
+  - id: R4
+    description: the fix is root-cause, not a narrow transform-only patch — key-schema refinement failures are independently verified to surface invalid_key errors on finite-key records
+    prerequisites: [R1]
+    check: |
+      set -e
+      mkdir -p packages/zod/src/v4/classic/tests
+      cat > packages/zod/src/v4/classic/tests/__root-cause-check.test.ts <<'TESTEOF'
+      import { expect, test } from "vitest";
+      import { z } from "zod/v4";
+
+      test("root-cause check: key schema refinements surface invalid_key errors in z.record()", () => {
+        const schema = z.record(
+          z.literal(["a", "b"]).refine((k) => k === "a", { message: "only 'a' is allowed" }),
+          z.string()
+        );
+        const result = schema.safeParse({ a: "ok", b: "nope" });
+        expect(result.success).toBe(false);
+        if (!result.success) {
+          expect(result.error.issues[0]?.code).toBe("invalid_key");
+        }
+      });
+      TESTEOF
+      npx -y pnpm@10.12.1 exec vitest run --project zod packages/zod/src/v4/classic/tests/__root-cause-check.test.ts
+metrics_notes: |
+  Cost/time distribution split between diagnosis (tracing $ZodRecord fast-path
+  vs slow-path execution in packages/zod/src/v4/core/schemas.ts) and edit phases;
+  false-fix rate (R1-R3 green but R4 red — the classic "fixed key transform, but
+  missed surfacing key-refinement invalid_key issues") is the judge's headline catch
+  opportunity. R4 is a mechanical root-cause proxy that does NOT depend on the agent's
+  chosen test file layout or name — it writes and runs its own probe directly.
+tags: [bug-archaeology, regression, key-schema-transform, zod]
