@@ -63,6 +63,7 @@ import {
   type MemoryEvictionPolicy,
   type MemoryPointerPolicy,
 } from "../runner/memory-pointer.js";
+import { renderWriteBoundary, WRITE_BOUNDARY_NOTE } from "../chain/write-boundary.js";
 import { isCompletionMilestone } from "./judge-trigger.js";
 import { decideEscalationWait } from "./escalation-wait.js";
 import {
@@ -607,14 +608,19 @@ export async function agentLoop(spec: TaskSpec): Promise<RunStatus> {
 
     const memoryRecallNote = pendingMemoryRecallNote;
     pendingMemoryRecallNote = undefined;
+    // F-218: a chain node is FAILED at seal for writing outside its declared
+    // writeSet, so it has to be told the boundary before it works. Rides
+    // `notes` (CM-2), which survives compaction verbatim — the boundary must not
+    // decay out of context on a long node.
+    const writeBoundary = renderWriteBoundary(spec.chainLink?.writeSet ?? []);
     const context: ContextBundle = {
       goal: stepInstruction,
       acceptanceCriteria: spec.acceptanceCriteria,
       planItem: stepInstruction,
-      notes:
-        memoryRecallNote === undefined
-          ? {}
-          : { "memory.recall": memoryRecallNote },
+      notes: {
+        ...(memoryRecallNote === undefined ? {} : { "memory.recall": memoryRecallNote }),
+        ...(writeBoundary === "" ? {} : { [WRITE_BOUNDARY_NOTE]: writeBoundary }),
+      },
       recentSteps: recentSummaries.slice(-RECENT_STEPS_WINDOW),
       judgeFeedback,
       injections,

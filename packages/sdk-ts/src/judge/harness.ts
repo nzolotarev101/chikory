@@ -193,6 +193,8 @@ export interface RunJudgePassInput {
   goal: string;
   /** Big-picture context (e.g. the chain plan's goal) distinct from `goal`. */
   overallGoal?: string;
+  /** The chain node's declared write boundary, rendered (F-218). */
+  writeBoundary?: string;
   criteria: AcceptanceCriterion[];
   /** Diff base: commit of the checkpoint covering the previous verdict (or run base). */
   sinceCommit: string;
@@ -250,6 +252,7 @@ export async function runJudgePass(input: RunJudgePassInput): Promise<JudgePassR
     messages: buildJudgeMessages({
       goal: input.goal,
       ...(input.overallGoal !== undefined ? { overallGoal: input.overallGoal } : {}),
+      ...(input.writeBoundary !== undefined ? { writeBoundary: input.writeBoundary } : {}),
       evidence: collected.evidence,
       rubric,
       diffText: collected.diffText,

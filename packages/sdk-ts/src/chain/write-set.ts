@@ -1,6 +1,11 @@
 import { posix } from "node:path";
 
 import type { Plan, PlanNode } from "../types.js";
+// F-218: the four admission rules live in `write-boundary.ts`, which the
+// executor prompt also reads, so the boundary the executor is SHOWN and the
+// boundary that KILLS it are one definition. That module imports nothing —
+// `agent-loop.ts` reaches it, and the workflow sandbox has no node builtins.
+import { isBarrelPath, isTestPath, parentDirOf } from "./write-boundary.js";
 
 function normalizeWritePath(path: string): string {
   const normalized = posix.normalize(path.replaceAll("\\", "/"));
@@ -72,39 +77,6 @@ export function serializeWriteConflicts(
 }
 
 /**
- * WP-510/F-89: a loose "prove it with a test" AC forces the executor to write
- * test files whose exact paths the planner's src-only writeSet cannot predict
- * (file layout is the executor's — F-82/F-83). Admit the test tree at the
- * runtime boundary so a complete, all-green delivery is not false-FAILED. This
- * relaxes only the runtime check; planning-time conflict serialization
- * (`serializeWriteConflicts`) still runs on the declared writeSet unchanged.
- */
-function isTestPath(path: string): boolean {
-  const segments = path.split("/");
-  if (segments.some((segment) => segment === "test" || segment === "tests")) return true;
-  const base = segments[segments.length - 1] ?? "";
-  return /\.(test|spec)\.[cm]?[jt]sx?$/.test(base);
-}
-
-/**
- * WP-510/F-89: a barrel (`index.ts`) is a re-export aggregator; every LOOSE node
- * that adds a primitive must append its export to the shared package barrel, but
- * the planner assigns that one file to a single node's writeSet. Admit additive
- * barrel edits like the test tree — the judge and the full-build AC catch any
- * non-additive damage.
- */
-function isBarrelPath(path: string): boolean {
-  const base = path.slice(path.lastIndexOf("/") + 1);
-  return /^index\.[cm]?[jt]sx?$/.test(base);
-}
-
-/** Repo-relative POSIX dirname ("" for a top-level file). */
-function parentDir(path: string): string {
-  const slash = path.lastIndexOf("/");
-  return slash < 0 ? "" : path.slice(0, slash);
-}
-
-/**
  * Actual node output must stay inside the planner-declared write boundary.
  *
  * WP-510/F-89: exact-path writeSet enforcement is fundamentally incompatible with
@@ -130,7 +102,7 @@ function parentDir(path: string): string {
 export function undeclaredWritePaths(node: PlanNode, changedPaths: string[]): string[] {
   const declared = (node.writeSet ?? []).map(normalizeWritePath);
   const declaredSet = new Set(declared);
-  const declaredDirs = new Set(declared.map(parentDir).filter((dir) => dir.length > 0));
+  const declaredDirs = new Set(declared.map(parentDirOf).filter((dir) => dir.length > 0));
   return changedPaths
     .map(normalizeWritePath)
     .filter(
@@ -138,6 +110,6 @@ export function undeclaredWritePaths(node: PlanNode, changedPaths: string[]): st
         !declaredSet.has(path) &&
         !isTestPath(path) &&
         !isBarrelPath(path) &&
-        !declaredDirs.has(parentDir(path)),
+        !declaredDirs.has(parentDirOf(path)),
     );
 }

@@ -218,6 +218,7 @@ export { renderChainTrace } from "./chain/trace.js";
 export { readyNodes } from "./chain/sequencing.js";
 export { hasDependencyCycle } from "./chain/validation.js";
 export { serializeWriteConflicts, undeclaredWritePaths } from "./chain/write-set.js";
+export { renderWriteBoundary, WRITE_BOUNDARY_NOTE } from "./chain/write-boundary.js";
 export {
   ChainJournal,
   chainRecordFrom,

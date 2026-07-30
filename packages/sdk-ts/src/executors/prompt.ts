@@ -4,6 +4,7 @@
  * Large material never appears inline: memory refs render as pointer
  * summaries only (CM-3).
  */
+import { WRITE_BOUNDARY_NOTE } from "../chain/write-boundary.js";
 import { formatPointerReference } from "../runner/memory-pointer.js";
 import type { StepInput } from "../types.js";
 import { COMPLETION_MARKER } from "./step.js";
@@ -20,7 +21,11 @@ export function renderStepPrompt(input: StepInput): string {
   );
   parts.push(`# Current plan item\n${context.planItem}`);
 
-  const notes = Object.entries(context.notes);
+  // F-218: the write boundary is not a "note" among notes — it is the rule that
+  // discards the whole node's work when broken, so it is lifted out of the
+  // bulleted list and rendered inside the workspace-boundary block below.
+  const notes = Object.entries(context.notes).filter(([key]) => key !== WRITE_BOUNDARY_NOTE);
+  const writeBoundary = context.notes[WRITE_BOUNDARY_NOTE];
   if (notes.length > 0) {
     parts.push(`# Notes\n${notes.map(([k, v]) => `- ${k}: ${v}`).join("\n")}`);
   }
@@ -58,7 +63,11 @@ export function renderStepPrompt(input: StepInput): string {
       `from (its \`origin\`) is NOT yours to touch — editing it puts your work outside the ` +
       `graded tree, where it counts for nothing. Never resolve a path via \`origin\`, and never ` +
       `follow one out of the workspace.\n` +
-      `Do not commit; the runner checkpoints for you.\n\n` +
+      `Do not commit; the runner checkpoints for you.\n` +
+      // F-218: the workspace is the outer boundary; a chain node also has an
+      // inner one — the plan's declared writeSet, enforced when the node seals.
+      (writeBoundary === undefined ? "" : `\n## Declared write boundary\n${writeBoundary}\n`) +
+      `\n` +
       `# Completion signal\n` +
       `If — and only if — you judge the whole task above fully complete after this step ` +
       `(nothing left for a follow-up step), end your final message with this exact line on its own:\n` +

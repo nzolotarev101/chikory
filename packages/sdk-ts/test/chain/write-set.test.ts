@@ -1,6 +1,11 @@
 import { describe, expect, it } from "vitest";
 
-import { serializeWriteConflicts, undeclaredWritePaths, type Plan } from "../../src/index.js";
+import {
+  renderWriteBoundary,
+  serializeWriteConflicts,
+  undeclaredWritePaths,
+  type Plan,
+} from "../../src/index.js";
 
 function plan(writeSets: string[][]): Plan {
   return {
@@ -94,5 +99,53 @@ describe("undeclaredWritePaths", () => {
     expect(
       undeclaredWritePaths(node, ["src/memory/core.ts", "src/index.ts"]),
     ).toEqual([]);
+  });
+});
+
+describe("renderWriteBoundary (F-218)", () => {
+  it("names every declared path and every relaxation the runtime check admits", () => {
+    const rendered = renderWriteBoundary(["src/memory/core.ts", "src/memory/index.ts"]);
+
+    expect(rendered).toContain("- src/memory/core.ts");
+    expect(rendered).toContain("- src/memory/index.ts");
+    expect(rendered).toContain("src/memory");
+    expect(rendered).toMatch(/test file/);
+    expect(rendered).toMatch(/barrel `index\.\*`/);
+    // The consequence, not just the rule: dogfood-120's N-2 lost the node with a
+    // PASSING judge form.
+    expect(rendered).toMatch(/FAILS the whole node/);
+  });
+
+  it("is empty for a node with no declared writeSet, so no boundary is promised", () => {
+    expect(renderWriteBoundary([])).toBe("");
+  });
+
+  it("de-duplicates and orders the declared paths for a stable prompt", () => {
+    // Input is the plan's writeSet, already normalized by
+    // `serializeWriteConflicts`; the renderer only makes the listing stable.
+    const rendered = renderWriteBoundary(["a/c.ts", "a/b.ts", "a/b.ts"]);
+    expect(rendered.match(/^ {2}- /gmu)).toHaveLength(2);
+    expect(rendered.indexOf("- a/b.ts")).toBeLessThan(rendered.indexOf("- a/c.ts"));
+  });
+
+  it("would have shown dogfood-120's N-2 the legal slot it never used", () => {
+    // The real declared set of chain-0723ac0b node N-2, and the real path the
+    // executor invented for the evidence the goal demanded.
+    const writeSet = [
+      "benchmarks/reports/p3-rung-4/brownfield-004.md",
+      "benchmarks/tasks/brownfield-004.yaml",
+    ];
+    const rendered = renderWriteBoundary(writeSet);
+    expect(rendered).toContain("- benchmarks/reports/p3-rung-4/brownfield-004.md");
+
+    // And the enforcement side still rejects what the node actually wrote — the
+    // prompt and the gate describe one boundary, not two.
+    const node = { ...plan([writeSet]).nodes[0]!, writeSet };
+    expect(
+      undeclaredWritePaths(node, [
+        "benchmarks/tasks/brownfield-004.yaml",
+        "docs/reports/brownfield-004-evidence.md",
+      ]),
+    ).toEqual(["docs/reports/brownfield-004-evidence.md"]);
   });
 });

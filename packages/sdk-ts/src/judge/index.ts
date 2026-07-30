@@ -31,6 +31,7 @@ export {
   renderActiveWorkChunkScope,
   renderOverallGoal,
   renderOverallGoalContext,
+  renderWriteBoundaryScope,
   type JudgePromptInput,
 } from "./prompt.js";
 export {

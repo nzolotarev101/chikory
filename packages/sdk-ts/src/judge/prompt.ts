@@ -141,6 +141,27 @@ export function renderOverallGoalContext(planGoal: string, planOutline?: string[
   ].join("\n");
 }
 
+/**
+ * F-218: the chain node's declared write boundary, as the JUDGE must apply it.
+ * The seal check is deterministic and terminal — a changed path outside the
+ * boundary FAILS the node and discards its work — so a pass that greenlights an
+ * out-of-boundary write is a pass that lets the node die later. On dogfood-120
+ * `N-2` this rubric item PASSED at step 4 for `docs/reports/…` files, and the
+ * seal then threw the node away.
+ */
+export function renderWriteBoundaryScope(writeBoundary?: string): string {
+  if (writeBoundary === undefined || writeBoundary.length === 0) return "";
+  return [
+    "## WRITE BOUNDARY (deterministic — enforced when this node seals)",
+    writeBoundary,
+    "",
+    "The executor was shown exactly this. A changed path outside the boundary is",
+    "NOT a style question: fail `scope_matches_instruction` and name the offending",
+    "paths in the justification, so the executor can move the file while the work",
+    "is still recoverable.",
+  ].join("\n");
+}
+
 export function renderOverallGoal(overallGoal?: string): string {
   if (overallGoal === undefined) return "";
   return [
@@ -205,6 +226,8 @@ export interface JudgePromptInput {
   goal: string;
   /** Big-picture context (e.g. the chain plan's goal) distinct from `goal`. */
   overallGoal?: string;
+  /** The chain node's declared write boundary, rendered (F-218). */
+  writeBoundary?: string;
   evidence: JudgeEvidence;
   rubric: RubricItem[];
   diffText: string;
@@ -220,12 +243,14 @@ export interface JudgePromptInput {
 
 export function buildJudgeMessages(input: JudgePromptInput): Message[] {
   const overallGoal = renderOverallGoal(input.overallGoal);
+  const writeBoundaryScope = renderWriteBoundaryScope(input.writeBoundary);
   const activeWorkChunkScope = renderActiveWorkChunkScope(input.activeWorkChunkDirective);
   const user = [
     "## GOAL the executor was given",
     input.goal,
     ...(overallGoal.length > 0 ? ["", overallGoal] : []),
     ...(activeWorkChunkScope.length > 0 ? ["", activeWorkChunkScope] : []),
+    ...(writeBoundaryScope.length > 0 ? ["", writeBoundaryScope] : []),
     ...(input.reviewScope === "cumulative" ? ["", COMPLETION_REVIEW_SCOPE] : []),
     "",
     "## ACCEPTANCE CRITERIA (fill `criterionResults`, one entry per id)",

@@ -103,6 +103,7 @@ import {
   type WorkspaceRepo,
 } from "./workspace-repos.js";
 import { undeclaredWritePaths } from "../chain/write-set.js";
+import { renderWriteBoundary } from "../chain/write-boundary.js";
 
 /**
  * Compaction default (WP-203 / ADR-006 / CM-1): once the recall tier exceeds
@@ -1437,6 +1438,7 @@ export function createRunnerActivities(deps: RunnerActivityDeps) {
             provider: spec.routing.stages.judge.provider,
             model: spec.judge.model ?? spec.routing.stages.judge.model,
           };
+          const writeBoundary = renderWriteBoundary(spec.chainLink?.writeSet ?? []);
           const capabilities = resolveEndpointCapabilities(spec);
           const executorFamily = endpointCapabilityFamily(capabilities.code[0]) ?? spec.executor.family;
           const judgeFamily =
@@ -1475,6 +1477,10 @@ export function createRunnerActivities(deps: RunnerActivityDeps) {
                   ),
                 }
               : {}),
+            // F-218: the judge applies the same boundary the seal enforces and
+            // the executor was shown, so an out-of-boundary write is caught
+            // while the work can still be moved instead of discarded.
+            ...(writeBoundary === "" ? {} : { writeBoundary }),
             criteria: input.criteria,
             sinceCommit: input.sinceCommit,
             workspaceRepos,
