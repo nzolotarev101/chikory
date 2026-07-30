@@ -29,7 +29,7 @@ const PLAN: Plan = {
     {
       id: "N-1",
       goal: "author the tasks as `status: pinned`",
-      acceptanceCriteria: [{ id: "AC-1", description: "tasks load" }],
+      acceptanceCriteria: [{ id: "AC-1", description: "tasks load", check: "node -e 'require(1)'" }],
       dependsOn: [],
       writeSet: ["tasks.yaml"],
       budgetUsd: 10,
@@ -37,7 +37,7 @@ const PLAN: Plan = {
     {
       id: "N-2",
       goal: "publish the bundle",
-      acceptanceCriteria: [{ id: "AC-2", description: "bundle lands" }],
+      acceptanceCriteria: [{ id: "AC-2", description: "bundle lands", check: "test -f bundle.json" }],
       dependsOn: ["N-1"],
       writeSet: ["bundle.json"],
       budgetUsd: 10,

@@ -27,6 +27,7 @@ import { classifyPlanGateFailure } from "../chain/plan-gate-failure.js";
 import { buildGateRepairBrief } from "../heal/gate-repair.js";
 import type { Plan, PlanVerdict } from "../types.js";
 import { planLiteralGaps } from "./literal-preservation.js";
+import { planOracleGaps } from "./oracle-floor.js";
 
 /** The gate name every plan-phase repair brief is addressed from. */
 export const PLAN_GATE_NAME = "plan meta-judge gate";
@@ -117,6 +118,22 @@ function describeUncovered(id: string): string {
   );
 }
 
+/**
+ * F-221: the node has no criterion a shell can settle, so nothing but an LLM's
+ * reading can ever call it done — and a criterion like that killed dogfood-120's
+ * `N-2` on three consecutive prose fails. The planner is deliberately NOT asked
+ * to author a check (F-40): it must reuse a goal criterion's id, whose `check`
+ * `buildPlan` copies verbatim, or fold the node into one that already has one.
+ */
+function describeOracleGap(nodeId: string): string {
+  return (
+    `node \`${nodeId}\` has no acceptance criterion with an executable \`check\` — it can ` +
+    `never be shown done, and the chain will still kill it for failing one. Cover it with a ` +
+    `goal criterion id whose check THIS node can satisfy, or merge it into a node that has ` +
+    `one. Do not invent a check of your own.`
+  );
+}
+
 function describeLiteralGap(literal: string): string {
   return (
     `mandated goal literal \`${literal}\` appears in no node goal — copy it verbatim ` +
@@ -134,6 +151,7 @@ export function gateFailure(verdict: PlanVerdict, plan: Plan): PlanPhaseFailure 
   const machineGaps = [
     ...verdict.uncoveredCriteria.map(describeUncovered),
     ...planLiteralGaps(plan).map(describeLiteralGap),
+    ...planOracleGaps(plan).map(describeOracleGap),
   ];
 
   // An unreachable meta-judge says nothing about the plan — re-ask, don't revise.

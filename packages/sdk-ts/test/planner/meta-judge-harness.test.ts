@@ -31,14 +31,14 @@ const PLAN: Plan = {
     {
       id: "N-1",
       goal: "first slice",
-      acceptanceCriteria: [{ id: "AC-1", description: "the first slice ships" }],
+      acceptanceCriteria: [{ id: "AC-1", description: "the first slice ships", check: "pnpm exec vitest run" }],
       dependsOn: [],
       budgetUsd: 5,
     },
     {
       id: "N-2",
       goal: "second slice",
-      acceptanceCriteria: [{ id: "AC-2", description: "the second slice ships" }],
+      acceptanceCriteria: [{ id: "AC-2", description: "the second slice ships", check: "pnpm exec tsc --noEmit" }],
       dependsOn: ["N-1"],
       budgetUsd: 5,
     },
