@@ -87,9 +87,17 @@ describe("planner prompt (WP-219 S2, ADR-005 D1)", () => {
   // backtick literal, but the prompt never stated the rule — the floor enforced
   // something the planner was never told (one of the five dogfood-120 stops).
   it("states the backtick-literal preservation rule the verdict floor enforces", () => {
-    expect(PLANNER_SYSTEM_PROMPT).toContain("PRESERVE EVERY BACKTICKED LITERAL");
+    expect(PLANNER_SYSTEM_PROMPT).toContain("PRESERVE EVERY BACKTICKED ARTIFACT LITERAL");
     expect(PLANNER_SYSTEM_PROMPT).toContain("VERBATIM");
     expect(PLANNER_SYSTEM_PROMPT).toContain("checked automatically");
+  });
+
+  // F-225: the floor mandates ARTIFACTS, so the prompt must say where a literal
+  // may survive (goal OR criteria) and ask for constraints separately — a node
+  // run sees only its own goal, never the chain's.
+  it("names both surfaces a literal may survive on, and asks for constraints by name", () => {
+    expect(PLANNER_SYSTEM_PROMPT).toContain("in its goal or in one of its acceptance");
+    expect(PLANNER_SYSTEM_PROMPT).toContain("Restate the goal's CONSTRAINTS");
   });
 
   it("renders the repair brief last on a repair pass, and omits it otherwise", () => {

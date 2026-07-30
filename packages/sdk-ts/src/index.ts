@@ -145,7 +145,14 @@ export {
 export * from "./judge/index.js";
 export { planCoverageGaps } from "./planner/coverage.js";
 export { planOracleGaps } from "./planner/oracle-floor.js";
-export { extractGoalLiterals, planLiteralGaps } from "./planner/literal-preservation.js";
+export {
+  extractGoalLiterals,
+  isMandatedLiteral,
+  literalCarrier,
+  mandatedGoalLiterals,
+  nodeCarriesLiteral,
+  planLiteralGaps,
+} from "./planner/literal-preservation.js";
 export { buildPlannerMessages, PLANNER_SYSTEM_PROMPT, PLAN_RESPONSE_SCHEMA } from "./planner/prompt.js";
 export { buildPlan, type BuildPlanOptions } from "./planner/assemble.js";
 export { buildPlanJudgeMessages, PLAN_JUDGE_SYSTEM_PROMPT, PLAN_VERDICT_RESPONSE_SCHEMA } from "./planner/meta-judge-prompt.js";
@@ -153,11 +160,14 @@ export { buildPlanVerdict, type PlanJudgeReply } from "./planner/meta-judge-verd
 // WP-542/F-207 — the gate-repair tier and its plan-phase binding.
 export {
   buildGateRepairBrief,
+  classifyGapProgress,
   decideGateRepair,
   gateRepairCostCap,
+  returnedGaps,
   GATE_REPAIR_BRIEF_MAX_CHARS,
   GATE_REPAIR_COST_SHARE,
   MAX_GATE_REPAIR_ATTEMPTS,
+  type GapProgress,
   type GateRepairBounds,
   type GateRepairBriefInput,
   type GateRepairDecision,

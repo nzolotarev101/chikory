@@ -272,6 +272,16 @@ fi
 echo "Setup: Rebuilding Chikory SDK..."
 pnpm -r build
 
+# 2b. F-225: the WP-257 mandated-literal report, authoritatively — the lint above runs
+# BEFORE the build, so it reads whatever `dist` happened to be lying around (or skips).
+# Every literal listed here is one the plan gate will REVISE a plan for dropping, and
+# dogfood-121 proved that is a launch-ending cost: $0.7764 of plan spend, no node run.
+if [ -f scripts/dogfood-progression.sh ]; then
+  echo
+  bash scripts/dogfood-progression.sh --spec "$SPEC_FILE" --literals || true
+  echo
+fi
+
 # 3. Check/Start Temporal Dev Server
 ADDRESS="${TEMPORAL_ADDRESS:-localhost:7233}"
 PORT="${ADDRESS##*:}"

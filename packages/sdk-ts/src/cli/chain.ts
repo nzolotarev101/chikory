@@ -308,14 +308,25 @@ export async function planAndGateChain(
     options.onAttempt?.(record, maxPasses);
 
     const decision = decideGateRepair(
-      { attemptsUsed: attempts.length - 1, costUsdSpent: costUsd, repairable: failure.repairable },
+      {
+        attemptsUsed: attempts.length - 1,
+        costUsdSpent: costUsd,
+        repairable: failure.repairable,
+        // F-226: the defect sets of the earlier attempts, so a defect that comes
+        // back after being satisfied ends the loop instead of buying more churn.
+        gapHistory: attempts.slice(0, -1).map((earlier) => earlier.machineGaps),
+        machineGaps: failure.machineGaps,
+      },
       { maxAttempts: maxRepairAttempts, costCapUsd },
     );
     if (decision.action === "stop") {
+      const stop = renderPlanPhaseStop(failure, attempts.length - 1);
       return {
         ok: false,
         phase: failure.phase,
-        message: renderPlanPhaseStop(failure, attempts.length - 1),
+        message: decision.reason.startsWith("repair is oscillating")
+          ? `${stop} [${decision.reason}]`
+          : stop,
         ...(failure.verdict !== undefined ? { verdict: failure.verdict } : {}),
         costUsd,
         attempts,

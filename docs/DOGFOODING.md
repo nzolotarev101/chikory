@@ -5,21 +5,21 @@ This is the complete operating manual for executing Phase 2+ work packages
 task spec for a WP (every field explained), how to launch, supervise, and
 recover a run, and how to land the result as a normal PR.
 
-**Status (2026-07-29, bounded — update discipline: REPLACE this block, ≤15 lines;
+**Status (2026-07-30, bounded — update discipline: REPLACE this block, ≤15 lines;
 displaced prose moves verbatim to [`PLAN-HISTORY.md`](PLAN-HISTORY.md); per-run detail:
 `docs/reports/`; queue + course correction: `plan.md` §6/§7).**
-⛔ **dogfood-120 FAILED and P3-rung-4 is UNCLIMBED — `chain-0723ac0b-4eba-413a-933f-2d1646a4f643`,**
-6-node plan, 19 steps, 22 judge passes, **$1.5187/$80**, 18h 47m (`docs/reports/dogfood-120.md`). The
-brownfield corpus stays at 3 runnable tasks and neither agent arm ran. **One node sealed SUCCESS and is
-landed (`7ad4bd3`):** the raw command adapter materializes each exact pin, and `chikory-bench compare`
-emits 95% Wilson intervals over two like-for-like five-task arms (AC-1/AC-2/AC-5 re-verified by hand).
-🔴 **F-218** killed the campaign: node `N-2`'s work was PASSED by the judge (criterion `pass: true`,
-6/6 rubric) and then discarded at seal for writing outside a `writeSet` **the executor was never shown**.
-🔴 **F-221**: its only criterion had no executable `check`, so nothing could settle it — and the squeeze
-made the retry FABRICATE a review sign-off and fake-shim RED/GREEN evidence.
-Also 🟡 F-220 (a resume replays the launch-frozen template) · 🟡 F-222 (a SUCCESS node of a FAILED chain
-had no harvest path) · 🟡 F-219 → WP-548. **All four hand-fixed: WP-545/546/547 + `57b7505`.**
-Progression ✅ PROGRESSING (horizon 19 vs 4). **NEXT = dogfood-121 — rung 4 again, scoped to the remaining work, with a settleable behavioral AC on EVERY authoring node.**
+⛔ **dogfood-121 never launched a node** — the plan meta-judge gate stopped the chain after
+**$0.7764 over 4 attempts**, and a plan-gate stop journals NOTHING (no chain db is created
+before PROCEED). P3-rung-4 stays unclimbed; the brownfield corpus stays at 3 tasks.
+Attempt 1 caught a real AC-assignment defect. Attempts 2–4 chased backticked words and lost
+`devbox run` again at attempt 4 after fixing it at attempt 2 (`docs/reports/F-223.md`).
+🔴 **F-223**: the repair brief was clamped whole at 2000 chars with the instruction LAST, and a
+real 6-node outline is 3,798 — the planner never read "keep what the gate did not object to".
+🔴 **F-224/F-225**: the literal floor searched `node.goal` only (criteria are hydrated verbatim)
+and mandated every backtick, prose included. 🟡 **F-226**: no gap history, so churn read as progress.
+**All hand-fixed: WP-549 · WP-550 · WP-551** (1176 TS / 128 harness / 84 py green); F-227 → WP-552.
+Progression ✅ PROGRESSING (horizon 19 vs 4). **NEXT = relaunch dogfood-121 UNCHANGED** — its goal is
+the regression fixture; `devbox run chain-dogfood`.
 
 Related docs: [`docs/spec/task-spec.md`](spec/task-spec.md) (schema
 reference) · [`docs/TASK-PROTOCOL.md`](TASK-PROTOCOL.md) (WP etiquette, §7 is
@@ -697,6 +697,8 @@ broken (a false-green, not a follow-on fix).
 | The plan gate REVISEs with `[oracle override: nodes with no executable acceptance check: …]` | WP-546/F-221. That node's acceptance criteria are all prose, so nothing but an LLM's reading could ever call it done — and the run would still HALT it after three prose fails (that is how dogfood-120 died). The repair pass tells the planner to cover the node with a goal criterion id (whose `check` is copied verbatim from your spec) or merge it into a node that has one. **You** can prevent it: give the goal spec enough per-slice behavioral ACs that every plausible node can own one. A spec with NO executable checks at all is exempt — the floor never blocks a prose-only spec. |
 | `chikory chain resume` prints `chain … was frozen with no stepLimits, pacing, unattended … in its node template` | WP-547/F-220. A chain's node template is captured at LAUNCH and replayed by every dispatch, so a chain started before those fields were forwarded never gets them, and resuming will not fix it — expect the default 600s step cap and a human park on escalation instead of your `unattended.escalation`. If the declared surface matters for the work that is left, land what the chain already sealed (`bash scripts/harvest.sh <chain-id>-node-<node-id>`) and launch a FRESH chain over the remainder. |
 | `harvest.sh` refuses with `chain is not safely harvestable`, but one node of that dead chain DID seal SUCCESS | Only a SUCCESS chain harvests whole. Name the NODE run explicitly: `devbox run -- bash scripts/harvest.sh <chain-id>-node-<node-id> main` (F-222 — an explicitly named node id is no longer promoted to its chain). Find the sealed node in `chikory chain trace <chain-id>` or the chain journal's `node_sealed` entries, then verify the delivery against the goal spec's ACs by hand before committing. |
+| The plan gate repeats the SAME literal gaps across attempts and then stops (`plan gate REVISE (attempt n/4) — repairing: mandated goal literal … appears in no node goal`) | **That is oscillation, not slow convergence — do NOT raise the attempt cap.** dogfood-121 spent $0.7764 over 4 attempts and launched nothing: the repair brief was clamped at 2000 chars with the instruction LAST, so on a real 6-node plan (3,798 chars of node goals) the planner never read "keep what the gate did not object to" and re-rolled every time (F-223, fixed in WP-549 — the brief is budgeted now and the instruction is never truncated). Since WP-551 the loop STOPS the moment a defect returns after being satisfied, and names it: `[repair is oscillating: … returned after being satisfied — …]`. If you see that line, the goal's mandate is the problem, not the planner — read the preflight's mandated-literal report and un-backtick what is narrative. |
+| A launch prints `⚠️ carried by NO acceptance criterion (n): …` in the mandated-literal report | Those literals live only in the goal's prose, so the PLANNER must recite each one into a node goal or the plan gate REVISEs (WP-257 floor). Deliverable paths belong there — narrative does not. Un-backtick anything that is context (a prior run id, a SHA, a node name, an elided path) and keep backticks for artifacts the delivery must contain. Shape-exempt prose (`any`, `git`, `devbox run`) is already dropped automatically (F-225/WP-550); the report prints the exempt set too, so you can see what the floor ignored. Run it any time at $0: `devbox run -- bash scripts/dogfood-progression.sh --spec <yaml> --literals` (needs a built `dist`). |
 | Judge checks time out | 120 s/check cap. Bare `pnpm` not `devbox run` (§3.4); split slow suites into a focused test file per criterion. |
 | A judge check "times out" at 120 s but the judge pass takes MINUTES longer — and/or an AC reads red right after a wall-clock-killed step even though the workspace is complete | **The check-timeout kill does not reap the check's process tree** (dogfood-073 **F-78 → WP-264**). `runCheck` (`src/judge/evidence.ts:76`) runs each `check` via `execFileAsync("/bin/sh", ["-c", …], { timeout })`; Node's `timeout` kills only the direct `/bin/sh`, so grandchildren (vitest tinypool workers, etc.) hold the stdout/stderr pipes and the check doesn't settle until they die naturally — dogfood-072's post-kill AC-2 logged `[check timed out after 120000ms]` yet ran **695,853 ms = 5.8× the cap**, tail `Error: Failed to terminate worker`. Treat such a red as an INFRA artifact, not a code red: re-run the check by hand before trusting a FAILED verdict, and beware the 3-consecutive-fails HALT compounding it. Durable fix = WP-264 (port the WP-255(a) `runBounded` group-kill to `runCheck`). |
 | Judge verdict is ESCALATE with `judge raised concerns` | The rubric/concerns fired (e.g. scope creep, deleted tests). `trace --step <n>` shows the full form; approve or reject deliberately. |

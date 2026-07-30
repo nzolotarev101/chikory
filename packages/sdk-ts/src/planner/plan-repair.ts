@@ -26,7 +26,7 @@
 import { classifyPlanGateFailure } from "../chain/plan-gate-failure.js";
 import { buildGateRepairBrief } from "../heal/gate-repair.js";
 import type { Plan, PlanVerdict } from "../types.js";
-import { planLiteralGaps } from "./literal-preservation.js";
+import { literalCarrier, mandatedGoalLiterals, planLiteralGaps } from "./literal-preservation.js";
 import { planOracleGaps } from "./oracle-floor.js";
 
 /** The gate name every plan-phase repair brief is addressed from. */
@@ -51,6 +51,13 @@ export interface PlanPhaseFailure {
   message: string;
   /** Independently checkable defects, verbatim, for the repair brief. */
   machineGaps: string[];
+  /**
+   * F-226: what the next plan must keep, whether or not it is currently broken.
+   * Held apart from `machineGaps` on purpose — a defect list drives the loop's
+   * convergence check, and a standing contract that restates itself every attempt
+   * would read as churn.
+   */
+  contract?: string[];
   /** What the next attempt must do differently. */
   instruction: string;
   verdict?: PlanVerdict;
@@ -142,15 +149,38 @@ function describeLiteralGap(literal: string): string {
 }
 
 /**
+ * F-226: the WHOLE literal contract, every attempt — not just what is missing
+ * right now. dogfood-121's repairs named only the current gaps, so each retry
+ * patched those and rewrote node goals that were already fine, losing a literal
+ * it had satisfied two attempts earlier. A planner that can see which node
+ * carries each literal has no reason to move any of them.
+ */
+export function describeLiteralInventory(plan: Plan): string | undefined {
+  const literals = mandatedGoalLiterals(plan.goal);
+  if (literals.length === 0) return undefined;
+
+  const inventory = literals
+    .map((literal) => `\`${literal}\` → ${literalCarrier(plan, literal) ?? "MISSING"}`)
+    .join(", ");
+  return (
+    `the goal's mandated literals and the node currently carrying each — every one of these ` +
+    `must still be carried by the next plan: ${inventory}`
+  );
+}
+
+/**
  * Classify a non-PROCEED plan meta-judge verdict, harvesting the deterministic
  * floors' own findings as repair evidence. `classifyPlanGateFailure` stays the
  * authority on infra-vs-substantive so the WP-233 distinction is not forked.
  */
 export function gateFailure(verdict: PlanVerdict, plan: Plan): PlanPhaseFailure {
   const cls = classifyPlanGateFailure(verdict);
+  const literalGaps = planLiteralGaps(plan);
+  const inventory = literalGaps.length > 0 ? describeLiteralInventory(plan) : undefined;
+  const contract = inventory === undefined ? [] : [inventory];
   const machineGaps = [
     ...verdict.uncoveredCriteria.map(describeUncovered),
-    ...planLiteralGaps(plan).map(describeLiteralGap),
+    ...literalGaps.map(describeLiteralGap),
     ...planOracleGaps(plan).map(describeOracleGap),
   ];
 
@@ -175,6 +205,7 @@ export function gateFailure(verdict: PlanVerdict, plan: Plan): PlanPhaseFailure 
       repairable: true,
       message: verdict.rationale,
       machineGaps,
+      contract,
       instruction:
         "Fix every machine-checked defect above and address the gate's rationale. Keep the " +
         "parts of your plan it did not object to — node ids, dependency order, and write sets " +
@@ -219,6 +250,9 @@ export function buildPlanRepairBrief(input: PlanRepairBriefInput): string {
     attempt: input.attempt,
     maxAttempts: input.maxAttempts,
     machineGaps: failure.machineGaps,
+    ...(failure.contract !== undefined && failure.contract.length > 0
+      ? { contract: failure.contract }
+      : {}),
     ...(failure.verdict !== undefined ? { rationale: failure.verdict.rationale } : {}),
     instruction: failure.instruction,
     ...(input.priorPlan !== undefined ? { priorOutline: planOutline(input.priorPlan) } : {}),

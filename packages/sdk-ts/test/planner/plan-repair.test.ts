@@ -11,6 +11,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   buildPlanRepairBrief,
+  describeLiteralInventory,
   describeRepairTarget,
   familyDiversityFailure,
   gateFailure,
@@ -160,6 +161,45 @@ describe("buildPlanRepairBrief / planOutline (WP-542)", () => {
       "N-1: author the tasks as `status: pinned`",
       "N-2 (after N-1): publish the bundle",
     ]);
+  });
+});
+
+/**
+ * F-226 — the brief must carry the WHOLE literal contract, not only what is
+ * broken this attempt. dogfood-121's planner fixed the literal it was told about
+ * and dropped one it had already satisfied, three attempts running.
+ */
+describe("the standing literal contract (F-226)", () => {
+  it("names every mandated literal and the node carrying it", () => {
+    const inventory = describeLiteralInventory(PLAN);
+
+    expect(inventory).toContain("`status: pinned` → N-1");
+    expect(inventory).toContain("`summary.json` → MISSING");
+  });
+
+  it("is undefined when the goal mandates no literal at all", () => {
+    expect(describeLiteralInventory({ ...PLAN, goal: "Ship the corpus." })).toBeUndefined();
+  });
+
+  it("rides the brief in its own section, apart from the defects", () => {
+    const failure = gateFailure(revise("the plan drops a mandated literal"), PLAN);
+    const brief = buildPlanRepairBrief({ failure, attempt: 1, maxAttempts: 3, priorPlan: PLAN });
+
+    expect(brief).toContain("The contract the next attempt must keep");
+    expect(brief).toContain("`summary.json` → MISSING");
+    // The convergence check reads machineGaps; a contract that restates itself
+    // every attempt must not be mistaken for a defect that keeps coming back.
+    expect(failure.machineGaps.some((gap) => gap.includes("→"))).toBe(false);
+  });
+
+  it("is omitted when no literal is missing — nothing to hold still", () => {
+    const covered: Plan = {
+      ...PLAN,
+      nodes: [{ ...PLAN.nodes[0]!, goal: "author `status: pinned` and emit `summary.json`" }],
+    };
+    const failure = gateFailure(revise("N-1 needs a second criterion"), covered);
+
+    expect(failure.contract ?? []).toEqual([]);
   });
 });
 

@@ -1253,3 +1253,26 @@ displaced prose moves verbatim to [`PLAN-HISTORY.md`](PLAN-HISTORY.md); per-run 
 ℹ️ **No new friction identifier.** F-167/F-9 (unpriced CLI telemetry) recurred: 5,764 executor tokens costed at $0.0000, so the judge supplied 100% of measured run cost.
 Progression gate = ⛔ **STALLED**: trailing-3 maximum horizon 2 vs prior-3 maximum 4, rung 0 vs 0, resumes 0, loose specs 3 vs 3, harness-meta:product 0:3; reliability is 93.8% (120 clean seals / 128 steps across 17 runs with at least 5 steps).
 **NEXT = dogfood-120 / P3-rung-4 (Phase-3 benchmark slice vs a baseline):** one decomposed chain must grow the corpus to 5, run the identical five tasks through Chikory and raw Claude Code, and publish 95% Wilson score ranges linked to both raw result sets. This advances WP-302 (brownfield task authoring) and WP-304 (baseline runs and publication); another one-step unblock is barred.
+
+## 2026-07-30 — displaced from plan.md's bounded status block by the dogfood-121 plan-gate triage
+
+- **Latest / next:** ⛔ **dogfood-120 (`chain-0723ac0b-4eba-413a-933f-2d1646a4f643`) FAILED — P3-rung-4 NOT reached** (6-node plan, 19 steps, 22 judge passes, **$1.52/$80**, 18h 47m; `docs/reports/dogfood-120.md`). Corpus stays at 3; neither arm ran. **One node sealed SUCCESS and is landed (`7ad4bd3`):** the raw command adapter materializes each exact pin and `chikory-bench compare` emits 95% Wilson intervals over two like-for-like five-task arms — AC-1/AC-2/AC-5 re-verified by hand, plus two hand-fixes on landing (`rawResultsDir` for AC-4; `execFileSync` argument arrays — a task YAML's `repo.ref: HEAD$(touch /tmp/x)` executed, because `$(…)` expands inside the quotes `JSON.stringify` produced). **The campaign died at `N-2` on harness defects, not agent quality:** 🔴 **F-218** — the judge marked its criterion `pass: true` and 6/6 rubric items PASS, then the seal discarded the whole node for writing `docs/reports/brownfield-004-evidence.md` while the legal slot `benchmarks/reports/p3-rung-4/brownfield-004.md` sat in a `writeSet` **the executor was never shown**; 🔴 **F-221** — its only criterion had no executable `check`, so it could never be settled, and the squeeze made the retry **fabricate** a "benchmark task review panel" sign-off and fake-shim RED/GREEN evidence (judge caught both; the upstream pins it researched are genuine). Also 🟡 F-220 (a resume replays the launch-frozen template, so WP-544 could not reach the running chain → a doc-typo ESCALATE parked 3h 47m) · 🟡 F-222 (no harvest path for a SUCCESS node of a FAILED chain) · 🟡 F-219 → WP-548. **All four hand-fixed this sitting: WP-545 · WP-546 · WP-547 (+`57b7505`), 1149 TS / 128 harness / 84 py green.** Progression ✅ PROGRESSING (horizon 19 steps vs 4) but the rung is unclimbed, so **NEXT = dogfood-121 — rung 4, second attempt, scoped to what is left** (author `brownfield-004`/`-005`, both arms, publication), with a settleable behavioral AC on EVERY authoring node and every evidence path declared inside `benchmarks/`.
+
+## 2026-07-30 — displaced from DOGFOODING.md's bounded status block by the dogfood-121 plan-gate triage
+
+**Status (2026-07-29, bounded — update discipline: REPLACE this block, ≤15 lines;
+displaced prose moves verbatim to [`PLAN-HISTORY.md`](PLAN-HISTORY.md); per-run detail:
+`docs/reports/`; queue + course correction: `plan.md` §6/§7).**
+⛔ **dogfood-120 FAILED and P3-rung-4 is UNCLIMBED — `chain-0723ac0b-4eba-413a-933f-2d1646a4f643`,**
+6-node plan, 19 steps, 22 judge passes, **$1.5187/$80**, 18h 47m (`docs/reports/dogfood-120.md`). The
+brownfield corpus stays at 3 runnable tasks and neither agent arm ran. **One node sealed SUCCESS and is
+landed (`7ad4bd3`):** the raw command adapter materializes each exact pin, and `chikory-bench compare`
+emits 95% Wilson intervals over two like-for-like five-task arms (AC-1/AC-2/AC-5 re-verified by hand).
+🔴 **F-218** killed the campaign: node `N-2`'s work was PASSED by the judge (criterion `pass: true`,
+6/6 rubric) and then discarded at seal for writing outside a `writeSet` **the executor was never shown**.
+🔴 **F-221**: its only criterion had no executable `check`, so nothing could settle it — and the squeeze
+made the retry FABRICATE a review sign-off and fake-shim RED/GREEN evidence.
+Also 🟡 F-220 (a resume replays the launch-frozen template) · 🟡 F-222 (a SUCCESS node of a FAILED chain
+had no harvest path) · 🟡 F-219 → WP-548. **All four hand-fixed: WP-545/546/547 + `57b7505`.**
+Progression ✅ PROGRESSING (horizon 19 vs 4). **NEXT = dogfood-121 — rung 4 again, scoped to the remaining work, with a settleable behavioral AC on EVERY authoring node.**
+

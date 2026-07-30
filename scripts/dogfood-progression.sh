@@ -14,6 +14,9 @@
 #   bash scripts/dogfood-progression.sh --spec <yaml> --preflight
 #                                       # + launch-strict: ALSO refuse when the dry-run
 #                                       #   finds NO RED-on-HEAD AC (no armed challenge)
+#   bash scripts/dogfood-progression.sh --spec <yaml> --literals
+#                                       # ONLY the WP-257 mandated-literal report (F-225);
+#                                       # run post-build, where `dist` is guaranteed fresh
 #
 # Data source: docs/reports/dogfood-ledger.csv — one row per terminal run,
 # appended by /dogfood-review phase 4 (columns: run,wp,mode,outcome,steps,
@@ -48,13 +51,69 @@ set -euo pipefail
 LEDGER="docs/reports/dogfood-ledger.csv"
 SPEC=""
 PREFLIGHT=0
+LITERALS_ONLY=0
 while [ $# -gt 0 ]; do
   case "$1" in
     --spec) SPEC="${2:?--spec requires a path}"; shift 2 ;;
     --preflight) PREFLIGHT=1; shift ;;
-    *) echo "Usage: $0 [--spec <yaml>] [--preflight]" >&2; exit 2 ;;
+    --literals) LITERALS_ONLY=1; shift ;;
+    *) echo "Usage: $0 [--spec <yaml>] [--preflight] [--literals]" >&2; exit 2 ;;
   esac
 done
+
+# ---------- F-225: what the goal's backticks MANDATE (WP-257 literal floor) ----------
+# Every backticked span in the goal used to be a hard plan-gate requirement, prose
+# included. dogfood-121 never launched a node: the gate spent $0.7764 over four
+# attempts on `rawResultsDir`, `devbox run`, `benchmarks/` and `any`, and dropped one
+# it had already fixed each time. The shape filter now exempts prose — but the harness
+# cannot tell a goal's NARRATIVE from its CONTRACT, so the author sees the mandate here,
+# at $0, before a plan is ever paid for. Sourced from the built SDK so the rule that
+# prints and the rule that HALTS a launch are the same function.
+print_goal_literals() {
+  echo "### Mandated goal literals (WP-257 literal floor)"
+  LIT_MODULE="packages/sdk-ts/dist/planner/literal-preservation.js"
+  if [ ! -f "$LIT_MODULE" ]; then
+    echo "ℹ️  Skipped — no built SDK at $LIT_MODULE (run \`devbox run build\`)."
+    return 0
+  fi
+  node --input-type=module -e '
+    const { readFileSync } = await import("node:fs");
+    const { createRequire } = await import("node:module");
+    const { resolve } = await import("node:path");
+    const { pathToFileURL } = await import("node:url");
+    const yaml = createRequire(resolve("packages/sdk-ts/package.json"))("yaml");
+    const lit = await import(
+      pathToFileURL(resolve("packages/sdk-ts/dist/planner/literal-preservation.js")).href
+    );
+    const spec = yaml.parse(readFileSync(process.argv[1], "utf8"));
+    const goal = String(spec.goal ?? "");
+    const all = lit.extractGoalLiterals(goal);
+    const mandated = lit.mandatedGoalLiterals(goal);
+    const exempt = all.filter((l) => !mandated.includes(l));
+    const acText = (spec.acceptance_criteria ?? [])
+      .map((ac) => `${ac.description ?? ""} ${ac.check ?? ""}`)
+      .join("\n");
+    const show = (xs) => xs.map((l) => "`" + l + "`").join(", ");
+    console.log(`🟢 mandated (${mandated.length}): ${show(mandated)}`);
+    if (exempt.length > 0) console.log(`ℹ️  exempt prose (${exempt.length}): ${show(exempt)}`);
+    const proseOnly = mandated.filter((l) => !acText.includes(l));
+    if (proseOnly.length > 0) {
+      console.log(`⚠️  carried by NO acceptance criterion (${proseOnly.length}): ${show(proseOnly)}`);
+      console.log("    The planner must recite each of these into a node goal or the plan gate");
+      console.log("    REVISEs. Un-backtick the ones that are narrative, not deliverables.");
+    }
+  ' "$1" 2>/dev/null ||
+    echo "⚠️  Could not read the goal literals (spec unparsable or SDK build stale)."
+}
+
+if [ "$LITERALS_ONLY" -eq 1 ]; then
+  if [ ! -f "$SPEC" ]; then
+    echo "Error: --literals requires --spec <existing yaml>" >&2
+    exit 2
+  fi
+  print_goal_literals "$SPEC"
+  exit 0
+fi
 
 if [ ! -f "$LEDGER" ]; then
   echo "Error: ledger not found at $LEDGER" >&2
@@ -305,6 +364,9 @@ EOF_AC
       echo "🟢 Challenge armed: $RED_ACS RED-on-HEAD AC(s) will flip green only when the delivery lands."
     fi
   fi
+
+  echo
+  print_goal_literals "$SPEC"
 
   if [ "$LINT_HIT" -eq 1 ]; then
     EXIT_FLAG=3
