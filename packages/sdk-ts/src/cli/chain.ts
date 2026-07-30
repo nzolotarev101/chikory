@@ -36,7 +36,11 @@ import { renderPlanGateFailureNotice } from "../chain/plan-gate-notice.js";
 import { renderChainReadTrace } from "../chain/read-trace.js";
 import { ChainJournal, chainRecordFrom, type ChainEntry } from "../chain/store.js";
 import { serializeWriteConflicts } from "../chain/write-set.js";
-import type { ChainNodeTemplate } from "../chain/node-spec.js";
+import {
+  renderStaleTemplateWarning,
+  templateGaps,
+  type ChainNodeTemplate,
+} from "../chain/node-spec.js";
 import { renderChainTrace } from "../chain/trace.js";
 import {
   decideGateRepair,
@@ -586,6 +590,32 @@ function unblockHint(chainId: string, parked: ChildParked): string {
     : `unblock with: chikory chain resume ${chainId} --add-budget <usd>`;
 }
 
+/**
+ * F-220: warn when the chain's PERSISTED node template lacks execution-surface
+ * policies. Read straight off the chain row (`template_json`) — the record the
+ * resumed workflow will actually dispatch from.
+ */
+export function warnStaleTemplate(dataDir: string, chainId: string, ioPair: Io): void {
+  const path = chainJournalPath(dataDir, chainId);
+  if (!existsSync(path)) return;
+  const journal = new ChainJournal(path);
+  let raw: string | null | undefined;
+  try {
+    raw = journal.getChain()?.template_json;
+  } finally {
+    journal.close();
+  }
+  if (raw === undefined || raw === null) return;
+  let template: unknown;
+  try {
+    template = JSON.parse(raw);
+  } catch {
+    return;
+  }
+  const warning = renderStaleTemplateWarning(chainId, templateGaps(template));
+  if (warning !== undefined) ioPair.err(warning);
+}
+
 function readChainRecord(dataDir: string, chainId: string): ChainRecord | undefined {
   const path = chainJournalPath(dataDir, chainId);
   if (!existsSync(path)) return undefined;
@@ -1075,6 +1105,10 @@ export async function cmdChainResume(
   const ioPair = io(deps);
   try {
     const record = readChainRecord(args.dataDir, args.chainId);
+    // F-220: say so BEFORE re-entering — a resume replays the template frozen at
+    // launch, so a chain started by an older binary keeps its F-209 gaps and no
+    // landed fix reaches it.
+    warnStaleTemplate(args.dataDir, args.chainId, ioPair);
     if (record && CHAIN_TERMINAL.has(record.status)) {
       // WP-521(c): a sealed-FAILED chain re-enters via runner.resumeChain (which
       // refuses SUCCESS / dead-FAILED); a sealed-SUCCESS falls through to the

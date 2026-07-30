@@ -138,6 +138,62 @@ export type ChainTemplateFieldChecks = [
 ];
 
 /**
+ * The execution-surface fields a node inherits that an OPERATOR declares
+ * optionally — i.e. `templateForwarded` minus the four every chain always has.
+ * These are exactly the fields WP-544 added to `templateFromSpec`, and therefore
+ * exactly the fields a template frozen before WP-544 cannot carry.
+ */
+const OPTIONAL_TEMPLATE_FIELDS = [
+  "stepLimits",
+  "pacing",
+  "unattended",
+  "soak",
+  "notifications",
+  "horizon",
+  "budgetTokens",
+  "maxSteps",
+] as const;
+
+/**
+ * F-220: which optional execution-surface fields the PERSISTED template lacks.
+ *
+ * A chain's template is frozen into its journal at launch and replayed by every
+ * later dispatch, including `chikory chain resume`. So a template written by a
+ * pre-WP-544 binary keeps its F-209 gaps for the whole life of the chain, and no
+ * amount of fixing the code reaches it. dogfood-120 is the proof: WP-544 landed
+ * mid-chain, the operator resumed 4 minutes later, and the resumed node still
+ * ran with `stepLimits: undefined` / `unattended: undefined` — so a judge
+ * ESCALATE over a stray glyph in a doc parked it 3h47m for a human the spec had
+ * said not to wait for.
+ *
+ * This cannot distinguish "the operator declared nothing" from "an old binary
+ * dropped it", so it is warning evidence, never a refusal.
+ */
+export function templateGaps(template: unknown): string[] {
+  if (template === null || typeof template !== "object") return [...OPTIONAL_TEMPLATE_FIELDS];
+  const present = template as Record<string, unknown>;
+  return OPTIONAL_TEMPLATE_FIELDS.filter((field) => present[field] === undefined);
+}
+
+/**
+ * The operator-facing warning for a resume about to replay a template with gaps.
+ * `undefined` when the template carries every optional field — nothing to say.
+ */
+export function renderStaleTemplateWarning(chainId: string, gaps: string[]): string | undefined {
+  if (gaps.length === 0) return undefined;
+  return [
+    `chikory: chain ${chainId} was frozen with no ${gaps.join(", ")} in its node template.`,
+    "  A chain's template is captured at launch and replayed by every dispatch, including this",
+    "  resume — if your goal spec declared any of those blocks, this chain never received them",
+    "  and this resume will not fix that (F-209/F-220).",
+    "  Consequences to expect: the default 600s step cap instead of your `step_limits`, and a",
+    "  judge ESCALATE parking the node for a human instead of your `unattended.escalation`.",
+    "  To run the remaining work on the declared surface, launch a fresh chain over what is",
+    "  left rather than resuming this one.",
+  ].join("\n");
+}
+
+/**
  * Deterministic child workflow id for a chain node — `chikory trace` and
  * crash-replay both rely on it being a pure function of (chainId, nodeId). The
  * `-node-` separator (not `:`/`::`) keeps the id valid as a git ref: a run's
