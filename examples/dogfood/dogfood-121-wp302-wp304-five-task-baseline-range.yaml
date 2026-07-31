@@ -102,12 +102,20 @@ goal: >
       through the `command` adapter with no in-loop Chikory judge. Both arms score the identical five
       pinned tasks, and the raw-Claude-Code arm runs sequentially AFTER the Chikory arm.
 
-    * Raw artifacts stay under `benchmarks/results/`. Only the two small suite summaries plus the
-      generated comparison are copied into `benchmarks/publications/p3-rung-4/`, alongside a concise
-      report. The comparison records raw result directories, exact task ids, adapter/executor/judge
-      families, wall-clock totals, requirement counts, point estimates, and finite 95% intervals —
-      the interval, not the point, is the headline. Do not commit provider credentials, full
-      transcripts, target `node_modules`, or cloned target repositories.
+    * Each arm leaves its own auditable directory: `benchmarks/results/p3-rung-4/chikory/` for the
+      Chikory arm and `benchmarks/results/p3-rung-4/raw-claude-code/` for the baseline, each holding
+      that arm's `summary.json` AND the per-task result JSON the harness already writes for every
+      scored task, named for that task id. The summary is a DERIVED artifact: its counts, its I-SR/D-SR and its
+      per-task rows must recompute exactly from those per-task results, which is what makes an arm
+      checkable by someone who did not watch it run. Everything else the run produced stays under
+      `benchmarks/results/`.
+
+    * Only the two small suite summaries plus the generated comparison are copied into
+      `benchmarks/publications/p3-rung-4/`, alongside a concise report. The comparison records raw
+      result directories, exact task ids, adapter/executor/judge families, wall-clock totals,
+      requirement counts, point estimates, and finite 95% intervals — the interval, not the point, is
+      the headline. Do not commit provider credentials, full transcripts, target `node_modules`, or
+      cloned target repositories.
 
   Constraints: TypeScript stays strict ESM with named exports and no `any`; no new dependency,
   provider SDK, API key, global install, frozen contract change, or unrelated package edit. Project
@@ -119,8 +127,14 @@ goal: >
     - The raw-Claude-Code baseline node MUST depend on and run sequentially AFTER the Chikory arm node
       (never concurrent — Devbox commands run sequentially).
     - Give every node at least one acceptance criterion whose id is one of the goal criteria below,
-      so each node has an oracle a shell can settle: AC-3 fits the brownfield-004 slice, AC-4 the
-      brownfield-005 slice, AC-5 either authoring slice, AC-1 the arms, AC-2 the publication bundle.
+      and it must be one that CANNOT already pass before that node does its work: AC-3 fits the
+      brownfield-004 slice, AC-4 the brownfield-005 slice, AC-5 either authoring slice, **AC-7 the
+      Chikory arm, AC-8 the raw-Claude-Code baseline**, AC-2 the publication bundle.
+    - AC-1 and AC-6 are REGRESSION GUARDS: they pass on HEAD today and must keep passing, so they
+      prove nothing about a node's own delivery. Attach them freely as extra criteria, but NEVER as a
+      node's only oracle. dogfood-121 gave the Chikory arm node AC-1 alone; it passed over an empty
+      diff, the judge could not settle the node on evidence and objected in free text instead, and
+      the node died twice (F-229). A node's oracle must go from RED to GREEN because that node ran.
 
 repos:
   - url: /Users/nikitazolotarev/repos/chikory
@@ -129,11 +143,13 @@ repos:
 acceptance_criteria:
   - id: AC-1
     description: >
-      The comparison CLI still owns the statistical oracle after any change made for this campaign.
-      Against two synthetic five-task summaries it emits 95% Wilson intervals from
+      REGRESSION GUARD, not an arm oracle — this passes on HEAD today and must keep passing. The
+      comparison CLI still owns the statistical oracle after any change made for this campaign:
+      against two synthetic five-task summaries it emits 95% Wilson intervals from
       satisfied/total requirement counts, keeps the identical ordered task set, names each arm's raw
       results directory, and rejects a mismatched or shortened arm. This check specifies its inputs
       and expected interval endpoints itself; executor-authored tests are not the oracle.
+      Do NOT assign this as a node's only criterion — see AC-7/AC-8 for the arms (F-229).
     check: |
       cd benchmarks/harness && pnpm exec tsc && node -e '
       const {mkdtempSync,writeFileSync,readFileSync}=require("node:fs");
@@ -313,6 +329,123 @@ acceptance_criteria:
         process.exit(1)
       }
       console.log("AC-6 OK: "+r.numPassedTests+" harness tests pass")'
+
+  - id: AC-7
+    description: >
+      THE CHIKORY ARM'S OWN ORACLE — this node PRODUCES a scored run, and this check settles on that
+      run, never on tooling that already works. It re-derives the arm's headline numbers from the
+      per-task results sitting next to the summary and requires exact agreement, so the summary is a
+      DERIVED artifact and not a claim: every one of the corpus's five task ids has a per-task result
+      whose graded requirement ids are exactly the ones its task declares, the aggregate counts and
+      I-SR recompute, every base verified green having actually run tests, and the wall-clock is
+      consistent with a sequential suite that really cloned, installed and ran five targets.
+      (An empty diff cannot satisfy this, which is the point — F-229.)
+    check: |
+      cd benchmarks/harness && pnpm exec tsc && node --input-type=module -e '
+      import {readFileSync,existsSync} from "node:fs";
+      import {join} from "node:path";
+      import {loadTaskDir} from "./dist/suite.js";
+      const A=(c,m)=>{if(!c){console.error("FAIL: "+m);process.exit(1);}};
+      const DIR="../results/p3-rung-4/chikory";
+      const SUM=join(DIR,"summary.json");
+      A(existsSync(SUM),"missing "+SUM+" — this node must PRODUCE a scored Chikory arm, not describe one");
+      const s=JSON.parse(readFileSync(SUM,"utf8"));
+      A(s.adapter==="chikory","the Chikory arm must record adapter chikory, got "+s.adapter);
+      A(s.tasks===5&&s.tasksVerified===5,"the arm must score and verify 5/5 tasks, got tasks="+s.tasks+" verified="+s.tasksVerified);
+      A(Array.isArray(s.unverifiedTasks)&&s.unverifiedTasks.length===0,"no task may be silently unverified");
+      const {tasks:corpus}=loadTaskDir("../tasks");
+      const wanted=corpus.filter((t)=>t.class==="brownfield").map((t)=>t.id).sort();
+      A(wanted.length===5,"the corpus must hold exactly five brownfield tasks first, got "+wanted.length);
+      A(JSON.stringify(s.perTask.map((t)=>t.taskId).sort())===JSON.stringify(wanted),
+        "the arm must score exactly the authored corpus: "+wanted.join(",")+" vs "+s.perTask.map((t)=>t.taskId).sort().join(","));
+      let total=0,sat=0,dep=0,wall=0;
+      for (const id of wanted) {
+        const f=join(DIR,id+".json");
+        A(existsSync(f),"missing per-task result "+f+" — the raw evidence must sit beside the summary");
+        const r=JSON.parse(readFileSync(f,"utf8"));
+        A(r.taskId===id&&r.adapter==="chikory",id+": per-task result must record its own id and the chikory adapter");
+        const task=corpus.find((t)=>t.id===id);
+        const declared=task.requirements.map((q)=>q.id).sort();
+        const graded=(r.grading.grades??[]).map((g)=>g.requirementId).sort();
+        A(JSON.stringify(graded)===JSON.stringify(declared),
+          id+": graded requirement ids must be exactly the ones the task declares — got "+graded.join(",")+" want "+declared.join(","));
+        A(r.baseVerification&&r.baseVerification.green===true&&r.baseVerification.testsPassed>0,
+          id+": base must be verified GREEN by a suite that actually ran tests");
+        A(Array.isArray(r.run.artifacts)&&r.run.artifacts.length>0,id+": a real adapter run names its artifacts");
+        A(r.run.wallClockMs>=60000,
+          id+": wallClockMs "+r.run.wallClockMs+" is too short to have cloned, installed and run a real target");
+        const row=s.perTask.find((t)=>t.taskId===id);
+        A(row.total===r.grading.total&&row.satisfied===r.grading.satisfied&&row.dependencySatisfied===r.grading.dependencySatisfied,
+          id+": summary row disagrees with its own per-task result");
+        total+=r.grading.total; sat+=r.grading.satisfied; dep+=r.grading.dependencySatisfied; wall+=r.run.wallClockMs;
+      }
+      A(s.requirementsTotal===total&&s.requirementsSatisfied===sat,
+        "summary aggregates must recompute from the per-task results: got "+s.requirementsSatisfied+"/"+s.requirementsTotal+" want "+sat+"/"+total);
+      const near=(a,b)=>Math.abs(a-b)<0.0001;
+      A(near(s.iSr,sat/total)&&near(s.dSr,dep/total),"I-SR/D-SR must recompute from the graded requirements");
+      const span=Date.parse(s.endedAt)-Date.parse(s.startedAt);
+      A(Number.isFinite(span)&&span>=wall*0.9,
+        "the suite window ("+span+"ms) cannot be shorter than the sequential work it reports ("+wall+"ms)");
+      console.log("AC-7 OK: the Chikory arm scored "+sat+"/"+total+" over five verified tasks in "+Math.round(span/60000)+"m");
+      '
+
+  - id: AC-8
+    description: >
+      THE RAW BASELINE ARM'S OWN ORACLE, and the cross-arm identity the comparison rests on. Same
+      derived-artifact standard as AC-7 applied to the baseline directory, plus the two properties
+      only this node can establish: the baseline is the `command` adapter and not a second Chikory
+      configuration (trap E), and it ran sequentially AFTER the Chikory arm rather than beside it.
+    check: |
+      cd benchmarks/harness && pnpm exec tsc && node --input-type=module -e '
+      import {readFileSync,existsSync} from "node:fs";
+      import {join} from "node:path";
+      import {loadTaskDir} from "./dist/suite.js";
+      const A=(c,m)=>{if(!c){console.error("FAIL: "+m);process.exit(1);}};
+      const DIR="../results/p3-rung-4/raw-claude-code";
+      const SUM=join(DIR,"summary.json");
+      A(existsSync(SUM),"missing "+SUM+" — this node must PRODUCE a scored baseline arm, not describe one");
+      const s=JSON.parse(readFileSync(SUM,"utf8"));
+      A(s.adapter==="command",
+        "the baseline must run through the command adapter, not a second Chikory configuration — got adapter "+s.adapter);
+      A(s.tasks===5&&s.tasksVerified===5,"the baseline must score and verify 5/5 tasks, got tasks="+s.tasks+" verified="+s.tasksVerified);
+      A(Array.isArray(s.unverifiedTasks)&&s.unverifiedTasks.length===0,"no task may be silently unverified");
+      const {tasks:corpus}=loadTaskDir("../tasks");
+      const wanted=corpus.filter((t)=>t.class==="brownfield").map((t)=>t.id).sort();
+      A(JSON.stringify(s.perTask.map((t)=>t.taskId).sort())===JSON.stringify(wanted),
+        "both arms must score the identical five-task set");
+      let total=0,sat=0,dep=0,wall=0;
+      for (const id of wanted) {
+        const f=join(DIR,id+".json");
+        A(existsSync(f),"missing per-task result "+f+" — the raw evidence must sit beside the summary");
+        const r=JSON.parse(readFileSync(f,"utf8"));
+        A(r.taskId===id&&r.adapter==="command",id+": per-task result must record its own id and the command adapter");
+        const task=corpus.find((t)=>t.id===id);
+        const declared=task.requirements.map((q)=>q.id).sort();
+        const graded=(r.grading.grades??[]).map((g)=>g.requirementId).sort();
+        A(JSON.stringify(graded)===JSON.stringify(declared),
+          id+": graded requirement ids must be exactly the ones the task declares — got "+graded.join(",")+" want "+declared.join(","));
+        A(r.baseVerification&&r.baseVerification.green===true&&r.baseVerification.testsPassed>0,
+          id+": base must be verified GREEN by a suite that actually ran tests");
+        A(Array.isArray(r.run.artifacts)&&r.run.artifacts.length>0,id+": a real adapter run names its artifacts");
+        A(r.run.wallClockMs>=60000,
+          id+": wallClockMs "+r.run.wallClockMs+" is too short to have cloned, installed and run a real target");
+        const row=s.perTask.find((t)=>t.taskId===id);
+        A(row.total===r.grading.total&&row.satisfied===r.grading.satisfied&&row.dependencySatisfied===r.grading.dependencySatisfied,
+          id+": summary row disagrees with its own per-task result");
+        total+=r.grading.total; sat+=r.grading.satisfied; dep+=r.grading.dependencySatisfied; wall+=r.run.wallClockMs;
+      }
+      A(s.requirementsTotal===total&&s.requirementsSatisfied===sat,
+        "summary aggregates must recompute from the per-task results: got "+s.requirementsSatisfied+"/"+s.requirementsTotal+" want "+sat+"/"+total);
+      const near=(a,b)=>Math.abs(a-b)<0.0001;
+      A(near(s.iSr,sat/total)&&near(s.dSr,dep/total),"I-SR/D-SR must recompute from the graded requirements");
+      const span=Date.parse(s.endedAt)-Date.parse(s.startedAt);
+      A(Number.isFinite(span)&&span>=wall*0.9,
+        "the suite window ("+span+"ms) cannot be shorter than the sequential work it reports ("+wall+"ms)");
+      const chik=JSON.parse(readFileSync("../results/p3-rung-4/chikory/summary.json","utf8"));
+      A(Date.parse(s.startedAt)>=Date.parse(chik.endedAt),
+        "the baseline must run sequentially AFTER the Chikory arm — baseline started "+s.startedAt+", Chikory ended "+chik.endedAt);
+      console.log("AC-8 OK: the raw baseline scored "+sat+"/"+total+" over the identical five tasks, after the Chikory arm");
+      '
 
 budget_usd: 60
 max_steps: 30
