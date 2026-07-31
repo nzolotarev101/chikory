@@ -33,6 +33,23 @@
 #   * The fabricated "review panel sign-off" in dogfood-120's draft is why NO criterion here asks for
 #     a review, an approval, or any artifact a node cannot produce and prove by itself.
 #
+# WHAT dogfood-121 TAUGHT THIS SPEC (F-229 — amended 2026-07-30, after the first real launch):
+#   The arms had NO oracle of their own. The decomposition guidance said "AC-1 the arms", and AC-1 is
+#   a regression guard for the pre-existing `chikory-bench compare` — it passes on HEAD, and it
+#   passed over node `N-3`'s EMPTY diff. With nothing to settle the node on, the judge fell back to
+#   free-text concerns ("the diff is empty, so it provides no evidence the launcher was added") and
+#   killed the node twice, exhausting the replan budget. WP-554 stops that from ending a chain; it
+#   does not make the criterion meaningful. AC-7 and AC-8 are the fix: each arm's own oracle, which
+#   can only go green because that node ran.
+#
+# ⚠️ REVIEWER NOTE — AC-7/AC-8 ARE RUN-WORKSPACE-SCOPED. `benchmarks/results/` is gitignored in its
+#   entirety (`benchmarks/results/.gitignore` is `*`), by deliberate design: raw arm artifacts stay
+#   local and only `benchmarks/publications/p3-rung-4/` is committed. So AC-7/AC-8 will read RED on
+#   the HOST tree after harvest — that is CORRECT, not a failure (the F-193 trap). Re-verify them
+#   inside the node's own workspace:
+#     cd .chikory/runs/<chain-id>-node-<node-id>/workspace && <the AC-7 check verbatim>
+#   AC-2 is the one that must be green on the host tree after harvest.
+#
 # RESEARCH ALREADY BANKED (use it or beat it — do not treat it as authored):
 #   docs/reports/attachments/dogfood-120-brownfield-004-drafts/ holds two drafts whose upstream pins
 #   were verified against GitHub during the review:
@@ -108,7 +125,8 @@ goal: >
       scored task, named for that task id. The summary is a DERIVED artifact: its counts, its I-SR/D-SR and its
       per-task rows must recompute exactly from those per-task results, which is what makes an arm
       checkable by someone who did not watch it run. Everything else the run produced stays under
-      `benchmarks/results/`.
+      `benchmarks/results/`, which is gitignored by design — the arms' raw evidence lives in the run
+      workspace and is never committed; only the publication bundle below is.
 
     * Only the two small suite summaries plus the generated comparison are copied into
       `benchmarks/publications/p3-rung-4/`, alongside a concise report. The comparison records raw
