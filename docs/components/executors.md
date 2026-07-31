@@ -42,8 +42,17 @@ export interface StepRecord {
   failure?: { reason: string; retriable: boolean };
   infraFailed?: boolean;           // F-210 — killed at the maxSeconds cap: inconclusive, spends no rule-3 strike
   claimsComplete?: boolean;        // P2 (WP-221) — executor's explicit "task done" signal
+  limitSignal?: RawLimitSignal;    // F-228 (WP-553) — raw quota/rate evidence off the endpoint, routed to classifyLimitSignal
 }
 ```
+
+**`limitSignal` (F-228).** A quota or rate wall is not incompetence. `runCliStep` attaches the
+process's stderr and exit code to every FAILED record; `classifyLimitSignal` — not the adapter —
+decides whether that really is a limit, and the runner then parks until reset or fails over
+instead of spending strikes. Before this the field was read by the runner but set by nobody, so
+the whole park-until-reset path was reachable only through `CHIKORY_LIMIT_AT_STEP` injection, and
+`agy`'s `Individual quota reached … Resets in 1h0m8s` killed a node and then a 5-node chain
+(dogfood-121 `N-3-r1`, four consecutive steps).
 
 ### Conformance suite (part of WP-111)
 

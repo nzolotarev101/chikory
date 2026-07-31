@@ -10,7 +10,9 @@ import { fileURLToPath } from "node:url";
 
 import { describe, expect, it } from "vitest";
 
+import { describeEndpointCapability } from "../../src/endpoint-capability.js";
 import { createGeminiCliAdapter, parseAgyOutput } from "../../src/executors/gemini-cli.js";
+import { classifyLimitSignal } from "../../src/limit-signal.js";
 import { StepRecordSchema } from "../../src/schemas.js";
 import {
   executorConformanceSuite,
@@ -71,6 +73,35 @@ describe("agy invocation flags", () => {
     // 14-minute step contract silently became a 5-minute one.
     expect(record.summary).toContain("--print-timeout 840s");
     expect(record.summary).toContain("--mode accept-edits");
+  });
+});
+
+describe("quota wall (F-228)", () => {
+  it("carries the provider's stderr as a limitSignal the scheduler can classify", async () => {
+    const ws = await makeWorkspace();
+    const adapter = createGeminiCliAdapter({
+      store: ws.store,
+      binPath: FAKE_BIN,
+      env: { ...process.env, FAKE_DIALECT: "agy", FAKE_MODE: "quota" },
+    });
+    const record = await adapter.runStep(makeStepInput(ws, TOY_STEPS[0].instruction, 60));
+
+    // Still a FAILED step — the adapter does not get to decide it was a limit.
+    expect(record.status).toBe("FAILED");
+    StepRecordSchema.parse(record);
+    // …but the evidence now travels with it. Before F-228 nothing populated this
+    // field, so `rawLimitSignalFromStepRecord` always returned undefined and the
+    // park-until-reset scheduler was unreachable outside CHIKORY_LIMIT_AT_STEP.
+    expect(record.limitSignal).toMatchObject({ kind: "cli-stderr", exitCode: 1 });
+    expect(record.limitSignal).toHaveProperty("stderr", expect.stringContaining("quota reached"));
+
+    // End to end: that raw signal is what the classifier turns into a 1h0m8s park.
+    expect(
+      classifyLimitSignal({
+        capability: describeEndpointCapability({ adapter: "gemini-cli", family: "gemini" }),
+        signal: record.limitSignal,
+      }),
+    ).toMatchObject({ source: "cli-usage-limit", retryAfterMs: 3_608_000 });
   });
 });
 

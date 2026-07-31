@@ -182,7 +182,7 @@ export function createScriptedAdapter(ctx: { store: ArtifactStore }): ExecutorAd
             retriable: true,
           },
           limitSignal: {
-            kind: "http",
+            kind: "http" as const,
             statusCode: 429,
             headers: withoutRetryAfter ? {} : { "retry-after": String(retryAfterSeconds) },
             body: `scripted HTTP 429 at attempt ${attempt}`,
@@ -202,7 +202,7 @@ export function createScriptedAdapter(ctx: { store: ArtifactStore }): ExecutorAd
             retriable: true,
           },
           limitSignal: {
-            kind: "cli-stderr",
+            kind: "cli-stderr" as const,
             stderr,
             exitCode: cfg.cliLimitExitCode ?? 1,
           },

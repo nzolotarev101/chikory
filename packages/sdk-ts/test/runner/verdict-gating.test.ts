@@ -33,6 +33,7 @@ import {
   TERMINAL_STATUSES,
   waitFor,
   type FakeJudgeWire,
+  type ScriptedConfig,
 } from "./helpers.js";
 
 const address = inject("temporalAddress");
@@ -45,10 +46,10 @@ describe.skipIf(address === null)("verdict gating (WP-132)", () => {
     while (cleanups.length > 0) await cleanups.pop()!();
   });
 
-  async function setup(wire: FakeJudgeWire) {
+  async function setup(wire: FakeJudgeWire, scripted: Partial<ScriptedConfig> = {}) {
     const tmp = await mkdtemp(join(tmpdir(), "chikory-gating-"));
     cleanups.push(() => rm(tmp, { recursive: true, force: true }));
-    const repoUrl = await initSourceRepo(join(tmp, "src"));
+    const repoUrl = await initSourceRepo(join(tmp, "src"), scripted);
     const dataDir = join(tmp, "data");
     const taskQueue = `tq-${randomUUID()}`;
 
@@ -124,9 +125,13 @@ describe.skipIf(address === null)("verdict gating (WP-132)", () => {
     return userContent.slice(sectionStart, nextSection === -1 ? undefined : nextSection).trim();
   }
 
-  async function run(wire: FakeJudgeWire, specOverrides: Partial<TaskSpec> & { cadence?: number }) {
+  async function run(
+    wire: FakeJudgeWire,
+    specOverrides: Partial<TaskSpec> & { cadence?: number },
+    scripted: Partial<ScriptedConfig> = {},
+  ) {
     cleanups.push(() => wire.close());
-    const { repoUrl, dataDir, runner } = await setup(wire);
+    const { repoUrl, dataDir, runner } = await setup(wire, scripted);
     const spec = makeJudgedSpec({ repoUrl, maxSteps: 10, cadence: 1, ...specOverrides });
     const handle = await runner.start(spec);
     return { dataDir, handle };
@@ -276,6 +281,90 @@ describe.skipIf(address === null)("verdict gating (WP-132)", () => {
     try {
       const terminal = journal.entries("terminal")[0]!.payload as { status: string; reason?: string };
       expect(terminal.status).toBe("SUCCESS");
+      expect(terminal.reason ?? "").toContain("approved out-of-rubric escalation");
+    } finally {
+      journal.close();
+    }
+  });
+
+  test("F-229: UNATTENDED out-of-rubric ESCALATE over an EMPTY diff seals SUCCESS, not FAILED", async () => {
+    // dogfood-121 `N-3` replayed. Every acceptance criterion passed, every
+    // rubric item passed, the step produced a zero-byte diff, and the judge
+    // objected only in free text about evidence an INCREMENTAL diff cannot
+    // carry ("the diff is empty, so it provides no evidence the launcher was
+    // added" — while the launcher sat committed one checkpoint earlier).
+    // Unattended, that sealed FAILED; the chain auto-resumed, re-judged the
+    // same empty tree, re-raised the same concern, sealed FAILED again, and
+    // exhausted the node's replan budget. The run has CONVERGED — seal it.
+    const wire = await startFakeJudgeWire([
+      judgeForm({ criteria: { "AC-1": true }, concerns: ["the diff is empty, so no evidence"] }),
+      judgeForm({ criteria: { "AC-1": true }, concerns: ["the diff is empty, so no evidence"] }),
+    ]);
+    const { dataDir, handle } = await run(
+      wire,
+      { unattended: { escalation: "seal_resumable_failed" } },
+      { emptyDiffSteps: [1] },
+    );
+
+    const report = await awaitTerminal(handle);
+    expect(report.status).toBe("SUCCESS");
+    // The second (identical) form is never consumed — no re-judge of the empty tree.
+    expect(verdictKinds(dataDir, handle.runId)).toEqual(["ESCALATE"]);
+
+    const journal = new Journal(journalPath(dataDir, handle.runId));
+    try {
+      const terminal = journal.entries("terminal")[0]!.payload as { status: string; reason?: string };
+      expect(terminal.status).toBe("SUCCESS");
+      expect(terminal.reason ?? "").toContain("converged out-of-rubric escalation");
+      // The concern is recorded in the seal, never silently dropped.
+      expect(terminal.reason ?? "").toContain("the diff is empty, so no evidence");
+    } finally {
+      journal.close();
+    }
+  });
+
+  test("F-229: an out-of-rubric ESCALATE over a NON-empty diff still seals FAILED unattended", async () => {
+    // The dogfood-121 `N-1` path, which recovered correctly: the concern was
+    // raised over real work, so there IS something the executor can answer.
+    // Convergence must be inferred from the empty diff alone — never from the
+    // escalate class, or a first advisory concern would end every run early.
+    const wire = await startFakeJudgeWire([
+      judgeForm({ criteria: { "AC-1": true }, concerns: ["horizon claim is not supported"] }),
+    ]);
+    const { dataDir, handle } = await run(wire, {
+      unattended: { escalation: "seal_resumable_failed" },
+    });
+
+    const report = await awaitTerminal(handle);
+    expect(report.status).toBe("FAILED");
+    expect(report.failure?.reason).toContain("unattended judge escalation");
+    expect(report.failure?.reason).toContain("horizon claim is not supported");
+    expect(verdictKinds(dataDir, handle.runId)).toEqual(["ESCALATE"]);
+  });
+
+  test("F-229: an ATTENDED out-of-rubric ESCALATE over an empty diff still awaits the operator", async () => {
+    // The carve-out replaces only the seal that fires with nobody there to
+    // answer. An operator who asked to adjudicate still gets asked, and F-154
+    // seals SUCCESS the moment they approve.
+    const wire = await startFakeJudgeWire([
+      judgeForm({ criteria: { "AC-1": true }, concerns: ["prefers a different file layout"] }),
+    ]);
+    const { dataDir, handle } = await run(wire, {}, { emptyDiffSteps: [1] });
+
+    await waitFor(
+      async () => ((await handle.status()).status === "AWAITING_APPROVAL" ? true : undefined),
+      { what: "run to await approval" },
+    );
+    await handle.approve({ approved: true, reason: "layout is fine" });
+
+    const report = await awaitTerminal(handle);
+    expect(report.status).toBe("SUCCESS");
+    expect(verdictKinds(dataDir, handle.runId)).toEqual(["ESCALATE"]);
+
+    const journal = new Journal(journalPath(dataDir, handle.runId));
+    try {
+      const terminal = journal.entries("terminal")[0]!.payload as { reason?: string };
+      // F-154's wording, not F-229's — the operator adjudicated.
       expect(terminal.reason ?? "").toContain("approved out-of-rubric escalation");
     } finally {
       journal.close();

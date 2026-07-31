@@ -139,8 +139,16 @@ export interface StepRecord {
   durationMs: number;
   transcriptRef: ArtifactRef;
   failure?: { reason: string; retriable: boolean };
+  infraFailed?: boolean;           // F-210 — killed at its maxSeconds cap; inconclusive, spends no rule-3 strike
   claimsComplete?: boolean;        // P2 (WP-221) — explicit "task done"; OR'd into the WP-217 trigger (kills F-11 probe)
+  limitSignal?: RawLimitSignal;    // F-228 (WP-553) — raw quota/rate evidence, routed to classifyLimitSignal
 }
+
+/** F-228 — raw provider-limit evidence, before classification. */
+export type RawLimitSignal =
+  | { kind: "http"; statusCode: number; headers?: Record<string, string | string[] | undefined>; body?: string }
+  | { kind: "cli-stderr"; stderr: string; exitCode?: number | null }
+  | { kind: "injected"; reason: string; retryAfterMs?: number; retryAtMs?: number };
 
 export interface TokenUsage { input: number; output: number; }
 

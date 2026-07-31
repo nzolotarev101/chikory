@@ -304,6 +304,31 @@ export interface StepLimits {
   maxCostUsd?: number;
 }
 
+/**
+ * Raw provider-limit evidence a step's endpoint emitted, before
+ * `classifyLimitSignal` decides whether it really is a quota/rate wall.
+ * Lives here because `StepRecord` carries it (F-228); `limit-signal.ts`
+ * re-exports this exact type.
+ */
+export type RawLimitSignal =
+  | {
+      readonly kind: "http";
+      readonly statusCode: number;
+      readonly headers?: Readonly<Record<string, string | readonly string[] | undefined>>;
+      readonly body?: string;
+    }
+  | {
+      readonly kind: "cli-stderr";
+      readonly stderr: string;
+      readonly exitCode?: number | null;
+    }
+  | {
+      readonly kind: "injected";
+      readonly reason: string;
+      readonly retryAfterMs?: number;
+      readonly retryAtMs?: number;
+    };
+
 export interface StepRecord {
   /** Invariant #4. */
   status: TerminalStatus;
@@ -333,6 +358,19 @@ export interface StepRecord {
    * inference as today.
    */
   claimsComplete?: boolean;
+  /**
+   * F-228 (WP-553) — the RAW provider-limit evidence this step's process
+   * emitted, handed to `classifyLimitSignal` so a quota/rate wall reaches the
+   * park-until-reset scheduler instead of counting as executor incompetence.
+   *
+   * `runner/activities.ts` already read this property off the record via a
+   * structural cast; nothing ever set it, so the entire real-world limit path
+   * was reachable only through `CHIKORY_LIMIT_AT_STEP` injection. dogfood-121
+   * `N-3-r1` died on four consecutive `agy` steps reporting `Individual quota
+   * reached … Resets in 1h0m8s` — a wall the runner should have slept through,
+   * not spent a node's whole replan budget on. Absent = no limit evidence.
+   */
+  limitSignal?: RawLimitSignal;
 }
 
 export interface TokenUsage {

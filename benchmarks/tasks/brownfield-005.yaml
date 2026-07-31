@@ -1,0 +1,118 @@
+# PINNED brownfield task — abort in-flight fetch request on httpBatchStreamLink unsubscribe
+# Stresses: multi-package client link architecture, teardown lifecycle semantics,
+# AbortController signal chaining, and resource leak prevention in streaming observables.
+#
+# Source: trpc/trpc PR #7390, fixed by commit dfbafa8ef178a5a3d23ef9461caa9494b3ef7f95.
+# Parent base commit: cdbc28049889a9da9ea2abb6bd6519afe2279ead.
+#
+# Bug: When `httpBatchStreamLink` creates a batch stream request observable it calls
+# `loader.load(op)` and returns a no-op teardown (`return () => {}`). There is NO AbortController
+# in the request path at all, so when a subscriber unsubscribes (component unmount, query
+# cancellation) nothing cancels the in-flight fetch and the JSONL HTTP stream stays open on both
+# client and server. The upstream fix CREATES the controller, races its signal against the
+# caller's (`raceAbortSignals(op.signal, ac.signal)`), tracks completion, and aborts from the
+# teardown when the request has not finished.
+#
+# F-232 (2026-07-30): this block previously claimed the AbortController already existed and only
+# the teardown was missing. That is false at `repo.ref` and would have pointed the agent at a
+# one-line edit instead of the real design change. Verified against the upstream patch.
+#
+# Upstream fix size, measured (`gh api repos/trpc/trpc/commits/dfbafa8…`):
+#   packages/client/src/links/httpBatchStreamLink.ts  +11/-2
+#   packages/tests/server/links.test.ts               +51/-0
+id: brownfield-005
+class: brownfield
+status: pinned
+repo:
+  url: https://github.com/trpc/trpc
+  ref: cdbc28049889a9da9ea2abb6bd6519afe2279ead
+base_verification_command: pnpm install --frozen-lockfile && pnpm vitest run packages/tests/server/links.test.ts
+# F-231: measured against the upstream fix above, not asserted. The EDIT is small; the work is
+# the diagnosis (teardown lifecycle across the client link stack) plus getting signal racing and
+# completion tracking right without breaking the caller's own AbortSignal.
+horizon: 1-3h
+goal: |
+  In `trpc`, when `httpBatchStreamLink` is used to create a batch stream observable and a subscriber unsubscribes before the HTTP request stream completes (for example when a component unmounts or a query is cancelled), the underlying network request should be cancelled.
+  Currently, `httpBatchStreamLink` calls `loader.load()` and returns a no-op teardown, and nothing in the request path can cancel the fetch. As a result, unsubscribing leaves the underlying HTTP request running, consuming network resources on both client and server.
+
+  Ensure that unsubscribing from an active `httpBatchStreamLink` observable cancels the in-flight fetch request, without cancelling a request that has already completed and without discarding an AbortSignal the caller supplied on the operation. Maintain type safety, keep all existing tests passing, and pass project typechecks (`pnpm typecheck-packages`).
+requirements:
+  - id: R1
+    description: dependencies install clean (pnpm workspace, frozen lockfile)
+    check: pnpm install --frozen-lockfile
+  - id: R2
+    description: pre-existing tRPC client links test suite passes green
+    prerequisites: [R1]
+    check: pnpm vitest run packages/tests/server/links.test.ts
+  - id: R3
+    description: project package typechecks clean (pnpm typecheck-packages)
+    prerequisites: [R1]
+    check: pnpm typecheck-packages
+  - id: R4
+    description: "root-cause probe: httpBatchStreamLink unsubscribe aborts in-flight fetch request"
+    prerequisites: [R1]
+    check: |
+      set -e
+      PROBE_FILE="packages/tests/server/probe-httpbatchstreamlink-abort.test.ts"
+      cat > "$PROBE_FILE" << 'TESTEOF'
+      import { expect, test, vi } from 'vitest';
+      import { httpBatchStreamLink } from '@trpc/client';
+      import { createChain } from '@trpc/client/links/internals/createChain';
+      import type { TRPCClientRuntime } from '@trpc/client';
+
+      const mockRuntime: TRPCClientRuntime = {};
+
+      test('httpBatchStreamLink - unsubscribe aborts fetch', async () => {
+        let fetchSignal: AbortSignal | undefined;
+        const fetchCalled = new Promise<void>((resolve) => {
+          vi.spyOn(globalThis, 'fetch').mockImplementation(async (_url, init) => {
+            fetchSignal = init?.signal ?? undefined;
+            resolve();
+            return new Response(
+              new ReadableStream({
+                start() {
+                  // never enqueue or close - keeps the stream open
+                },
+              }),
+              { status: 200 },
+            );
+          });
+        });
+
+        try {
+          const links = [
+            httpBatchStreamLink({
+              url: 'http://localhost:9999',
+            })(mockRuntime),
+          ];
+
+          const chain = createChain({
+            links,
+            op: {
+              id: 1,
+              type: 'query',
+              path: 'hello',
+              input: null,
+              context: {},
+              signal: null,
+            },
+          });
+
+          const sub = chain.subscribe({});
+
+          await fetchCalled;
+
+          expect(fetchSignal!.aborted).toBe(false);
+
+          sub.unsubscribe();
+
+          expect(fetchSignal!.aborted).toBe(true);
+        } finally {
+          vi.restoreAllMocks();
+        }
+      });
+      TESTEOF
+      pnpm vitest run "$PROBE_FILE"
+metrics_notes: |
+  R4 probes the observable teardown lifecycle. An agent taking a shallow fix (e.g. handling abort signals inside loader instead of returning a teardown cleanup function from the observable link wrapper) will fail R4 because `sub.unsubscribe()` will not trigger `abortController.abort()`.
+tags: [bug-fix, streaming, observability, teardown-lifecycle]

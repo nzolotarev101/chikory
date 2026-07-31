@@ -1,0 +1,104 @@
+# PINNED brownfield task — clear internal errors state on argument-less clearErrors()
+# Stresses: root-cause diagnosis vs shallow event notification, reference-integrity,
+# and state consistency across `getFieldState` and `_formState.errors`.
+#
+# Source: react-hook-form/react-hook-form PR #13613, fixed by commit 69da9545b222aceb5fc8ea15e851cab83b1c84f6.
+# Parent base commit: d96c5ceef12cb53266ce1ae5e65fba301a31fe57.
+#
+# Bug: Calling `clearErrors()` without arguments in `createFormControl` notified subscribers
+# via `_subjects.state.next({ errors: {} })`, but omitted updating `_formState.errors = {}`.
+# Consequently, `control._formState.errors` retained stale error entries, and subsequent calls
+# to `getFieldState(fieldName).invalid` continued to evaluate to `true`.
+#
+# Upstream fix size, measured (`gh api repos/react-hook-form/react-hook-form/commits/69da954…`):
+#   src/logic/createFormControl.ts                +2/-1
+#   src/__tests__/logic/createFormControl.test.ts +20/-0
+id: brownfield-004
+class: brownfield
+status: pinned
+repo:
+  url: https://github.com/react-hook-form/react-hook-form
+  ref: d96c5ceef12cb53266ce1ae5e65fba301a31fe57
+base_verification_command: pnpm install --frozen-lockfile && pnpm test
+# F-231: measured against the upstream fix above, not asserted. A two-line edit whose cost is the
+# diagnosis — the divergence between the published subscriber payload and the stored state is only
+# visible through `getFieldState`, not through any event-based component test.
+horizon: 1-3h
+goal: |
+  In `react-hook-form`, calling `clearErrors()` without arguments is expected to clear all form validation errors across both reactive event subscriptions and direct field state queries.
+  Currently, when `clearErrors()` is invoked without parameters, field state queries (such as `getFieldState(fieldName).invalid`) continue returning `true` and reporting invalid status even after errors are cleared.
+
+  Ensure that an argument-less `clearErrors()` call cleanly clears all field errors and resets form error state, so that `getFieldState(fieldName).invalid` returns `false` and formState errors are completely cleared across all accessors and subscriptions.
+  All pre-existing tests in the repository must pass unmodified.
+  The project must type-check cleanly (`pnpm type` / `tsc --noEmit`). No external API contracts or unrelated behaviors may be broken.
+requirements:
+  - id: R1
+    description: dependencies install clean (pnpm workspace, frozen lockfile)
+    check: pnpm install --frozen-lockfile
+  - id: R2
+    description: full pre-existing react-hook-form test suite is green (>= 1208 tests pass)
+    prerequisites: [R1]
+    check: |
+      set -e
+      OUTFILE="/tmp/rhf-jest-result-$(date +%s).json"
+      rm -f "$OUTFILE"
+      pnpm jest --config ./scripts/jest/jest.config.js --json --outputFile="$OUTFILE" > /tmp/rhf-jest.log 2>&1 || true
+      node -e "
+      const fs = require('fs');
+      if (!fs.existsSync('$OUTFILE')) {
+        console.error('Jest output JSON file was not generated');
+        process.exit(1);
+      }
+      const r = JSON.parse(fs.readFileSync('$OUTFILE', 'utf8'));
+      fs.unlinkSync('$OUTFILE');
+      if (!r.success || r.numFailedTests !== 0) {
+        console.error('failed tests:', r.numFailedTests);
+        process.exit(1);
+      }
+      if (r.numTotalTests < 1208) {
+        console.error('expected >= 1208 total tests, got', r.numTotalTests);
+        process.exit(1);
+      }
+      "
+  - id: R3
+    description: project typechecks clean (tsc --noEmit)
+    prerequisites: [R1]
+    check: pnpm type
+  - id: R4
+    description: "root-cause probe: argument-less clearErrors() resets internal _formState.errors and getFieldState invalid status"
+    prerequisites: [R1]
+    check: |
+      set -e
+      PROBE_DIR="src/__tests__/__probe__"
+      PROBE_FILE="$PROBE_DIR/clear-errors-root-cause.test.ts"
+      mkdir -p "$PROBE_DIR"
+      cat > "$PROBE_FILE" <<'TESTEOF'
+      import { createFormControl } from '../../logic/createFormControl';
+
+      describe('root cause probe: argument-less clearErrors', () => {
+        it('resets internal _formState.errors and field state status', () => {
+          const { setError, clearErrors, getFieldState, control } =
+            createFormControl<{
+              foo: string;
+              bar: string;
+            }>();
+
+          setError('foo', { type: 'required' });
+          setError('bar', { type: 'required' });
+
+          expect(getFieldState('foo').invalid).toBe(true);
+          expect(control._formState.errors).not.toEqual({});
+
+          clearErrors();
+
+          expect(getFieldState('foo').invalid).toBe(false);
+          expect(getFieldState('bar').invalid).toBe(false);
+          expect(control._formState.errors).toEqual({});
+        });
+      });
+      TESTEOF
+      pnpm test "$PROBE_FILE"
+metrics_notes: |
+  R4 probes the root-cause state update. An agent taking the plausible wrong turn (emitting an empty error payload to subscribers without updating `_formState.errors`) will pass event-based component tests while failing R4 because internal state remains stale and `getFieldState` returns `invalid: true`.
+tags: [bug-fix, state-management, reference-integrity]
+

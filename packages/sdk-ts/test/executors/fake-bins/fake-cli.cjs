@@ -81,6 +81,15 @@ if (mode === "hang") {
 } else if (mode === "fail") {
   process.stderr.write("boom: fake agent crashed\n");
   process.exit(2);
+} else if (mode === "quota") {
+  // F-228: a subscription quota wall — empty stdout, the provider's message on
+  // stderr, nonzero exit. Verbatim shape `agy` produced on dogfood-121
+  // `chain-86fbe5a7…-node-N-3-r1`, four consecutive steps.
+  process.stderr.write(
+    "Error: Individual quota reached. Please upgrade your subscription to " +
+      "increase your limits. Resets in 1h0m8s.\n",
+  );
+  process.exit(1);
 } else if (dialect === "claude") {
   emit({ type: "system", subtype: "init", cwd: process.cwd() });
   const summary = withEnvSummary(mode === "ok" ? doWork() : "did nothing");

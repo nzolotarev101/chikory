@@ -1,3 +1,23 @@
+## 2026-07-30 — displaced from docs/DOGFOODING.md status block by the dogfood-121 review
+
+⛔ **dogfood-121 never launched a node** — the plan meta-judge gate stopped the chain after
+**$0.7764 over 4 attempts**, and a plan-gate stop journals NOTHING (no chain db is created
+before PROCEED). P3-rung-4 stays unclimbed; the brownfield corpus stays at 3 tasks.
+Attempt 1 caught a real AC-assignment defect. Attempts 2–4 chased backticked words and lost
+`devbox run` again at attempt 4 after fixing it at attempt 2 (`docs/reports/F-223.md`).
+🔴 **F-223**: the repair brief was clamped whole at 2000 chars with the instruction LAST, and a
+real 6-node outline is 3,798 — the planner never read "keep what the gate did not object to".
+🔴 **F-224/F-225**: the literal floor searched `node.goal` only (criteria are hydrated verbatim)
+and mandated every backtick, prose included. 🟡 **F-226**: no gap history, so churn read as progress.
+**All hand-fixed: WP-549 · WP-550 · WP-551** (1176 TS / 128 harness / 84 py green); F-227 → WP-552.
+Progression ✅ PROGRESSING (horizon 19 vs 4). **NEXT = relaunch dogfood-121 UNCHANGED** — its goal is
+the regression fixture; `devbox run chain-dogfood`.
+
+
+## 2026-07-30 — displaced from plan.md §-top status block by the dogfood-121 review (F-228…F-234)
+
+- **Latest / next:** ⛔ **dogfood-121 never launched a node — the plan gate stopped it for $0.7764 over 4 attempts** (no chain db exists; a plan-gate stop journals nothing). Attempt 1 caught a real AC-assignment defect; attempts 2–4 chased backticked words and **lost `devbox run` again at attempt 4 after fixing it at attempt 2**. Root cause is NOT planner quality: 🔴 **F-223** — `buildGateRepairBrief` clamped the WHOLE brief at 2000 chars with the instruction rendered LAST, and dogfood-120's real 6 node goals are 3,798 chars, so the planner never read *"Keep the parts of your plan it did not object to"* and was structurally told to start over each attempt; 🔴 **F-224** — the literal floor searched `node.goal` alone while `buildPlan` hydrates criteria verbatim, so `rawResultsDir` was "missing" while sitting in AC-1's check, and `benchmarks/tasks/` failed to satisfy `benchmarks/`; 🔴 **F-225** — every backtick was a hard mandate (19 on this goal, incl. `any`, `git`, `npx`, a SHA and an ellipsis); 🟡 **F-226** — no gap history, so the loop could not tell churn from progress. **All four hand-fixed this sitting: WP-549 · WP-550 · WP-551, 1176 TS / 128 harness / 84 py green, replay-proven that all four burned literals are no longer gaps.** F-227 (the executor never sees `chainLink.planGoal` — judge-only) → WP-552 queued. **NEXT = relaunch dogfood-121 unchanged** — its goal is deliberately untouched so it is the regression fixture; watch for the gate converging inside 3 repair attempts, or stopping with a NAMED oscillation instead of a cap.
+
 ## 2026-07-28 — displaced from docs/DOGFOODING.md status block by the dogfood-118 review
 
 Previous status block, verbatim:

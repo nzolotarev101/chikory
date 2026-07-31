@@ -1,23 +1,13 @@
 import type { EndpointCapability } from "./endpoint-capability.js";
 
-export type RawLimitSignal =
-  | {
-      readonly kind: "http";
-      readonly statusCode: number;
-      readonly headers?: Readonly<Record<string, string | readonly string[] | undefined>>;
-      readonly body?: string;
-    }
-  | {
-      readonly kind: "cli-stderr";
-      readonly stderr: string;
-      readonly exitCode?: number | null;
-    }
-  | {
-      readonly kind: "injected";
-      readonly reason: string;
-      readonly retryAfterMs?: number;
-      readonly retryAtMs?: number;
-    };
+/**
+ * F-228 (WP-553): the definition moved to `types.js` when `StepRecord` grew a
+ * `limitSignal` field — the contracts file must stay self-contained. Re-exported
+ * here so every existing `from "./limit-signal.js"` import keeps working and
+ * there is exactly ONE definition.
+ */
+export type { RawLimitSignal } from "./types.js";
+import type { RawLimitSignal } from "./types.js";
 
 export type LimitSignalSource = "http-429" | "cli-usage-limit" | "injected";
 
@@ -43,9 +33,17 @@ export interface ClassifyLimitSignalInput {
   readonly nowMs?: number;
 }
 
-const CLI_LIMIT_RE = /\b(rate|usage|session)\s+limit\b|\blimit\s+(reached|exceeded|hit)\b/i;
+// F-228: `quota` is the word the Antigravity/Gemini CLI uses — "Individual quota
+// reached. Please upgrade your subscription to increase your limits." matched
+// none of the original alternatives ("your limits" is not "usage limit", and
+// "quota reached" is not "limit reached"), so a real wall was never classified.
+const CLI_LIMIT_RE =
+  /\b(rate|usage|session|quota)\s+limit\b|\b(limit|quota)\s+(reached|exceeded|exhausted|hit)\b/i;
+// F-234: same letter-terminator rule as the per-part scan below — the window
+// this captures is what the runner parks for, so a unit letter glued to more
+// letters ("5months") must not be read as a unit.
 const DURATION_RE =
-  /\b(?:retry|try again|reset|resets|available|availability)[^\n.]*?\bin\s+((?:(?:\d+(?:\.\d+)?)\s*(?:hours?|hrs?|h|minutes?|mins?|m|seconds?|secs?|s)\s*)+)/i;
+  /\b(?:retry|try again|reset|resets|available|availability)[^\n.]*?\bin\s+((?:(?:\d+(?:\.\d+)?)\s*(?:hours?|hrs?|h|minutes?|mins?|m|seconds?|secs?|s)(?![a-z])\s*)+)/i;
 
 function capabilityTarget(capability: EndpointCapability): string {
   switch (capability.kind) {
@@ -99,7 +97,16 @@ function parseDurationMs(text: string): number | undefined {
   if (match?.[1] === undefined) return undefined;
 
   let totalMs = 0;
-  const parts = match[1].matchAll(/(\d+(?:\.\d+)?)\s*(hours?|hrs?|h|minutes?|mins?|m|seconds?|secs?|s)\b/gi);
+  // F-234: the terminator must reject a following LETTER ("5months" is not five
+  // minutes) while accepting a following DIGIT — a `\b` here did the opposite,
+  // and COMPACT durations are exactly what the CLIs emit: `agy`'s "Resets in
+  // 1h0m8s" parsed as 8 SECONDS (h→0 and m→8 are both word-char boundaries, so
+  // only the trailing "8s" matched). Parking 8s against a 1-hour wall walks
+  // straight back into it. Spaced forms ("1h 30m") were unaffected, which is why
+  // this survived until a compact one arrived.
+  const parts = match[1].matchAll(
+    /(\d+(?:\.\d+)?)\s*(hours?|hrs?|h|minutes?|mins?|m|seconds?|secs?|s)(?![a-z])/gi,
+  );
   for (const part of parts) {
     const amount = Number(part[1]);
     const unit = part[2]?.toLowerCase();

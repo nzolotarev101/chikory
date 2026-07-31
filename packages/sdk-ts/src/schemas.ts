@@ -354,6 +354,40 @@ export const StepInputSchema = z
   })
   .strict();
 
+/**
+ * F-228: raw provider-limit evidence carried on a step record. Kept structural
+ * (not `.strict()` on the http headers bag) because the shapes come straight
+ * off a provider response or a CLI's stderr.
+ */
+export const RawLimitSignalSchema = z.discriminatedUnion("kind", [
+  z
+    .object({
+      kind: z.literal("http"),
+      statusCode: z.number().int(),
+      headers: z
+        .record(z.string(), z.union([z.string(), z.array(z.string()).readonly()]).optional())
+        .readonly()
+        .optional(),
+      body: z.string().optional(),
+    })
+    .strict(),
+  z
+    .object({
+      kind: z.literal("cli-stderr"),
+      stderr: z.string(),
+      exitCode: z.number().int().nullable().optional(),
+    })
+    .strict(),
+  z
+    .object({
+      kind: z.literal("injected"),
+      reason: z.string().min(1),
+      retryAfterMs: z.number().nonnegative().optional(),
+      retryAtMs: z.number().nonnegative().optional(),
+    })
+    .strict(),
+]);
+
 export const StepRecordSchema = z
   .object({
     status: TerminalStatusSchema,
@@ -375,6 +409,8 @@ export const StepRecordSchema = z
     /** F-210: killed at its wall-clock cap — inconclusive, not a code red. */
     infraFailed: z.boolean().optional(),
     claimsComplete: z.boolean().optional(),
+    /** F-228: raw provider-limit evidence, for `classifyLimitSignal`. */
+    limitSignal: RawLimitSignalSchema.optional(),
   })
   .strict();
 

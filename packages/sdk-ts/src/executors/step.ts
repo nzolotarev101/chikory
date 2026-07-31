@@ -216,6 +216,17 @@ export async function runCliStep(opts: CliStepOptions): Promise<StepRecord> {
       status: "FAILED",
       summary: parsed.summary || failure.reason,
       failure: { ...failure, reason: `${failure.reason}${exitCtx}` },
+      // F-228 (WP-553): hand the raw stderr to the limit scheduler. A quota or
+      // rate wall reads as an ordinary executor failure here — `agy`'s
+      // "Individual quota reached … Resets in 1h0m8s" FAILED four consecutive
+      // steps on dogfood-121 `N-3-r1`, tripped the CG-1 loop-breaker, and spent
+      // the node's whole replan budget on a wall that clears itself in an hour.
+      // `classifyLimitSignal` (activities) is the authority on whether this IS a
+      // limit; attaching the evidence unconditionally is what makes the existing
+      // park-until-reset / declared-failover path reachable outside injection.
+      ...(proc.stderr
+        ? { limitSignal: { kind: "cli-stderr", stderr: proc.stderr, exitCode: proc.exitCode } as const }
+        : {}),
     };
   } else {
     // WP-533/F-159: `parsed.ok` — the executor completed a valid turn. A non-zero

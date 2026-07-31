@@ -132,6 +132,19 @@ function allCriteriaPass(verdict: JudgeVerdict | undefined): boolean {
 }
 
 /**
+ * F-229: every rubric item passed too. Companion to `allCriteriaPass` for the
+ * one place that must know the judge found NOTHING wrong inside its own form
+ * and is objecting only in free text.
+ */
+function allRubricPass(verdict: JudgeVerdict | undefined): boolean {
+  return (
+    verdict !== undefined &&
+    verdict.form.rubricResults.length > 0 &&
+    verdict.form.rubricResults.every((r) => r.pass)
+  );
+}
+
+/**
  * F-212: the rationale PLUS the failing acceptance criteria. A rule-1 ROLLBACK
  * rationale names only the destructive rubric item, so on dogfood-120 `N-2` the
  * executor was told "the evidence report is outside the allowed write scope"
@@ -1014,6 +1027,38 @@ export async function agentLoop(spec: TaskSpec): Promise<RunStatus> {
         judgeFeedback = withCriterionFeedback(verdict);
       } else if (verdict.kind === "ESCALATE") {
         judgeFeedback = withCriterionFeedback(verdict);
+        // F-229: the run has CONVERGED. Every acceptance criterion passed, every
+        // rubric item passed, and the step produced an EMPTY diff — the judge is
+        // objecting only in free text, about evidence the incremental diff cannot
+        // carry ("the diff is empty, so it provides no evidence the launcher was
+        // added" — while the launcher sat committed one checkpoint earlier). There
+        // is nothing left for the executor to produce, so running again re-judges
+        // the same empty tree and re-raises the same concern.
+        //
+        // F-154 already reached this conclusion for the ATTENDED path, but its
+        // carve-out sits BELOW the unattended seal, so unattended it was never
+        // reachable: dogfood-121 `N-3` escalated twice over an empty diff, sealed
+        // FAILED twice, exhausted the node's replan budget and killed a 5-node
+        // chain whose delivery was already committed. Seal SUCCESS and carry the
+        // concern verbatim — it is recorded, never silently dropped.
+        //
+        // Scoped to the UNATTENDED policy on purpose: an attended run has an
+        // operator who asked to adjudicate, and F-154 already seals SUCCESS the
+        // moment they approve. This only replaces the seal that would otherwise
+        // fire with nobody there to answer.
+        if (
+          spec.unattended?.escalation === "seal_resumable_failed" &&
+          verdict.escalateClass === "out_of_rubric" &&
+          allCriteriaPass(verdict) &&
+          allRubricPass(verdict) &&
+          record.diffRef.bytes === 0
+        ) {
+          return seal(
+            "SUCCESS",
+            `converged out-of-rubric escalation over an empty diff, all criteria and rubric pass — ` +
+              `${verdict.escalateReason ?? verdict.rationale} (F-229)`,
+          );
+        }
         const escalationWait = decideEscalationWait(
           { source: "judge", reason: verdict.escalateReason ?? verdict.rationale },
           spec.unattended,

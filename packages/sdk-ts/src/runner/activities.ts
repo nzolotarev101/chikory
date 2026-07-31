@@ -1544,8 +1544,17 @@ export function createRunnerActivities(deps: RunnerActivityDeps) {
 
           // Judge telemetry (WP-134): span per pass + JD-7 cost-share warning.
           const totals = runTotals(writer);
+          // F-230: with a KEYLESS executor (CLI OAuth — `agy`, `codex`,
+          // `claude-code`) the executor's wire cost is $0, so the judge share is
+          // structurally 1.0 and the warning's own advice ("consider a larger
+          // cadence") cannot move it. dogfood-121 printed it 12 times in one
+          // chain. Warn only when there is executor spend the share is measured
+          // against; the OTel `cost.share.breached` attribute below is unchanged,
+          // so the telemetry still records the ratio.
+          const executorCostUsd = totals.costUsd - totals.judgeCostUsd;
           if (
             spec.judge.maxCostShare !== undefined &&
+            executorCostUsd > 0 &&
             totals.judgeCostShare > spec.judge.maxCostShare
           ) {
             console.warn(
