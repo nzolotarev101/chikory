@@ -42,6 +42,11 @@ import {
   type LimitResponsePlan,
 } from "../limit-response.js";
 import {
+  inferBackendFromModel,
+  type AgentClass,
+  type AgentClassRegistry,
+} from "../agents/classes.js";
+import {
   classifyLimitSignal,
   type ClassifiedLimitSignal,
   type RawLimitSignal,
@@ -85,6 +90,14 @@ import {
   isBlindMeteredStep,
   type KilledStepUsageEstimate,
 } from "./killed-step-usage.js";
+import { judgeFailoverChoices } from "./agent-pair.js";
+import {
+  recordWallAndCheckPeer,
+  resolveStepAgents,
+  rotationHandoffRecord,
+  stepAgentAttrs,
+  stepFailureKind,
+} from "./agent-rotation.js";
 import type { LimitPaceAction, WindowQuotaState } from "./limit-pacing.js";
 import {
   artifactsDir,
@@ -133,6 +146,12 @@ export type AdapterRegistry = Record<string, AdapterFactory>;
 export interface RunnerActivityDeps {
   dataDir: string;
   adapters: AdapterRegistry;
+  /**
+   * WP-566 agent class registry. Default: `agent-classes.yaml` merged over the
+   * shipped defaults. Injected by tests, which register their own adapters and
+   * so cannot use the real registry's CLI-backed members.
+   */
+  registry?: AgentClassRegistry;
   /** Router construction options for judge passes (test seam: env/baseUrls). */
   routerOptions?: RouterOptions;
   /** All workers on a distributed task queue must point this at one namespace. */
@@ -169,6 +188,55 @@ export interface LimitSignalPayload {
   signal: ClassifiedLimitSignal;
   limitResponse: LimitResponsePlan;
   chosenResponse: LimitResponsePlan["steps"][number];
+}
+
+/**
+ * WP-568 — one agent swap, journaled. `trigger: "selection"` is the swap the
+ * scheduler made BEFORE running the step (a peer was already cooled);
+ * `"wall"` is the swap this step's own failure caused.
+ */
+export interface AgentRotationPayload {
+  atStep: number;
+  trigger: "selection" | "wall";
+  fromExecutor?: string;
+  toExecutor?: string;
+  fromJudge?: string;
+  toJudge?: string;
+  executorAdapter?: string;
+  executorModel?: string;
+  judgeModel?: string;
+  /** Set when the failing member was cooled: why, and until when. */
+  cooledMemberId?: string;
+  cooledReason?: string;
+  cooledUntilMs?: number;
+  /** Set when class resolution failed and the step fell back to the declared agents. */
+  resolutionError?: string;
+}
+
+/** Rotations this run has already spent on a wall — the per-node rotation budget. */
+function wallRotationCount(journal: Journal): number {
+  return journal
+    .entries("agent_rotation")
+    .filter((entry) => (entry.payload as AgentRotationPayload).trigger === "wall").length;
+}
+
+/**
+ * Consecutive substantive failures ending at this step, INCLUDING it.
+ *
+ * Infra-flagged steps break the chain, which gives the crash trigger the right
+ * shape for free: a rotation marks its own step `infraFailed`, so the counter
+ * resets after every rotation and a three-member class cannot be burned down by
+ * one flaky step.
+ */
+function consecutiveSubstantiveFailures(journal: Journal): number {
+  const steps = journal.entries("step");
+  let count = 1;
+  for (let i = steps.length - 1; i >= 0; i--) {
+    const prior = (steps[i]!.payload as StepPayload).record;
+    if (prior.status !== "FAILED" || prior.infraFailed === true) break;
+    count++;
+  }
+  return count;
 }
 
 export interface LimitObservationPayload {
@@ -964,7 +1032,32 @@ export function createRunnerActivities(deps: RunnerActivityDeps) {
             };
           }
 
-          const spec = requireSpec(journal, input.runId);
+          const declaredSpec = requireSpec(journal, input.runId);
+          // WP-568: which agents does THIS step run on? Walls recorded by an
+          // earlier step — or by an earlier chain NODE, since the ledger is
+          // cross-run — take a member out of selection here, so a walled agent
+          // is never retried straight back into its own wall. With no classes
+          // declared this resolves to the spec's own agents and changes nothing.
+          const agents = resolveStepAgents(deps, declaredSpec, Date.now());
+          const spec = agents.spec;
+          if (agents.rotation !== undefined || agents.resolutionError !== undefined) {
+            journal.appendOnce(
+              { field: "atStep", value: input.stepIndex },
+              {
+                kind: "agent_rotation",
+                payload: {
+                  atStep: input.stepIndex,
+                  trigger: "selection",
+                  ...(agents.rotation ?? {}),
+                  ...(agents.resolutionError === undefined
+                    ? {}
+                    : { resolutionError: agents.resolutionError }),
+                } satisfies AgentRotationPayload,
+                costDeltaUsd: 0,
+                artifactRefs: [],
+              },
+            );
+          }
           const factory = deps.adapters[spec.executor.adapter];
           if (!factory) {
             throw new Error(
@@ -1086,6 +1179,7 @@ export function createRunnerActivities(deps: RunnerActivityDeps) {
               stepIndex: input.stepIndex,
               planItem: input.context.planItem,
               record,
+              agent: stepAgentAttrs(spec, agents),
             });
             return {
               ...record,
@@ -1202,6 +1296,79 @@ export function createRunnerActivities(deps: RunnerActivityDeps) {
                   artifactRefs: [],
                 },
               );
+
+              // WP-568: parking is no longer the FIRST answer to a wall. If a
+              // peer in the executor's class can take this work, cool the walled
+              // member (cross-run, so later steps and later chain nodes skip it)
+              // and hand the step back for an immediate retry on the peer. A live
+              // run once slept 4h 6m on a Gemini wall with two other authenticated
+              // CLIs sitting idle; that is what this replaces. Parking still
+              // happens below when there IS no peer.
+              const wall =
+                agents.executorClass !== undefined && agents.judgeClass !== undefined
+                  ? recordWallAndCheckPeer({
+                      deps,
+                      spec,
+                      classes: {
+                        executorClass: agents.executorClass,
+                        judgeClass: agents.judgeClass,
+                        declared: agents.declared === true,
+                      },
+                      kind: "limit",
+                      nowMs: observedAtMs,
+                      ...(signal.retryAtMs === undefined
+                        ? {}
+                        : { limitRetryAtMs: signal.retryAtMs }),
+                      consecutiveFailures: 1,
+                      rotationsUsed: wallRotationCount(journal),
+                    })
+                  : undefined;
+              if (wall?.peerAvailable === true && wall.cooled !== undefined) {
+                const handoff = rotationHandoffRecord(record, wall.cooled, wall.nextExecutorId!);
+                journal.appendOnce(
+                  { field: "atStep", value: input.stepIndex },
+                  {
+                    kind: "agent_rotation",
+                    payload: {
+                      atStep: input.stepIndex,
+                      trigger: "wall",
+                      toExecutor: wall.nextExecutorId,
+                      ...(wall.nextJudgeId === undefined ? {} : { toJudge: wall.nextJudgeId }),
+                      cooledMemberId: wall.cooled.memberId,
+                      cooledReason: wall.cooled.reason,
+                      cooledUntilMs: wall.cooled.cooldownUntilMs,
+                    } satisfies AgentRotationPayload,
+                    costDeltaUsd: 0,
+                    artifactRefs: [],
+                  },
+                );
+                journal.appendOnce(
+                  { field: "stepIndex", value: input.stepIndex },
+                  {
+                    kind: "step",
+                    payload: {
+                      stepIndex: input.stepIndex,
+                      instruction: input.instruction,
+                      planItem: input.context.planItem,
+                      record: handoff,
+                      limitResponse,
+                    } satisfies StepPayload,
+                    costDeltaUsd: 0,
+                    tokens: handoff.tokens,
+                    artifactRefs: [handoff.diffRef, handoff.transcriptRef],
+                  },
+                );
+                appendStepConsumption(deps, spec, input, handoff);
+                recordRunStepSpan({
+                  runId: input.runId,
+                  stepIndex: input.stepIndex,
+                  planItem: input.context.planItem,
+                  record: handoff,
+                  agent: stepAgentAttrs(spec, agents),
+                });
+                return handoff;
+              }
+
               record = await applyLimitResponse({
                 store,
                 stepIndex: input.stepIndex,
@@ -1255,6 +1422,7 @@ export function createRunnerActivities(deps: RunnerActivityDeps) {
                 stepIndex: input.stepIndex,
                 planItem: input.context.planItem,
                 record,
+                agent: stepAgentAttrs(spec, agents),
               });
               return {
                 ...record,
@@ -1263,6 +1431,62 @@ export function createRunnerActivities(deps: RunnerActivityDeps) {
                   ? { limitDeferredPlanItem: input.context.planItem }
                   : {}),
               };
+            }
+          }
+
+          // WP-572: a failure that is NOT a quota wall can still be the AGENT's
+          // problem rather than the code's — a CLI whose OAuth session lapsed,
+          // or one crashing repeatedly. Cool the member so the next attempt
+          // selects a peer. A crash needs two consecutive substantive failures
+          // (one is noise); auth rotates immediately, because a logout does not
+          // clear on retry. An ordinary red build classifies as neither and
+          // rotates nothing — it would just fail the same way on a peer.
+          if (
+            record.status === "FAILED" &&
+            agents.executorClass !== undefined &&
+            agents.judgeClass !== undefined
+          ) {
+            const kind = stepFailureKind(record);
+            if (kind === "auth" || kind === "crash") {
+              const unhealthy = recordWallAndCheckPeer({
+                deps,
+                spec,
+                classes: {
+                  executorClass: agents.executorClass,
+                  judgeClass: agents.judgeClass,
+                  declared: agents.declared === true,
+                },
+                kind,
+                nowMs: Date.now(),
+                consecutiveFailures: consecutiveSubstantiveFailures(journal),
+                rotationsUsed: wallRotationCount(journal),
+              });
+              if (unhealthy.peerAvailable && unhealthy.cooled !== undefined) {
+                journal.appendOnce(
+                  { field: "atStep", value: input.stepIndex },
+                  {
+                    kind: "agent_rotation",
+                    payload: {
+                      atStep: input.stepIndex,
+                      trigger: "wall",
+                      toExecutor: unhealthy.nextExecutorId,
+                      ...(unhealthy.nextJudgeId === undefined
+                        ? {}
+                        : { toJudge: unhealthy.nextJudgeId }),
+                      cooledMemberId: unhealthy.cooled.memberId,
+                      cooledReason: unhealthy.cooled.reason,
+                      cooledUntilMs: unhealthy.cooled.cooldownUntilMs,
+                    } satisfies AgentRotationPayload,
+                    costDeltaUsd: 0,
+                    artifactRefs: [],
+                  },
+                );
+                record = rotationHandoffRecord(
+                  record,
+                  unhealthy.cooled,
+                  unhealthy.nextExecutorId!,
+                );
+              }
             }
           }
 
@@ -1318,6 +1542,7 @@ export function createRunnerActivities(deps: RunnerActivityDeps) {
             stepIndex: input.stepIndex,
             planItem: input.context.planItem,
             record,
+            agent: stepAgentAttrs(spec, agents),
           });
           return record;
         } finally {
@@ -1394,10 +1619,23 @@ export function createRunnerActivities(deps: RunnerActivityDeps) {
         let stepInfraFailed: boolean;
         let stepSummaries: string[];
         let journaledForm: JudgePayload | undefined;
+        let judgeClass: AgentClass | undefined;
         try {
           const existing = reader.findByKey("verdict", "judgeIndex", input.judgeIndex);
           if (existing) return (existing.payload as VerdictPayload).verdict;
-          spec = requireSpec(reader, input.runId);
+          // WP-569: the judge runs in its OWN activity and re-reads the spec
+          // from the journal, so it would otherwise see the DECLARED judge even
+          // after the executor rotated. Resolving the pair here is what makes
+          // the lockstep rotation real: when the executor moved into the judge's
+          // vendor, the judge must have moved too, or invariant #2 is broken for
+          // every pass that follows.
+          const resolvedAgents = resolveStepAgents(
+            deps,
+            requireSpec(reader, input.runId),
+            Date.now(),
+          );
+          spec = resolvedAgents.spec;
+          judgeClass = resolvedAgents.judgeClass;
           workspaceRepos = collectWorkspaceRepos(spec.repos).all;
           repoDiffBases = input.completionReview
             ? repoDiffBasesAtRunBase(workspaceRepos)
@@ -1456,11 +1694,25 @@ export function createRunnerActivities(deps: RunnerActivityDeps) {
           for (const warning of warnings) console.warn(warning);
           // Single-stage routing: only the judge provider's adapter is
           // constructed, so executor-stage env keys are not required here.
+          // WP-569: the judge stage had NO failover at all — this single-model
+          // policy is built fresh per pass, so `spec.routing.failover.judge` was
+          // the only source and dogfood specs never set it. A judge-side wall
+          // therefore burned five router retries and then failed the pass. The
+          // judge class supplies the alternatives now.
+          const judgeFailover =
+            judgeClass === undefined
+              ? []
+              : judgeFailoverChoices(
+                  judgeClass,
+                  judgeModel.model,
+                  judgeModel.provider,
+                  inferBackendFromModel(spec.routing.stages.code.model),
+                );
+          const failoverJudge =
+            judgeFailover.length > 0 ? judgeFailover : (spec.routing.failover?.judge ?? []);
           const routing: RoutingPolicy = {
             stages: { plan: judgeModel, code: judgeModel, review: judgeModel, judge: judgeModel },
-            ...(spec.routing.failover?.judge
-              ? { failover: { judge: spec.routing.failover.judge } }
-              : {}),
+            ...(failoverJudge.length > 0 ? { failover: { judge: failoverJudge } } : {}),
           };
           const pass = await runJudgePass({
             runId: input.runId,

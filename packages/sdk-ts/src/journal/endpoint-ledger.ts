@@ -14,6 +14,7 @@
 import type { DatabaseSync } from "node:sqlite";
 
 import { openDatabase } from "./sqlite.js";
+import type { MemberCooldown, RotationTrigger } from "../agents/classes.js";
 import type { DeclaredQuotaWindow } from "../endpoint-capability.js";
 
 export interface ConsumptionAppend {
@@ -82,6 +83,14 @@ export class EndpointLedger {
       );
       CREATE INDEX IF NOT EXISTS limit_observations_target
         ON limit_observations (endpoint_target, window_kind, observed_at_ms);
+      CREATE TABLE IF NOT EXISTS member_cooldown (
+        member_id TEXT PRIMARY KEY,
+        reason TEXT NOT NULL,
+        observed_at_ms INTEGER NOT NULL,
+        cooldown_until_ms INTEGER NOT NULL
+      );
+      CREATE INDEX IF NOT EXISTS member_cooldown_until
+        ON member_cooldown (cooldown_until_ms);
     `);
   }
 
@@ -155,6 +164,65 @@ export class EndpointLedger {
         : {}),
     };
     return state;
+  }
+
+  /**
+   * Hold an agent class member out of selection until `cooldownUntilMs` (WP-573).
+   *
+   * Cross-run by construction, which is the point: a chain node that discovers
+   * a wall must stop the NEXT node walking straight back into it. Keyed by
+   * member id rather than adapter, because two members can share one adapter
+   * (same CLI, different model).
+   *
+   * An existing cooldown is only ever EXTENDED. A later, shorter signal — an
+   * auth blip arriving after a four-hour quota wall — must not resurrect a
+   * member whose real wall has not lifted.
+   */
+  recordMemberCooldown(input: MemberCooldown): void {
+    this.db
+      .prepare(
+        `INSERT INTO member_cooldown (member_id, reason, observed_at_ms, cooldown_until_ms)
+         VALUES (?, ?, ?, ?)
+         ON CONFLICT(member_id) DO UPDATE SET
+           reason = CASE WHEN excluded.cooldown_until_ms > member_cooldown.cooldown_until_ms
+                         THEN excluded.reason ELSE member_cooldown.reason END,
+           observed_at_ms = excluded.observed_at_ms,
+           cooldown_until_ms = MAX(member_cooldown.cooldown_until_ms, excluded.cooldown_until_ms)`,
+      )
+      .run(input.memberId, input.reason, input.observedAtMs, input.cooldownUntilMs);
+  }
+
+  /** Every member still held out at `nowMs`, soonest expiry first. */
+  activeCooldowns(nowMs: number): readonly MemberCooldown[] {
+    const rows = this.db
+      .prepare(
+        `SELECT member_id, reason, observed_at_ms, cooldown_until_ms
+           FROM member_cooldown
+          WHERE cooldown_until_ms > ?
+          ORDER BY cooldown_until_ms ASC`,
+      )
+      .all(nowMs) as Array<{
+      member_id: string;
+      reason: string;
+      observed_at_ms: number;
+      cooldown_until_ms: number;
+    }>;
+
+    return rows.map((row) => ({
+      memberId: row.member_id,
+      reason: row.reason as RotationTrigger,
+      observedAtMs: row.observed_at_ms,
+      cooldownUntilMs: row.cooldown_until_ms,
+    }));
+  }
+
+  /**
+   * Lift a cooldown early — the launcher's preflight probe calls this when a
+   * member it previously cooled for an auth failure answers a live prompt.
+   * Without it a re-login would not be noticed until the timer expired.
+   */
+  clearMemberCooldown(memberId: string): void {
+    this.db.prepare(`DELETE FROM member_cooldown WHERE member_id = ?`).run(memberId);
   }
 
   close(): void {

@@ -38,6 +38,24 @@
 #   * `chikory-bench compare` already emits 95% Wilson intervals and each arm's `rawResultsDir`
 #     (AC-1 guards it). It must be USED, not rebuilt.
 #
+# WHAT THIS SPEC ALSO EXERCISES (WP-566…WP-576, hand-landed 2026-08-02):
+#   This is the first run armed with AGENT CLASSES (a primary agent plus interchangeable peers).
+#   The primaries are unchanged — Gemini executes, Codex judges — so the arming directive is the
+#   same; what is new is that a quota wall now ROTATES to a peer instead of parking on a durable
+#   timer. A live run once slept 4h 6m on `Individual quota reached … Resets in 4h6m22s` with two
+#   other authenticated CLIs idle.
+#
+#   Because the fix lands BY HAND before this run, the run can genuinely live-prove it (the F-197
+#   trap does not apply: a run cannot prove a runner fix it delivers itself). At review time read:
+#     * `chikory trace <run-id>` — a `🔄 agent rotation` line iff a wall was hit. Its ABSENCE on a
+#       short run is expected and is NOT a failure; it means no member was walled.
+#     * a `park-until-reset` count of ZERO. A park alongside a healthy peer is the regression.
+#     * `.chikory/ledger/endpoints.db` → `SELECT * FROM member_cooldown;` — one row per walled
+#       member, and it must OUTLIVE the run (that row is what stops the next run re-hitting it).
+#   All six members were probed live against their real binaries on 2026-08-02 (WP-575); the
+#   launcher re-probes them at $0 on every launch, so an unusable model refuses the launch instead
+#   of surfacing hours in.
+#
 # Designed traps:
 #   A. Inventing, editing, or "correcting" an arm's numbers instead of reading them. The summaries
 #      are evidence; this node's job is to publish them, not to improve them.
@@ -186,7 +204,10 @@ max_steps: 12
 
 step_limits:
   max_turns: 40
-  max_seconds: 900
+  # 840 is the hard ceiling (MAX_STEP_MAX_SECONDS): above it the executeStep
+  # activity's Temporal startToCloseTimeout kills the step first. This spec was
+  # authored at 900 and would have been REFUSED at parse time.
+  max_seconds: 840
 
 pacing:
   mode: auto
@@ -195,18 +216,15 @@ pacing:
 unattended:
   escalation: seal_resumable_failed
 
-executor:
-  adapter: gemini-cli
-  family: gemini
+# WP-566 agent classes (interchangeable agents). The primaries are unchanged —
+# Gemini executes, Codex judges — so this run is armed exactly as before; what is
+# new is that both have somewhere to go if they hit a quota wall mid-run.
+# `routing.stages` is DERIVED from the selected members and must not be restated
+# here, or a rotation would move the agent but leave its routing behind.
+agent_classes:
+  executor: executor-default
+  judge: judge-default
 
 judge:
-  family: openai-compat
   cadence: 1
   max_cost_share: 0.5
-
-routing:
-  stages:
-    plan: { provider: openai-compat, model: gpt-5.6-sol xhigh }
-    code: { provider: openai-compat, model: default }
-    review: { provider: openai-compat, model: gpt-5.6-sol xhigh }
-    judge: { provider: openai-compat, model: gpt-5.6-sol xhigh }

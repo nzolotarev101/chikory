@@ -46,6 +46,7 @@ const TEMPLATE: ChainNodeTemplate = {
       judge: { provider: "openai-compat", model: "m" },
     },
   },
+  agentClasses: { executor: "executor-default", judge: "judge-default" },
   budgetTokens: 500_000,
   maxSteps: 30,
   stepLimits: { maxSeconds: 840, maxTurns: 50 },
@@ -80,6 +81,13 @@ describe("chain node template passthrough (F-209)", () => {
     // as the bug it is rather than as an anonymous key-count mismatch.
     expect(spec.stepLimits).toEqual({ maxSeconds: 840, maxTurns: 50 });
     expect(spec.unattended).toEqual({ escalation: "seal_resumable_failed" });
+    // WP-571: the CLASS NAMES, not just the armed pair. Carry only the pair and
+    // a chain freezes its agents at launch — only the first node could rotate
+    // off a walled one, which is the whole failure this feature exists to fix.
+    expect(spec.agentClasses).toEqual({
+      executor: "executor-default",
+      judge: "judge-default",
+    });
 
     for (const field of CHAIN_TEMPLATE_FIELDS.templateForwarded) {
       expect(spec[field], `template field ${field} was dropped`).toEqual(

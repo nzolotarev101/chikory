@@ -180,7 +180,44 @@ before the runner could reap and journal it.
 
 ---
 
-## `executor` block (required)
+## `agent_classes` block (optional, WP-566)
+
+Names the **agent classes** (groups of interchangeable agents) this run may
+rotate within. Without it, the declared `executor`/`judge` are a class of one:
+a quota wall parks the run until the reset, which on a chain that runs for
+hours means sleeping while other authenticated CLIs sit idle.
+
+```yaml
+agent_classes:
+  executor: executor-default   # a class in agent-classes.yaml
+  judge: judge-default
+judge:
+  cadence: 1                   # `family`/`model` come from the class primary
+```
+
+Rules:
+
+- **The primary is always tried first.** Naming a class does not change which
+  agent the run starts on — it only gives it somewhere to go when that agent is
+  walled, loses its credentials, or crashes repeatedly.
+- **`executor:` and `judge.family` become optional** and are filled from the
+  class primaries.
+- **`routing:` must be omitted.** `routing.stages` is DERIVED from the selected
+  members, because a rotation that moved the agent but left its routing behind
+  would be cosmetic — the judge stage would stay pinned to the walled model.
+  Declaring both is a parse error rather than a silent override.
+- **Invariant #2 is enforced on the member's `backend`** (its true vendor), not
+  its transport. The scheduler selects a compatible PAIR, so an executor
+  rotating into the judge's vendor rotates the judge in lockstep.
+
+Classes are declared in `agent-classes.yaml` at the repo root; see that file for
+the member shape. Every member is probed against its real CLI at launch
+(WP-575), so a model id the binary rejects refuses the launch at $0 instead of
+surfacing hours into a run.
+
+---
+
+## `executor` block (required unless `agent_classes.executor` is set)
 
 ```yaml
 executor:
@@ -216,6 +253,14 @@ enforcement (judge must differ). Must match the adapter's actual lineage:
 
 Do not set `openai-compat` here. That label is for the `openai-compat` router
 transport seam, not for CLI-executor adapters.
+
+> **Why the transport is not a family (WP-569).** A keyless judge declares
+> `family: openai-compat` and reaches its model through
+> `scripts/cli-judge-proxy.mjs`, which picks the backing CLI from the MODEL
+> NAME. So executor `codex` + judge `gpt-5.6-sol` compared as `openai` vs
+> `openai-compat` — two families on paper, one GPT-5.6 model in fact, with
+> invariant #2 reporting green. Parse-time validation now also compares the
+> resolved **vendor** of both models and rejects that pair.
 
 ---
 

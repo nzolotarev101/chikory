@@ -4,6 +4,8 @@ import type { TaskSpec } from "../types.js";
 export const CONTEXT_WINDOW_TABLE: Record<string, number> = {
   // Anthropic
   "claude-fable-5": 200_000,
+  "claude-opus-5": 200_000,
+  "claude-sonnet-5": 200_000,
   "claude-opus-4-8": 200_000,
   "claude-opus-4-7": 200_000,
   "claude-opus-4-6": 200_000,
@@ -12,12 +14,16 @@ export const CONTEXT_WINDOW_TABLE: Record<string, number> = {
   // OpenAI
   "gpt-5.6-sol xhigh": 400_000,
   "gpt-5.6-sol": 400_000,
+  "gpt-5.6-terra": 400_000,
   "gpt-5.5": 400_000,
   "gpt-5.5-mini": 400_000,
   "gpt-5.2": 400_000,
   "gpt-5.2-mini": 400_000,
   // Gemini
+  "gemini-3.6-flash": 1_000_000,
+  "gemini-3.5-flash": 1_000_000,
   "gemini-3.1-pro-preview": 1_000_000,
+  "gemini-3.1-pro": 1_000_000,
   "gemini-3.1-flash": 1_000_000,
   "gemini-2.5-pro": 1_000_000,
   "gemini-2.5-flash": 1_000_000,

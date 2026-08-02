@@ -204,6 +204,13 @@ export interface RunStepSpanInput {
   stepIndex: number;
   planItem: string;
   record: StepRecord;
+  /**
+   * WP-574 — which agent actually ran this step. The step span carried no
+   * provider/model at all, so once a run can rotate mid-flight the trace could
+   * not answer "which agent produced this diff". `chikory.llm.call` has the
+   * attribute but only covers ROUTER calls, and a CLI executor never routes.
+   */
+  agent?: { adapter: string; model?: string; memberId?: string };
 }
 
 /**
@@ -227,6 +234,13 @@ export function recordRunStepSpan(input: RunStepSpanInput): void {
   span.setAttribute("tool.calls", input.record.toolCalls);
   span.setAttribute("artifact.diff.id", input.record.diffRef.id);
   span.setAttribute("artifact.transcript.id", input.record.transcriptRef.id);
+  if (input.agent !== undefined) {
+    span.setAttribute("agent.adapter", input.agent.adapter);
+    if (input.agent.model !== undefined) span.setAttribute("agent.model", input.agent.model);
+    if (input.agent.memberId !== undefined) {
+      span.setAttribute("agent.member", input.agent.memberId);
+    }
+  }
   if (input.record.status === "FAILED") {
     span.setAttribute("error.reason", input.record.failure?.reason ?? "step failed");
     span.setAttribute("error.retriable", input.record.failure?.retriable ?? false);

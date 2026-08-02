@@ -29,8 +29,36 @@ import type {
   PlanAttemptRecord,
   RepoSpec,
   RoutingPolicy,
+  TaskSpec,
 } from "../types.js";
 import { deriveNodeOutcome } from "./node-spec.js";
+import { inferBackendFromModel } from "../agents/classes.js";
+import { loadAgentClassRegistry, resolveAgentClass } from "../agents/registry.js";
+import { judgeFailoverChoices } from "../runner/agent-pair.js";
+
+/**
+ * Peer judges for the chain-level completion review (WP-571). Never throws: a
+ * registry that cannot resolve the chain's class must not take down the review
+ * that seals the chain — it degrades to whatever failover the routing declared.
+ */
+function chainJudgeFailoverChoices(
+  input: ReviewChainCompletionInput,
+  judgeModel: ModelChoice,
+): ModelChoice[] {
+  const classId = input.agentClasses?.judge;
+  if (classId === undefined) return [];
+  try {
+    const judgeClass = resolveAgentClass(loadAgentClassRegistry(), classId, "judge");
+    return judgeFailoverChoices(
+      judgeClass,
+      judgeModel.model,
+      judgeModel.provider,
+      inferBackendFromModel(input.routing.stages.code.model),
+    );
+  } catch {
+    return [];
+  }
+}
 
 /** What the chain learns from a sealed child run. */
 export interface NodeResult {
@@ -76,6 +104,13 @@ export interface ReviewChainCompletionInput {
   repos: RepoSpec[];
   judge: JudgePolicy;
   routing: RoutingPolicy;
+  /**
+   * WP-571 — the chain's agent classes, so the completion review can fail over
+   * to a peer judge instead of dying on a wall. This review runs at the very end
+   * of a chain that may have been burning one subscription for hours, which is
+   * exactly when the primary judge is most likely to be walled.
+   */
+  agentClasses?: TaskSpec["agentClasses"];
 }
 
 export type ReviewChainCompletionResult =
@@ -385,11 +420,18 @@ export function createChainActivities(deps: ChainActivityDeps) {
         provider: input.routing.stages.judge.provider,
         model: input.judge.model ?? input.routing.stages.judge.model,
       };
+      // WP-571: peers from the judge class, same rules as the per-run judge —
+      // same transport (so no new API key is demanded at router construction)
+      // and a different vendor from the executor (so a failover cannot quietly
+      // re-break invariant #2).
+      const chainJudgeFailover = chainJudgeFailoverChoices(input, judgeModel);
+      const failoverJudge =
+        chainJudgeFailover.length > 0
+          ? chainJudgeFailover
+          : (input.routing.failover?.judge ?? []);
       const routing: RoutingPolicy = {
         stages: { plan: judgeModel, code: judgeModel, review: judgeModel, judge: judgeModel },
-        ...(input.routing.failover?.judge
-          ? { failover: { judge: input.routing.failover.judge } }
-          : {}),
+        ...(failoverJudge.length > 0 ? { failover: { judge: failoverJudge } } : {}),
       };
 
       const pass = await runJudgePass({

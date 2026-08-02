@@ -268,6 +268,19 @@ export const TaskSpecSchema = z
         family: LLMProviderSchema,
       })
       .strict(),
+    /**
+     * WP-566 — the agent classes this run may rotate within. `executor`/`judge`
+     * above stay REQUIRED and always hold the CURRENTLY SELECTED member, so
+     * every existing reader is unaffected; these names are what lets the
+     * scheduler find a peer when that member is walled.
+     */
+    agentClasses: z
+      .object({
+        executor: z.string().min(1).optional(),
+        judge: z.string().min(1).optional(),
+      })
+      .strict()
+      .optional(),
     judge: JudgePolicySchema,
     routing: RoutingPolicySchema,
     pacing: PacingPolicySchema.optional(),
@@ -483,6 +496,7 @@ export const JournalEntryKindSchema = z.enum([
   "capability",
   "limit_observation",
   "limit_signal",
+  "agent_rotation",
   "terminal",
   "seam",
   "remediation",

@@ -9,6 +9,7 @@
 import type { RunRow, RunTotals } from "../journal/journal.js";
 import type { EndpointCapability, ResolvedEndpointCapabilities } from "../endpoint-capability.js";
 import type {
+  AgentRotationPayload,
   CapabilityPayload,
   JudgePayload,
   LimitObservationPayload,
@@ -744,6 +745,29 @@ export function formatEntryLine(entry: JournalEntry): string {
       return (
         `[${ts}] limit signal ${payload.signal.source} @ step ${payload.atStep + 1} — ` +
         `${payload.chosenResponse.action}`
+      );
+    }
+    case "agent_rotation": {
+      const payload = entry.payload as AgentRotationPayload;
+      if (payload.resolutionError !== undefined) {
+        return (
+          `[${ts}] ${yellow}🔄 agent classes UNRESOLVED${reset} @ step ${payload.atStep + 1} — ` +
+          `${payload.resolutionError} ${dim}(running on the declared agents; no rotation possible)${reset}`
+        );
+      }
+      const from = payload.fromExecutor ?? payload.cooledMemberId ?? "?";
+      const cooled =
+        payload.cooledUntilMs === undefined
+          ? ""
+          : ` ${dim}(${payload.cooledReason ?? "unavailable"} until ` +
+            `${new Date(payload.cooledUntilMs).toISOString().slice(11, 19)}Z)${reset}`;
+      const judge =
+        payload.toJudge === undefined
+          ? ""
+          : ` · judge ${payload.fromJudge !== undefined && payload.fromJudge !== payload.toJudge ? `${payload.fromJudge} → ` : ""}${bold}${payload.toJudge}${reset}`;
+      return (
+        `[${ts}] 🔄 agent rotation @ step ${payload.atStep + 1} — ` +
+        `${from} → ${bold}${payload.toExecutor ?? "?"}${reset}${cooled}${judge}`
       );
     }
     case "limit_pace": {

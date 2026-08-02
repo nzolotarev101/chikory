@@ -397,6 +397,10 @@ function templateFromSpec(spec: TaskSpec): ChainNodeTemplate {
     judge: spec.judge,
     routing: spec.routing,
   };
+  // WP-571: forward the CLASS NAMES, not just the armed pair. Without these a
+  // chain freezes its agents at launch (the F-220 shape) and only the first
+  // node could ever rotate off a walled one.
+  if (spec.agentClasses !== undefined) template.agentClasses = spec.agentClasses;
   if (spec.budgetTokens !== undefined) template.budgetTokens = spec.budgetTokens;
   if (spec.maxSteps !== undefined) template.maxSteps = spec.maxSteps;
   // F-209: forward the execution-surface policies the operator declared. Before

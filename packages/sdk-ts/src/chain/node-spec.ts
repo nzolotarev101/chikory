@@ -32,7 +32,13 @@ import type {
  */
 export interface ChainNodeTemplate {
   repos: RepoSpec[];
+  /**
+   * The pair the chain was ARMED with. WP-571: when `agentClasses` is set this
+   * is only the starting selection — each node re-selects from live cooldowns at
+   * dispatch, so a wall one node hits does not strand the next.
+   */
   executor: TaskSpec["executor"];
+  agentClasses?: TaskSpec["agentClasses"];
   judge: JudgePolicy;
   routing: RoutingPolicy;
   budgetTokens?: number;
@@ -95,6 +101,9 @@ export const CHAIN_TEMPLATE_FIELDS = {
   templateForwarded: [
     "repos",
     "executor",
+    // WP-566: a node must inherit the class names, not just the armed member —
+    // otherwise only the first node can ever rotate off a walled agent.
+    "agentClasses",
     "judge",
     "routing",
     "budgetTokens",
@@ -275,6 +284,7 @@ export function planNodeToTaskSpec(
     routing: template.routing,
     chainLink,
   };
+  if (template.agentClasses !== undefined) spec.agentClasses = template.agentClasses;
   if (template.budgetTokens !== undefined) spec.budgetTokens = template.budgetTokens;
   if (template.maxSteps !== undefined) spec.maxSteps = template.maxSteps;
   // F-209: the rest of the execution surface. Keep this block in step with

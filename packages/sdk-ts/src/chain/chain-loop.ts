@@ -441,6 +441,12 @@ export async function chainLoop(input: ChainLoopInput): Promise<ChainStatus> {
         repos: template.repos,
         judge: template.judge,
         routing: template.routing,
+        // WP-571: the completion review fires at the end of a chain that may
+        // have burned one subscription for hours — exactly when the primary
+        // judge is most likely walled. Give it the class so it can fail over.
+        ...(template.agentClasses === undefined
+          ? {}
+          : { agentClasses: template.agentClasses }),
       });
     }
   }

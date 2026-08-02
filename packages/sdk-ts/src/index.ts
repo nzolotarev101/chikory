@@ -40,6 +40,40 @@ export {
   type RawLimitSignal,
 } from "./limit-signal.js";
 export {
+  classMembers,
+  DEFAULT_AGENT_CLASSES,
+  findMember,
+  isExecutorMember,
+  isJudgeMember,
+  type AgentBackend,
+  type AgentClass,
+  type AgentClassRegistry,
+  type AgentMember,
+  type AgentRole,
+  type ExecutorAgentMember,
+  type JudgeAgentMember,
+  type MemberCooldown,
+  type RotationTrigger,
+} from "./agents/classes.js";
+export {
+  AgentClassValidationError,
+  DEFAULT_AGENT_CLASSES_PATH,
+  loadAgentClassRegistry,
+  parseAgentClassRegistry,
+  resolveAgentClass,
+  singletonExecutorClass,
+  singletonJudgeClass,
+  type LoadAgentClassRegistryOptions,
+} from "./agents/registry.js";
+export {
+  selectAgentPair,
+  type AgentPair,
+  type AgentPairSelection,
+  type BlockedMember,
+  type MemberBlockReason,
+  type SelectAgentPairInput,
+} from "./agents/select.js";
+export {
   decideLimitResponse,
   learnEndpointReset,
   observeEndpointReset,

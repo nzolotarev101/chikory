@@ -294,14 +294,34 @@ else
   echo "Setup: disk OK — ${DISK_FREE_GIB} GiB free where .chikory lives (--$MODE needs ${DISK_MIN_GIB})."
 fi
 
+# 1d-quinquies. WP-575 — every agent class member must actually answer.
+#
+# Every other check validates the classes on PAPER (shape, price rows,
+# adapter/vendor pairing). None proves the thing that strands a long chain: a
+# model id the CLI rejects, or a CLI that is logged out. That only surfaces when
+# the rotation fires — hours in, at the moment the run needed a peer, turning
+# "failover" into a second failure.
+#
+# So spawn each member's real binary with a trivial prompt first. Costs three
+# tiny turns; buys the guarantee that every agent the run may rotate to is
+# reachable. This runs BEFORE the preflight-only exit so a $0 preflight covers it.
+if [ "${CHIKORY_ALLOW_UNPROBED_MEMBERS:-}" = "1" ]; then
+  echo "Setup: ⚠️  agent class liveness probe SKIPPED (CHIKORY_ALLOW_UNPROBED_MEMBERS=1)."
+else
+  if ! node scripts/probe-agent-classes.mjs "$SPEC_FILE"; then
+    echo "⛔ REFUSING LAUNCH (WP-575): an agent class member is not usable — see above." >&2
+    exit 4
+  fi
+fi
+
 # 1e. Preflight-only mode: run every launch guard above, then stop WITHOUT building,
 # starting Temporal/proxy, or spending a cent. The one-command answer to "is the next
 # run's hypothesis + challenge actually armed?":
 #   CHIKORY_PREFLIGHT_ONLY=1 [spec envs...] devbox run run-dogfood
 if [ "${CHIKORY_PREFLIGHT_ONLY:-}" = "1" ]; then
   echo
-  echo "✅ Preflight OK (CHIKORY_PREFLIGHT_ONLY=1) — spec lint, AC dry-run, env contract, and"
-  echo "   window sizing all pass. Not launching."
+  echo "✅ Preflight OK (CHIKORY_PREFLIGHT_ONLY=1) — spec lint, AC dry-run, env contract,"
+  echo "   window sizing, and agent class liveness all pass. Not launching."
   exit 0
 fi
 

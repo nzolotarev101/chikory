@@ -11,7 +11,7 @@ import {
   ROLLING_5H_WINDOW_MS,
   WEEKLY_WINDOW_MS,
 } from "../../src/index.js";
-import type { DeclaredQuotaWindow } from "../../src/index.js";
+import type { DeclaredQuotaWindow, RotationTrigger } from "../../src/index.js";
 
 const WEEKLY: DeclaredQuotaWindow = { window: "weekly", durationMs: WEEKLY_WINDOW_MS };
 const ROLLING_5H: DeclaredQuotaWindow = { window: "rolling-5h", durationMs: ROLLING_5H_WINDOW_MS };
@@ -172,5 +172,63 @@ describe("EndpointLedger (WP-310)", () => {
     const second = new EndpointLedger(endpointLedgerPath(dir));
     expect(second.windowState("codex", WEEKLY, NOW).consumedTokens).toBe(1000);
     second.close();
+  });
+
+  describe("member cooldowns (WP-573)", () => {
+    const cool = (memberId: string, untilMs: number, reason: RotationTrigger = "limit") => ({
+      memberId,
+      reason,
+      observedAtMs: NOW,
+      cooldownUntilMs: untilMs,
+    });
+
+    it("returns only members still held out, soonest expiry first", () => {
+      ledger.recordMemberCooldown(cool("sonnet-5", NOW + 3 * HOUR));
+      ledger.recordMemberCooldown(cool("gemini-3-6-flash", NOW + HOUR));
+      ledger.recordMemberCooldown(cool("gpt-5-6-terra", NOW - 1));
+
+      const active = ledger.activeCooldowns(NOW);
+      expect(active.map((c) => c.memberId)).toEqual(["gemini-3-6-flash", "sonnet-5"]);
+      expect(active[0]?.cooldownUntilMs).toBe(NOW + HOUR);
+    });
+
+    it("EXTENDS an existing cooldown and never shortens it", () => {
+      ledger.recordMemberCooldown(cool("gemini-3-6-flash", NOW + 4 * HOUR, "limit"));
+      // An auth blip arriving after a four-hour wall must not resurrect the member.
+      ledger.recordMemberCooldown(cool("gemini-3-6-flash", NOW + 10 * 60_000, "auth"));
+
+      const [active] = ledger.activeCooldowns(NOW);
+      expect(active?.cooldownUntilMs).toBe(NOW + 4 * HOUR);
+      expect(active?.reason).toBe("limit");
+    });
+
+    it("takes the later expiry and its reason when the new signal is longer", () => {
+      ledger.recordMemberCooldown(cool("gemini-3-6-flash", NOW + 10 * 60_000, "auth"));
+      ledger.recordMemberCooldown(cool("gemini-3-6-flash", NOW + 4 * HOUR, "limit"));
+
+      const [active] = ledger.activeCooldowns(NOW);
+      expect(active?.cooldownUntilMs).toBe(NOW + 4 * HOUR);
+      expect(active?.reason).toBe("limit");
+    });
+
+    it("clears a cooldown so a re-login is noticed before the timer expires", () => {
+      ledger.recordMemberCooldown(cool("sonnet-5", NOW + 4 * HOUR, "auth"));
+      expect(ledger.activeCooldowns(NOW)).toHaveLength(1);
+
+      ledger.clearMemberCooldown("sonnet-5");
+      expect(ledger.activeCooldowns(NOW)).toEqual([]);
+    });
+
+    it("is cross-run: a second handle on the same file sees the wall", () => {
+      // This is the property that stops chain node N+1 walking back into the
+      // wall node N just found — each node is a separate run.
+      ledger.recordMemberCooldown(cool("gemini-3-6-flash", NOW + 4 * HOUR));
+      const second = new EndpointLedger(endpointLedgerPath(dir));
+      try {
+        expect(second.activeCooldowns(NOW).map((c) => c.memberId)).toEqual(["gemini-3-6-flash"]);
+      } finally {
+        second.close();
+      }
+    });
   });
 });

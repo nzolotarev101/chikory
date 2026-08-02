@@ -9,7 +9,8 @@ import { createOpenAICompatAdapter } from "../src/providers/openai-compat.js";
 describe("pricing (WP-101)", () => {
   it("is versioned", () => {
     expect(PRICING_VERSION).toMatch(/^\d{4}-\d{2}-\d{2}$/);
-    expect(PRICING_VERSION).toBe("2026-06-12");
+    // Bumped by WP-567, which added the agent-class member models.
+    expect(PRICING_VERSION).toBe("2026-08-02");
   });
 
   it("computes cost from the static table", () => {

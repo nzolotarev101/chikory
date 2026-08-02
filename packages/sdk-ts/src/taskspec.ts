@@ -5,6 +5,15 @@
 import { parse as parseYaml } from "yaml";
 import { z } from "zod";
 
+import type {
+  AgentBackend,
+  AgentClass,
+  AgentClassRegistry,
+  ExecutorAgentMember,
+  JudgeAgentMember,
+} from "./agents/classes.js";
+import { inferBackendFromModel } from "./agents/classes.js";
+import { loadAgentClassRegistry, resolveAgentClass } from "./agents/registry.js";
 import { endpointCapabilityFamily, resolveEndpointCapabilities } from "./endpoint-capability.js";
 import { TaskSpecSchema } from "./schemas.js";
 import type { LLMProvider, ModelChoice, RoutingPolicy, Stage, TaskSpec } from "./types.js";
@@ -64,6 +73,25 @@ export function defaultPolicy(executorFamily: LLMProvider, judgeFamily?: LLMProv
 export interface MissingProviderEnv {
   provider: LLMProvider;
   envVar: string;
+}
+
+/**
+ * The vendor a CLI executor speaks, for the WP-569 invariant-2 backend check.
+ * Used when the code stage's model name is not itself vendor-bearing (a CLI
+ * running its own default, e.g. `model: default`), where the ADAPTER is the
+ * only honest evidence of who serves the request.
+ */
+function executorFamilyBackend(spec: TaskSpec): AgentBackend {
+  switch (spec.executor.adapter) {
+    case "claude-code":
+      return "anthropic";
+    case "codex":
+      return "openai";
+    case "gemini-cli":
+      return "gemini";
+    default:
+      return inferBackendFromModel(spec.executor.family);
+  }
 }
 
 /**
@@ -160,12 +188,26 @@ const RawTaskSpecYaml = z
       })
       .strict()
       .optional(),
+    /**
+     * WP-566 — name the agent classes this run may rotate within. When a class
+     * is named, the corresponding `executor:` / `judge.family` block becomes
+     * OPTIONAL and is filled from that class's primary, so a spec states the
+     * agents once instead of restating the primary alongside the class.
+     */
+    agent_classes: z
+      .object({
+        executor: z.string().min(1).optional(),
+        judge: z.string().min(1).optional(),
+      })
+      .strict()
+      .optional(),
     executor: z
       .object({ adapter: z.string().min(1), family: z.enum(["anthropic", "openai", "gemini", "openai-compat"]) })
-      .strict(),
+      .strict()
+      .optional(),
     judge: z
       .object({
-        family: z.enum(["anthropic", "openai", "gemini", "openai-compat"]),
+        family: z.enum(["anthropic", "openai", "gemini", "openai-compat"]).optional(),
         model: z.string().min(1).optional(),
         cadence: z.number().int().min(1).optional(),
         allow_same_family: z.boolean().optional(),
@@ -250,6 +292,32 @@ export interface ParseTaskSpecOptions {
   env?: Record<string, string | undefined>;
   /** Sink for the same-family loud warning (invariant #2). Default: console.warn. */
   warn?: (message: string) => void;
+  /** Agent class registry (WP-566). Default: `agent-classes.yaml` merged over the shipped defaults. */
+  registry?: AgentClassRegistry;
+}
+
+/**
+ * WP-566 — routing derived from the SELECTED class members.
+ *
+ * When a spec names agent classes, `routing.stages` must follow the members or
+ * a rotation is cosmetic: the executor would move while the judge stage still
+ * pointed at the walled model. The code stage carries the executor's model
+ * (a CLI adapter reads only the model name from it — F-178), and the three
+ * router-served stages carry the judge member's transport and model.
+ */
+export function policyFromMembers(
+  executor: ExecutorAgentMember,
+  judge: JudgeAgentMember,
+): RoutingPolicy {
+  const judgeChoice: ModelChoice = { provider: judge.transport, model: judge.model };
+  return {
+    stages: {
+      plan: judgeChoice,
+      code: { provider: executor.family, model: executor.model },
+      review: judgeChoice,
+      judge: judgeChoice,
+    },
+  };
 }
 
 export function parseTaskSpec(yamlText: string, opts: ParseTaskSpecOptions = {}): TaskSpec {
@@ -270,6 +338,64 @@ export function parseTaskSpec(yamlText: string, opts: ParseTaskSpecOptions = {})
     );
   }
   const raw = parsed.data;
+
+  // ── WP-566: resolve agent classes into the concrete selected pair ──────────
+  // The class primary IS the parse-time selection. Rotation later swaps the
+  // member at run time; nothing here presumes the primary stays chosen.
+  const registry = opts.registry ?? loadAgentClassRegistry();
+  const classIssues: string[] = [];
+  let executorClass: AgentClass | undefined;
+  let judgeClass: AgentClass | undefined;
+  for (const [role, classId] of [
+    ["executor", raw.agent_classes?.executor],
+    ["judge", raw.agent_classes?.judge],
+  ] as const) {
+    if (classId === undefined) continue;
+    try {
+      const resolved = resolveAgentClass(registry, classId, role);
+      if (role === "executor") executorClass = resolved;
+      else judgeClass = resolved;
+    } catch (err) {
+      classIssues.push(`agent_classes.${role}: ${err instanceof Error ? err.message : String(err)}`);
+    }
+  }
+
+  const executorPrimary =
+    executorClass?.primary.role === "executor" ? executorClass.primary : undefined;
+  const judgePrimary = judgeClass?.primary.role === "judge" ? judgeClass.primary : undefined;
+
+  if (raw.executor === undefined && executorPrimary === undefined) {
+    classIssues.push(
+      "executor: declare an `executor:` block or name an `agent_classes.executor` class",
+    );
+  }
+  if (raw.judge.family === undefined && judgePrimary === undefined) {
+    classIssues.push(
+      "judge.family: declare `judge.family` or name an `agent_classes.judge` class",
+    );
+  }
+  // Deriving routing from the members is what makes a rotation real. Silently
+  // ignoring a hand-written `routing:` would leave the judge stage pinned to the
+  // walled model, so say so instead of guessing which the operator meant.
+  if (raw.agent_classes !== undefined && raw.routing !== undefined) {
+    classIssues.push(
+      "routing: `routing.stages` is DERIVED from the agent class members when `agent_classes` " +
+        "is set (otherwise a rotation would move the agent but not its routing) — remove one of the two",
+    );
+  }
+  if (classIssues.length > 0) throw new TaskSpecValidationError(classIssues);
+
+  const executorDecl = raw.executor ?? {
+    adapter: executorPrimary!.adapter,
+    family: executorPrimary!.family,
+  };
+  const declaredJudgeFamily = raw.judge.family ?? judgePrimary!.transport;
+  const judgeModel = raw.judge.model ?? judgePrimary?.model;
+
+  const derivedRouting =
+    executorPrimary !== undefined && judgePrimary !== undefined
+      ? policyFromMembers(executorPrimary, judgePrimary)
+      : undefined;
 
   const spec: TaskSpec = {
     name: raw.name,
@@ -309,17 +435,28 @@ export function parseTaskSpec(yamlText: string, opts: ParseTaskSpecOptions = {})
           },
         }
       : {}),
-    executor: { adapter: raw.executor.adapter, family: raw.executor.family },
+    executor: { adapter: executorDecl.adapter, family: executorDecl.family },
+    ...(raw.agent_classes !== undefined
+      ? {
+          agentClasses: {
+            ...(raw.agent_classes.executor !== undefined
+              ? { executor: raw.agent_classes.executor }
+              : {}),
+            ...(raw.agent_classes.judge !== undefined ? { judge: raw.agent_classes.judge } : {}),
+          },
+        }
+      : {}),
     judge: {
-      family: raw.judge.family,
-      model: raw.judge.model,
+      family: declaredJudgeFamily,
+      model: judgeModel,
       cadence: raw.judge.cadence ?? DEFAULT_CADENCE,
       allowSameFamily: raw.judge.allow_same_family,
       scoringMethod: raw.judge.scoring_method ?? DEFAULT_SCORING_METHOD,
       maxCostShare: raw.judge.max_cost_share,
       rubricPacks: raw.judge.rubric_packs,
     },
-    routing: raw.routing ?? defaultPolicy(raw.executor.family, raw.judge.family),
+    routing:
+      raw.routing ?? derivedRouting ?? defaultPolicy(executorDecl.family, declaredJudgeFamily),
     pacing: raw.pacing
       ? {
           mode: raw.pacing.mode,
@@ -381,6 +518,43 @@ export function parseTaskSpec(yamlText: string, opts: ParseTaskSpecOptions = {})
       issues.push(
         `judge.family '${judgeFamily}' must differ from executor.family ` +
           `'${executorFamily}' (invariant #2). Set allow_same_family: true to override.`,
+      );
+    }
+  }
+
+  // WP-569 — invariant #2 on the TRUE VENDOR, not the transport.
+  //
+  // The check above compares `LLMProvider` values, and every keyless judge
+  // declares the provider `openai-compat`. That is a TRANSPORT: the judge proxy
+  // reaches Codex, Antigravity or Claude through the same one, picking the CLI
+  // by model name. So executor `codex` + judge `gpt-5.6-sol xhigh` reads as
+  // `openai` vs `openai-compat` — two different families on paper, one GPT-5.6
+  // model in fact, and the bias mitigation invariant #2 exists for is gone
+  // while every check reports green.
+  const executorBackend = inferBackendFromModel(spec.routing.stages.code.model);
+  const judgeBackend = inferBackendFromModel(spec.judge.model ?? spec.routing.stages.judge.model);
+  const executorVendor = executorBackend === "open" ? executorFamilyBackend(spec) : executorBackend;
+  // Purely ADDITIVE: when the declared-family check above already caught this
+  // pair, it is the same violation seen twice — reporting it again would double
+  // the warning on a legitimate `allow_same_family` opt-in.
+  if (
+    judgeSameFamilyCapability === undefined &&
+    judgeBackend !== "open" &&
+    judgeBackend === executorVendor
+  ) {
+    if (spec.judge.allowSameFamily) {
+      warn(
+        `[chikory] WARNING: the judge model resolves to the same VENDOR as the executor ` +
+          `('${judgeBackend}') even though their declared families differ ` +
+          `(allow_same_family: true). Bias mitigation is reduced (invariant #2).`,
+      );
+    } else {
+      issues.push(
+        `judge model '${spec.judge.model ?? spec.routing.stages.judge.model}' and executor ` +
+          `'${spec.executor.adapter}' both resolve to the '${judgeBackend}' vendor, despite ` +
+          `declaring different families — the '${spec.judge.family}' transport is not a vendor ` +
+          `(invariant #2). Pick a judge model from a different vendor, or set ` +
+          `allow_same_family: true to override.`,
       );
     }
   }

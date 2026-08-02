@@ -100,7 +100,19 @@ export interface TaskSpec {
    * startToCloseTimeout (parse-time validated).
    */
   stepLimits?: { maxSeconds?: number; maxTurns?: number; maxCostUsd?: number };
+  /**
+   * The CURRENTLY SELECTED executor. Always populated — when `agentClasses.executor`
+   * names a class, this is filled from the member the scheduler picked (the
+   * class primary at parse time), so every reader downstream is unchanged.
+   */
   executor: { adapter: string; family: LLMProvider };
+  /**
+   * WP-566 — agent classes this run may rotate within when a member is walled
+   * (quota, auth, repeated crash, or a predicted wall). Absent = no peers: the
+   * declared executor/judge are a class of one and the run parks on a wall,
+   * which is the pre-WP-566 behavior.
+   */
+  agentClasses?: { executor?: string; judge?: string };
   judge: JudgePolicy;
   routing: RoutingPolicy;
   /** P2 (WP-207); absent = fixed defaults. */
@@ -344,11 +356,12 @@ export interface StepRecord {
   failure?: { reason: string; retriable: boolean };
   /**
    * F-210 (additive): the step did not complete for an INFRASTRUCTURE reason —
-   * killed at its `maxSeconds` cap — so its outcome says nothing about the
-   * code. The judge still runs and still reports; the flag keeps the verdict
-   * out of the rule-3 stuck-criterion sequence, exactly as WP-263(b)'s
-   * `JudgeForm` `infraFailed` does for a killed judge CHECK. Absent = a
-   * substantive step outcome.
+   * killed at its `maxSeconds` cap, or (WP-568) abandoned because the agent it
+   * ran on hit a quota wall or lost its credentials — so its outcome says
+   * nothing about the code. The judge still runs and still reports; the flag
+   * keeps the verdict out of the rule-3 stuck-criterion sequence, exactly as
+   * WP-263(b)'s `JudgeForm` `infraFailed` does for a killed judge CHECK.
+   * Absent = a substantive step outcome.
    */
   infraFailed?: boolean;
   /**
@@ -516,6 +529,11 @@ export type JournalEntryKind =
   | "capability"
   | "limit_observation"
   | "limit_signal"
+  // WP-568 — the run swapped to a different member of its agent class, because
+  // the one it was on hit a wall, lost its credentials, or kept crashing.
+  // Without this entry a mid-run agent swap leaves no trace: `capability` is
+  // written once at prepareRun and never re-emitted.
+  | "agent_rotation"
   | "terminal"
   | "seam"
   // P2 (WP-519, ADR-009 D3) — one journaled heal attempt: rule-3 HALT

@@ -1,0 +1,70 @@
+# Agent classes (WP-566) — the agents Chikory may use, grouped so a long-lived
+# run can rotate off a quota-walled agent instead of sleeping through the reset.
+#
+# A class is one PRIMARY plus an ordered ADJACENT group. The primary is the
+# declared default and is ALWAYS tried first; adjacent members are tried in the
+# order written here, and only when the ones before them are unavailable
+# (quota wall, auth failure, repeated crash, or a predicted wall).
+#
+# `backend` is the TRUE vendor and is not decoration. Every keyless judge reaches
+# its model over the `openai-compat` transport through scripts/cli-judge-proxy.mjs,
+# so a transport-keyed check would read executor `codex` + judge `gpt-5.6-sol` as
+# two different families while both are GPT-5.6. Invariant #2 — the judge must
+# not share the executor's family — is enforced on `backend`, and the scheduler
+# selects a compatible PAIR: rotate the executor into the judge's vendor and the
+# judge rotates in lockstep.
+#
+# Rules the loader enforces at $0, before a run starts (see src/agents/registry.ts):
+#   * member ids are globally unique (cooldowns are keyed by member id)
+#   * a CLI adapter's family/backend must match the vendor it actually speaks
+#   * every model has a PRICE_TABLE and CONTEXT_WINDOW_TABLE row — an unpriced
+#     member costs $0 on paper while burning real capacity
+# Whether a CLI actually accepts a model id, and is logged in, is checked
+# separately by the launcher's preflight probe (scripts/dogfood.sh).
+#
+# Model ids are what the real binaries take. `agy models` is the authority for
+# the Gemini members; note it offers only 4.6-era Claude, which is why the
+# Claude members here go through the `claude` CLI instead of Antigravity.
+
+version: 1
+
+classes:
+  # Gemini executes — the standing arming default, unchanged.
+  executor-default:
+    role: executor
+    primary:
+      id: gemini-3-6-flash
+      adapter: gemini-cli
+      family: gemini
+      backend: gemini
+      model: gemini-3.6-flash-high
+    adjacent:
+      - id: gpt-5-6-terra
+        adapter: codex
+        family: openai
+        backend: openai
+        model: gpt-5.6-terra
+      - id: sonnet-5
+        adapter: claude-code
+        family: anthropic
+        backend: anthropic
+        model: claude-sonnet-5
+
+  # Codex judges — the standing arming default, unchanged. Also serves the
+  # plan and review stages, which route through the same judge-side transport.
+  judge-default:
+    role: judge
+    primary:
+      id: gpt-5-6-sol
+      transport: openai-compat
+      backend: openai
+      model: gpt-5.6-sol xhigh
+    adjacent:
+      - id: opus-5
+        transport: openai-compat
+        backend: anthropic
+        model: claude-opus-5
+      - id: gemini-3-1-pro
+        transport: openai-compat
+        backend: gemini
+        model: gemini-3.1-pro-high

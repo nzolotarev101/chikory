@@ -29,6 +29,7 @@ import { mkdtempSync } from "node:fs";
 import { createServer } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { pathToFileURL } from "node:url";
 
 const port = Number(process.argv[2] ?? 8787);
 const backend = process.argv[3] ?? "codex";
@@ -73,27 +74,28 @@ function run(bin, args, opts, stdin) {
   });
 }
 
+/**
+ * Split a codex model id into the name and its reasoning-effort suffix.
+ *
+ * `gpt-5.6-sol xhigh` is Chikory's spelling, not codex's: the CLI takes
+ * `-m gpt-5.6-sol -c model_reasoning_effort="xhigh"` and rejects the joined
+ * form outright ("The 'gpt-5.6-sol xhigh' model is not supported"). Exported so
+ * the launch probe (WP-575) builds the SAME argv the judge does — probing a
+ * different command than the run uses proves nothing.
+ */
+export function splitCodexModel(model) {
+  const match = /^(.*?)\s+(xhigh|high|medium|low)$/.exec(model);
+  if (match === null) return { model, effort: undefined };
+  return { model: match[1], effort: match[2] };
+}
+
 async function codexComplete(prompt, model) {
   const args = ["exec", "--json", "--skip-git-repo-check", "-s", "read-only", "-c", 'approval_policy="never"', "-C", sandbox];
   if (model !== "default") {
-    let modelName = model;
-    let reasoningEffort = undefined;
-    if (modelName.endsWith(" xhigh")) {
-      modelName = modelName.slice(0, -6);
-      reasoningEffort = "xhigh";
-    } else if (modelName.endsWith(" high")) {
-      modelName = modelName.slice(0, -5);
-      reasoningEffort = "high";
-    } else if (modelName.endsWith(" medium")) {
-      modelName = modelName.slice(0, -7);
-      reasoningEffort = "medium";
-    } else if (modelName.endsWith(" low")) {
-      modelName = modelName.slice(0, -4);
-      reasoningEffort = "low";
-    }
+    const { model: modelName, effort } = splitCodexModel(model);
     args.push("-m", modelName);
-    if (reasoningEffort) {
-      args.push("-c", `model_reasoning_effort="${reasoningEffort}"`);
+    if (effort) {
+      args.push("-c", `model_reasoning_effort="${effort}"`);
     }
   }
   args.push("-");
@@ -138,22 +140,75 @@ async function geminiComplete(prompt, model) {
   };
 }
 
-function mapAgyModel(model) {
+/**
+ * Map a requested model onto an id `agy` actually accepts.
+ *
+ * WP-570: the previous table returned DISPLAY strings ("Gemini 3.5 Flash
+ * (High)", "Claude Opus 4.6 (Thinking)"). `agy models` emits slug ids —
+ * `gemini-3.6-flash-high`, `claude-opus-4-6-thinking` — so those display forms
+ * were not selectable. The list below is verbatim from `agy models`; anything
+ * already in slug form is passed straight through.
+ *
+ * Note what is NOT here: Claude 5. Antigravity tops out at `claude-sonnet-4-6`
+ * and `claude-opus-4-6-thinking`, so a `claude-sonnet-5` / `claude-opus-5`
+ * request must go to the `claude` CLI instead (see `dispatchFor`).
+ */
+const AGY_MODELS = new Set([
+  "gemini-3.6-flash-high",
+  "gemini-3.6-flash-medium",
+  "gemini-3.6-flash-low",
+  "gemini-3.5-flash-high",
+  "gemini-3.5-flash-medium",
+  "gemini-3.5-flash-low",
+  "gemini-3.1-pro-high",
+  "gemini-3.1-pro-low",
+  "claude-sonnet-4-6",
+  "claude-opus-4-6-thinking",
+  "gpt-oss-120b-medium",
+]);
+
+export function mapAgyModel(model) {
   if (model === "default") return model;
   const lower = model.toLowerCase();
-  if (lower.includes("gemini-3.5-flash") || lower.includes("gemini-1.5-flash") || lower.includes("gemini-3.1-flash")) {
-    return "Gemini 3.5 Flash (High)";
-  }
-  if (lower.includes("gemini-3.1-pro") || lower.includes("gemini-1.5-pro")) {
-    return "Gemini 3.1 Pro (High)";
-  }
-  if (lower.includes("sonnet")) {
-    return "Claude Sonnet 4.6 (Thinking)";
-  }
-  if (lower.includes("opus")) {
-    return "Claude Opus 4.6 (Thinking)";
-  }
+  if (AGY_MODELS.has(lower)) return lower;
+
+  // Effort suffix is part of the id; default to the strongest tier when absent.
+  const effort = /-(high|medium|low)$/.exec(lower)?.[1];
+  const base = effort ? lower.slice(0, -(effort.length + 1)) : lower;
+  const withEffort = (slug, fallback) => {
+    const candidate = `${slug}-${effort ?? fallback}`;
+    return AGY_MODELS.has(candidate) ? candidate : `${slug}-${fallback}`;
+  };
+
+  if (/gemini-3\.6.*flash|gemini.*3\.6-flash/.test(base)) return withEffort("gemini-3.6-flash", "high");
+  if (/gemini-3\.5.*flash|gemini-1\.5-flash/.test(base)) return withEffort("gemini-3.5-flash", "high");
+  if (/gemini-3\.1.*flash/.test(base)) return withEffort("gemini-3.5-flash", "high");
+  if (/gemini-3\.1-pro|gemini-1\.5-pro/.test(base)) return withEffort("gemini-3.1-pro", "high");
+  if (base.includes("sonnet")) return "claude-sonnet-4-6";
+  if (base.includes("opus")) return "claude-opus-4-6-thinking";
   return model;
+}
+
+/**
+ * Which CLI serves this model. The judge reaches every vendor over one
+ * `openai-compat` transport, so the MODEL NAME is the only routing signal —
+ * this function is the authority the SDK's `inferBackendFromModel` mirrors.
+ *
+ * Claude 5 ids go to the `claude` CLI because Antigravity does not carry them.
+ */
+export function dispatchFor(model, fallbackBackend) {
+  const lower = model.toLowerCase();
+  if (lower.includes("gpt") || lower.includes("codex")) return "codex";
+  if (/claude-(opus|sonnet|haiku)-5|claude-fable-5|\bfable\b/.test(lower)) return "claude";
+  if (
+    lower.includes("gemini") ||
+    lower.includes("claude") ||
+    lower.includes("sonnet") ||
+    lower.includes("opus")
+  ) {
+    return "agy";
+  }
+  return fallbackBackend;
 }
 
 async function agyComplete(prompt, model) {
@@ -171,9 +226,70 @@ async function agyComplete(prompt, model) {
   };
 }
 
-const backends = { codex: codexComplete, gemini: geminiComplete, agy: agyComplete };
+/**
+ * WP-570: Claude 5 judge members. `agy` only carries 4.6-era Claude, so an
+ * `opus-5` / `sonnet-5` class member has to reach the `claude` CLI directly.
+ * Print mode with a 1-turn cap — the judge fills a form, it does not need tools.
+ */
+async function claudeComplete(prompt, model) {
+  const args = ["-p", prompt, "--max-turns", "1", "--setting-sources", "project"];
+  if (model !== "default") args.push("--model", model);
+  const stdout = await run("claude", args, { cwd: sandbox });
+  const text = stdout.trim();
+  if (!text) throw new Error(`claude produced no response: ${stdout.slice(-500)}`);
+  // Print mode reports no usage — estimated, and flagged as such so token
+  // budgets never mistake it for a metered count.
+  return {
+    text,
+    tokens: { input: estimateTokens(prompt), output: estimateTokens(text), estimated: true },
+  };
+}
+
+/**
+ * Is this CLI failure a quota wall? Mirrors `CLI_LIMIT_RE` in
+ * `packages/sdk-ts/src/limit-signal.ts` — the two must agree, or a judge-side
+ * wall classifies on one side of the proxy and not the other.
+ */
+const LIMIT_RE =
+  /\b(rate|usage|session|quota)\s+limit\b|\b(limit|quota)\s+(reached|exceeded|exhausted|hit)\b/i;
+
+/** Seconds until reset, parsed from the CLI's own "Resets in 4h6m22s" phrasing. */
+export function retryAfterSeconds(message) {
+  const match =
+    /\b(?:retry|try again|reset|resets|available)[^\n.]*?\bin\s+((?:\d+(?:\.\d+)?\s*(?:h|hours?|hrs?|m|minutes?|mins?|s|seconds?|secs?)(?![a-z])\s*)+)/i.exec(
+      message,
+    );
+  if (!match) return undefined;
+  let total = 0;
+  for (const [, amount, unit] of match[1].matchAll(
+    /(\d+(?:\.\d+)?)\s*(h|hours?|hrs?|m|minutes?|mins?|s|seconds?|secs?)(?![a-z])/gi,
+  )) {
+    const n = Number(amount);
+    const u = unit.toLowerCase();
+    if (u.startsWith("h")) total += n * 3600;
+    else if (u.startsWith("m")) total += n * 60;
+    else total += n;
+  }
+  return total > 0 ? Math.round(total) : undefined;
+}
+
+const backends = {
+  codex: codexComplete,
+  gemini: geminiComplete,
+  agy: agyComplete,
+  claude: claudeComplete,
+};
+/**
+ * WP-570: this file is both a server and a module — `mapAgyModel`,
+ * `dispatchFor` and `retryAfterSeconds` are unit-tested, and importing a file
+ * that binds a port (or calls `process.exit`) as a side effect is not testable.
+ * Everything below the guard runs only when the file is the entry point.
+ */
+const isEntryPoint =
+  process.argv[1] !== undefined && import.meta.url === pathToFileURL(process.argv[1]).href;
+
 const complete = backends[backend];
-if (!complete) {
+if (isEntryPoint && !complete) {
   console.error(`unknown backend '${backend}' (have: ${Object.keys(backends).join(", ")})`);
   process.exit(1);
 }
@@ -190,22 +306,10 @@ const server = createServer((req, res) => {
     try {
       const { messages = [], model = "default" } = JSON.parse(body);
 
-      // Dynamic dispatch based on requested model name (F-138/dogfood-102 fix)
-      let completeFn = complete;
-      let activeBackend = backend;
-      const lowerModel = model.toLowerCase();
-      if (lowerModel.includes("gpt") || lowerModel.includes("codex")) {
-        completeFn = codexComplete;
-        activeBackend = "codex";
-      } else if (
-        lowerModel.includes("gemini") ||
-        lowerModel.includes("claude") ||
-        lowerModel.includes("sonnet") ||
-        lowerModel.includes("opus")
-      ) {
-        completeFn = agyComplete;
-        activeBackend = "agy";
-      }
+      // Dynamic dispatch based on requested model name (F-138/dogfood-102 fix;
+      // WP-570 adds the `claude` backend for Claude 5 members).
+      const activeBackend = dispatchFor(model, backend);
+      const completeFn = backends[activeBackend] ?? complete;
 
       const { text, tokens } = await completeFn(renderPrompt(messages), model);
       console.log(
@@ -229,15 +333,32 @@ const server = createServer((req, res) => {
         }),
       );
     } catch (err) {
+      // WP-570: a quota wall must leave as an HTTP 429, not a blanket 500.
+      // `classifyLimitSignal` only treats an HTTP signal as a limit on status
+      // 429 (limit-signal.ts), so a walled judge used to arrive as a generic
+      // retriable 500: the router burned all five attempts and failed the pass,
+      // and no cooldown was ever recorded because nothing recognised a wall.
+      const isLimit = LIMIT_RE.test(err.message);
+      const retryAfter = isLimit ? retryAfterSeconds(err.message) : undefined;
       console.error(
-        `[cli-judge:${backend}] FAILED after ${Date.now() - startedAt}ms: ${err.message}`,
+        `[cli-judge:${backend}] ${isLimit ? "QUOTA WALL" : "FAILED"} after ` +
+          `${Date.now() - startedAt}ms: ${err.message}`,
       );
-      res.writeHead(500, { "content-type": "application/json" });
+      res.writeHead(isLimit ? 429 : 500, {
+        "content-type": "application/json",
+        ...(retryAfter === undefined ? {} : { "retry-after": String(retryAfter) }),
+      });
       res.end(JSON.stringify({ error: { message: err.message } }));
     }
   });
 });
 
-server.listen(port, "127.0.0.1", () => {
-  console.log(`[cli-judge] OpenAI-compat shim on http://127.0.0.1:${port} (backend: ${backend} CLI)`);
-});
+if (isEntryPoint) {
+  server.listen(port, "127.0.0.1", () => {
+    console.log(
+      `[cli-judge] OpenAI-compat shim on http://127.0.0.1:${port} (backend: ${backend} CLI)`,
+    );
+  });
+}
+
+export { server };
