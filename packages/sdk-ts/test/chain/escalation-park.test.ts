@@ -14,6 +14,7 @@ import {
   decideChainOrphanRepair,
   failedActiveNodeIds,
   resolveAnsweredEscalationPark,
+  ABANDONED_NODE_REASON,
 } from "../../src/chain/escalation-park.js";
 
 describe("resolveAnsweredEscalationPark (workflow side)", () => {
@@ -83,9 +84,57 @@ describe("decideChainOrphanRepair (CLI side)", () => {
   });
 
   it("declines while a node is in flight — that node is the signal target", () => {
-    const decision = decideChainOrphanRepair({ ...orphan, hasInflightNode: true });
+    const decision = decideChainOrphanRepair({
+      ...orphan,
+      hasInflightNode: true,
+      inflightNodeWorkflow: "live",
+    });
     expect(decision.action).toBe("none");
     expect(decision.reason).toContain("chikory chain approve");
+  });
+
+  // F-240 (dogfood-122, chain-ebecd792): the host process was killed mid-node.
+  // N-3 had a child run id and no sealed outcome, so `hasInflightNode` alone
+  // declined the repair under EVERY chain-workflow liveness — the chain was
+  // stuck RUNNING with no command able to seal it.
+  it("seals a chain whose in-flight node's own workflow is gone too", () => {
+    expect(
+      decideChainOrphanRepair({
+        ...orphan,
+        hasInflightNode: true,
+        inflightNodeWorkflow: "gone",
+        failedNodeIds: ["N-3"],
+      }),
+    ).toEqual({
+      action: "seal",
+      status: "FAILED",
+      resumable: true,
+      reason: `${ABANDONED_NODE_REASON}: N-3`,
+    });
+  });
+
+  it("declines when the in-flight node's workflow cannot be reached", () => {
+    for (const inflightNodeWorkflow of ["unknown", undefined] as const) {
+      const decision = decideChainOrphanRepair({
+        ...orphan,
+        hasInflightNode: true,
+        ...(inflightNodeWorkflow !== undefined ? { inflightNodeWorkflow } : {}),
+      });
+      expect(decision.action).toBe("none");
+      expect(decision.reason).toContain("in-flight node");
+    }
+  });
+
+  it("still declines an abandoned node while the chain workflow is live", () => {
+    // Both guards must hold: an abandoned node does not license sealing a chain
+    // whose own execution is still running.
+    const decision = decideChainOrphanRepair({
+      ...orphan,
+      hasInflightNode: true,
+      inflightNodeWorkflow: "gone",
+      workflow: "live",
+    });
+    expect(decision).toEqual({ action: "none", reason: "the chain workflow is still running" });
   });
 
   it("declines while the chain workflow is still running", () => {

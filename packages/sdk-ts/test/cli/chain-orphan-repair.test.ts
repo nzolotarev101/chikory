@@ -129,6 +129,12 @@ describe("repairOrphanedChainSeal (F-208)", () => {
     expect(sealed()).toEqual({ status: "RUNNING", terminals: [] });
   });
 
+  /** Liveness that answers per workflow id: the chain vs. its dispatched node. */
+  const liveness =
+    (chain: "live" | "gone" | "unknown", node: "live" | "gone" | "unknown") =>
+    async (workflowId: string) =>
+      workflowId === CHAIN_ID ? chain : node;
+
   it("writes NOTHING while a dispatched node is still in flight (WP-241 approve owns it)", async () => {
     const record = orphanRecord({
       nodeRuns: { "N-1-r1": `${CHAIN_ID}-node-N-1-r1` },
@@ -139,12 +145,67 @@ describe("repairOrphanedChainSeal (F-208)", () => {
       CHAIN_ID,
       record,
       flags(),
-      { workflowLiveness: async () => "gone" },
+      { workflowLiveness: liveness("gone", "live") },
       ioPair,
     );
 
     expect(decision.action).toBe("none");
     expect(sealed().terminals).toEqual([]);
+  });
+
+  it("writes NOTHING when the in-flight node's own workflow cannot be reached", async () => {
+    const record = orphanRecord({
+      nodeRuns: { "N-1-r1": `${CHAIN_ID}-node-N-1-r1` },
+      nodeOutcomes: {},
+    });
+
+    const decision = await repairOrphanedChainSeal(
+      CHAIN_ID,
+      record,
+      flags(),
+      { workflowLiveness: liveness("gone", "unknown") },
+      ioPair,
+    );
+
+    expect(decision.action).toBe("none");
+    expect(sealed().terminals).toEqual([]);
+  });
+
+  // F-240 (dogfood-122, chain-ebecd792): the host process died mid-node. N-3
+  // had a child run id and no sealed outcome, so the in-flight guard declined
+  // forever and the chain stayed RUNNING with nothing able to seal it.
+  it("seals a node abandoned with its host, and the chain, resumably", async () => {
+    const record = orphanRecord({
+      nodeRuns: { "N-1-r1": `${CHAIN_ID}-node-N-1-r1` },
+      nodeOutcomes: {},
+    });
+
+    const decision = await repairOrphanedChainSeal(
+      CHAIN_ID,
+      record,
+      flags(),
+      { workflowLiveness: liveness("gone", "gone") },
+      ioPair,
+    );
+
+    expect(decision).toMatchObject({ action: "seal", status: "FAILED", resumable: true });
+    const state = sealed();
+    expect(state.status).toBe("FAILED");
+    expect(state.terminals[0]).toMatchObject({ status: "FAILED", resumable: true });
+    expect(state.terminals[0]!["reason"]).toContain("N-1-r1");
+
+    // The abandoned node must be sealed FAILED in the journal too — otherwise
+    // the record a resume re-reads still shows it in flight and declines again.
+    const journal = new ChainJournal(chainJournalPath(dir, CHAIN_ID));
+    try {
+      const seals = journal.entries("node_sealed").map((e) => e.payload as Record<string, unknown>);
+      expect(seals).toEqual([
+        { nodeId: "N-1-r1", outcome: { status: "FAILED", verdict: "HALT" } },
+      ]);
+    } finally {
+      journal.close();
+    }
+    expect(out.join("\n")).toContain("abandoned mid-flight");
   });
 
   it("is not a second write on an already-sealed chain", async () => {

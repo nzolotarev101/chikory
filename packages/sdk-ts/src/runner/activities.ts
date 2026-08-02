@@ -29,6 +29,7 @@ import {
   COMPLETION_REVIEW_RUBRIC,
   enforceFamilyDiversity,
   renderOverallGoalContext,
+  runCriteriaChecks,
   runJudgePass,
 } from "../judge/index.js";
 import { EndpointLedger } from "../journal/endpoint-ledger.js";
@@ -76,6 +77,7 @@ import type {
   TaskSpec,
   TokenUsage,
 } from "../types.js";
+import type { PrecheckCheckResult } from "../util/precheck.js";
 import { buildDigestMessages } from "./compaction-prompt.js";
 import { planCompaction } from "./compaction.js";
 import {
@@ -1587,6 +1589,44 @@ export function createRunnerActivities(deps: RunnerActivityDeps) {
      * own — the verdict's `rollbackTo` plus the next checkpoint's commit are
      * the audit trail.
      */
+    /**
+     * WP-561 / F-237 — run this run's acceptance checks BEFORE step 0 and
+     * report their exit codes, so the workflow can tell whether the goal is
+     * already satisfied on the base it inherited.
+     *
+     * dogfood-122's chain nodes N-1 and N-2 were told to author
+     * `brownfield-004`/`brownfield-005`, both of which had landed on HEAD in
+     * `1bec8bb` before the launch. Their oracles (AC-3, AC-4, AC-5) were green
+     * on entry, so an executor was paid to produce a four-line cosmetic edit and
+     * the judge sealed it SUCCESS. `evaluateBaselinePrecheck` existed and was
+     * unit-tested for exactly this since WP-228, with no production caller.
+     *
+     * No LLM, no diff — just the checks. A run with no executable check returns
+     * an empty list, which `evaluateBaselinePrecheck` reports as unsatisfied.
+     */
+    async precheckAcceptance(input: {
+      runId: string;
+      criteria: AcceptanceCriterion[];
+    }): Promise<{ results: PrecheckCheckResult[] }> {
+      return withHeartbeat(async () => {
+        const journal = openJournal(deps, input.runId);
+        let workspaceRepos: WorkspaceRepo[];
+        try {
+          workspaceRepos = collectWorkspaceRepos(requireSpec(journal, input.runId).repos).all;
+        } finally {
+          journal.close();
+        }
+        const runs = await runCriteriaChecks({
+          workspaceDir: workspaceDir(deps.dataDir, input.runId),
+          criteria: input.criteria,
+          workspaceRepos,
+        });
+        return {
+          results: runs.map((run) => ({ id: run.criterionId, exitCode: run.exitCode })),
+        };
+      });
+    },
+
     async restoreCheckpoint(input: { runId: string; checkpointId: string }): Promise<void> {
       return withHeartbeat(async () => {
         const journal = openJournal(deps, input.runId);

@@ -7,6 +7,7 @@ export {
 export {
   collectEvidence,
   collectPerRepoDiffs,
+  runCriteriaChecks,
   DEFAULT_CHECK_TIMEOUT_MS,
   MAX_CHECK_OUTPUT_CHARS,
   MAX_DIFF_PROMPT_CHARS,

@@ -14,6 +14,7 @@ import {
 } from "./family-preflight.js";
 import { commandComplete, makeJudgeGrader } from "./judge-grader.js";
 import { compareSummaries, type SuiteSummary } from "./results.js";
+import { acquireSuiteLock, SuiteAlreadyRunningError } from "./suite-lock.js";
 import { loadTaskDir, runSuite } from "./suite.js";
 import { isRunnable } from "./task.js";
 
@@ -39,6 +40,9 @@ commands:
       [--out <dir>]          results root (default benchmarks/results)
       [--filter <substr>]    only tasks whose id contains substr
       [--suite <name>]       summary label (default the tasks dir)
+      [--base-verify-minutes <n>]
+                             cap for each task's base verification: install +
+                             the target's FULL suite (default 45)
   compare <summary-a.json> <summary-b.json>
                            compare two 5-task run summaries with 95% Wilson CIs
       [--arm-a <file>] / [--left <file>]    path to summary A
@@ -215,15 +219,47 @@ export async function main(argv: string[], io = { out: console.log, err: console
 
     const judgeCmd = values["judge-cmd"];
     const judge = judgeCmd ? makeJudgeGrader(commandComplete(judgeCmd)) : undefined;
+    const resultsDir = resolve(values["out"] ?? "benchmarks/results");
+    const suiteName = values["suite"] ?? tasksDir;
+    // F-241: base verification installs a real target and runs its whole suite;
+    // it must never inherit the 120 s judge-check cap.
+    const baseVerifyMinutes = values["base-verify-minutes"];
+    if (baseVerifyMinutes !== undefined && !/^\d+$/.test(baseVerifyMinutes)) {
+      io.err(`chikory-bench run: --base-verify-minutes must be a whole number of minutes`);
+      return 1;
+    }
 
-    const { summary, outDir } = await runSuite({
-      suite: values["suite"] ?? tasksDir,
-      tasks: selected,
-      adapter,
-      resultsDir: resolve(values["out"] ?? "benchmarks/results"),
-      judge,
-      log: io.out,
-    });
+    // F-239: one suite at a time per results root. dogfood-122's node ran four
+    // concurrently against the same root; none finished, and every wall-clock
+    // they reported was contended.
+    let releaseLock: () => void;
+    try {
+      releaseLock = acquireSuiteLock(resultsDir, { suite: suiteName, adapter: adapterName });
+    } catch (err) {
+      if (err instanceof SuiteAlreadyRunningError) {
+        io.err(`chikory-bench run: REFUSING to launch — ${err.message}`);
+        return 1;
+      }
+      throw err;
+    }
+
+    let summary: SuiteSummary;
+    let outDir: string;
+    try {
+      ({ summary, outDir } = await runSuite({
+        suite: suiteName,
+        tasks: selected,
+        adapter,
+        resultsDir,
+        judge,
+        log: io.out,
+        ...(baseVerifyMinutes !== undefined
+          ? { baseVerifyTimeoutMs: Number(baseVerifyMinutes) * 60_000 }
+          : {}),
+      }));
+    } finally {
+      releaseLock();
+    }
     io.out(
       `suite ${summary.suite}: ${summary.tasks} tasks, ` +
         `${summary.requirementsSatisfied}/${summary.requirementsTotal} requirements satisfied ` +

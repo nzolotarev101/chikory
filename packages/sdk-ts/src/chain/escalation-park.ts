@@ -35,6 +35,14 @@ export const ANSWERED_ESCALATION_REASON = "chain halted on an answered node esca
 /** Seal reason for a chain whose workflow vanished without a terminal entry. */
 export const ORPHANED_CHAIN_REASON = "chain workflow exited without sealing";
 
+/**
+ * Seal reason for a chain whose workflow AND whose dispatched node both vanished
+ * (F-240). Distinct from `ORPHANED_CHAIN_REASON` because the node run left
+ * evidence on disk that a resume can heal from, while a plain orphan did not.
+ */
+export const ABANDONED_NODE_REASON =
+  "chain workflow exited mid-node; the node's own workflow is gone too";
+
 export interface AnsweredEscalationPark {
   /** Status the reducer derived from the sealed node outcomes. */
   status: ChainStatus;
@@ -78,6 +86,15 @@ export interface ChainOrphanState {
   status: ChainStatus;
   /** Whether a dispatched node has no sealed outcome (a signal target exists). */
   hasInflightNode: boolean;
+  /**
+   * F-240: whether that node's OWN Temporal execution is still running. A
+   * dispatched node with no sealed outcome only means "a signal target exists"
+   * while its workflow can receive one; once the host process dies mid-node the
+   * node is abandoned, not in flight, and `hasInflightNode` alone would decline
+   * the repair forever. Omit when there is no in-flight node; `undefined` with
+   * one present is read as `"unknown"` and declines, fail-closed.
+   */
+  inflightNodeWorkflow?: ChainWorkflowLiveness;
   /** Whether the chain's Temporal execution is still running. */
   workflow: ChainWorkflowLiveness;
   /** Ids of ACTIVE plan nodes whose sealed outcome is FAILED. */
@@ -93,10 +110,18 @@ export function decideChainOrphanRepair(state: ChainOrphanState): ParkResolution
   if (state.status === "SUCCESS" || state.status === "FAILED") {
     return { action: "none", reason: `chain already sealed ${state.status}` };
   }
-  if (state.hasInflightNode) {
+  // F-240: an un-sealed dispatched node blocks the repair only while its own
+  // execution can still be signalled. When the host process dies mid-node both
+  // workflows go with it, and declining here left the chain RUNNING with no
+  // command that could ever seal it (chain-ebecd792, dogfood-122).
+  const nodeAbandoned = state.hasInflightNode && state.inflightNodeWorkflow === "gone";
+  if (state.hasInflightNode && !nodeAbandoned) {
     return {
       action: "none",
-      reason: "a node is still in flight — deliver its decision with chikory chain approve",
+      reason:
+        state.inflightNodeWorkflow === "live"
+          ? "a node is still in flight — deliver its decision with chikory chain approve"
+          : "cannot reach Temporal to confirm the in-flight node's workflow has exited",
     };
   }
   if (state.workflow === "live") {
@@ -108,7 +133,10 @@ export function decideChainOrphanRepair(state: ChainOrphanState): ParkResolution
       reason: "cannot reach Temporal to confirm the chain workflow has exited",
     };
   }
-  return sealFor(state.failedNodeIds, ORPHANED_CHAIN_REASON);
+  return sealFor(
+    state.failedNodeIds,
+    nodeAbandoned ? ABANDONED_NODE_REASON : ORPHANED_CHAIN_REASON,
+  );
 }
 
 /**

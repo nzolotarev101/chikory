@@ -8,10 +8,9 @@
  *
  * Uses `node:sqlite` (pinned nodejs@22 in devbox) — no native build step.
  */
-import { mkdirSync } from "node:fs";
-import { dirname } from "node:path";
-import { DatabaseSync } from "node:sqlite";
+import type { DatabaseSync } from "node:sqlite";
 
+import { openDatabase } from "./sqlite.js";
 import type {
   ArtifactRef,
   Checkpoint,
@@ -80,8 +79,7 @@ export class Journal {
   private readonly db: DatabaseSync;
 
   constructor(dbPath: string) {
-    mkdirSync(dirname(dbPath), { recursive: true });
-    this.db = new DatabaseSync(dbPath);
+    this.db = openDatabase(dbPath, "run journal");
     // Concurrent readers (status polling, `chikory trace`) must wait out a
     // writer instead of failing with SQLITE_BUSY.
     this.db.exec("PRAGMA busy_timeout = 5000;");

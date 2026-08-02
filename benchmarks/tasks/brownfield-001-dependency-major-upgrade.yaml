@@ -25,7 +25,21 @@ status: pinned
 repo:
   url: https://github.com/ecyrbe/zodios
   ref: 6e6f3b3dbc3fdd62bc2c043efbdcd0254823fcb4 # zod-3 HEAD, before any v4 upgrade attempt (upstream never did this migration)
-base_verification_command: yarn install --immutable && yarn test
+# F-242 (dogfood-122): was `yarn install --immutable && yarn test`, which used the
+# AMBIENT yarn. This target carries a Yarn CLASSIC lockfile (`# yarn lockfile v1`),
+# declares no `packageManager` and ships no `.yarnrc.yml`, so ambient Yarn Berry
+# 3.6.4 tried to convert the lockfile and refused under `--immutable`:
+#   "YN0028: The lockfile would have been modified by this install, which is
+#    explicitly forbidden."
+# The base could therefore never verify, and this task could never be scored. Pin
+# the target's own major, like the pnpm tasks do; Yarn 1's flag is
+# `--frozen-lockfile` (`--immutable` is Berry-only).
+# `YARN_IGNORE_PATH=1` is load-bearing (F-243): Yarn 1's launcher honours a
+# `yarnPath` from a HOME-level `~/.yarnrc.yml`, so on any machine that has ever
+# used Yarn Berry, `npx -y yarn@1.22.22` silently re-execs Berry from ANY
+# directory — `npx -y yarn@1.22.22 --version` printed `3.6.4`.
+# Measured 2026-08-01 against a fresh clone of the pin: green, 117 passed, 0 failed, 9s.
+base_verification_command: YARN_IGNORE_PATH=1 npx -y yarn@1.22.22 install --frozen-lockfile && YARN_IGNORE_PATH=1 npx -y yarn@1.22.22 test
 horizon: 3-6h
 goal: |
   Upgrade the `zod` dependency (currently pinned to `3.22.4` via both

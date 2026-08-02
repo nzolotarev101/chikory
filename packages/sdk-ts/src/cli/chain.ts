@@ -1153,10 +1153,15 @@ export async function cmdChainResume(
  * state to re-enter. Returns the resolution so the caller can route (and so the
  * decision is observable without a Temporal server).
  *
- * Every write is fail-closed: an in-flight node (there is something to signal),
- * a live workflow, or an unreachable server all decline. Chains orphaned by the
- * pre-fix `chainLoop` are recovered here; new ones never reach this state
- * because the workflow now always seals.
+ * Every write is fail-closed: a node whose own workflow is still live (there is
+ * something to signal), a live chain workflow, or an unreachable server all
+ * decline. Chains orphaned by the pre-fix `chainLoop` are recovered here; new
+ * ones never reach this state because the workflow now always seals.
+ *
+ * F-240: a node dispatched but never sealed used to decline unconditionally, so
+ * a host process killed mid-node left the chain RUNNING with no command able to
+ * seal it. That node is now probed too, and an abandoned one is sealed FAILED
+ * so the chain seal is resumable.
  */
 export async function repairOrphanedChainSeal(
   chainId: string,
@@ -1166,24 +1171,50 @@ export async function repairOrphanedChainSeal(
   ioPair: Io,
 ): Promise<ParkResolution> {
   const probe = deps.workflowLiveness ?? describeWorkflowLiveness;
-  const workflow: ChainWorkflowLiveness = await probe(chainId, {
-    ...(flags.address !== undefined ? { address: flags.address } : {}),
-  });
+  const address = flags.address !== undefined ? { address: flags.address } : {};
+  const workflow: ChainWorkflowLiveness = await probe(chainId, address);
+
+  // F-240: a dispatched node with no sealed outcome is only a signal target
+  // while its OWN execution lives. Probe it — a child workflow that is gone
+  // means the host died mid-node, and the node is abandoned, not in flight.
+  const inflight = inflightNode(record);
+  const inflightNodeWorkflow =
+    inflight === undefined ? undefined : await probe(inflight.childRunId, address);
+  const abandoned = inflight !== undefined && inflightNodeWorkflow === "gone" ? inflight : undefined;
+
+  const outcomeStatusById: Record<string, string | undefined> = Object.fromEntries(
+    Object.entries(record.nodeOutcomes).map(([id, outcome]) => [id, outcome.status]),
+  );
+  // The abandoned node's seal is written below, but it must count as failed
+  // HERE so `sealFor` makes the chain seal resumable — a resume has real node
+  // evidence on disk to heal from.
+  if (abandoned !== undefined) outcomeStatusById[abandoned.nodeId] = "FAILED";
+
   const decision = decideChainOrphanRepair({
     status: record.status,
-    hasInflightNode: inflightNode(record) !== undefined,
+    hasInflightNode: inflight !== undefined,
+    ...(inflightNodeWorkflow !== undefined ? { inflightNodeWorkflow } : {}),
     workflow,
     failedNodeIds: failedActiveNodeIds({
       nodeIds: record.plan.nodes.map((node) => node.id),
-      outcomeStatusById: Object.fromEntries(
-        Object.entries(record.nodeOutcomes).map(([id, outcome]) => [id, outcome.status]),
-      ),
+      outcomeStatusById,
     }),
   });
   if (decision.action === "none") return decision;
 
   const journal = new ChainJournal(chainJournalPath(flags.dataDir, chainId));
   try {
+    // Seal the abandoned node before the chain, so the chain's terminal entry
+    // is never the last word on a node the reducer still reads as un-sealed.
+    if (abandoned !== undefined) {
+      journal.append("node_sealed", {
+        nodeId: abandoned.nodeId,
+        outcome: { status: "FAILED", verdict: "HALT" },
+      });
+      ioPair.out(
+        `node ${abandoned.nodeId} was abandoned mid-flight (workflow ${abandoned.childRunId} is gone) — sealed FAILED`,
+      );
+    }
     journal.append("terminal", {
       status: decision.status,
       reason: decision.reason,

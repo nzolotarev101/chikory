@@ -59,6 +59,8 @@ export interface RunSuiteOptions {
   judge?: JudgeFn;
   checkTimeoutMs?: number;
   adapterTimeoutMs?: number;
+  /** F-241: cap for install + full base suite; NOT the 120 s judge-check cap. */
+  baseVerifyTimeoutMs?: number;
   /** Skip non-runnable (draft) tasks instead of failing. Default true. */
   skipDrafts?: boolean;
   log?: (line: string) => void;
@@ -126,6 +128,9 @@ export async function runSuite(opts: RunSuiteOptions): Promise<{ summary: SuiteS
       outDir: taskOut,
       timeoutMs: opts.adapterTimeoutMs,
       nodeProvisioning,
+      ...(opts.baseVerifyTimeoutMs !== undefined
+        ? { baseVerifyTimeoutMs: opts.baseVerifyTimeoutMs }
+        : {}),
     });
 
     let baseVerification = run.baseVerification;
@@ -143,6 +148,9 @@ export async function runSuite(opts: RunSuiteOptions): Promise<{ summary: SuiteS
             command: task.baseVerificationCommand,
             cwd: workspaceDir,
             provisioning: nodeProvisioning,
+            ...(opts.baseVerifyTimeoutMs !== undefined
+              ? { timeoutMs: opts.baseVerifyTimeoutMs }
+              : {}),
           });
         } catch (err) {
           baseVerification = {

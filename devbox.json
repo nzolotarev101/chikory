@@ -33,7 +33,10 @@
       "bench-run": "bash scripts/bench-run.sh",
       "judge-proxy": "node scripts/cli-judge-proxy.mjs 8787 codex",
       "harvest": "bash scripts/harvest.sh \"\" main",
-      "harvest-audit": "bash scripts/harvest-audit.sh"
+      "harvest-audit": "bash scripts/harvest-audit.sh",
+      // Reclaim run workspaces (F-236). Dry run by default; journals and
+      // artifacts are never touched: devbox run -- bash scripts/prune-runs.sh --apply
+      "prune-runs": "bash scripts/prune-runs.sh"
     }
   }
 }

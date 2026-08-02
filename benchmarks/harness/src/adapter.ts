@@ -23,6 +23,8 @@ export interface AdapterContext {
   outDir: string;
   timeoutMs?: number;
   nodeProvisioning?: ProvisioningDecision;
+  /** F-241: cap for install + full base suite; NOT the 120 s judge-check cap. */
+  baseVerifyTimeoutMs?: number;
 }
 
 export interface AdapterResult {
@@ -202,6 +204,9 @@ export function commandAdapter(name: string, template: string): RunnerAdapter {
                 command: task.baseVerificationCommand,
                 cwd: ctx.workspaceDir,
                 provisioning: ctx.nodeProvisioning ?? { type: "ambient" },
+                ...(ctx.baseVerifyTimeoutMs !== undefined
+                  ? { timeoutMs: ctx.baseVerifyTimeoutMs }
+                  : {}),
               });
             } catch (err) {
               baseVerification = {

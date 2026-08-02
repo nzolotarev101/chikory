@@ -12,6 +12,11 @@ cd "$(dirname "$0")/.."
 TMPDIR_FIXTURES=$(mktemp -d)
 trap 'rm -rf "$TMPDIR_FIXTURES"' EXIT
 
+# F-236: every case below exercises a guard OTHER than the disk gate, and the
+# machine's free space is not the property under test — so the gate is neutered
+# here and driven explicitly by its own cases at the bottom of this file.
+export CHIKORY_ALLOW_LOW_DISK=1
+
 FAILURES=0
 check() { # <name> <expected-exit> <actual-exit>
   if [ "$3" -eq "$2" ]; then
@@ -170,6 +175,45 @@ check "resume drill refuses when the force-fail seam is UNARMED (WP-532)" 4 $?
 CHIKORY_SEED_CHAIN_FAIL_NODE=1 CHIKORY_CHAIN_RESUME_DRILL=1 CHIKORY_PREFLIGHT_ONLY=1 \
   bash scripts/dogfood.sh --chain "$TMPDIR_FIXTURES/heal-chain.yaml" >/dev/null 2>&1
 check "resume drill preflight passes when --chain + seam armed (WP-532)" 0 $?
+
+# ---- F-236 / WP-560: the free-disk launch gate (1d-quater) ----
+# dogfood-122 launched a rung-4 chain onto 11 GiB free and died 5h39m later with
+# `chikory: unable to open database file`, chain un-sealed. The threshold is
+# injectable so BOTH directions are deterministic on any machine: 1 GiB can
+# never refuse, and 10000 GiB can never pass.
+cat > "$TMPDIR_FIXTURES/disk.yaml" <<'EOF'
+name: fixture-disk-gate
+goal: >
+  Deliver an outcome whose only AC is absent on HEAD, so the launch reaches the
+  disk gate rather than being refused earlier.
+acceptance_criteria:
+  - id: AC-1
+    description: net-new symbol absent on HEAD
+    check: grep -rq 'thisSymbolDoesNotExistAnywhereOnHead' packages/sdk-ts/src/
+EOF
+
+env -u CHIKORY_ALLOW_LOW_DISK CHIKORY_MIN_FREE_GIB=10000 CHIKORY_PREFLIGHT_ONLY=1 \
+  bash scripts/dogfood.sh --run "$TMPDIR_FIXTURES/disk.yaml" >/dev/null 2>&1
+check "dogfood.sh refuses a launch with too little free disk (F-236)" 4 $?
+
+env -u CHIKORY_ALLOW_LOW_DISK CHIKORY_MIN_FREE_GIB=1 CHIKORY_PREFLIGHT_ONLY=1 \
+  bash scripts/dogfood.sh --run "$TMPDIR_FIXTURES/disk.yaml" >/dev/null 2>&1
+check "the disk gate passes when free space clears the threshold (F-236)" 0 $?
+
+CHIKORY_ALLOW_LOW_DISK=1 CHIKORY_MIN_FREE_GIB=10000 CHIKORY_PREFLIGHT_ONLY=1 \
+  bash scripts/dogfood.sh --run "$TMPDIR_FIXTURES/disk.yaml" >/dev/null 2>&1
+check "CHIKORY_ALLOW_LOW_DISK=1 overrides the disk gate (F-236)" 0 $?
+
+# A --chain needs more headroom than a --run: the same free space that clears
+# the run threshold must NOT clear the chain one.
+DISK_OUT=$(env -u CHIKORY_ALLOW_LOW_DISK CHIKORY_PREFLIGHT_ONLY=1 \
+  bash scripts/dogfood.sh --chain "$TMPDIR_FIXTURES/disk.yaml" 2>&1 || true)
+if echo "$DISK_OUT" | grep -qE 'a --chain launch needs at least 40 GiB|disk OK .* --chain needs 40'; then
+  echo "PASS: the disk gate holds a --chain to a higher floor than a --run (F-236)"
+else
+  echo "FAIL: the disk gate did not apply the --chain floor of 40 GiB"
+  FAILURES=$((FAILURES + 1))
+fi
 set -e
 
 echo

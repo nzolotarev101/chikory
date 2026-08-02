@@ -81,6 +81,7 @@ import { decideStepForcing } from "./step-forcing.js";
 import { decideWorkChunk } from "./work-chunk.js";
 import { decideLimitParkDelay } from "./limit-park.js";
 import { decideLimitPacing } from "../runner/limit-pacing.js";
+import { evaluateBaselinePrecheck } from "../util/precheck.js";
 
 /** Step bound when the TaskSpec doesn't say otherwise (executors.md). */
 export const DEFAULT_STEP_LIMITS: StepLimits = { maxSeconds: 600 };
@@ -428,6 +429,48 @@ export async function agentLoop(spec: TaskSpec): Promise<RunStatus> {
   remediationIndexBase = restored.remediationIndexBase;
   completionReviewAttempts = restored.completionReviewAttempts;
   sinceCommit = restored.sinceCommit ?? baseCommit;
+
+  // WP-561 / F-237 — is this node's goal ALREADY satisfied on the base it
+  // inherited? dogfood-122 paid two chain nodes to author benchmark tasks that
+  // had landed on HEAD in `1bec8bb` before the launch. Their oracles were green
+  // on entry, so the executor produced a cosmetic four-line edit and the judge
+  // sealed it SUCCESS — a node cannot fail a criterion it could never turn red.
+  // `evaluateBaselinePrecheck` had been unit-tested for exactly this since
+  // WP-228 and was called from nowhere.
+  //
+  // Deliberately narrow, and the narrowness is load-bearing:
+  //
+  //   * CHAIN NODES ONLY (`spec.chainLink`). A standalone run's spec is the
+  //     operator's own, and `dogfood-progression.sh --preflight` already refuses
+  //     one whose criteria are all green on HEAD ("no armed challenge"). A chain
+  //     NODE's criteria are assigned by the planner, with nothing between the
+  //     assignment and the spend — which is the gap F-237 fell through.
+  //   * FRESH RUNS ONLY (`stepIndex === 0`). A resume re-enters mid-work, where
+  //     a green check is the goal, not a reason to stop.
+  //
+  // KNOWN LIMITATION: a NEGATIVE criterion ("no marker file in X") is green on
+  // an empty base by construction, so this reads it as "already done". The
+  // proper home for the check is the plan gate, which can compare a node's
+  // assigned criteria against the chain base before anyone is paid — this is
+  // the cheap guard, not the complete one.
+  if (
+    stepIndex === 0 &&
+    spec.chainLink !== undefined &&
+    spec.acceptanceCriteria.some((criterion) => criterion.check)
+  ) {
+    const precheck = await activities.precheckAcceptance({
+      runId,
+      criteria: spec.acceptanceCriteria,
+    });
+    const baseline = evaluateBaselinePrecheck(precheck.results);
+    if (baseline.satisfied) {
+      return seal(
+        "SUCCESS",
+        `already satisfied before step 0: ${baseline.summary} (${baseline.passedIds.join(", ")}) — ` +
+          `no step was run, because no step could change the verdict`,
+      );
+    }
+  }
 
   for (;;) {
     if (cancelRequested) return seal("CANCELLED", "cancelled by user");

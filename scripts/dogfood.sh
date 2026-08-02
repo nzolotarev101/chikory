@@ -21,9 +21,11 @@
 # Launch guards (all before any build/spend; each has a deliberate override env):
 #   exit 3 — WP-266/WP-267 AC hazard (static lint or dynamic dry-run: broken check,
 #            file-pin, bare-word negative grep, or no RED-on-HEAD challenge AC)
-#   exit 4 — F-121 spec-named env unset, F-120 window sized at executor scale, or
+#   exit 4 — F-121 spec-named env unset, F-120 window sized at executor scale,
 #            F-146/WP-531 a --chain self-heal spec launched with the force-fail seam
-#            CHIKORY_SEED_CHAIN_FAIL_NODE unarmed (override CHIKORY_ALLOW_UNARMED_HEAL=1)
+#            CHIKORY_SEED_CHAIN_FAIL_NODE unarmed (override CHIKORY_ALLOW_UNARMED_HEAL=1),
+#            or F-236 too little free disk for the launch mode
+#            (override CHIKORY_ALLOW_LOW_DISK=1)
 #
 # The LAUNCH MODE is now EXPLICIT (--run / --chain), chosen by the operator.
 # The old auto-detection (grep the spec for "chikory chain") was BROKEN: every
@@ -111,7 +113,7 @@ fi
 # Any CHIKORY_* env the spec text names is therefore a LAUNCH CONTRACT: every one must be
 # exported in the launching shell or the launch is refused at zero LLM cost.
 # Deliberate exception: CHIKORY_ALLOW_MISSING_ENV=1.
-LAUNCHER_INTERNAL_ENVS='^CHIKORY_(ALLOW_LOOSE_AC_HAZARD|ALLOW_MISSING_ENV|ALLOW_UNARMED_HEAL|ALLOW_WINDOW_SIZE|PREFLIGHT_ONLY|CHAIN_MAX_REPLANS)$'
+LAUNCHER_INTERNAL_ENVS='^CHIKORY_(ALLOW_LOOSE_AC_HAZARD|ALLOW_MISSING_ENV|ALLOW_UNARMED_HEAL|ALLOW_WINDOW_SIZE|ALLOW_LOW_DISK|MIN_FREE_GIB|PREFLIGHT_ONLY|CHAIN_MAX_REPLANS)$'
 SPEC_ENVS=$(grep -oE 'CHIKORY_[A-Z0-9_]+' "$SPEC_FILE" | sort -u | grep -vE "$LAUNCHER_INTERNAL_ENVS" || true)
 MISSING_ENVS=""
 for VAR in $SPEC_ENVS; do
@@ -255,6 +257,41 @@ if [ "${CHIKORY_CHAIN_RESUME_DRILL:-}" = "1" ]; then
     exit 4
   fi
   echo "Setup: WP-532 resume drill ARMED — phase 1 seals FAILED (maxReplans 0), phase 2 chikory chain resume."
+fi
+
+# 1d-quater. F-236 — free disk is a launch precondition, and it is the ONE the
+# operator cannot recover from mid-run. dogfood-122 launched a five-node rung-4
+# chain onto a volume with 11 GiB free; 5h39m and $0.36 later the process died
+# with `chikory: unable to open database file` and the chain never sealed.
+#
+# A chain node that runs the benchmark corpus clones five real OSS targets and
+# installs their node_modules, per suite attempt. That is tens of GiB of churn
+# against a number nobody checked at launch.
+#
+# NOTE for whoever reads a scary `du` here: on APFS the run workspaces are
+# copy-on-write CLONES that share physical blocks, so `du .chikory` reported 95 G
+# where deleting all of it freed only ~9 GiB. Trust `df`, not `du` — which is
+# exactly why this guard measures free space and not directory size.
+DISK_MIN_GIB="${CHIKORY_MIN_FREE_GIB:-$([ "$MODE" = "chain" ] && echo 40 || echo 15)}"
+DISK_FREE_KB=$(df -Pk .chikory 2>/dev/null | awk 'NR==2 {print $4}')
+DISK_FREE_GIB=$(( ${DISK_FREE_KB:-0} / 1024 / 1024 ))
+if [ -n "$DISK_FREE_KB" ] && [ "$DISK_FREE_GIB" -lt "$DISK_MIN_GIB" ]; then
+  if [ "${CHIKORY_ALLOW_LOW_DISK:-}" != "1" ]; then
+    RECLAIMABLE=$(ls -d .chikory/runs/*/workspace 2>/dev/null | wc -l | tr -d ' ')
+    echo "⛔ REFUSING LAUNCH (F-236): only ${DISK_FREE_GIB} GiB free where .chikory lives;" >&2
+    echo "   a --$MODE launch needs at least ${DISK_MIN_GIB} GiB." >&2
+    echo "   dogfood-122 launched at 11 GiB free and died 5h39m in with" >&2
+    echo "   'chikory: unable to open database file', chain un-sealed." >&2
+    echo "   ${RECLAIMABLE} run workspace(s) are reclaimable (journals and artifacts are kept):" >&2
+    echo "     devbox run prune-runs                                  # dry run" >&2
+    echo "     devbox run -- bash scripts/prune-runs.sh --apply" >&2
+    echo "   Deliberate override (you know the run is small):" >&2
+    echo "     CHIKORY_ALLOW_LOW_DISK=1 devbox run ${MODE}-dogfood" >&2
+    exit 4
+  fi
+  echo "Setup: ⚠️  only ${DISK_FREE_GIB} GiB free (want ${DISK_MIN_GIB}) — overridden by CHIKORY_ALLOW_LOW_DISK=1."
+else
+  echo "Setup: disk OK — ${DISK_FREE_GIB} GiB free where .chikory lives (--$MODE needs ${DISK_MIN_GIB})."
 fi
 
 # 1e. Preflight-only mode: run every launch guard above, then stop WITHOUT building,

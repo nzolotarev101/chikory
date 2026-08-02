@@ -205,6 +205,57 @@ async function runCheck(
   };
 }
 
+/**
+ * Run just the criteria checks in the workspace, with no diff, no judge, and no
+ * LLM (WP-561 / F-237). The baseline precheck needs the exit codes ALONE, to
+ * answer "is this node's goal already satisfied before it spends a step?" —
+ * `collectEvidence` would additionally diff every repo and build judge context
+ * that nothing would read.
+ *
+ * Side-effect cleanup is deliberately shared with `collectEvidence`: a check
+ * that writes into the workspace must not leave that write behind as if the
+ * executor had made it.
+ */
+export async function runCriteriaChecks(input: {
+  workspaceDir: string;
+  criteria: AcceptanceCriterion[];
+  workspaceRepos?: EvidenceWorkspaceRepo[];
+  checkTimeoutMs?: number;
+}): Promise<CheckRun[]> {
+  const runs: CheckRun[] = [];
+  const reposToSnapshot =
+    input.workspaceRepos && input.workspaceRepos.length > 0
+      ? input.workspaceRepos.map((repo) => ({
+          dir: repo.relativePath === "." ? input.workspaceDir : join(input.workspaceDir, repo.relativePath),
+        }))
+      : [{ dir: input.workspaceDir }];
+
+  const beforeSnapshots = new Map<string, WorkspaceDirtySnapshot>();
+  for (const repo of reposToSnapshot) {
+    beforeSnapshots.set(repo.dir, await snapshotWorkspace(repo.dir));
+  }
+  try {
+    for (const criterion of input.criteria) {
+      if (!criterion.check) continue;
+      runs.push(
+        await runCheck(
+          input.workspaceDir,
+          criterion,
+          input.checkTimeoutMs ?? DEFAULT_CHECK_TIMEOUT_MS,
+          input.workspaceRepos ?? [],
+        ),
+      );
+    }
+  } finally {
+    for (const repo of reposToSnapshot) {
+      const before = beforeSnapshots.get(repo.dir);
+      const after = await snapshotWorkspace(repo.dir);
+      await applyCleanupPlan(repo.dir, planCheckSideEffectCleanup(before ?? "", after), before);
+    }
+  }
+  return runs;
+}
+
 export interface CollectEvidenceInput {
   workspaceDir: string;
   store: ArtifactStore;

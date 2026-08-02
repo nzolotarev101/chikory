@@ -12,10 +12,9 @@
  * over. `chainRecordFrom` reconstructs the frozen `ChainRecord` from the
  * entries so a chain is itself resumable and traceable (D4).
  */
-import { mkdirSync } from "node:fs";
-import { dirname } from "node:path";
-import { DatabaseSync } from "node:sqlite";
+import type { DatabaseSync } from "node:sqlite";
 
+import { openDatabase } from "../journal/sqlite.js";
 import type {
   ChainNodeHandoff,
   ChainRecord,
@@ -148,8 +147,7 @@ export class ChainJournal {
   private readonly db: DatabaseSync;
 
   constructor(dbPath: string) {
-    mkdirSync(dirname(dbPath), { recursive: true });
-    this.db = new DatabaseSync(dbPath);
+    this.db = openDatabase(dbPath, "chain store");
     this.db.exec("PRAGMA busy_timeout = 5000;");
     this.db.exec("PRAGMA journal_mode = WAL;");
     this.db.exec(`

@@ -2,6 +2,8 @@ import { describe, expect, it } from "vitest";
 import {
   verifyBaseGreen,
   parseTestSummary,
+  outputTail,
+  DEFAULT_BASE_VERIFY_TIMEOUT_MS,
   type BaseVerifyRunner,
 } from "../src/base-verify.js";
 import type { ProvisioningDecision } from "../src/engine.js";
@@ -74,6 +76,118 @@ describe("verifyBaseGreen", () => {
   it("family 4 negative: parses valid output successfully", async () => {
     const parsed = parseTestSummary(GREEN_OUTPUT);
     expect(parsed).toEqual({ testsPassed: 1128, testsFailed: 0 });
+  });
+
+  // F-238 (dogfood-122): every scored task reported the same
+  // "Unparseable suite output: could not find test summary" whether the suite
+  // ran and printed something odd or never started at all. The exit code is
+  // the discriminator and it was being checked second, then discarded.
+  describe("F-238: a suite that never ran must not be reported as unparseable", () => {
+    const INSTALL_FAILURE =
+      "Progress: resolved 0, reused 0\nERR_PNPM_LOCKFILE_CONFIG_MISMATCH  Cannot install with frozen-lockfile\nERROR  Command failed with exit code 1";
+
+    it("names the exit code and the real output when the command failed", async () => {
+      const mock = createMockRunner(1, INSTALL_FAILURE);
+      const res = await verifyBaseGreen({ command: "pnpm install && pnpm test", cwd: "/w", provisioning: amb, run: mock.run });
+      expect(res.green).toBe(false);
+      expect(res.reason).toContain("exit code 1");
+      expect(res.reason).toContain("ERR_PNPM_LOCKFILE_CONFIG_MISMATCH");
+      // The parser is NOT blamed for a suite that never got to print a summary.
+      expect(res.reason).not.toContain("Unparseable");
+    });
+
+    it("still says unparseable when the command SUCCEEDED but printed no summary", async () => {
+      const mock = createMockRunner(0, JUNK_OUTPUT);
+      const res = await verifyBaseGreen({ command: "pnpm test", cwd: "/w", provisioning: amb, run: mock.run });
+      expect(res.reason).toContain("Unparseable");
+      expect(res.reason).toContain("Segmentation fault");
+    });
+
+    it("keeps the plain exit-code reason when the failing suite DID print counts", async () => {
+      const mock = createMockRunner(1, RED_OUTPUT);
+      const res = await verifyBaseGreen({ command: "pnpm test", cwd: "/w", provisioning: amb, run: mock.run });
+      expect(res.reason).toBe("Verification command failed with exit code 1");
+      expect(res.testsFailed).toBe(354);
+    });
+
+    it("survives a command that printed nothing at all", async () => {
+      const mock = createMockRunner(127, "");
+      const res = await verifyBaseGreen({ command: "pnpm test", cwd: "/w", provisioning: amb, run: mock.run });
+      expect(res.reason).toContain("exit code 127");
+      expect(res.reason).toContain("no output at all");
+    });
+  });
+
+  // F-241 (dogfood-122): base verification borrowed DEFAULT_CHECK_TIMEOUT_MS —
+  // the 120 s cap for a single judge assertion — for a job that installs a real
+  // target's dependencies and runs its entire suite. It could never pass, so
+  // AC-7/AC-8 (`baseVerification.green === true` on all five tasks) made P3
+  // rung 4 unreachable, and no message said why.
+  describe("F-241: base verification gets a timeout sized for install + suite", () => {
+    function capturingRunner(code: number, output: string) {
+      const calls: { timeoutMs?: number }[] = [];
+      const run: BaseVerifyRunner = async (input) => {
+        calls.push({ ...(input.timeoutMs !== undefined ? { timeoutMs: input.timeoutMs } : {}) });
+        return { code, output };
+      };
+      return { run, calls };
+    }
+
+    it("defaults to far more than the 120 s judge-check cap", async () => {
+      const mock = capturingRunner(0, GREEN_OUTPUT);
+      await verifyBaseGreen({ command: "pnpm test", cwd: "/w", provisioning: amb, run: mock.run });
+      expect(mock.calls[0]?.timeoutMs).toBe(DEFAULT_BASE_VERIFY_TIMEOUT_MS);
+      expect(DEFAULT_BASE_VERIFY_TIMEOUT_MS).toBeGreaterThan(120_000);
+    });
+
+    it("honours an explicit cap", async () => {
+      const mock = capturingRunner(0, GREEN_OUTPUT);
+      await verifyBaseGreen({
+        command: "pnpm test",
+        cwd: "/w",
+        provisioning: amb,
+        run: mock.run,
+        timeoutMs: 90 * 60_000,
+      });
+      expect(mock.calls[0]?.timeoutMs).toBe(5_400_000);
+    });
+
+    it("reports a timeout as a timeout, not as unparseable output", async () => {
+      // What the real runner produces when the cap is hit: partial output plus
+      // the marker, and a non-zero code.
+      const mock = createMockRunner(1, "Progress: resolved 812\n[base verification timed out after 120000ms]");
+      const res = await verifyBaseGreen({ command: "pnpm test", cwd: "/w", provisioning: amb, run: mock.run });
+      expect(res.green).toBe(false);
+      expect(res.reason).toContain("timed out");
+      expect(res.reason).not.toContain("Unparseable");
+    });
+  });
+
+  // F-243 (dogfood-122): a HOME-level ~/.yarnrc.yml with `yarnPath` made Yarn 1
+  // re-exec Yarn Berry from any directory, so brownfield-001's base verification
+  // failed with a Berry lockfile error that looked like a defect in the target.
+  it("F-243: neutralises a HOME-level yarnPath so a pinned yarn means that yarn", async () => {
+    const mock = createMockRunner(0, GREEN_OUTPUT);
+    await verifyBaseGreen({
+      command: "npx -y yarn@1.22.22 install --frozen-lockfile",
+      cwd: "/w",
+      provisioning: amb,
+      run: mock.run,
+    });
+    expect(mock.calls[0]?.env?.YARN_IGNORE_PATH).toBe("1");
+  });
+
+  describe("outputTail", () => {
+    it("strips ANSI, drops blank lines, and keeps the last five", () => {
+      const tail = outputTail("[32mone[0m\n\n two \n three\nfour\nfive\nsix\n");
+      expect(tail).toBe("two ⏎ three ⏎ four ⏎ five ⏎ six");
+    });
+
+    it("bounds a runaway line to the limit, keeping its END", () => {
+      const tail = outputTail(`${"a".repeat(50)}FINAL`, 20);
+      expect(tail.length).toBeLessThanOrEqual(21); // 20 + the ellipsis marker
+      expect(tail.endsWith("FINAL")).toBe(true);
+    });
   });
 
   // Family 5 / Trap C (provision): binDir prepended to PATH & negative (ambient)

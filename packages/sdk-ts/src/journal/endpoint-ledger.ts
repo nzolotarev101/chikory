@@ -11,10 +11,9 @@
  * Touched ONLY inside activities: the workflow sees quota state exclusively
  * as memoized activity results.
  */
-import { mkdirSync } from "node:fs";
-import { dirname } from "node:path";
-import { DatabaseSync } from "node:sqlite";
+import type { DatabaseSync } from "node:sqlite";
 
+import { openDatabase } from "./sqlite.js";
 import type { DeclaredQuotaWindow } from "../endpoint-capability.js";
 
 export interface ConsumptionAppend {
@@ -55,8 +54,7 @@ export class EndpointLedger {
   private readonly db: DatabaseSync;
 
   constructor(dbPath: string) {
-    mkdirSync(dirname(dbPath), { recursive: true });
-    this.db = new DatabaseSync(dbPath);
+    this.db = openDatabase(dbPath, "endpoint ledger");
     // Concurrent runs on one subscription share this file: writers must wait
     // each other out instead of failing with SQLITE_BUSY.
     this.db.exec("PRAGMA busy_timeout = 5000;");

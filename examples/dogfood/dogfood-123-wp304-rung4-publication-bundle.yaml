@@ -1,0 +1,212 @@
+# Plain: Turn the two arm results the operator already ran into one small, auditable
+# comparison bundle that reports score RANGES and links back to the raw evidence.
+# WP: WP-304 (baseline runs and publication)
+# Ladder-rung: 4
+# Thesis-KPI: benchmark slice vs a baseline — the published interval, linked to both raw arms
+# Format: loose — the outcome and the comparison contract are fixed; layout and prose are the executor's
+#
+# Launch mode: RUN (single node — one deliverable). Launch only after this review's commits are
+# pushed AND both arms exist on disk:
+#   CHIKORY_PREFLIGHT_ONLY=1 devbox run run-dogfood
+#   devbox run run-dogfood
+#
+# ⛔ DO NOT LAUNCH UNTIL BOTH ARMS EXIST. This spec deliberately does NOT run the arms.
+#   Required first, by the operator, sequentially, outside the agent loop:
+#     devbox run -- bash scripts/bench-run.sh --out benchmarks/results/p3-rung-4/chikory
+#     # …then, only after that returns:
+#     devbox run -- bash scripts/bench-run.sh --adapter command --cmd '<claude-code template>' \
+#       --out benchmarks/results/p3-rung-4/raw-claude-code
+#   AC-2 is RED until `benchmarks/publications/p3-rung-4/` exists; the arms' own summaries are
+#   inputs this node READS, never something it may fabricate.
+#
+# WHY THIS AND NOT THE dogfood-121 CHAIN (dogfood-122 review, 2026-08-01):
+#   dogfood-121's five-node chain was attempted twice and failed twice
+#   (`chain-86fbe5a7…` $0.8869, `chain-ebecd792…` $0.6545, docs/reports/dogfood-121.md and -122.md).
+#   It is NOT re-run, because its shape is wrong, not its luck:
+#     * `N-1`/`N-2` authored brownfield-004/005, which landed in `1bec8bb`. Re-running them can only
+#       re-grade finished work — dogfood-122 paid for exactly that and got a 4-line cosmetic diff
+#       sealed SUCCESS (F-237, now guarded by WP-561).
+#     * `N-3`/`N-4` asked an LLM executor, inside a step loop with no resume, to supervise a
+#       multi-hour, disk-heavy, quota-bound benchmark. It responded by starting the job five times
+#       concurrently (F-239, now guarded by WP-562). That work belongs to the operator.
+#   What is genuinely left is the publication bundle. That is this spec, and nothing else.
+#
+# PRECONDITIONS, ALL MEASURED (do not re-litigate; re-measure if stale):
+#   * 5/5 base verifications green, 2026-08-01, against fresh clones of each declared pin:
+#       brownfield-001 zodios 117 · -002 gitify 1128 · -003 zod 3680 · -004 react-hook-form 1208 ·
+#       -005 trpc 22 — 87 s for the whole corpus.
+#   * `chikory-bench compare` already emits 95% Wilson intervals and each arm's `rawResultsDir`
+#     (AC-1 guards it). It must be USED, not rebuilt.
+#
+# Designed traps:
+#   A. Inventing, editing, or "correcting" an arm's numbers instead of reading them. The summaries
+#      are evidence; this node's job is to publish them, not to improve them.
+#   B. A point estimate presented as a range, or a range over the wrong denominator.
+#   C. Copying raw evidence (clones, node_modules, transcripts) into the committed bundle.
+#      `benchmarks/results/` is gitignored in its entirety, by design.
+#   D. Rebuilding the `command` adapter or the comparison capability.
+
+name: dogfood-123-wp304-rung4-publication-bundle
+goal: >
+  Publish the P3 rung-4 comparison: take the two arm summaries the operator already produced —
+  `benchmarks/results/p3-rung-4/chikory/summary.json` (Chikory's directive arm, Gemini executes and
+  Codex judges) and `benchmarks/results/p3-rung-4/raw-claude-code/summary.json` (raw Claude Code
+  through the `command` adapter) — and turn them into one small, auditable bundle under
+  `benchmarks/publications/p3-rung-4/`.
+
+  Use the existing `chikory-bench compare` capability on the two real `summary.json` files. It
+  already requires identical ordered task ids, `tasksVerified === tasks === 5` and no
+  `unverifiedTasks`, and it already emits I-SR/D-SR point estimates, finite 95% Wilson score ranges,
+  and each arm's `rawResultsDir`. Extend it only where this goal demands it; do not rebuild it, and
+  do not rebuild the `command` adapter.
+
+  The finished bundle must make all of the following true:
+
+    * `benchmarks/publications/p3-rung-4/` holds exactly: `chikory-summary.json` and
+      `raw-claude-code-summary.json` (verbatim copies of the two small arm summaries),
+      `comparison.json` (generated), and `report.md`.
+
+    * The two copied summaries are BYTE-FAITHFUL to their sources. They are evidence produced by
+      runs this node did not perform; reading them is the whole job. Do not recompute, round,
+      reorder, or repair any field — if an arm looks wrong, say so in the report and stop.
+
+    * `report.md` names the exact task ids, each arm's adapter and executor/judge families, the
+      wall-clock totals, the requirement counts, the point estimates, and the 95% intervals — and
+      makes the INTERVAL, not the point estimate, the headline claim. It links both raw result
+      directories by path, and states plainly that those directories are gitignored and local.
+
+    * Nothing else is committed: no provider credentials, no transcripts, no target `node_modules`,
+      no cloned target repositories, no raw per-task result JSON. Raw evidence stays under
+      `benchmarks/results/`.
+
+  Constraints: TypeScript stays strict ESM with named exports and no `any`; no new dependency,
+  provider SDK, API key, global install, frozen contract change, or unrelated package edit. Project
+  commands run sequentially inside the already-activated Devbox environment, so invoke pinned tools
+  directly and never nest `devbox run`. Writes stay within `benchmarks/publications/p3-rung-4/` and,
+  only if narrowly required, `benchmarks/harness/`. Every existing test remains green.
+
+repos:
+  - url: /Users/nikitazolotarev/repos/chikory
+    writable: true
+
+acceptance_criteria:
+  - id: AC-1
+    description: >
+      REGRESSION GUARD, not this node's oracle — it passes on HEAD today and must keep passing. The
+      comparison CLI still owns the statistical oracle after any change made here: against two
+      synthetic five-task summaries it emits 95% Wilson intervals from satisfied/total requirement
+      counts, keeps the identical ordered task set, names each arm's raw results directory, and
+      rejects a mismatched or shortened arm. This check specifies its inputs and expected interval
+      endpoints itself; executor-authored tests are not the oracle.
+    check: |
+      cd benchmarks/harness && pnpm exec tsc && node -e '
+      const {mkdtempSync,writeFileSync,readFileSync}=require("node:fs");
+      const {execFileSync,spawnSync}=require("node:child_process");
+      const {tmpdir}=require("node:os");
+      const {join}=require("node:path");
+      const A=(c,m)=>{if(!c){console.error("FAIL: "+m);process.exit(1);}};
+      const d=mkdtempSync(join(tmpdir(),"rung4-compare-"));
+      const ids=["brownfield-001","brownfield-002","brownfield-003","brownfield-004","brownfield-005"];
+      const summary=(adapter,sat,total)=>({
+        suite:"rung4",adapter,startedAt:"2026-01-01T00:00:00Z",endedAt:"2026-01-01T01:00:00Z",
+        tasks:5,tasksVerified:5,unverifiedTasks:[],requirementsTotal:total,
+        requirementsSatisfied:sat,iSr:sat/total,dSr:sat/total,
+        perTask:ids.map((taskId)=>({taskId,satisfied:1,dependencySatisfied:1,total:1,exitCode:0,wallClockMs:1,baseVerified:true}))
+      });
+      const left=join(d,"left.json"),right=join(d,"right.json"),out=join(d,"comparison.json");
+      writeFileSync(left,JSON.stringify(summary("chikory",8,10)));
+      writeFileSync(right,JSON.stringify(summary("raw-claude-code",5,10)));
+      execFileSync("node",["dist/bin.js","compare","--left",left,"--left-label","chikory",
+        "--right",right,"--right-label","raw-claude-code","--out",out],{stdio:"inherit"});
+      const r=JSON.parse(readFileSync(out,"utf8"));
+      A(JSON.stringify(r.taskIds)===JSON.stringify(ids),"task ids must stay identical and ordered");
+      const by=Object.fromEntries(r.arms.map((x)=>[x.label,x]));
+      const near=(a,b)=>Math.abs(a-b)<0.001;
+      A(near(by.chikory.iSrRange.low,0.490)&&near(by.chikory.iSrRange.high,0.943),
+        "8/10 Wilson interval must be approximately [0.490,0.943]");
+      A(near(by["raw-claude-code"].iSrRange.low,0.237)&&near(by["raw-claude-code"].iSrRange.high,0.763),
+        "5/10 Wilson interval must be approximately [0.237,0.763]");
+      A(r.arms.every((x)=>typeof x.rawResultsDir==="string"&&x.rawResultsDir.length>0),
+        "every arm must name its raw results directory");
+      const bad={...summary("raw-claude-code",5,10),perTask:summary("raw-claude-code",5,10).perTask.slice(1),tasks:4,tasksVerified:4};
+      writeFileSync(right,JSON.stringify(bad));
+      const p=spawnSync("node",["dist/bin.js","compare","--left",left,"--left-label","chikory",
+        "--right",right,"--right-label","raw-claude-code","--out",out],{encoding:"utf8"});
+      A(p.status!==0,"mismatched/shortened task sets must fail closed");
+      console.log("AC-1 OK: compare emits the specified ranges and rejects a mismatched arm");
+      '
+
+  - id: AC-2
+    description: >
+      THIS NODE'S OWN ORACLE — RED on HEAD, green only once the bundle lands. The published bundle
+      proves the actual campaign: two summaries over the same five verified task ids, one the
+      Chikory directive arm and one raw Claude Code through the `command` adapter, a comparison with
+      finite intervals and raw-result references, and a report that leads with the interval. The
+      copied summaries must be BYTE-FAITHFUL to the arm results on disk — this node publishes
+      evidence it did not produce, so a "corrected" number is a fabricated one (trap A).
+    check: |
+      cd benchmarks/harness && pnpm exec tsc && node --input-type=module -e '
+      import {readFileSync,existsSync} from "node:fs";
+      const P="../publications/p3-rung-4/";
+      const R="../results/p3-rung-4/";
+      const A=(c,m)=>{if(!c){console.error("FAIL: "+m);process.exit(1);}};
+      for (const f of ["chikory-summary.json","raw-claude-code-summary.json","comparison.json","report.md"])
+        A(existsSync(P+f),"missing "+P+f);
+      const load=(f)=>JSON.parse(readFileSync(P+f,"utf8"));
+      const c=load("chikory-summary.json"),b=load("raw-claude-code-summary.json"),r=load("comparison.json");
+      const ids=(s)=>s.perTask.map((x)=>x.taskId).sort();
+      A(c.tasks===5&&c.tasksVerified===5&&c.unverifiedTasks.length===0,"Chikory arm must verify 5/5 bases");
+      A(b.tasks===5&&b.tasksVerified===5&&b.unverifiedTasks.length===0,"baseline arm must verify 5/5 bases");
+      A(JSON.stringify(ids(c))===JSON.stringify(ids(b)),"both arms must score the identical task set");
+      A(c.adapter==="chikory","the Chikory arm must record adapter chikory, got "+c.adapter);
+      A(b.adapter==="command",
+        "the baseline must be the command adapter, not a second Chikory configuration — got "+b.adapter);
+      // Trap A: the published copies must equal the arm results byte for byte.
+      for (const [pub,src] of [["chikory-summary.json","chikory/summary.json"],
+                               ["raw-claude-code-summary.json","raw-claude-code/summary.json"]]) {
+        A(existsSync(R+src),"missing arm result "+R+src+" — run the arms BEFORE this spec");
+        A(readFileSync(P+pub,"utf8")===readFileSync(R+src,"utf8"),
+          pub+" is not byte-faithful to "+src+"; a published summary is copied evidence, never recomputed");
+      }
+      A(r.arms.some((x)=>x.label==="chikory")&&r.arms.some((x)=>x.label==="raw-claude-code"),
+        "comparison must name both real arms");
+      A(r.arms.every((x)=>Number.isFinite(x.iSrRange.low)&&Number.isFinite(x.iSrRange.high)&&
+        x.iSrRange.low<=x.iSrRange.high&&typeof x.rawResultsDir==="string"&&x.rawResultsDir.length>0),
+        "every arm needs a finite range and a raw-results reference");
+      const md=readFileSync(P+"report.md","utf8");
+      for (const id of ids(c)) A(md.includes(id),"report.md must name task id "+id);
+      A(/chikory/i.test(md)&&/claude/i.test(md),"report.md must name both arms");
+      A(md.includes("results/p3-rung-4/chikory")&&md.includes("results/p3-rung-4/raw-claude-code"),
+        "report.md must link BOTH raw result directories");
+      console.log("AC-2 OK: the rung-4 bundle publishes two byte-faithful five-task arms and auditable ranges");
+      '
+
+budget_usd: 15
+max_steps: 12
+
+step_limits:
+  max_turns: 40
+  max_seconds: 900
+
+pacing:
+  mode: auto
+  autoCalibrate: true
+
+unattended:
+  escalation: seal_resumable_failed
+
+executor:
+  adapter: gemini-cli
+  family: gemini
+
+judge:
+  family: openai-compat
+  cadence: 1
+  max_cost_share: 0.5
+
+routing:
+  stages:
+    plan: { provider: openai-compat, model: gpt-5.6-sol xhigh }
+    code: { provider: openai-compat, model: default }
+    review: { provider: openai-compat, model: gpt-5.6-sol xhigh }
+    judge: { provider: openai-compat, model: gpt-5.6-sol xhigh }
