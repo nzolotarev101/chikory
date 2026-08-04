@@ -13,6 +13,13 @@ export interface BoundedProcessOptions {
   maxSeconds: number;
   /** SIGTERM → SIGKILL grace. */
   killGraceMs?: number;
+  /**
+   * Live output sink, called per chunk as it arrives. For callers that must
+   * stream to a file or cap their own capture (the benchmark harness tails a
+   * multi-hour run's `adapter.log`) — `stdout`/`stderr` in the result are still
+   * accumulated in full regardless.
+   */
+  onOutput?: (chunk: Buffer, stream: "stdout" | "stderr") => void;
 }
 
 export interface BoundedProcessResult {
@@ -74,8 +81,14 @@ export function runBounded(
       );
     }, opts.maxSeconds * 1000);
 
-    child.stdout.on("data", (chunk: Buffer) => (stdout += chunk.toString("utf8")));
-    child.stderr.on("data", (chunk: Buffer) => (stderr += chunk.toString("utf8")));
+    child.stdout.on("data", (chunk: Buffer) => {
+      stdout += chunk.toString("utf8");
+      opts.onOutput?.(chunk, "stdout");
+    });
+    child.stderr.on("data", (chunk: Buffer) => {
+      stderr += chunk.toString("utf8");
+      opts.onOutput?.(chunk, "stderr");
+    });
 
     child.on("error", (err) => {
       clearTimeout(deadline);

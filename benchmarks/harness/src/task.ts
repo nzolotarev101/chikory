@@ -53,6 +53,20 @@ export interface BenchmarkTask {
   preferences: BenchmarkPreference[];
   repo?: { url: string; ref: string };
   baseVerificationCommand?: string;
+  /**
+   * F-254 (WP-586): exact Node version this task is graded on, overriding the
+   * repo's own `engines` range.
+   *
+   * A `pinned` task pins its repo to a 40-hex sha for reproducibility, then
+   * hands the runtime back to an open range like `">=24"` — so the harness
+   * picks whatever the newest locally-installed Node happens to be, and the
+   * same sha scores differently on two machines or two months apart.
+   * `brownfield-002` is the live proof: at ref `a061eaa1`, node **24.14.1**
+   * runs 1128/1128 green, while node **24.15.0** SIGABRTs vitest 4.1.9 before
+   * a single test executes. p3-rung-4 drew 24.15.0, recorded
+   * `baseVerified: false`, and dropped the task out of the arm.
+   */
+  nodeVersion?: string;
   horizon?: string;
   metricsNotes?: string;
   tags: string[];
@@ -83,6 +97,11 @@ const AuthoredTaskYaml = z
     blocked_reason: z.string().min(1).optional(),
     repo: z.object({ url: z.string().min(1), ref: z.string().min(1) }).strict().optional(),
     base_verification_command: z.string().min(1).optional(),
+    /** F-254: exact `x.y.z` Node the task is graded on; overrides repo `engines`. */
+    node_version: z
+      .string()
+      .regex(/^\d+\.\d+\.\d+$/, "node_version must be an exact x.y.z version")
+      .optional(),
     horizon: z.union([z.string(), z.number()]).optional(),
     goal: z.string().min(1),
     requirements: z.array(AuthoredRequirementYaml).min(1),
@@ -212,6 +231,7 @@ export function validateAuthoredTask(
     preferences: [],
     repo: t.repo && t.repo.url !== "TBD" ? { url: t.repo.url, ref: t.repo.ref } : undefined,
     baseVerificationCommand: t.base_verification_command,
+    nodeVersion: t.node_version,
     horizon: t.horizon === undefined ? undefined : String(t.horizon),
     metricsNotes: t.metrics_notes,
     tags: t.tags ?? [],

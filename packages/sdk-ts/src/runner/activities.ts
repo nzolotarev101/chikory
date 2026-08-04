@@ -109,6 +109,7 @@ import {
 } from "./paths.js";
 import {
   historyCutoffIdx,
+  consecutiveStrikeTail,
   isInfraStepFailure,
   markInfraFailedPass,
 } from "./strike-accounting.js";
@@ -1214,14 +1215,33 @@ export function createRunnerActivities(deps: RunnerActivityDeps) {
           if (record.status === "FAILED" && rawLimitSignal !== undefined) {
             const observedAtMs = Date.now();
             const limitCapabilities = resolveEndpointCapabilities(spec.routing);
+            // F-251 (WP-583): a wall belongs to the endpoint that HIT it. A
+            // `cli-stderr` signal came off the executor binary's own stderr, so
+            // it is the executor's endpoint regardless of what `routing.code`
+            // says — a CLI executor never routes through that provider, and the
+            // stage entry is a structurally-required placeholder. Only an
+            // `http` signal (a real routed response) belongs to `routing.code`.
+            //
+            // p3-rung-4 is what this costs: every task's routing pinned `code`
+            // to `openai-compat` (the Codex judge proxy), so Gemini's
+            // "Individual quota reached" was learned against the JUDGE endpoint
+            // in the cross-run ledger — and WP-568 member cooling would have
+            // sidelined the wrong agent off it.
+            const executorCapability = describeEndpointCapability({
+              adapter: spec.executor.adapter,
+              family: spec.executor.family,
+            });
+            const routedCapability = limitCapabilities.code[0] ?? capabilities.code[0];
+            // An UNRECOGNIZED executor adapter describes as `kind: "unknown"`,
+            // which carries no limit shape to classify against — falling back
+            // to the routed endpoint keeps the wall visible rather than
+            // dropping the signal, which is strictly worse than mis-filing it.
+            const walledCapability =
+              rawLimitSignal.kind === "cli-stderr" && executorCapability.kind !== "unknown"
+                ? executorCapability
+                : (routedCapability ?? executorCapability);
             const classified = classifyLimitSignal({
-              capability:
-                limitCapabilities.code[0] ??
-                capabilities.code[0] ??
-                describeEndpointCapability({
-                  adapter: spec.executor.adapter,
-                  family: spec.executor.family,
-                }),
+              capability: walledCapability,
               signal: rawLimitSignal,
               nowMs: observedAtMs,
             });
@@ -1379,6 +1399,10 @@ export function createRunnerActivities(deps: RunnerActivityDeps) {
                 baseRouting: spec.routing,
                 modelFamily: spec.executor.family,
                 routerOptions: deps.routerOptions,
+                // F-248 (WP-580): this wall came off the executor's own stderr,
+                // so the executor already ran and its edits are already on disk.
+                // Hand the attempt over instead of fabricating an empty record.
+                attemptedRecord: record,
                 stepInput: {
                   workspaceDir: workspaceDir(deps.dataDir, input.runId),
                   instruction: input.instruction,
@@ -2057,12 +2081,12 @@ export function createRunnerActivities(deps: RunnerActivityDeps) {
             },
             { completedReentries: 0, totalSleptMs: 0 },
           );
-        const lastStep = steps[steps.length - 1];
-        const consecutiveFailures = [...steps]
-          .reverse()
-          .findIndex((step) => step.record.status !== "FAILED");
-        const failedTail =
-          consecutiveFailures === -1 ? steps.length : consecutiveFailures;
+        // F-246 (WP-578): the resumed loop must inherit the count the LIVE loop
+        // held, so this reads the same accounting `agent-loop.ts` advances —
+        // infra-flagged steps (cap kills, quota parks) neither add nor reset.
+        // The old raw `status !== "FAILED"` scan handed a resume a strike tally
+        // the run it was resuming never had.
+        const failedTail = consecutiveStrikeTail(steps.map((step) => step.record));
 
         function nextPayloadIndex(kind: Parameters<Journal["entries"]>[0], field: string): number {
           const values = journal.entries(kind).map((entry) => {
@@ -2085,7 +2109,7 @@ export function createRunnerActivities(deps: RunnerActivityDeps) {
           limitPaceEventIndex: nextPayloadIndex("limit_pace", "limitPaceEventIndex"),
           escalationIndex: nextPayloadIndex("verdict", "escalationIndex"),
           controlEventIndex: nextPayloadIndex("control_event", "controlEventIndex"),
-          consecutiveFailures: lastStep?.record.status === "FAILED" ? failedTail : 0,
+          consecutiveFailures: failedTail,
           recentSummaries: steps.map((step) => step.record.summary),
           stepCosts,
           stepTokens,

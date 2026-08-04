@@ -102,10 +102,18 @@ export OPENAI_COMPAT_BASE_URL="http://127.0.0.1:$PROXY_PORT"
 
 # 4. Run the suite. Defaults target the runnable brownfield corpus with the
 # gemini executor; forwarded args come AFTER so a passed --flag overrides.
+# `--agent-classes` (F-253/WP-585) is what lets a quota wall rotate to a peer
+# instead of parking — p3-rung-4 ran without it and parked on all 5 walls. It
+# points at the BENCH class file, not the root `agent-classes.yaml`: the root one
+# lists Claude fallbacks, and rotating an arm onto Claude both violates the
+# directive and publishes an I-SR measured on a mixed executor (the preflight
+# refuses it). Probe every member at $0 first:
+#   devbox run -- node scripts/probe-agent-classes.mjs benchmarks/agent-classes.bench.yaml
 echo "bench-run: launching bench (executor gemini · judge codex via $OPENAI_COMPAT_BASE_URL)"
 exec bash scripts/bench.sh run \
   --tasks benchmarks/tasks \
   --adapter chikory \
   --executor gemini \
+  --agent-classes benchmarks/agent-classes.bench.yaml \
   --filter brownfield \
   "$@"

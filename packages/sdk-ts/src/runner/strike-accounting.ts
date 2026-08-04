@@ -43,6 +43,47 @@ export function isInfraStepFailure(record: Pick<StepRecord, "status" | "failure"
   return record.failure?.reason.startsWith(LEGACY_CAP_KILL_PREFIX) === true;
 }
 
+/** The two fields the CG-1 strike counters read off a step record. */
+type StrikeCountable = Pick<StepRecord, "status" | "failure"> & { infraFailed?: boolean };
+
+/**
+ * F-246 (WP-578) — advance the CG-1 loop-breaker's consecutive-failure count by
+ * one step.
+ *
+ * An infra failure NEITHER adds nor resets: it is not evidence the agent is
+ * spinning (it never got its turn), but it must not launder a genuine failing
+ * streak either. Skipping — rather than breaking, which is what the rotation
+ * counter in `activities.ts` deliberately does for its own reasons — is what
+ * keeps `[fail, park, fail, park, fail]` escalating on the third real failure
+ * instead of spinning forever.
+ *
+ * `p3-rung-4`'s `brownfield-001` is why this exists: two steps killed at
+ * `maxSeconds=840` plus one quota park counted 3/3, escalated to
+ * AWAITING_APPROVAL with no operator behind it, and burned the run's remaining
+ * 4 hours on a wall the agent had no part in. Zero of the three strikes were
+ * the agent's.
+ */
+export function advanceStrikeCount(current: number, record: StrikeCountable): number {
+  if (isInfraStepFailure(record)) return current;
+  return record.status === "FAILED" ? current + 1 : 0;
+}
+
+/**
+ * The same accounting, re-derived from a journal's step tail — `restoreWorkflowState`
+ * must hand the resumed loop the count the live loop held, or a resume silently
+ * disagrees with the run it is resuming.
+ */
+export function consecutiveStrikeTail(records: readonly StrikeCountable[]): number {
+  let count = 0;
+  for (let i = records.length - 1; i >= 0; i--) {
+    const record = records[i]!;
+    if (isInfraStepFailure(record)) continue;
+    if (record.status !== "FAILED") break;
+    count++;
+  }
+  return count;
+}
+
 /**
  * Flag every criterion result of a pass that judged a cap-killed step, so the
  * result rides the JOURNALED form and every later pass skips it too (the

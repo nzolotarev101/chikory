@@ -2,8 +2,9 @@
  * `chikory-bench` — WP-301 harness CLI (entry: `bin.ts`). Runs inside devbox
  * (`devbox run bench -- <command>`), never against host toolchains.
  */
-import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
+import { parse as parseYaml } from "yaml";
 
 import { chikoryAdapter, commandAdapter, type RunnerAdapter } from "./adapter.js";
 import { fetchDevAIInstances } from "./devai.js";
@@ -31,6 +32,8 @@ commands:
       --adapter <name>       chikory | command
       [--executor <name>]    chikory executor: gemini | claude-code | codex
                              (default gemini; also CHIKORY_BENCH_EXECUTOR)
+      [--agent-classes <f>]  agent-classes.yaml declaring peer members, so a
+                             quota wall rotates instead of parking (WP-585)
       [--cmd <template>]     command adapter template; placeholders
                              {workspace} {goalFile} {taskId}
       [--judge-cmd <tmpl>]   grade judge-kind requirements via a CLI judge;
@@ -73,6 +76,31 @@ function resolveExecutor(name: string): { adapter: string; family: string } | un
     default:
       return undefined;
   }
+}
+
+/**
+ * F-253 (WP-585): a registry file → the `{executor, judge}` class-id references
+ * a task spec carries. The spec names classes by id; the registry itself is
+ * resolved separately by the runner.
+ *
+ * Exactly one class per role, or nothing: a bench arm that could start on
+ * either of two executor classes is not one measurement, and picking silently
+ * would hide that from the published number.
+ */
+export function pickClassRefs(
+  registry: unknown,
+): { executor: string; judge: string } | undefined {
+  if (!registry || typeof registry !== "object") return undefined;
+  const classes = (registry as { classes?: unknown }).classes;
+  if (!classes || typeof classes !== "object") return undefined;
+
+  const byRole: Record<string, string[]> = { executor: [], judge: [] };
+  for (const [classId, declared] of Object.entries(classes as Record<string, unknown>)) {
+    const role = (declared as { role?: unknown } | null)?.role;
+    if (typeof role === "string" && byRole[role]) byRole[role].push(classId);
+  }
+  if (byRole.executor.length !== 1 || byRole.judge.length !== 1) return undefined;
+  return { executor: byRole.executor[0]!, judge: byRole.judge[0]! };
 }
 
 function parseFlags(argv: string[]): Flags {
@@ -172,7 +200,40 @@ export async function main(argv: string[], io = { out: console.log, err: console
         io.err(`chikory-bench run: unknown --executor '${executorName}' (gemini | claude-code | codex)`);
         return 1;
       }
-      adapter = chikoryAdapter(executor ? { executor } : {});
+      // F-253 (WP-585): declared agent classes are what let a quota wall rotate
+      // to a peer instead of parking. Without them `recordWallAndCheckPeer` is
+      // skipped entirely and the WP-566…WP-576 rotation system is inert —
+      // p3-rung-4 hit 5 walls and logged zero `agent_rotation` entries.
+      const agentClassesPath = values["agent-classes"];
+      let registry: unknown;
+      let agentClasses: { executor?: string; judge?: string } | undefined;
+      if (agentClassesPath !== undefined) {
+        const resolved = resolve(agentClassesPath);
+        if (!existsSync(resolved)) {
+          io.err(`chikory-bench run: --agent-classes file not found: ${resolved}`);
+          return 1;
+        }
+        registry = parseYaml(readFileSync(resolved, "utf8"));
+        agentClasses = pickClassRefs(registry);
+        if (agentClasses === undefined) {
+          io.err(
+            `chikory-bench run: ${resolved} must declare exactly one executor class and one judge class`,
+          );
+          return 1;
+        }
+        // The runner resolves the registry from CWD, and it runs with CWD set to
+        // the task workspace — so an absolute path here is what makes the
+        // operator's file the one the run actually loads, instead of silently
+        // falling back to the shipped defaults (which carry Claude members).
+        process.env.CHIKORY_AGENT_CLASSES = resolved;
+        io.out(
+          `bench preflight: agent classes ${agentClasses.executor} / ${agentClasses.judge} from ${resolved}`,
+        );
+      }
+      adapter = chikoryAdapter({
+        ...(executor ? { executor } : {}),
+        ...(agentClasses !== undefined ? { agentClasses } : {}),
+      });
 
       // Family preflight (WP-536, F-165/F-170): echo the resolved arm and refuse
       // to spend when the executor/judge/code-routing families violate the
@@ -180,7 +241,13 @@ export async function main(argv: string[], io = { out: console.log, err: console
       // in one day a suite burned real Anthropic budget on a wrong-family arm
       // because nothing asserted the family before launch. Override with
       // CHIKORY_BENCH_ALLOW_FAMILY_OVERRIDE=1.
-      const resolvedFamilies = resolveBenchFamilies(executor ? { executor } : {}, process.env);
+      const resolvedFamilies = resolveBenchFamilies(
+        {
+          ...(executor ? { executor } : {}),
+          ...(registry !== undefined ? { agentClasses: registry } : {}),
+        },
+        process.env,
+      );
       io.out(`bench preflight: ${formatResolvedFamilies(resolvedFamilies)}`);
       const violations = checkBenchFamilyDirective(resolvedFamilies);
       if (violations.length > 0 && process.env.CHIKORY_BENCH_ALLOW_FAMILY_OVERRIDE !== "1") {

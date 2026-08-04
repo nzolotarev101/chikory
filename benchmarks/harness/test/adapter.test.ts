@@ -169,6 +169,33 @@ describe("commandAdapter", () => {
     const result = await adapter.run(task, { workspaceDir: ws, outDir: out, timeoutMs: 200 });
     expect(result.notes).toContain("timed out");
   }, 10_000);
+
+  /**
+   * F-250 (WP-582): the deadline must kill the process GROUP.
+   *
+   * The old local `runShell` spawned `bash` undetached and signalled only that
+   * direct child. A grandchild holding the stdout pipe open keeps `close` from
+   * firing, so the adapter blocks long past its cap: p3-rung-4's
+   * `brownfield-002` ran 9h47m against a 4h cap — 2.45× — which is the same
+   * overrun signature F-59/WP-255 fixed in `runBounded` years of runs ago.
+   *
+   * `sh -c 'sleep 30 & wait'` reproduces it exactly: `bash` forks, the sleeper
+   * inherits stdout, and killing only the parent leaves the pipe open.
+   */
+  it("kills the whole process group at the cap, not just the direct child", async () => {
+    const ws = mkdtempSync(join(tmpdir(), "bench-ws-"));
+    const out = mkdtempSync(join(tmpdir(), "bench-out-"));
+    const task: BenchmarkTask = { ...BROWNFIELD, repo: undefined };
+    const adapter = commandAdapter("orphan", "sh -c 'sleep 30 & wait' ");
+
+    const started = Date.now();
+    const result = await adapter.run(task, { workspaceDir: ws, outDir: out, timeoutMs: 500 });
+    const elapsed = Date.now() - started;
+
+    expect(result.notes).toContain("timed out");
+    // Cap + SIGTERM→SIGKILL grace, nowhere near the 30 s the grandchild wanted.
+    expect(elapsed).toBeLessThan(12_000);
+  }, 40_000);
 });
 
 describe("buildChikorySpec", () => {
@@ -196,5 +223,62 @@ describe("buildChikorySpec", () => {
     const green: BenchmarkTask = { ...BROWNFIELD, id: "greenfield-001", class: "greenfield", repo: undefined };
     const spec = buildChikorySpec(green, {}, "/work/space");
     expect((spec.repos as { url: string }[])[0]!.url).toBe("/work/space");
+  });
+
+  /**
+   * F-247 (WP-579): nobody answers `chikory approve` on a benchmark arm.
+   * p3-rung-4's `brownfield-001` escalated, parked in AWAITING_APPROVAL, and
+   * burned its remaining 4 hours before the harness SIGKILLed it — leaving the
+   * Temporal workflow Running and orphaning the server for the next launch.
+   */
+  it("declares an unattended escalation policy so an ESCALATE seals instead of waiting", () => {
+    const spec = buildChikorySpec(BROWNFIELD, {}, "/tmp/ws");
+    const parsed = parseTaskSpec(stringifyYaml(spec), {
+      env: { ANTHROPIC_API_KEY: "x", GEMINI_API_KEY: "x" },
+      warn: () => {},
+    });
+    expect(parsed.unattended).toEqual({ escalation: "seal_resumable_failed" });
+  });
+
+  /**
+   * F-253 (WP-585): with no declared classes `recordWallAndCheckPeer` is
+   * skipped and every wall parks. p3-rung-4 hit 5 walls and journaled zero
+   * `agent_rotation` entries — the whole WP-566…WP-576 system was inert.
+   */
+  it("passes declared agent class REFERENCES through, in a shape parseTaskSpec accepts", () => {
+    const agentClasses = { executor: "executor-bench", judge: "judge-bench" };
+    const spec = buildChikorySpec(BROWNFIELD, { agentClasses }, "/tmp/ws");
+    expect(spec.agent_classes).toEqual(agentClasses);
+
+    // The oracle that matters: `agent_classes` is a map of class-id STRINGS
+    // (schemas.ts), not an inline registry. Asserting the field echoes back
+    // would have passed just as happily on an inline registry the real parser
+    // rejects — so round-trip it through the real parser.
+    const parsed = parseTaskSpec(stringifyYaml(spec), {
+      // The judge class rides the keyless openai-compat proxy, as the real arm does.
+      env: { ANTHROPIC_API_KEY: "x", GEMINI_API_KEY: "x", OPENAI_COMPAT_BASE_URL: "http://127.0.0.1:8787" },
+      warn: () => {},
+      registry: {
+        version: 1,
+        classes: {
+          "executor-bench": {
+            id: "executor-bench",
+            role: "executor",
+            primary: { id: "g", role: "executor", adapter: "gemini-cli", family: "gemini", backend: "gemini", model: "gemini-3.6-flash-high" },
+            adjacent: [],
+          },
+          "judge-bench": {
+            id: "judge-bench",
+            role: "judge",
+            primary: { id: "s", role: "judge", transport: "openai-compat", backend: "openai", model: "gpt-5.6-sol xhigh" },
+            adjacent: [],
+          },
+        },
+      },
+    });
+    expect(parsed.agentClasses).toEqual(agentClasses);
+
+    // Omitted when undeclared — the default arm stays byte-identical.
+    expect(buildChikorySpec(BROWNFIELD, {}, "/tmp/ws").agent_classes).toBeUndefined();
   });
 });

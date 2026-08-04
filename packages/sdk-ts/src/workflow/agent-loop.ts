@@ -43,6 +43,8 @@ import {
   type ContextWindowPacingPolicy,
 } from "../runner/pacing.js";
 import { calibrateContextWindow, resolveContextWindowForSpec } from "../runner/context-window.js";
+// Pure (no I/O, no clock) — workflow-bundle safe.
+import { advanceStrikeCount } from "../runner/strike-accounting.js";
 import type {
   ArtifactRef,
   ChainNodeHandoff,
@@ -373,8 +375,20 @@ export async function agentLoop(spec: TaskSpec): Promise<RunStatus> {
     response: Awaited<ReturnType<RunnerActivities["executeStep"]>>["limitParkResponse"],
   ): Promise<RunStatus | undefined> {
     if (response === undefined) return undefined;
-    const limitDelay = decideLimitParkDelay({ nowMs: Date.now() }, response);
+    const limitDelay = decideLimitParkDelay(
+      {
+        nowMs: Date.now(),
+        ...(spec.horizon?.deadlineMs !== undefined
+          ? { deadlineMs: spec.horizon.deadlineMs }
+          : {}),
+      },
+      response,
+    );
     if (limitDelay === null) return undefined;
+    // F-249 (WP-581): a reset past the run's own deadline is a hang, not a park.
+    if (limitDelay.action === "seal_resumable_failed") {
+      return seal("FAILED", limitDelay.reason, { resumable: true });
+    }
 
     status = "SUSPENDED";
     await sleep(limitDelay.sleepMs);
@@ -792,7 +806,11 @@ export async function agentLoop(spec: TaskSpec): Promise<RunStatus> {
       utilization: pacing.utilization,
     });
     recentSummaries.push(record.summary);
-    consecutiveFailures = record.status === "FAILED" ? consecutiveFailures + 1 : 0;
+    // F-246 (WP-578): a strike measures what the AGENT controls. A step killed
+    // at its wall-clock cap, or deferred by a quota park, is neither evidence
+    // of spinning nor a clean slate — `advanceStrikeCount` skips it. This was
+    // the last counter in the codebase still reading raw `status === "FAILED"`.
+    consecutiveFailures = advanceStrikeCount(consecutiveFailures, record);
 
     // Memory Pointer interception (WP-202 / CM-3): the step's transcript and
     // diff are already stored as artifacts; surface a pointer for any that is

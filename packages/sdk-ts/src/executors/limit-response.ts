@@ -33,6 +33,14 @@ export interface ApplyLimitResponseInput {
   readonly modelFamily?: TaskSpec["executor"]["family"];
   readonly routerOptions?: RouterOptions;
   readonly stepInput?: StepInput;
+  /**
+   * F-248 (WP-580): the record the executor ALREADY produced on this step, when
+   * the wall was read off its own stderr rather than predicted before it ran.
+   * A post-hoc wall does not un-write the files the agent edited — see the
+   * deferral branch below for why fabricating an empty record from scratch is a
+   * lie the ledger then acts on.
+   */
+  readonly attemptedRecord?: StepRecord;
 }
 
 function describeSelection(selected: LimitResponseDecision): string {
@@ -169,28 +177,62 @@ export async function applyLimitResponse(input: ApplyLimitResponseInput): Promis
 
   const selected = describeSelection(input.selected);
   const summary = `limit response deferred: ${input.selected.action} after ${input.signal.reason}`;
+
+  // F-248 (WP-580): a wall read off the executor's OWN stderr arrives AFTER the
+  // executor ran. On p3-rung-4's `brownfield-005` that executor had already
+  // spent ~3 minutes and written a real 3-file fix (`5ac47158c`) — the
+  // checkpoint 100 ms later committed it — while this branch journaled the step
+  // as an empty diff with ZERO_TOKENS and the words "no executor work was
+  // performed". Two things went wrong downstream: the trace denied work that
+  // exists, and `appendStepConsumption` wrote zero tokens into the very ledger
+  // `decideLimitPacing` reads to predict the NEXT wall.
+  //
+  // So: derive from the attempt when there was one (the same shape
+  // `rotationHandoffRecord` uses for a wall-triggered agent swap), and only
+  // claim "no work" when the deferral genuinely pre-empted the executor.
+  const attempted = input.attemptedRecord;
   const reason =
     `limit response deferred throttled plan item "${input.planItem}" via ${selected}; ` +
-    "no executor work was performed";
-  const [diffRef, transcriptRef] = await Promise.all([
-    input.store.put("", {
-      kind: "diff",
-      summary: `limit response deferred step ${input.stepIndex} produced no diff`,
-    }),
-    input.store.put(
-      [
-        input.signal.reason,
-        `scheduler selected ${selected}`,
-        `deferred plan item: ${input.planItem}`,
-      ].join("\n"),
-      {
-        kind: "transcript",
-        summary: `limit response deferred step ${input.stepIndex}`,
-      },
-    ),
-  ]);
+    (attempted === undefined
+      ? "no executor work was performed"
+      : "the executor's work up to the wall is preserved in this step's diff");
+
+  const transcriptRef = await input.store.put(
+    [
+      input.signal.reason,
+      `scheduler selected ${selected}`,
+      `deferred plan item: ${input.planItem}`,
+      ...(attempted === undefined
+        ? []
+        : [`executor attempt before the wall: ${attempted.summary}`]),
+    ].join("\n"),
+    {
+      kind: "transcript",
+      summary: `limit response deferred step ${input.stepIndex}`,
+    },
+  );
+
+  // `infraFailed`: a quota wall is never the agent's doing, so this step spends
+  // no CG-1 strike (`advanceStrikeCount`, F-246) and no rule-3 verdict strike.
+  const infraFailure = { infraFailed: true, failure: { reason, retriable: true } } as const;
+
+  if (attempted !== undefined) {
+    return {
+      ...attempted,
+      ...infraFailure,
+      status: "FAILED",
+      summary,
+      transcriptRef,
+    };
+  }
+
+  const diffRef = await input.store.put("", {
+    kind: "diff",
+    summary: `limit response deferred step ${input.stepIndex} produced no diff`,
+  });
 
   return {
+    ...infraFailure,
     status: "FAILED",
     diffRef,
     summary,
@@ -200,6 +242,5 @@ export async function applyLimitResponse(input: ApplyLimitResponseInput): Promis
     costEstimated: false,
     durationMs: 0,
     transcriptRef,
-    failure: { reason, retriable: true },
   };
 }

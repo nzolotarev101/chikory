@@ -32,6 +32,8 @@ export interface ResolvedBenchFamilies {
    * stage drives the EXECUTOR, so its model must match the executor family.
    */
   codeModel?: string;
+  /** Members a wall may rotate into (WP-585); empty when no classes declared. */
+  classMembers?: ResolvedClassMember[];
 }
 
 export interface BenchFamilyOptions {
@@ -39,6 +41,58 @@ export interface BenchFamilyOptions {
   judge?: { family: string };
   /** Raw routing block passed through to the spec (snake_case YAML shape). */
   routing?: unknown;
+  /** Parsed `agent-classes.yaml` (WP-585) — the members a wall may rotate INTO. */
+  agentClasses?: unknown;
+}
+
+/** One declared class member, reduced to what the directive check cares about. */
+export interface ResolvedClassMember {
+  classId: string;
+  memberId: string;
+  /** True vendor. A TRANSPORT is not a vendor — `backend` outranks `family`. */
+  backend: string;
+  model?: string;
+}
+
+/**
+ * Every member a rotation could land on, primary and adjacent alike.
+ *
+ * F-253 (WP-585) hands the bench arm declared classes so a quota wall rotates
+ * instead of parking — which means the members are now part of the ARM, and the
+ * directive has to be checked against all of them, not just the primary pair.
+ * The repo's own `agent-classes.yaml` lists `sonnet-5` and `opus-5` as
+ * fallbacks; wiring it into a benchmark unchecked would let a Gemini wall
+ * silently rotate the arm onto Claude — spending real Anthropic budget and
+ * publishing an I-SR measured on a mixed executor. That is exactly the failure
+ * (F-165) this preflight exists to prevent, arriving through a new door.
+ */
+export function resolveClassMembers(agentClasses: unknown): ResolvedClassMember[] {
+  if (!agentClasses || typeof agentClasses !== "object") return [];
+  const classes = (agentClasses as { classes?: unknown }).classes;
+  if (!classes || typeof classes !== "object") return [];
+
+  const members: ResolvedClassMember[] = [];
+  for (const [classId, declared] of Object.entries(classes as Record<string, unknown>)) {
+    if (!declared || typeof declared !== "object") continue;
+    const block = declared as { primary?: unknown; adjacent?: unknown };
+    const candidates = [block.primary, ...(Array.isArray(block.adjacent) ? block.adjacent : [])];
+    for (const candidate of candidates) {
+      if (!candidate || typeof candidate !== "object") continue;
+      const m = candidate as { id?: unknown; backend?: unknown; family?: unknown; model?: unknown };
+      members.push({
+        classId,
+        memberId: typeof m.id === "string" ? m.id : "<unnamed>",
+        backend:
+          typeof m.backend === "string"
+            ? m.backend
+            : typeof m.family === "string"
+              ? m.family
+              : "unknown",
+        ...(typeof m.model === "string" ? { model: m.model } : {}),
+      });
+    }
+  }
+  return members;
 }
 
 /**
@@ -67,7 +121,12 @@ export function resolveBenchFamilies(
     };
   }
 
-  return { executor, judge, codeModel: extractCodeModel(routing) };
+  return {
+    executor,
+    judge,
+    codeModel: extractCodeModel(routing),
+    classMembers: resolveClassMembers(opts.agentClasses),
+  };
 }
 
 function extractCodeModel(routing: unknown): string | undefined {
@@ -122,6 +181,23 @@ export function checkBenchFamilyDirective(r: ResolvedBenchFamilies): FamilyViola
       code: "code-routing-family-mismatch",
       message: `routing.stages.code.model '${r.codeModel}' is not a ${r.executor.family}-family model (F-170) — the code stage drives the executor`,
     });
+  }
+
+  // WP-585: a declared fallback is part of the arm. `never Claude` has to hold
+  // for every member a wall could rotate into, not just the primary pair — and
+  // `backend` is the authority, because every keyless judge reaches its model
+  // over the `openai-compat` TRANSPORT and a transport is not a vendor.
+  for (const member of r.classMembers ?? []) {
+    if (member.backend === "anthropic") {
+      violations.push({
+        code: "class-member-anthropic",
+        message:
+          `agent class '${member.classId}' declares member '${member.memberId}' ` +
+          `(backend anthropic${member.model ? `, model ${member.model}` : ""}) — a wall could ` +
+          "rotate this arm onto Claude, which the directive forbids and which would publish " +
+          "an I-SR measured on a mixed executor",
+      });
+    }
   }
 
   return violations;

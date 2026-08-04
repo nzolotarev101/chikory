@@ -19,7 +19,7 @@ import {
 } from "./results.js";
 import { parseDevAITask } from "./devai.js";
 import { isRunnable, validateAuthoredTask, type BenchmarkTask } from "./task.js";
-import { decideTargetNode, loadTargetEngineSource, discoverNodeToolchains, type ProvisioningDecision } from "./engine.js";
+import { decideTargetNode, loadTargetEngineSource, discoverNodeToolchains, pinnedNodeProvisioning, type ProvisioningDecision } from "./engine.js";
 import { verifyBaseGreen } from "./base-verify.js";
 
 export interface LoadReport {
@@ -93,10 +93,18 @@ export async function runSuite(opts: RunSuiteOptions): Promise<{ summary: SuiteS
     const workspaceDir = join(taskOut, "workspace");
     mkdirSync(workspaceDir, { recursive: true });
 
-    // Dynamic Node engine provisioning check
+    // Dynamic Node engine provisioning check.
+    //
+    // F-254 (WP-586): an explicit `node_version` on the task WINS over the
+    // repo's own `engines` range. A range like `">=24"` makes the newest
+    // locally-installed Node the de-facto runtime, so a fully-pinned task still
+    // scores differently across machines and across time — `brownfield-002` is
+    // 1128/1128 green on 24.14.1 and SIGABRTs vitest on 24.15.0.
     const engineSource = loadTargetEngineSource(task, workspaceDir);
     let nodeProvisioning: ProvisioningDecision;
-    if (engineSource.type === "error") {
+    if (task.nodeVersion !== undefined) {
+      nodeProvisioning = pinnedNodeProvisioning(task.nodeVersion, discoverNodeToolchains());
+    } else if (engineSource.type === "error") {
       nodeProvisioning = {
         type: "unavailable",
         neededVersion: "unknown (read failed)",

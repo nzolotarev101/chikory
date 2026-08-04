@@ -1,0 +1,63 @@
+# Agent classes for a BENCHMARK arm (WP-585) — the directive-legal subset of
+# the repo's own `agent-classes.yaml`.
+#
+# Why a separate file rather than reusing the root one: a benchmark arm is a
+# MEASUREMENT, and the root file lists `sonnet-5` / `opus-5` as fallbacks. Wiring
+# that into an arm would let a Gemini wall rotate the executor onto Claude —
+# which violates the standing directive (Gemini executes, Codex judges, never
+# Claude; F-162/F-165) and publishes an I-SR measured on a mixed executor.
+# `checkBenchFamilyDirective` now refuses any member with `backend: anthropic`,
+# so this file is what a bench launch can actually pass.
+#
+# Rotation still works, in lockstep pairs — invariant #2 (judge family must
+# differ from the executor's) holds in BOTH states:
+#
+#   executor gemini-3-6-flash  ↔  judge gpt-5-6-sol     (gemini / openai)
+#   executor gpt-5-6-terra     ↔  judge gemini-3-1-pro  (openai / gemini)
+#
+# The class ids are deliberately NOT `executor-default`/`judge-default`. A
+# same-id class REPLACES the shipped default wholesale (registry.ts), so reusing
+# those names would make "did my file load?" invisible: on a missed load the run
+# would quietly fall back to the shipped defaults, which DO carry the Claude
+# members. With bench-only ids a missed load fails loudly instead —
+# `resolveAgentClass` throws with the available names.
+#
+# Before launching, prove every member answers a trivial prompt at $0:
+#   CHIKORY_AGENT_CLASSES=benchmarks/agent-classes.bench.yaml \
+#     devbox run -- node scripts/probe-agent-classes.mjs
+# A member that cannot answer now cannot take over when the primary is walled
+# (WP-575) — rotation would just be a second failure, hours later.
+
+version: 1
+
+classes:
+  # Gemini executes — the standing arming default.
+  executor-bench:
+    role: executor
+    primary:
+      id: gemini-3-6-flash
+      adapter: gemini-cli
+      family: gemini
+      backend: gemini
+      model: gemini-3.6-flash-high
+    adjacent:
+      - id: gpt-5-6-terra
+        adapter: codex
+        family: openai
+        backend: openai
+        model: gpt-5.6-terra
+
+  # Codex judges — the standing arming default. Also serves the plan and review
+  # stages, which route through the same judge-side transport.
+  judge-bench:
+    role: judge
+    primary:
+      id: gpt-5-6-sol
+      transport: openai-compat
+      backend: openai
+      model: gpt-5.6-sol xhigh
+    adjacent:
+      - id: gemini-3-1-pro
+        transport: openai-compat
+        backend: gemini
+        model: gemini-3.1-pro-high

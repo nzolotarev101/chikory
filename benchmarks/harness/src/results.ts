@@ -31,11 +31,25 @@ export interface SuiteSummary {
   tasks: number;
   tasksVerified: number;
   unverifiedTasks: { taskId: string; reason: string }[];
+  /** Every task's requirements, including base-unverified ones. NOT the I-SR denominator. */
   requirementsTotal: number;
   requirementsSatisfied: number;
-  /** Independent satisfaction rate (DevAI I-SR), 0..1. */
+  /**
+   * F-252 (WP-584): the k and n `iSr`/`dSr` are actually computed from —
+   * base-verified tasks only. These exist so a consumer can rebuild the rate
+   * and its confidence interval without re-deriving a denominator of its own.
+   * `buildArmDetail` used to recompute from `requirementsTotal`, publishing
+   * 17/19 = 0.8947 for the same run whose summary said 14/15 = 0.9333.
+   *
+   * Optional because `summary.json` is a persisted artifact: files written
+   * before these fields existed are still read by `compare`.
+   */
+  requirementsVerifiedTotal?: number;
+  requirementsVerifiedSatisfied?: number;
+  dependencyVerifiedSatisfied?: number;
+  /** Independent satisfaction rate (DevAI I-SR), 0..1. Base-verified tasks only. */
   iSr: number;
-  /** Dependency-adjusted satisfaction rate (DevAI D-SR), 0..1. */
+  /** Dependency-adjusted satisfaction rate (DevAI D-SR), 0..1. Base-verified tasks only. */
   dSr: number;
   perTask: {
     taskId: string;
@@ -45,7 +59,21 @@ export interface SuiteSummary {
     exitCode: number | null;
     wallClockMs: number;
     baseVerified: boolean;
+    /**
+     * F-252 (WP-584): did the system under test reach a terminal state, or was
+     * it killed at the cap mid-run? Three of p3-rung-4's five tasks were graded
+     * off workspaces whose runs never sealed, and the artifact said nothing.
+     */
+    sealed: boolean;
   }[];
+}
+
+/**
+ * A run that timed out never sealed: the adapter reports no exit code because
+ * the deadline killed it, and notes the timeout.
+ */
+export function isRunSealed(run: AdapterResult): boolean {
+  return !run.notes.includes("timed out");
 }
 
 export function isTaskVerified(result: TaskResult): boolean {
@@ -92,6 +120,9 @@ export function summarize(
     unverifiedTasks,
     requirementsTotal,
     requirementsSatisfied,
+    requirementsVerifiedTotal: verifiedTotal,
+    requirementsVerifiedSatisfied: verifiedSatisfied,
+    dependencyVerifiedSatisfied: verifiedDependencySatisfied,
     iSr: verifiedTotal > 0 ? verifiedSatisfied / verifiedTotal : 0,
     dSr: verifiedTotal > 0 ? verifiedDependencySatisfied / verifiedTotal : 0,
     perTask: results.map((r) => ({
@@ -102,6 +133,7 @@ export function summarize(
       exitCode: r.run.exitCode,
       wallClockMs: r.run.wallClockMs,
       baseVerified: isTaskVerified(r),
+      sealed: isRunSealed(r.run),
     })),
   };
 }
@@ -197,12 +229,23 @@ function buildArmDetail(
   label?: string,
   reference?: string,
 ): ArmComparisonDetail {
-  const dependencySatisfied = summary.perTask.reduce((sum, t) => sum + t.dependencySatisfied, 0);
-  const iSr = summary.requirementsTotal > 0 ? summary.requirementsSatisfied / summary.requirementsTotal : 0;
-  const dSr = summary.requirementsTotal > 0 ? dependencySatisfied / summary.requirementsTotal : 0;
+  // F-252 (WP-584): ONE definition of I-SR. This used to recompute from the
+  // unfiltered `requirementsTotal`, silently readmitting tasks whose base ref
+  // was never green — publishing a different headline number than the
+  // `summary.json` it claims to be reporting. The verified counts are the
+  // denominator `summarize` already used; fall back to the unfiltered totals
+  // only for summaries written before they existed.
+  const verifiedTotal = summary.requirementsVerifiedTotal ?? summary.requirementsTotal;
+  const verifiedSatisfied = summary.requirementsVerifiedSatisfied ?? summary.requirementsSatisfied;
+  const dependencySatisfied =
+    summary.dependencyVerifiedSatisfied ??
+    summary.perTask.reduce((sum, t) => sum + t.dependencySatisfied, 0);
 
-  const iSrCi = wilsonScoreInterval(summary.requirementsSatisfied, summary.requirementsTotal);
-  const dSrCi = wilsonScoreInterval(dependencySatisfied, summary.requirementsTotal);
+  const iSr = verifiedTotal > 0 ? verifiedSatisfied / verifiedTotal : 0;
+  const dSr = verifiedTotal > 0 ? dependencySatisfied / verifiedTotal : 0;
+
+  const iSrCi = wilsonScoreInterval(verifiedSatisfied, verifiedTotal);
+  const dSrCi = wilsonScoreInterval(dependencySatisfied, verifiedTotal);
 
   return {
     label: label ?? summary.adapter,
@@ -212,8 +255,10 @@ function buildArmDetail(
     endedAt: summary.endedAt,
     tasks: summary.tasks,
     tasksVerified: summary.tasksVerified,
-    requirementsTotal: summary.requirementsTotal,
-    requirementsSatisfied: summary.requirementsSatisfied,
+    // The k and n BEHIND the published rate, not the suite's raw totals — a
+    // bundle that prints 0.9333 next to 17/19 is not auditable (F-252).
+    requirementsTotal: verifiedTotal,
+    requirementsSatisfied: verifiedSatisfied,
     dependencySatisfied,
     iSr,
     iSrCi,

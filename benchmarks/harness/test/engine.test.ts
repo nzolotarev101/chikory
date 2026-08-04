@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 import { describe, expect, it } from "vitest";
-import { resolveTargetNodeEngine, planNodeProvisioning, decideTargetNode, loadTargetEngineSource, satisfiesRange } from "../src/engine.js";
+import { resolveTargetNodeEngine, planNodeProvisioning, decideTargetNode, loadTargetEngineSource, pinnedNodeProvisioning, satisfiesRange } from "../src/engine.js";
 import type { BenchmarkTask } from "../src/task.js";
 
 describe("resolveTargetNodeEngine", () => {
@@ -268,3 +268,50 @@ describe("loadTargetEngineSource — absent vs unreadable (F-188)", () => {
   });
 });
 
+
+/**
+ * F-254 (WP-586) — an exact `node_version` pin overrides the repo's `engines`.
+ *
+ * `brownfield-002` at ref `a061eaa1` declares `engines.node: ">=24"`, so the
+ * harness took the newest installed toolchain. Measured on a clean clone:
+ * node 24.14.1 runs 1128/1128 green; node 24.15.0 SIGABRTs vitest 4.1.9 before
+ * a single test executes. p3-rung-4 drew 24.15.0 and lost the task.
+ */
+describe("pinnedNodeProvisioning (F-254)", () => {
+  const toolchains = [
+    { version: "22.22.3", binDir: "/nix/store/n22/bin" },
+    { version: "24.14.1", binDir: "/nix/store/n24a/bin" },
+    { version: "24.15.0", binDir: "/nix/store/n24b/bin" },
+  ];
+
+  it("provisions the pinned version, not the newest one the range allows", () => {
+    // What `engines: ">=24"` resolves to on this machine — the broken one.
+    expect(decideTargetNode({ engines: { node: ">=24" } }, toolchains, "v20.0.0")).toEqual({
+      type: "provision",
+      binDir: "/nix/store/n24b/bin",
+    });
+    // What the pin resolves to.
+    expect(pinnedNodeProvisioning("24.14.1", toolchains)).toEqual({
+      type: "provision",
+      binDir: "/nix/store/n24a/bin",
+    });
+  });
+
+  it("pins even when the ambient runtime would satisfy the range", () => {
+    // `decideTargetNode` short-circuits to ambient here; the pin must not.
+    expect(decideTargetNode({ engines: { node: ">=24" } }, toolchains, "v24.15.0").type).toBe(
+      "ambient",
+    );
+    expect(pinnedNodeProvisioning("24.14.1", toolchains).type).toBe("provision");
+  });
+
+  it("fails closed and names the missing version when the toolchain is absent", () => {
+    const decision = pinnedNodeProvisioning("24.14.1", [toolchains[0]!]);
+    expect(decision).toMatchObject({
+      type: "unavailable",
+      neededVersion: "24.14.1",
+      available: ["22.22.3"],
+    });
+    expect((decision as { error: string }).error).toContain("node_version");
+  });
+});

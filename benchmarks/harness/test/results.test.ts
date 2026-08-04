@@ -203,6 +203,7 @@ describe("compareSummaries", () => {
         exitCode: 0,
         wallClockMs: 1000,
         baseVerified: true,
+        sealed: true,
       })),
     };
   }
@@ -278,5 +279,97 @@ describe("compareSummaries", () => {
 
     expect(res.armA.dSr).toBe(0.5); // Recomputed to match 10/20
     expect(res.armA.dSrCi.lower).toBeCloseTo(0.2993, 3);
+  });
+});
+
+/**
+ * F-252 (WP-584) — one I-SR definition, replayed on the p3-rung-4 Chikory arm
+ * (`20260803-131837-chikory`) that surfaced the split.
+ *
+ * `summarize` scored base-verified tasks only: 14/15 = 0.9333. `buildArmDetail`
+ * — the path the publication bundle is built from — recomputed off the
+ * unfiltered totals: 17/19 = 0.8947, silently readmitting `brownfield-002`,
+ * whose base suite crashed vitest before ever going green. Same run, two
+ * headline numbers, and dogfood-123's AC-2 requires the published bundle to
+ * match `summary.json` byte-for-byte.
+ */
+describe("p3-rung-4 arm replay (F-252)", () => {
+  // satisfied / dependencySatisfied / total / baseGreen / sealed — the real rows.
+  const P3_RUNG_4: Array<[string, number, number, number, boolean, boolean]> = [
+    ["brownfield-001", 2, 0, 3, true, false],
+    ["brownfield-002", 3, 3, 4, false, false],
+    ["brownfield-003", 4, 4, 4, true, true],
+    ["brownfield-004", 4, 4, 4, true, true],
+    ["brownfield-005", 4, 4, 4, true, false],
+  ];
+
+  const results = P3_RUNG_4.map(([taskId, satisfied, dependencySatisfied, total, green, sealed]) =>
+    mockTaskResult({
+      taskId,
+      grading: { total, satisfied, dependencySatisfied, grades: [] },
+      run: {
+        exitCode: sealed ? 0 : null,
+        wallClockMs: 1000,
+        artifacts: [],
+        notes: sealed ? [] : ["timed out"],
+      },
+      baseVerification: {
+        green,
+        reason: green ? "Base suite is green" : "Verification command failed with exit code 1",
+        testsPassed: green ? 117 : 0,
+        testsFailed: 0,
+      },
+    }),
+  );
+
+  const summary = summarize("benchmarks/tasks", "chikory", "s", "e", results);
+
+  it("reproduces the arm's published rates from the verified tasks only", () => {
+    expect(summary.tasksVerified).toBe(4);
+    expect(summary.requirementsTotal).toBe(19);
+    expect(summary.requirementsVerifiedTotal).toBe(15);
+    expect(summary.requirementsVerifiedSatisfied).toBe(14);
+    expect(summary.iSr).toBeCloseTo(14 / 15, 10);
+    expect(summary.dSr).toBeCloseTo(12 / 15, 10);
+  });
+
+  it("refuses to publish this arm at all — brownfield-002 never had a green base", () => {
+    expect(() => compareSummaries(summary, summary, "/a/summary.json", "/b/summary.json")).toThrow(
+      /tasksVerified === 5/,
+    );
+  });
+
+  it("the comparison bundle publishes the SAME number as summary.json", () => {
+    // A clean 5/5 arm — the shape a publishable run has. Before F-252 this path
+    // recomputed its own rate off `requirementsTotal` and could disagree with
+    // the `summary.json` it claims to report.
+    const clean = summarize(
+      "benchmarks/tasks",
+      "chikory",
+      "s",
+      "e",
+      P3_RUNG_4.map(([taskId, satisfied, dependencySatisfied, total]) =>
+        mockTaskResult({
+          taskId,
+          grading: { total, satisfied, dependencySatisfied, grades: [] },
+          baseVerification: { green: true, reason: "ok", testsPassed: 1, testsFailed: 0 },
+        }),
+      ),
+    );
+
+    const compared = compareSummaries(clean, clean, "/a/summary.json", "/b/summary.json");
+    expect(compared.armA.iSr).toBeCloseTo(clean.iSr, 10);
+    expect(compared.armA.dSr).toBeCloseTo(clean.dSr, 10);
+    // ...and the k/n printed beside the rate are the ones behind it.
+    expect(compared.armA.requirementsSatisfied).toBe(clean.requirementsVerifiedSatisfied);
+    expect(compared.armA.requirementsTotal).toBe(clean.requirementsVerifiedTotal);
+    expect(compared.armA.iSrCi).toEqual(
+      wilsonScoreInterval(clean.requirementsVerifiedSatisfied!, clean.requirementsVerifiedTotal!),
+    );
+  });
+
+  it("surfaces the three tasks whose runs never sealed", () => {
+    const unsealed = summary.perTask.filter((t) => !t.sealed).map((t) => t.taskId);
+    expect(unsealed).toEqual(["brownfield-001", "brownfield-002", "brownfield-005"]);
   });
 });

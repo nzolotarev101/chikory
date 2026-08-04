@@ -62,6 +62,7 @@ Coined identifiers used across `plan.md`, reports, and specs. Per
 | `CM-n` | Requirement — memory | Context/memory requirement. |
 | `CG-n` | Requirement — cost | Cost/budget requirement. |
 | `dogfood-NNN` | Dogfood run | A self-hosting run (Chikory building Chikory); paired spec + report. |
+| `bench-<rung>-<date>` | Bench arm incident | A report on a HAND-RUN benchmark arm (`scripts/bench-run.sh`), not a dogfood run. Kept out of the `dogfood-NNN` series and `dogfood-ledger.csv` so the dogfood numbering keeps meaning "a run of Chikory on itself", but it feeds the same global `F-n` friction sequence. |
 | `run-<id>` | Run id | A single durable workflow execution's identifier. |
 
 ## Status words

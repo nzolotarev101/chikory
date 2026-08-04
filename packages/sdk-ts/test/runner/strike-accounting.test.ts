@@ -26,6 +26,8 @@ import { Journal } from "../../src/journal/journal.js";
 import { computeVerdict } from "../../src/judge/verdict.js";
 import { criteriaHistoryFromJournal } from "../../src/runner/activities.js";
 import {
+  advanceStrikeCount,
+  consecutiveStrikeTail,
   historyCutoffIdx,
   isInfraStepFailure,
   markInfraFailedPass,
@@ -234,5 +236,64 @@ describe("historyCutoffIdx", () => {
 
   it("returns -1 when nothing was ever restored, so all history counts", () => {
     expect(historyCutoffIdx([{ idx: 1, restoresWorkspace: false }])).toBe(-1);
+  });
+});
+
+/**
+ * F-246 (WP-578) — the CG-1 loop-breaker's own strike accounting.
+ *
+ * The replay here is p3-rung-4's `brownfield-001` (`run-757420ce-…`), whose
+ * three journaled steps were: two executors killed at `maxSeconds=840`, then a
+ * quota park. On HEAD-before-this-fix that trail read 3/3 and escalated to
+ * AWAITING_APPROVAL — with no operator behind a benchmark arm, the run then
+ * burned its remaining 4 hours and was SIGKILLed un-sealed. Zero of the three
+ * strikes were the agent's.
+ */
+describe("advanceStrikeCount / consecutiveStrikeTail (CG-1)", () => {
+  const capKill = {
+    status: "FAILED" as const,
+    failure: { reason: "step exceeded maxSeconds=840; killed after 840.2s (1.00× cap)", retriable: true },
+  };
+  const quotaPark = {
+    status: "FAILED" as const,
+    infraFailed: true,
+    failure: { reason: 'limit response deferred throttled plan item "…" via park-until-reset', retriable: true },
+  };
+  const substantive = {
+    status: "FAILED" as const,
+    failure: { reason: "tests still red", retriable: true },
+  };
+  const ok = { status: "SUCCESS" as const };
+
+  it("does not escalate brownfield-001's two cap-kills plus a quota park", () => {
+    const steps = [capKill, capKill, quotaPark];
+    expect(steps.reduce(advanceStrikeCount, 0)).toBe(0);
+    expect(consecutiveStrikeTail(steps)).toBe(0);
+  });
+
+  it("still escalates three substantive failures", () => {
+    const steps = [substantive, substantive, substantive];
+    expect(steps.reduce(advanceStrikeCount, 0)).toBe(3);
+    expect(consecutiveStrikeTail(steps)).toBe(3);
+  });
+
+  it("a park cannot launder a real failing streak — infra neither adds nor resets", () => {
+    const steps = [substantive, quotaPark, substantive, quotaPark, substantive];
+    expect(steps.reduce(advanceStrikeCount, 0)).toBe(3);
+    expect(consecutiveStrikeTail(steps)).toBe(3);
+  });
+
+  it("a genuine SUCCESS resets the count", () => {
+    const steps = [substantive, substantive, ok, substantive];
+    expect(steps.reduce(advanceStrikeCount, 0)).toBe(1);
+    expect(consecutiveStrikeTail(steps)).toBe(1);
+  });
+
+  it("the tail agrees with the live loop for every prefix — a resume must not disagree", () => {
+    const steps = [substantive, capKill, substantive, quotaPark, substantive, ok, substantive];
+    for (let i = 0; i <= steps.length; i++) {
+      const prefix = steps.slice(0, i);
+      expect(consecutiveStrikeTail(prefix)).toBe(prefix.reduce(advanceStrikeCount, 0));
+    }
   });
 });

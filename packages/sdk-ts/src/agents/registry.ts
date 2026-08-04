@@ -44,6 +44,18 @@ import {
 
 export const DEFAULT_AGENT_CLASSES_PATH = "agent-classes.yaml";
 
+/**
+ * Env override for the registry path (F-253/WP-585).
+ *
+ * The default path is resolved against CWD, which is fine for `chikory run` in
+ * the repo root but not for a caller that runs it somewhere else: the benchmark
+ * harness runs `chikory run` with CWD set to the TASK WORKSPACE, where no
+ * `agent-classes.yaml` exists — so the registry silently fell back to the
+ * shipped defaults and the arm got a class list nobody chose. `scripts/probe-
+ * agent-classes.mjs` already reads this variable; this makes the SDK agree.
+ */
+export const AGENT_CLASSES_PATH_ENV = "CHIKORY_AGENT_CLASSES";
+
 export class AgentClassValidationError extends Error {
   constructor(public readonly issues: string[]) {
     super(`Invalid agent class registry:\n${issues.map((i) => `  - ${i}`).join("\n")}`);
@@ -275,11 +287,19 @@ export function loadAgentClassRegistry(
   const base = opts.base ?? DEFAULT_AGENT_CLASSES;
   if (opts.text !== undefined) return parseAgentClassRegistry(opts.text, base);
 
-  const path = opts.path ?? DEFAULT_AGENT_CLASSES_PATH;
+  const envPath = process.env[AGENT_CLASSES_PATH_ENV];
+  const path = opts.path ?? (envPath !== undefined && envPath !== "" ? envPath : DEFAULT_AGENT_CLASSES_PATH);
   let text: string;
   try {
     text = readFileSync(path, "utf8");
   } catch {
+    // An EXPLICITLY named registry that cannot be read is an error, not a
+    // fallback: silently substituting the shipped defaults would hand the run a
+    // different class list — and a different vendor set — than the operator
+    // asked for. Only the unnamed default may fall back.
+    if (opts.path !== undefined || envPath) {
+      throw new AgentClassValidationError([`cannot read agent class registry at '${path}'`]);
+    }
     validateRegistry(base);
     return base;
   }

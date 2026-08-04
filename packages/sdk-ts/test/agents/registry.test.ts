@@ -48,10 +48,40 @@ function issuesOf(text: string): string[] {
 
 describe("agent class registry", () => {
   it("ships defaults that are themselves valid", () => {
-    expect(() => loadAgentClassRegistry({ path: "/nonexistent/agent-classes.yaml" })).not.toThrow();
-    expect(loadAgentClassRegistry({ path: "/nonexistent/agent-classes.yaml" })).toBe(
-      DEFAULT_AGENT_CLASSES,
+    // An empty overlay leaves the defaults untouched, and the load path
+    // validates whatever it returns — so this asserts the defaults themselves.
+    expect(() =>
+      loadAgentClassRegistry({ base: DEFAULT_AGENT_CLASSES, text: "version: 1\nclasses: {}" }),
+    ).not.toThrow();
+    expect(loadAgentClassRegistry({ base: DEFAULT_AGENT_CLASSES, text: "version: 1\nclasses: {}" }).classes)
+      .toEqual(DEFAULT_AGENT_CLASSES.classes);
+  });
+
+  /**
+   * F-253 (WP-585): a registry the caller NAMED and that cannot be read is an
+   * error, never a silent fallback.
+   *
+   * The defaults are a complete registry, so falling back looks harmless — but
+   * they carry a different member list (Claude fallbacks among them). A bench
+   * arm that asks for `benchmarks/agent-classes.bench.yaml` and quietly gets the
+   * defaults would rotate onto vendors nobody chose, and publish a number
+   * measured on them. Only the UNNAMED default path may fall back.
+   */
+  it("refuses a named registry it cannot read, instead of substituting the defaults", () => {
+    expect(() => loadAgentClassRegistry({ path: "/nonexistent/agent-classes.yaml" })).toThrow(
+      /cannot read agent class registry/,
     );
+  });
+
+  it("honours CHIKORY_AGENT_CLASSES when no path is passed", () => {
+    const previous = process.env.CHIKORY_AGENT_CLASSES;
+    try {
+      process.env.CHIKORY_AGENT_CLASSES = "/nonexistent/from-env.yaml";
+      expect(() => loadAgentClassRegistry()).toThrow(/from-env\.yaml/);
+    } finally {
+      if (previous === undefined) delete process.env.CHIKORY_AGENT_CLASSES;
+      else process.env.CHIKORY_AGENT_CLASSES = previous;
+    }
   });
 
   it("every default member model resolves in BOTH the price and context-window tables", () => {

@@ -290,6 +290,8 @@ export {
   type NodeHealState,
 } from "./chain/node-heal.js";
 export {
+  advanceStrikeCount,
+  consecutiveStrikeTail,
   historyCutoffIdx,
   isInfraStepFailure,
   markInfraFailedPass,

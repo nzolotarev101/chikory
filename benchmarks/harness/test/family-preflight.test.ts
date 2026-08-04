@@ -4,6 +4,7 @@ import {
   checkBenchFamilyDirective,
   formatResolvedFamilies,
   resolveBenchFamilies,
+  resolveClassMembers,
 } from "../src/family-preflight.js";
 
 const NO_PROXY: NodeJS.ProcessEnv = {};
@@ -107,5 +108,91 @@ describe("formatResolvedFamilies", () => {
     expect(formatResolvedFamilies(resolveBenchFamilies({}, NO_PROXY))).toBe(
       "executor gemini-cli(gemini) · judge anthropic",
     );
+  });
+});
+
+/**
+ * F-253 (WP-585) — the directive covers every member a wall can rotate INTO.
+ *
+ * Handing the bench arm declared classes makes the fallbacks part of the arm.
+ * The repo's own `agent-classes.yaml` lists `sonnet-5`/`opus-5`, so wiring it
+ * in unchecked would let a Gemini wall rotate the arm onto Claude — spending
+ * real Anthropic budget and publishing an I-SR measured on a mixed executor.
+ * That is F-165 arriving through a new door.
+ */
+describe("agent class members (WP-585)", () => {
+  const benchClasses = {
+    version: 1,
+    classes: {
+      "executor-default": {
+        role: "executor",
+        primary: { id: "gemini-3-6-flash", adapter: "gemini-cli", family: "gemini", backend: "gemini" },
+        adjacent: [{ id: "gpt-5-6-terra", adapter: "codex", family: "openai", backend: "openai" }],
+      },
+      "judge-default": {
+        role: "judge",
+        primary: { id: "gpt-5-6-sol", transport: "openai-compat", backend: "openai" },
+        adjacent: [{ id: "gemini-3-1-pro", transport: "openai-compat", backend: "gemini" }],
+      },
+    },
+  };
+
+  const withClaude = {
+    version: 1,
+    classes: {
+      "executor-default": {
+        role: "executor",
+        primary: { id: "gemini-3-6-flash", adapter: "gemini-cli", family: "gemini", backend: "gemini" },
+        adjacent: [
+          { id: "gpt-5-6-terra", adapter: "codex", family: "openai", backend: "openai" },
+          { id: "sonnet-5", adapter: "claude-code", family: "anthropic", backend: "anthropic", model: "claude-sonnet-5" },
+        ],
+      },
+    },
+  };
+
+  const env = { OPENAI_COMPAT_BASE_URL: "http://127.0.0.1:8787" } as NodeJS.ProcessEnv;
+
+  it("collects primary AND adjacent members from every class", () => {
+    const members = resolveClassMembers(benchClasses);
+    expect(members.map((m) => m.memberId)).toEqual([
+      "gemini-3-6-flash",
+      "gpt-5-6-terra",
+      "gpt-5-6-sol",
+      "gemini-3-1-pro",
+    ]);
+  });
+
+  it("passes the bench class file — rotation stays inside gemini/openai", () => {
+    const resolved = resolveBenchFamilies({ agentClasses: benchClasses }, env);
+    expect(checkBenchFamilyDirective(resolved)).toEqual([]);
+  });
+
+  it("REFUSES a Claude fallback — a wall must not rotate the arm onto Claude", () => {
+    const resolved = resolveBenchFamilies({ agentClasses: withClaude }, env);
+    const violations = checkBenchFamilyDirective(resolved);
+    expect(violations.map((v) => v.code)).toContain("class-member-anthropic");
+    expect(violations.find((v) => v.code === "class-member-anthropic")!.message).toContain("sonnet-5");
+  });
+
+  it("reads the true vendor from `backend`, never the transport", () => {
+    // `opus-5` reaches Claude over the openai-compat proxy — a transport is not
+    // a vendor, so a transport-keyed check would wave this through.
+    const viaProxy = {
+      version: 1,
+      classes: {
+        "judge-default": {
+          role: "judge",
+          primary: { id: "gpt-5-6-sol", transport: "openai-compat", backend: "openai" },
+          adjacent: [{ id: "opus-5", transport: "openai-compat", backend: "anthropic", model: "claude-opus-5" }],
+        },
+      },
+    };
+    const violations = checkBenchFamilyDirective(resolveBenchFamilies({ agentClasses: viaProxy }, env));
+    expect(violations.map((v) => v.code)).toContain("class-member-anthropic");
+  });
+
+  it("changes nothing when no classes are declared", () => {
+    expect(checkBenchFamilyDirective(resolveBenchFamilies({}, env))).toEqual([]);
   });
 });

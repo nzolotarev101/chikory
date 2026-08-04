@@ -7,10 +7,12 @@
  * - `chikoryAdapter`: `chikory run` on a generated task.yaml; the journal
  *   (`chikory trace --json`, the JIF interchange) is kept as the run artifact.
  */
-import { execFileSync, spawn } from "node:child_process";
+import { execFileSync } from "node:child_process";
 import { createWriteStream, cpSync, existsSync, mkdirSync, readdirSync, statSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { stringify as stringifyYaml } from "yaml";
+
+import { runBounded } from "@chikory/sdk";
 
 import type { BenchmarkTask } from "./task.js";
 import { type ProvisioningDecision } from "./engine.js";
@@ -43,35 +45,48 @@ export interface RunnerAdapter {
 
 export const DEFAULT_ADAPTER_TIMEOUT_MS = 4 * 60 * 60 * 1_000; // multi-hour tasks by design
 
-function runShell(
+/**
+ * F-250 (WP-582): this used to be a local re-implementation of bounded exec —
+ * `spawn("bash", …)` with no `detached`, killed with `child.kill("SIGKILL")`.
+ * That signals only the direct `bash`; grandchildren (the `chikory` node
+ * process, its Temporal worker) keep the stdout pipe open, so `close` never
+ * fires and the run outlives its cap. p3-rung-4's `brownfield-002` ran **9h47m
+ * against a 4h cap — 2.45×**, the exact overrun signature of F-59/WP-255.
+ *
+ * `runBounded` fixed that in the SDK a long time ago (`detached: true`,
+ * `process.kill(-pid, …)`, SIGTERM→SIGKILL grace). Forking a second bounded-exec
+ * is what let the old bug come back; there is now one implementation.
+ */
+async function runShell(
   command: string,
   cwd: string,
   timeoutMs: number,
   logPath: string,
 ): Promise<{ code: number | null; timedOut: boolean; output: string }> {
-  return new Promise((resolve) => {
-    const chunks: string[] = [];
-    const logStream = createWriteStream(logPath, { flags: "w" });
-    const child = spawn("bash", ["-c", command], { cwd, stdio: ["ignore", "pipe", "pipe"] });
-    const cap = (c: Buffer) => {
-      if (chunks.join("").length < 1_000_000) chunks.push(c.toString());
-      logStream.write(c);
-    };
-    child.stdout.on("data", cap);
-    child.stderr.on("data", cap);
-    let timedOut = false;
-    const timer = setTimeout(() => {
-      timedOut = true;
-      child.kill("SIGKILL");
-    }, timeoutMs);
-    const finish = (code: number | null) => {
-      clearTimeout(timer);
-      logStream.end();
-      resolve({ code, timedOut, output: chunks.join("") });
-    };
-    child.on("close", finish);
-    child.on("error", () => finish(null));
-  });
+  const logStream = createWriteStream(logPath, { flags: "w" });
+  const chunks: string[] = [];
+  let captured = 0;
+  try {
+    const result = await runBounded("bash", ["-c", command], {
+      cwd,
+      maxSeconds: timeoutMs / 1000,
+      onOutput: (chunk) => {
+        // Same 1 MB capture cap as before: `output` only feeds the run-id regex
+        // below, and a multi-hour arm's full log belongs on disk, not in heap.
+        if (captured < 1_000_000) {
+          chunks.push(chunk.toString());
+          captured += chunk.length;
+        }
+        logStream.write(chunk);
+      },
+    });
+    return { code: result.exitCode, timedOut: result.timedOut, output: chunks.join("") };
+  } catch {
+    // `runBounded` rejects when the process cannot be spawned at all.
+    return { code: null, timedOut: false, output: chunks.join("") };
+  } finally {
+    logStream.end();
+  }
 }
 
 async function withProvisionedPath<T>(nodeProvisioning: ProvisioningDecision | undefined, fn: () => Promise<T>): Promise<T> {
@@ -257,6 +272,14 @@ export interface ChikoryAdapterOptions {
   judge?: { family: string; cadence?: number };
   /** Raw routing block passed through to the spec (snake_case YAML shape). */
   routing?: unknown;
+  /**
+   * F-253 (WP-585): which declared classes this arm runs on, so a quota wall
+   * rotates to a peer instead of parking. These are class-id REFERENCES into
+   * the registry (`agent_classes: {executor, judge}` per task-spec.md), not an
+   * inline registry — the registry itself is resolved by the runner from
+   * `CHIKORY_AGENT_CLASSES`.
+   */
+  agentClasses?: { executor?: string; judge?: string };
 }
 
 /**
@@ -306,9 +329,21 @@ export function buildChikorySpec(
     // at dogfood-111's observed pace 50 turns ≈ 540s — the default 600s
     // wall-clock cap would kill the step before the turn cap bounds it.
     step_limits: { max_turns: opts.stepMaxTurns ?? 50, max_seconds: 840 },
+    // F-247 (WP-579): nobody is watching a benchmark arm. Without this an
+    // ESCALATE parks in AWAITING_APPROVAL forever waiting for a `chikory
+    // approve` that will never come — p3-rung-4's `brownfield-001` sat there
+    // until the harness SIGKILLed it 4 hours later, leaving the Temporal
+    // workflow Running and orphaning the server for the next launch.
+    // `seal_resumable_failed` ends the run at its last checkpoint instead.
+    unattended: { escalation: "seal_resumable_failed" },
     executor,
     judge,
     ...(routing !== undefined ? { routing } : {}),
+    // F-253 (WP-585): without declared classes `agents.executorClass` is
+    // undefined, `recordWallAndCheckPeer` is skipped, and every wall parks
+    // instead of rotating to a peer — the whole WP-566…WP-576 rotation system
+    // is inert. p3-rung-4 hit 5 walls and logged zero `agent_rotation` entries.
+    ...(opts.agentClasses !== undefined ? { agent_classes: opts.agentClasses } : {}),
   };
 }
 

@@ -25,6 +25,15 @@ status: pinned
 repo:
   url: https://github.com/gitify-app/gitify
   ref: a061eaa112fa18885dd4de0cea6c0e51094cad0c # pinned BEFORE #3036 (parent of the merge commit on main)
+# F-254 (2026-08-04): the repo's own engines range is ">=24", which resolves to
+# whatever the newest installed toolchain is — so this fully-pinned task was
+# still not reproducible. Measured on a clean clone of the base ref:
+#   node 24.14.1 → Test Files 153 passed (153), Tests 1128 passed (1128)
+#   node 24.15.0 → SIGABRT inside vitest 4.1.9 before ANY test runs (twice),
+#                  preceded by "File descriptor N opened in unmanaged mode twice"
+# p3-rung-4 drew 24.15.0, recorded baseVerified:false, and dropped this task out
+# of the arm. Raise this pin only alongside a re-measured green base.
+node_version: 24.14.1
 base_verification_command: npx -y pnpm@11.9.0 install --frozen-lockfile && npx -y pnpm@11.9.0 exec vitest run
 horizon: 4-6h
 goal: |

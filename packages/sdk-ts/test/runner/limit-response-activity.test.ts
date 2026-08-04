@@ -403,6 +403,7 @@ describe("executeStep limit response seam", () => {
       },
     ]);
     expect(decideLimitParkDelay({ nowMs: 10_000 }, expectedPlan.steps[0]!)).toEqual({
+      action: "sleep",
       sleepMs: 5000,
     });
     expect(
@@ -414,7 +415,7 @@ describe("executeStep limit response seam", () => {
           retryAtMs: 12_500,
         },
       ),
-    ).toEqual({ sleepMs: 2500 });
+    ).toEqual({ action: "sleep", sleepMs: 2500 });
     expect(
       decideLimitParkDelay(
         { nowMs: 12_500 },
@@ -425,6 +426,33 @@ describe("executeStep limit response seam", () => {
         },
       ),
     ).toBeNull();
+
+    // F-249 (WP-581): a reset that lands past the run's deadline is a hang, not
+    // a park — p3-rung-4's `brownfield-005` slept toward a 19h49m reset inside a
+    // 4h cap and was SIGKILLed having never woken. Replayed with its real
+    // numbers: observed 2026-08-04T03:16:04Z, reset 2026-08-04T23:05:00Z.
+    const bf005ObservedMs = Date.UTC(2026, 7, 4, 3, 16, 4);
+    const bf005ResetMs = 1785884700596;
+    const fourHourCapMs = bf005ObservedMs + 4 * 60 * 60 * 1000;
+    const pastDeadline = decideLimitParkDelay(
+      { nowMs: bf005ObservedMs, deadlineMs: fourHourCapMs },
+      { action: "park-until-reset", reason: "no-legal-headroom", retryAtMs: bf005ResetMs },
+    );
+    expect(pastDeadline?.action).toBe("seal_resumable_failed");
+    expect(pastDeadline).toMatchObject({
+      reason: expect.stringContaining("past this run's deadline"),
+    });
+    // A reset INSIDE the deadline still parks normally.
+    expect(
+      decideLimitParkDelay(
+        { nowMs: bf005ObservedMs, deadlineMs: fourHourCapMs },
+        {
+          action: "park-until-reset",
+          reason: "no-legal-headroom",
+          retryAtMs: bf005ObservedMs + 60 * 60 * 1000,
+        },
+      ),
+    ).toEqual({ action: "sleep", sleepMs: 60 * 60 * 1000 });
 
     expect(record.status).toBe("FAILED");
     expect(record.failure).toEqual({

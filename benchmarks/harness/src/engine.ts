@@ -126,6 +126,34 @@ export function satisfiesRange(versionStr: string, rangeStr: string): boolean {
   return groups.some(atoms => atoms.every(atom => atom(version)));
 }
 
+/**
+ * F-254 (WP-586): resolve an EXACT pinned Node version, ignoring the repo's own
+ * `engines` range.
+ *
+ * `decideTargetNode` answers "what does this repo say it needs?" — the right
+ * question for an unpinned task, the wrong one for a reproducible benchmark.
+ * A range like `">=24"` silently resolves to whatever the newest local
+ * toolchain is: `brownfield-002` at ref `a061eaa1` is 1128/1128 green on Node
+ * 24.14.1 and SIGABRTs vitest 4.1.9 before a single test on 24.15.0. A scored
+ * task must name the runtime it was scored on.
+ *
+ * No ambient shortcut: even when the running Node matches, the pinned toolchain
+ * is put on PATH explicitly, so the graded runtime is the one on the record.
+ */
+export function pinnedNodeProvisioning(
+  version: string,
+  availableToolchains: NodeToolchain[],
+): ProvisioningDecision {
+  const match = availableToolchains.find((t) => t.version === version);
+  if (match) return { type: "provision", binDir: match.binDir };
+  return {
+    type: "unavailable",
+    neededVersion: version,
+    available: availableToolchains.map((t) => t.version),
+    error: `task pins node ${version} (node_version) and no such toolchain is installed`,
+  };
+}
+
 export function decideTargetNode(
   packageJson: string | Record<string, unknown> | null | undefined,
   availableToolchains: NodeToolchain[],
