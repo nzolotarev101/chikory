@@ -98,7 +98,7 @@ describe("EndpointLedger (WP-310)", () => {
     expect(state.resetAtMs).toBe(NOW + 120_000);
   });
 
-  it("a stale (past) reset is not reported", () => {
+  it("a stale (past) observation is dropped entirely", () => {
     ledger.appendLimitObservation({
       endpointTarget: "codex",
       windowKind: "rolling-5h",
@@ -107,8 +107,72 @@ describe("EndpointLedger (WP-310)", () => {
       consumedTokensAtHit: 40_000,
     });
     const state = ledger.windowState("codex", ROLLING_5H, NOW);
-    expect(state.capacityTokens).toBe(40_000);
+    expect(state.capacityTokens).toBeUndefined();
     expect(state.resetAtMs).toBeUndefined();
+  });
+
+  it("a stale observation with no reset ever learned is dropped once a full window has elapsed", () => {
+    // Some raw provider limit signals carry no decodable reset hint at all
+    // (resetAtMs omitted). Fallback: a full window.durationMs since the
+    // observation is the same "this ceiling can no longer be trusted" signal.
+    ledger.appendLimitObservation({
+      endpointTarget: "codex",
+      windowKind: "rolling-5h",
+      observedAtMs: NOW - ROLLING_5H_WINDOW_MS - 1,
+      consumedTokensAtHit: 40_000,
+    });
+    const state = ledger.windowState("codex", ROLLING_5H, NOW);
+    expect(state.capacityTokens).toBeUndefined();
+    expect(state.resetAtMs).toBeUndefined();
+  });
+
+  it("an observation with no reset ever learned still reports capacity before a full window elapses", () => {
+    // Regression guard on the fallback boundary — must not fire early.
+    ledger.appendLimitObservation({
+      endpointTarget: "codex",
+      windowKind: "rolling-5h",
+      observedAtMs: NOW - ROLLING_5H_WINDOW_MS + 1,
+      consumedTokensAtHit: 40_000,
+    });
+    const state = ledger.windowState("codex", ROLLING_5H, NOW);
+    expect(state.capacityTokens).toBe(40_000);
+  });
+
+  it("proves the WP-577/F-245 incident property: a passed reset no longer parks future pacing", () => {
+    // Real Gemini CLI quota-wall numbers (rolling-5h wall hit, learned
+    // capacityTokens:0, reset from the CLI's own "resets in 57m44s" text).
+    // Checked 4 minutes AFTER that learned reset had already passed — this
+    // is the exact read that self-parked pacing for another full window,
+    // twice, for 9.8h, before this fix.
+    const HIT_AT = Date.parse("2026-08-02T17:19:00.000Z");
+    const LEARNED_RESET_AT = Date.parse("2026-08-02T18:16:00.000Z");
+    const CHECKED_AT = Date.parse("2026-08-02T18:20:00.000Z"); // 4 min after reset
+
+    ledger.appendLimitObservation({
+      endpointTarget: "gemini-cli",
+      windowKind: "rolling-5h",
+      observedAtMs: HIT_AT,
+      resetAtMs: LEARNED_RESET_AT,
+      consumedTokensAtHit: 0,
+    });
+
+    const state = ledger.windowState("gemini-cli", ROLLING_5H, CHECKED_AT);
+    expect(state.capacityTokens).toBeUndefined();
+    expect(state.resetAtMs).toBeUndefined();
+
+    // The property that actually matters: with capacity unknown, pacing
+    // must NOT throttle (limit-pacing.ts:89's "observe, never throttle"
+    // honesty rule). Before this fix capacityTokens stayed 0 forever and
+    // this would have asserted "throttle".
+    const pace = decideLimitPacing({
+      nowMs: CHECKED_AT,
+      windows: [state],
+      estimatedRemainingSteps: 10,
+      recentStepTokens: [1000, 1000, 1000, 1000, 1000],
+      recentStepDurationsMs: [60_000, 60_000, 60_000, 60_000, 60_000],
+    });
+    expect(pace.action).toBe("push");
+    expect(pace.sustainableTokensPerHour).toBe(Infinity);
   });
 
   it("a fresh ledger on the same database reads the persisted learned capacity", () => {

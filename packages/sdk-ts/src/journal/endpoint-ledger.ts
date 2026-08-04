@@ -133,6 +133,18 @@ export class EndpointLedger {
   /**
    * Quota state for one declared window: consumption inside the trailing
    * window across ALL runs, plus the latest learned capacity/reset.
+   *
+   * Capacity is a LEARNED ceiling from the window it was observed in
+   * ("capacity is observed, never vendor-declared" — see
+   * `LimitObservationAppend.consumedTokensAtHit`); once that window has
+   * rolled over the number is meaningless and must not be reported. A row is
+   * stale once ITS OWN known reset has passed; when no reset was ever
+   * decoded (some raw provider limit signals carry no reset hint),
+   * `window.durationMs` since the observation is the same signal — a full
+   * period has definitely passed. Without this gate `decideLimitPacing`
+   * (`limit-pacing.ts:89`) cannot tell a live ceiling from an hours-stale one
+   * and throttles forever off a number the provider has long since reset
+   * (WP-577, F-245).
    */
   windowState(endpointTarget: string, window: DeclaredQuotaWindow, nowMs: number): LedgerWindowState {
     const consumed = this.db
@@ -145,20 +157,28 @@ export class EndpointLedger {
 
     const observation = this.db
       .prepare(
-        `SELECT reset_at_ms, consumed_tokens_at_hit
+        `SELECT reset_at_ms, consumed_tokens_at_hit, observed_at_ms
            FROM limit_observations
           WHERE endpoint_target = ? AND window_kind = ?
           ORDER BY observed_at_ms DESC LIMIT 1`,
       )
       .get(endpointTarget, window.window) as
-      | { reset_at_ms: number | null; consumed_tokens_at_hit: number }
+      | { reset_at_ms: number | null; consumed_tokens_at_hit: number; observed_at_ms: number }
       | undefined;
+
+    const capacityStale =
+      observation !== undefined &&
+      (observation.reset_at_ms != null
+        ? observation.reset_at_ms <= nowMs
+        : observation.observed_at_ms + window.durationMs <= nowMs);
 
     const state: LedgerWindowState = {
       window: window.window,
       windowMs: window.durationMs,
       consumedTokens: consumed.tokens,
-      ...(observation !== undefined ? { capacityTokens: observation.consumed_tokens_at_hit } : {}),
+      ...(observation !== undefined && !capacityStale
+        ? { capacityTokens: observation.consumed_tokens_at_hit }
+        : {}),
       ...(observation?.reset_at_ms != null && observation.reset_at_ms > nowMs
         ? { resetAtMs: observation.reset_at_ms }
         : {}),
