@@ -31,6 +31,10 @@
       // runnable brownfield corpus with the directive arm (Gemini executes /
       // Codex judges). Custom filters/tasks: devbox run -- bash scripts/bench-run.sh <args>.
       "bench-run": "bash scripts/bench-run.sh",
+      // The raw Claude Code baseline arm this one is compared against. Claude is
+      // the system UNDER MEASUREMENT here, not Chikory's executor — see the
+      // script header before "correcting" it to gemini (F-260).
+      "bench-baseline": "bash scripts/bench-baseline.sh",
       "judge-proxy": "node scripts/cli-judge-proxy.mjs 8787 codex",
       "harvest": "bash scripts/harvest.sh \"\" main",
       "harvest-audit": "bash scripts/harvest-audit.sh",

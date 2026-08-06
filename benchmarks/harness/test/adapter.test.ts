@@ -7,7 +7,7 @@ import { stringify as stringifyYaml } from "yaml";
 
 import { parseTaskSpec } from "@chikory/sdk";
 
-import { buildChikorySpec, commandAdapter } from "../src/adapter.js";
+import { buildChikorySpec, chikoryAdapter, commandAdapter } from "../src/adapter.js";
 import type { BenchmarkTask } from "../src/task.js";
 
 const BROWNFIELD: BenchmarkTask = {
@@ -196,6 +196,191 @@ describe("commandAdapter", () => {
     // Cap + SIGTERM→SIGKILL grace, nowhere near the 30 s the grandchild wanted.
     expect(elapsed).toBeLessThan(12_000);
   }, 40_000);
+
+  it("verifies the pinned base BEFORE the agent runs (F-258 reference behaviour)", async () => {
+    const fixture = createTestGitRepo();
+    try {
+      const task: BenchmarkTask = {
+        ...BROWNFIELD,
+        repo: { url: fixture.repoDir, ref: fixture.commitSha },
+        // Green on the pinned tree, red once `base.txt` is rewritten.
+        baseVerificationCommand: 'grep -q "from pinned base" base.txt && echo "Tests  1 passed (1)"',
+      };
+      const ws = mkdtempSync(join(tmpdir(), "bench-ws-cmdbase-"));
+      const out = mkdtempSync(join(tmpdir(), "bench-out-cmdbase-"));
+      const adapter = commandAdapter("mutate", 'echo "agent rewrote this" > base.txt');
+      const result = await adapter.run(task, { workspaceDir: ws, outDir: out });
+
+      expect(result.baseVerification).toMatchObject({ green: true, testsPassed: 1, testsFailed: 0 });
+      // The agent really did break the base command afterwards — the verification
+      // above is only meaningful because it ran first.
+      expect(readFileSync(join(ws, "base.txt"), "utf8")).toBe("agent rewrote this\n");
+    } finally {
+      fixture.cleanup();
+    }
+  }, 60_000);
+});
+
+/**
+ * A stand-in `chikory` binary: announces a run-id the way the real CLI does,
+ * clones the pin into its OWN `dataDir/runs/<id>/workspace` (never the harness
+ * workspace), and edits the tree there. That is the shape that made F-258
+ * invisible — the adapter's agent works somewhere else entirely, and the
+ * harness only sees the result.
+ */
+function writeChikoryStub(repoDir: string, mutation: string): string {
+  const binDir = mkdtempSync(join(tmpdir(), "chikory-stub-"));
+  const binPath = join(binDir, "chikory-stub.sh");
+  writeFileSync(
+    binPath,
+    [
+      "#!/usr/bin/env bash",
+      "set -euo pipefail",
+      'DATA_DIR="$4"',
+      'RUN_ID="run-aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"',
+      'WS="$DATA_DIR/runs/$RUN_ID/workspace"',
+      'mkdir -p "$WS"',
+      `git clone --quiet ${JSON.stringify(repoDir)} "$WS"`,
+      'echo "run-id: $RUN_ID"',
+      `cd "$WS" && ${mutation}`,
+    ].join("\n"),
+    { mode: 0o755 },
+  );
+  return `bash ${JSON.stringify(binPath)}`;
+}
+
+describe("chikoryAdapter base verification (F-258)", () => {
+  /**
+   * F-258: the harness reported `baseVerified` for the Chikory arm by running
+   * the base command against `ctx.workspaceDir` — which this adapter overwrites
+   * with the agent's FINAL tree before grading. So "was the base green?" was
+   * answered by testing the agent's output.
+   *
+   * p3-rung-4's `brownfield-001` (zod v3→v4) failed on `Your lockfile needs to
+   * be updated, but yarn was run with --frozen-lockfile`: a frozen install
+   * against the `yarn.lock` the agent had correctly rewritten. Same pin, same
+   * command, verified green (117 passed) through `commandAdapter`, which
+   * verifies pre-agent. The other four tasks passed only because they do not
+   * perturb their lockfiles enough to trip a frozen install — so `baseVerified`
+   * had never measured what its name claims, on any Chikory-arm run.
+   *
+   * The mutation below is that defect in miniature: a base command that is green
+   * on the pin and red on the agent's tree.
+   */
+  it("verifies the pin, not the tree the agent handed back", async () => {
+    const fixture = createTestGitRepo();
+    try {
+      const task: BenchmarkTask = {
+        ...BROWNFIELD,
+        repo: { url: fixture.repoDir, ref: fixture.commitSha },
+        baseVerificationCommand: 'grep -q "from pinned base" base.txt && echo "Tests  1 passed (1)"',
+      };
+      const ws = mkdtempSync(join(tmpdir(), "bench-ws-chik-"));
+      const out = mkdtempSync(join(tmpdir(), "bench-out-chik-"));
+      const adapter = chikoryAdapter({
+        bin: writeChikoryStub(fixture.repoDir, 'echo "agent rewrote this" > base.txt'),
+      });
+
+      const result = await adapter.run(task, { workspaceDir: ws, outDir: out });
+
+      expect(result.exitCode).toBe(0);
+      // Pre-agent, against the pin.
+      expect(result.baseVerification).toMatchObject({ green: true, testsPassed: 1, testsFailed: 0 });
+      expect(result.baseVerification?.reason).toContain("Base suite is green");
+      // …and the graded workspace really is the post-agent tree, on which that
+      // same command would have failed. Without this line the assertion above
+      // could pass for the wrong reason.
+      expect(readFileSync(join(ws, "base.txt"), "utf8")).toBe("agent rewrote this\n");
+    } finally {
+      fixture.cleanup();
+    }
+  }, 60_000);
+
+  it("leaves no base-verification residue in the graded workspace", async () => {
+    const fixture = createTestGitRepo();
+    try {
+      const task: BenchmarkTask = {
+        ...BROWNFIELD,
+        repo: { url: fixture.repoDir, ref: fixture.commitSha },
+        // Writes an artifact the way a real install does (`node_modules`).
+        baseVerificationCommand: 'mkdir -p node_modules && echo "Tests  1 passed (1)"',
+      };
+      const ws = mkdtempSync(join(tmpdir(), "bench-ws-residue-"));
+      const out = mkdtempSync(join(tmpdir(), "bench-out-residue-"));
+      const adapter = chikoryAdapter({ bin: writeChikoryStub(fixture.repoDir, "true") });
+
+      const result = await adapter.run(task, { workspaceDir: ws, outDir: out });
+
+      expect(result.baseVerification?.green).toBe(true);
+      // The scratch clone is deleted…
+      expect(existsSync(join(out, "base-verify"))).toBe(false);
+      // …and its install output never reaches the graded artifact. `cpSync` runs
+      // with `force` but does NOT delete extra files at the destination, so
+      // anything left here would survive into grading.
+      expect(existsSync(join(ws, "node_modules"))).toBe(false);
+    } finally {
+      fixture.cleanup();
+    }
+  }, 60_000);
+
+  it("reports a red base without inventing a reason of its own", async () => {
+    const fixture = createTestGitRepo("not what the command wants\n");
+    try {
+      const task: BenchmarkTask = {
+        ...BROWNFIELD,
+        repo: { url: fixture.repoDir, ref: fixture.commitSha },
+        baseVerificationCommand: 'grep -q "from pinned base" base.txt && echo "Tests  1 passed (1)"',
+      };
+      const ws = mkdtempSync(join(tmpdir(), "bench-ws-red-"));
+      const out = mkdtempSync(join(tmpdir(), "bench-out-red-"));
+      const adapter = chikoryAdapter({ bin: writeChikoryStub(fixture.repoDir, "true") });
+
+      const result = await adapter.run(task, { workspaceDir: ws, outDir: out });
+      expect(result.baseVerification?.green).toBe(false);
+      expect(result.baseVerification?.reason).toContain("failed with exit code 1");
+    } finally {
+      fixture.cleanup();
+    }
+  }, 60_000);
+
+  it("names a missing base_verification_command the same way commandAdapter does", async () => {
+    const fixture = createTestGitRepo();
+    try {
+      const task: BenchmarkTask = { ...BROWNFIELD, repo: { url: fixture.repoDir, ref: fixture.commitSha } };
+      const chikOut = mkdtempSync(join(tmpdir(), "bench-out-nocmd-chik-"));
+      const cmdOut = mkdtempSync(join(tmpdir(), "bench-out-nocmd-cmd-"));
+
+      const viaChikory = await chikoryAdapter({ bin: writeChikoryStub(fixture.repoDir, "true") }).run(task, {
+        workspaceDir: mkdtempSync(join(tmpdir(), "bench-ws-nocmd-chik-")),
+        outDir: chikOut,
+      });
+      const viaCommand = await commandAdapter("noop", "true").run(task, {
+        workspaceDir: mkdtempSync(join(tmpdir(), "bench-ws-nocmd-cmd-")),
+        outDir: cmdOut,
+      });
+
+      // Two arms of one published comparison: `baseVerified` has to mean the
+      // same thing in each, down to the reason text an operator greps for.
+      expect(viaChikory.baseVerification).toEqual(viaCommand.baseVerification);
+      expect(viaChikory.baseVerification?.reason).toContain("No base verification command declared");
+    } finally {
+      fixture.cleanup();
+    }
+  }, 60_000);
+
+  it("does not verify a base for a greenfield task with no repo pin", async () => {
+    const fixture = createTestGitRepo();
+    try {
+      const task: BenchmarkTask = { ...BROWNFIELD, id: "greenfield-001", class: "greenfield", repo: undefined };
+      const result = await chikoryAdapter({ bin: writeChikoryStub(fixture.repoDir, "true") }).run(task, {
+        workspaceDir: mkdtempSync(join(tmpdir(), "bench-ws-green-")),
+        outDir: mkdtempSync(join(tmpdir(), "bench-out-green-")),
+      });
+      expect(result.baseVerification).toBeUndefined();
+    } finally {
+      fixture.cleanup();
+    }
+  }, 60_000);
 });
 
 describe("buildChikorySpec", () => {
@@ -280,5 +465,59 @@ describe("buildChikorySpec", () => {
 
     // Omitted when undeclared — the default arm stays byte-identical.
     expect(buildChikorySpec(BROWNFIELD, {}, "/tmp/ws").agent_classes).toBeUndefined();
+  });
+
+  /**
+   * F-256/F-257: `bench-run.sh` exports `OPENAI_COMPAT_BASE_URL` (real
+   * `process.env`, not the `env:` option below) for every launch, and passes
+   * `--agent-classes` in the same breath, but never `ANTHROPIC_API_KEY` — the
+   * standing directive is Gemini executes, Codex judges, never Claude.
+   * `buildChikorySpec` used to always set an explicit `routing` block AND
+   * default `judge.family` to a Claude/Gemini guess whenever agent classes
+   * weren't threaded all the way through — both leftovers from before agent
+   * classes existed. The `routing` override collided with `parseTaskSpec`'s
+   * "routing is DERIVED from agent_classes, not both" check; the `judge`
+   * guess survived that fix and got checked independently by
+   * `missingProviderEnv`, demanding a Claude key the bench arm never sets.
+   * Both killed every task before it materialized a workspace.
+   */
+  it("derives judge + routing from agent classes, never guessing anthropic, even with the proxy env set (F-256/F-257)", () => {
+    const prior = process.env.OPENAI_COMPAT_BASE_URL;
+    process.env.OPENAI_COMPAT_BASE_URL = "http://127.0.0.1:8787";
+    try {
+      const agentClasses = { executor: "executor-bench", judge: "judge-bench" };
+      const spec = buildChikorySpec(BROWNFIELD, { agentClasses }, "/tmp/ws");
+      expect(spec.routing).toBeUndefined();
+      expect(spec.judge).toEqual({});
+
+      const parsed = parseTaskSpec(stringifyYaml(spec), {
+        // No ANTHROPIC_API_KEY — the real bench arm never sets one.
+        env: { GEMINI_API_KEY: "x", OPENAI_COMPAT_BASE_URL: "http://127.0.0.1:8787" },
+        warn: () => {},
+        registry: {
+          version: 1,
+          classes: {
+            "executor-bench": {
+              id: "executor-bench",
+              role: "executor",
+              primary: { id: "g", role: "executor", adapter: "gemini-cli", family: "gemini", backend: "gemini", model: "gemini-3.6-flash-high" },
+              adjacent: [],
+            },
+            "judge-bench": {
+              id: "judge-bench",
+              role: "judge",
+              primary: { id: "s", role: "judge", transport: "openai-compat", backend: "openai", model: "gpt-5.6-sol xhigh" },
+              adjacent: [],
+            },
+          },
+        },
+      });
+      expect(parsed.judge.family).toBe("openai-compat");
+      expect(parsed.routing.stages.judge).toEqual({ provider: "openai-compat", model: "gpt-5.6-sol xhigh" });
+      expect(parsed.routing.stages.code).toEqual({ provider: "gemini", model: "gemini-3.6-flash-high" });
+    } finally {
+      if (prior === undefined) delete process.env.OPENAI_COMPAT_BASE_URL;
+      else process.env.OPENAI_COMPAT_BASE_URL = prior;
+    }
   });
 });

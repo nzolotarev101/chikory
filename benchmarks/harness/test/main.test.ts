@@ -58,6 +58,67 @@ describe("chikory-bench CLI", () => {
     expect(o.lines.out.join("\n")).toContain("1/1 requirements satisfied");
   });
 
+  /**
+   * F-259: the canonical `<out>/summary.json` two arms are compared from used to
+   * be promoted by hand, with `ls -d <out>/*-chikory | tail -1` — "the newest
+   * directory". Run one diagnostic task afterwards and the newest directory is a
+   * ONE-task summary, published as the five-task arm. p3-rung-4 had exactly that
+   * directory sitting on disk (`20260806-010237-chikory`) when the promote step
+   * was due.
+   */
+  it("run: promotes a canonical summary.json for a full-corpus run", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "bench-cli-promote-"));
+    writeFileSync(join(dir, "greenfield-002.yaml"), GOOD);
+    writeFileSync(join(dir, "greenfield-003.yaml"), GOOD.replace("greenfield-002", "greenfield-003"));
+    const results = mkdtempSync(join(tmpdir(), "bench-cli-results-"));
+    const o = io();
+
+    expect(
+      await main(
+        ["run", "--tasks", dir, "--adapter", "command", "--cmd", "touch hi.txt", "--out", results, "--suite", "smoke"],
+        o,
+      ),
+    ).toBe(0);
+
+    const canonical = join(results, "summary.json");
+    expect(o.lines.out.join("\n")).toContain(`promoted canonical summary: ${canonical}`);
+    const promoted = JSON.parse(readFileSync(canonical, "utf8"));
+    expect(promoted.tasks).toBe(2);
+
+    // Byte-faithful to the run's own summary — dogfood-123 publishes verbatim
+    // copies and diffs them against this path.
+    const runDir = o.lines.out.join("\n").match(/^artifacts: (.+)$/m)![1];
+    expect(readFileSync(canonical, "utf8")).toBe(readFileSync(join(runDir, "summary.json"), "utf8"));
+  });
+
+  it("run: a filtered subset is a diagnostic and never clobbers the canonical summary", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "bench-cli-filtered-"));
+    writeFileSync(join(dir, "greenfield-002.yaml"), GOOD);
+    writeFileSync(join(dir, "greenfield-003.yaml"), GOOD.replace("greenfield-002", "greenfield-003"));
+    const results = mkdtempSync(join(tmpdir(), "bench-cli-results-"));
+
+    const full = io();
+    await main(
+      ["run", "--tasks", dir, "--adapter", "command", "--cmd", "touch hi.txt", "--out", results, "--suite", "smoke"],
+      full,
+    );
+    const afterFullRun = readFileSync(join(results, "summary.json"), "utf8");
+
+    const diagnostic = io();
+    expect(
+      await main(
+        [
+          "run", "--tasks", dir, "--adapter", "command", "--cmd", "touch hi.txt",
+          "--out", results, "--suite", "smoke", "--filter", "greenfield-003",
+        ],
+        diagnostic,
+      ),
+    ).toBe(0);
+
+    expect(diagnostic.lines.out.join("\n")).toContain("NOT promoting a canonical summary: 1 of 2 tasks selected");
+    expect(readFileSync(join(results, "summary.json"), "utf8")).toBe(afterFullRun);
+  });
+
   it("run --adapter chikory: family preflight REFUSES a wrong-family arm before spending (WP-536)", async () => {
     const dir = mkdtempSync(join(tmpdir(), "bench-cli-"));
     writeFileSync(join(dir, "greenfield-002.yaml"), GOOD);

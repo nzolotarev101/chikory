@@ -14,7 +14,7 @@ import {
   resolveBenchFamilies,
 } from "./family-preflight.js";
 import { commandComplete, makeJudgeGrader } from "./judge-grader.js";
-import { compareSummaries, type SuiteSummary } from "./results.js";
+import { compareSummaries, writeSuiteSummary, type SuiteSummary } from "./results.js";
 import { acquireSuiteLock, SuiteAlreadyRunningError } from "./suite-lock.js";
 import { loadTaskDir, runSuite } from "./suite.js";
 import { isRunnable } from "./task.js";
@@ -333,6 +333,28 @@ export async function main(argv: string[], io = { out: console.log, err: console
         `(I-SR ${(summary.iSr * 100).toFixed(1)}%, D-SR ${(summary.dSr * 100).toFixed(1)}%)`,
     );
     io.out(`artifacts: ${outDir}`);
+
+    // F-259: promote the canonical `<out>/summary.json` here, so nobody has to
+    // pick it out of a glob afterwards. The runbook's hand-promote step was
+    // `ls -d <out>/*-chikory | tail -1`, which is "newest directory" — and the
+    // newest directory after a diagnostic re-run of ONE task is that one-task
+    // summary, silently published as the five-task arm.
+    //
+    // Guarded on a full-corpus selection for exactly that reason: `--filter
+    // brownfield-001` can never clobber the canonical file, while
+    // `bench-run.sh`'s standing `--filter brownfield` (5 of 5) still promotes.
+    // Byte-identical to the run's own summary.json — both go through
+    // `writeSuiteSummary`, and dogfood-123 diffs the published copies against
+    // this path.
+    if (selected.length === tasks.length) {
+      const canonical = writeSuiteSummary(resultsDir, summary);
+      io.out(`promoted canonical summary: ${canonical}`);
+    } else {
+      io.out(
+        `NOT promoting a canonical summary: ${selected.length} of ${tasks.length} tasks selected ` +
+          `(a filtered subset is a diagnostic, not an arm)`,
+      );
+    }
     return 0;
   }
 

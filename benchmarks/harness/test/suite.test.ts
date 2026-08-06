@@ -1,5 +1,5 @@
 import { execSync } from "node:child_process";
-import { mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { cpSync, existsSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
@@ -399,11 +399,28 @@ requirements:
       expect(invalid).toEqual({});
 
       const resultsDir = mkdtempSync(join(tmpdir(), "bench-results-"));
+      // F-258: base verification is the ADAPTER's job now — `runSuite` cannot do
+      // it after the fact, because the workspace it would test is the adapter's
+      // output. This stub works in place (like `commandAdapter`), so it verifies
+      // the freshly-materialized tree before touching it.
       const adapter: RunnerAdapter = {
         name: "test-adapter",
         run: async (task, ctx) => {
+          let baseVerification;
           if (task.repo) {
             ensureGitWorkspace(ctx.workspaceDir, task.repo.url, task.repo.ref);
+            baseVerification = task.baseVerificationCommand
+              ? await verifyBaseGreen({
+                  command: task.baseVerificationCommand,
+                  cwd: ctx.workspaceDir,
+                  provisioning: { type: "ambient" },
+                })
+              : {
+                  green: false,
+                  reason: "No base verification command declared (base_verification_command is missing)",
+                  testsPassed: 0,
+                  testsFailed: 0,
+                };
           }
           if (task.id === "brownfield-901") {
             writeFileSync(join(ctx.workspaceDir, "green.txt"), "ok");
@@ -411,7 +428,13 @@ requirements:
           if (task.id === "greenfield-001") {
             writeFileSync(join(ctx.workspaceDir, "hello.txt"), "hello");
           }
-          return { exitCode: 0, wallClockMs: 10, artifacts: [], notes: [] };
+          return {
+            exitCode: 0,
+            wallClockMs: 10,
+            artifacts: [],
+            notes: [],
+            ...(baseVerification !== undefined ? { baseVerification } : {}),
+          };
         },
       };
 
@@ -433,6 +456,145 @@ requirements:
       expect(writtenSummary.tasksVerified).toBe(2);
       expect(writtenSummary.unverifiedTasks).toHaveLength(2);
       expect(writtenSummary.iSr).toBe(1);
+    } finally {
+      fixture.cleanup();
+    }
+  });
+
+  /**
+   * F-258, end to end and at the altitude the defect lived at.
+   *
+   * `runSuite` used to fall back to running the base command against
+   * `workspaceDir` whenever an adapter reported nothing. For an adapter whose
+   * agent works elsewhere — `chikoryAdapter` clones into
+   * `dataDir/runs/<id>/workspace` and copies the finished tree back for grading
+   * — that directory holds the agent's OUTPUT by then. The suite answered "was
+   * the base green?" by testing the thing the agent produced.
+   *
+   * It failed exactly where it mattered: p3-rung-4's `brownfield-001` is a real
+   * zod v3→v4 upgrade, so a `--frozen-lockfile` install against the agent's
+   * rewritten `yarn.lock` could only fail. That marked Chikory's best task
+   * (3/3, dep 3) unverified, and `compareSummaries` refuses to publish an arm
+   * with `tasksVerified !== 5`. The other four tasks passed by luck.
+   *
+   * The adapter below is that geometry in miniature: it works in a private
+   * directory, reports nothing, and hands back a tree that PASSES the base
+   * command for reasons of its own. On the old code the suite read that pass as
+   * "the base is green" — a fabricated green, from a tree the pin never
+   * produced. The false-red p3-rung-4 actually hit and this false-green are the
+   * same defect seen from two sides.
+   */
+  it("never manufactures a base verdict from a workspace the agent overwrote (F-258)", async () => {
+    const fixture = createGitRepoFixture();
+    try {
+      const taskYaml = `
+id: brownfield-905
+class: brownfield
+status: pinned
+repo:
+  url: ${JSON.stringify(fixture.repoDir)}
+  ref: ${fixture.commitSha}
+base_verification_command: ./test.sh
+goal: goal
+requirements:
+  - id: R1
+    description: requirement 1
+    check: test -f delivered.txt
+`;
+      const dir = mkdtempSync(join(tmpdir(), "bench-suite-f258-"));
+      writeFileSync(join(dir, "brownfield-905.yaml"), taskYaml);
+      const { tasks } = loadTaskDir(dir);
+
+      const outOfBandAdapter: RunnerAdapter = {
+        name: "out-of-band",
+        run: async (task, ctx) => {
+          const agentDir = mkdtempSync(join(tmpdir(), "agent-private-"));
+          ensureGitWorkspace(agentDir, task.repo!.url, task.repo!.ref);
+          // The agent's own tree: a `test.sh` that reports green while testing
+          // nothing, plus the deliverable. Materially different from the pin.
+          writeFileSync(join(agentDir, "test.sh"), '#!/bin/sh\necho "Tests  99 passed (99)"\nexit 0\n', {
+            mode: 0o755,
+          });
+          writeFileSync(join(agentDir, "delivered.txt"), "ok");
+          cpSync(agentDir, ctx.workspaceDir, { recursive: true, force: true });
+          rmSync(agentDir, { recursive: true, force: true });
+          return { exitCode: 0, wallClockMs: 10, artifacts: [], notes: [] };
+        },
+      };
+
+      const resultsDir = mkdtempSync(join(tmpdir(), "bench-results-"));
+      const { summary, outDir } = await runSuite({
+        suite: "unit",
+        tasks,
+        adapter: outOfBandAdapter,
+        resultsDir,
+      });
+
+      const taskResult = JSON.parse(readFileSync(join(outDir, "brownfield-905.json"), "utf8"));
+      // The old fallback answered `green: true, testsPassed: 99` here — read off
+      // the agent's own substituted suite.
+      expect(taskResult.baseVerification.green).toBe(false);
+      expect(taskResult.baseVerification.testsPassed).toBe(0);
+      expect(taskResult.baseVerification.reason).toContain(
+        "adapter 'out-of-band' did not report a base verification",
+      );
+      expect(summary.tasksVerified).toBe(0);
+      expect(summary.unverifiedTasks).toHaveLength(1);
+      // The graded tree really is the agent's, not the pin's — without this the
+      // assertions above could hold for the wrong reason.
+      expect(existsSync(join(outDir, "brownfield-905", "workspace", "delivered.txt"))).toBe(true);
+    } finally {
+      fixture.cleanup();
+    }
+  });
+
+  /**
+   * Same contract, the in-place case: an adapter can hand back a perfectly green
+   * tree and still owe a verification. `runSuite` must not accept the tree as a
+   * substitute for the measurement.
+   */
+  it("reports a repo-pinned task as unverified when the adapter reports nothing", async () => {
+    const fixture = createGitRepoFixture();
+    try {
+      const taskYaml = `
+id: brownfield-906
+class: brownfield
+status: pinned
+repo:
+  url: ${JSON.stringify(fixture.repoDir)}
+  ref: ${fixture.commitSha}
+base_verification_command: ./test.sh
+goal: goal
+requirements:
+  - id: R1
+    description: requirement 1
+    check: "true"
+`;
+      const dir = mkdtempSync(join(tmpdir(), "bench-suite-silent-"));
+      writeFileSync(join(dir, "brownfield-906.yaml"), taskYaml);
+      const { tasks } = loadTaskDir(dir);
+
+      const silentAdapter: RunnerAdapter = {
+        name: "silent",
+        run: async (task, ctx) => {
+          // Materializes a genuinely green tree — and still reports nothing.
+          ensureGitWorkspace(ctx.workspaceDir, task.repo!.url, task.repo!.ref);
+          return { exitCode: 0, wallClockMs: 10, artifacts: [], notes: [] };
+        },
+      };
+
+      const resultsDir = mkdtempSync(join(tmpdir(), "bench-results-"));
+      const { summary, outDir } = await runSuite({
+        suite: "unit",
+        tasks,
+        adapter: silentAdapter,
+        resultsDir,
+      });
+
+      const taskResult = JSON.parse(readFileSync(join(outDir, "brownfield-906.json"), "utf8"));
+      expect(taskResult.baseVerification.green).toBe(false);
+      expect(taskResult.baseVerification.reason).toContain("adapter 'silent' did not report a base verification");
+      expect(summary.tasksVerified).toBe(0);
     } finally {
       fixture.cleanup();
     }

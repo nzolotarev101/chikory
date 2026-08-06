@@ -3,7 +3,7 @@
  * (DevAI instance JSONs and/or authored YAMLs), run each through an adapter
  * in an isolated workspace, grade, and write artifacts.
  */
-import { existsSync, mkdirSync, readdirSync, readFileSync } from "node:fs";
+import { mkdirSync, readdirSync, readFileSync } from "node:fs";
 import { extname, join } from "node:path";
 
 import { type AdapterResult, type RunnerAdapter } from "./adapter.js";
@@ -20,7 +20,6 @@ import {
 import { parseDevAITask } from "./devai.js";
 import { isRunnable, validateAuthoredTask, type BenchmarkTask } from "./task.js";
 import { decideTargetNode, loadTargetEngineSource, discoverNodeToolchains, pinnedNodeProvisioning, type ProvisioningDecision } from "./engine.js";
-import { verifyBaseGreen } from "./base-verify.js";
 
 export interface LoadReport {
   tasks: BenchmarkTask[];
@@ -141,41 +140,30 @@ export async function runSuite(opts: RunSuiteOptions): Promise<{ summary: SuiteS
         : {}),
     });
 
+    // F-258: base verification belongs to the ADAPTER, because only the adapter
+    // knows where its agent works and therefore where a pristine tree still
+    // exists. `workspaceDir` is not that place: by the time control reaches here
+    // it holds whatever the adapter left behind, and for any adapter whose agent
+    // works elsewhere (`chikoryAdapter` clones into `dataDir/runs/<id>/workspace`)
+    // that is the POST-agent tree. This used to run `verifyBaseGreen` against it
+    // anyway, which answered "was the base green?" by testing the agent's own
+    // output — silently, and greenly enough that four of five p3-rung-4 tasks
+    // looked correct. It also ran a full dependency install inside the graded
+    // workspace immediately before `gradeTask`.
+    //
+    // Both shipped adapters now report their own. An adapter that does not is a
+    // contract violation, and a contract violation must be loud, not guessed at.
     let baseVerification = run.baseVerification;
     if (baseVerification === undefined && task.repo !== undefined) {
-      if (!task.baseVerificationCommand) {
-        baseVerification = {
-          green: false,
-          reason: "No base verification command declared (base_verification_command is missing)",
-          testsPassed: 0,
-          testsFailed: 0,
-        };
-      } else if (existsSync(join(workspaceDir, ".git"))) {
-        try {
-          baseVerification = await verifyBaseGreen({
-            command: task.baseVerificationCommand,
-            cwd: workspaceDir,
-            provisioning: nodeProvisioning,
-            ...(opts.baseVerifyTimeoutMs !== undefined
-              ? { timeoutMs: opts.baseVerifyTimeoutMs }
-              : {}),
-          });
-        } catch (err) {
-          baseVerification = {
-            green: false,
-            reason: `Failed to verify base ref: ${(err as Error).message}`,
-            testsPassed: 0,
-            testsFailed: 0,
-          };
-        }
-      } else {
-        baseVerification = {
-          green: false,
-          reason: "Failed to materialize base ref: git workspace not present",
-          testsPassed: 0,
-          testsFailed: 0,
-        };
-      }
+      baseVerification = {
+        green: false,
+        reason:
+          `adapter '${opts.adapter.name}' did not report a base verification for a repo-pinned ` +
+          `task — the harness cannot verify one after the fact, because the workspace it would ` +
+          `test is the adapter's output, not the pinned base`,
+        testsPassed: 0,
+        testsFailed: 0,
+      };
     }
     const gradeCtx: GradeContext = {
       workspaceDir,

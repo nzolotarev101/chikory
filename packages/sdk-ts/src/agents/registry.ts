@@ -17,8 +17,10 @@
  *     `CONTEXT_WINDOW_TABLE` — `lookupPricing` returns undefined for an unknown
  *     model, which `computeCostUsd` turns into $0, so an unpriced member burns
  *     real subscription capacity while the CG-2 budget gate reads zero;
- *   * member ids are unique across the WHOLE registry, because cooldowns are
- *     keyed by member id in the cross-run endpoint ledger.
+ *   * member ids are unique across the WHOLE registry for any given real
+ *     endpoint, because cooldowns are keyed by member id in the cross-run
+ *     endpoint ledger — an id may be redeclared under a different class only
+ *     if every declaration describes the identical endpoint (F-255).
  *
  * Binary-level liveness (does this CLI actually accept this model id, is it
  * logged in) cannot be checked here — that is the launcher's preflight probe.
@@ -199,7 +201,7 @@ function validateMember(
 
 function validateRegistry(registry: AgentClassRegistry): void {
   const issues: string[] = [];
-  const seenMemberIds = new Map<string, string>();
+  const seenMembers = new Map<string, { classId: string; member: AgentMember }>();
 
   for (const [classId, agentClass] of Object.entries(registry.classes)) {
     if (agentClass.id !== classId) {
@@ -217,20 +219,39 @@ function validateRegistry(registry: AgentClassRegistry): void {
       }
       localIds.add(member.id);
 
-      const owner = seenMemberIds.get(member.id);
-      if (owner !== undefined && owner !== classId) {
+      const seen = seenMembers.get(member.id);
+      if (seen !== undefined && seen.classId !== classId && !membersEqual(seen.member, member)) {
         issues.push(
-          `member id '${member.id}' is declared in both '${owner}' and '${classId}' — ids must be ` +
-            `globally unique because cooldowns are keyed by member id in the endpoint ledger`,
+          `member id '${member.id}' is declared in both '${seen.classId}' and '${classId}' with ` +
+            `different configurations — ids must be globally unique because cooldowns are keyed ` +
+            `by member id in the endpoint ledger`,
         );
       }
-      seenMemberIds.set(member.id, classId);
+      if (seen === undefined) seenMembers.set(member.id, { classId, member });
 
       validateMember(member, classId, agentClass.role, issues);
     }
   }
 
   if (issues.length > 0) throw new AgentClassValidationError(issues);
+}
+
+/**
+ * A member id repeated across classes is only a conflict if the underlying
+ * endpoint differs. A bench class file that mirrors a shipped default's real
+ * members under bench-only class names (WP-585 — so a missed load fails loud
+ * instead of silently inheriting the Claude fallback) redeclares the SAME
+ * endpoint on purpose; cooldown state keyed by that id is correct either way.
+ */
+function membersEqual(a: AgentMember, b: AgentMember): boolean {
+  if (a.role !== b.role || a.backend !== b.backend || a.model !== b.model) return false;
+  if (a.role === "executor" && b.role === "executor") {
+    return a.adapter === b.adapter && a.family === b.family;
+  }
+  if (a.role === "judge" && b.role === "judge") {
+    return a.transport === b.transport;
+  }
+  return false;
 }
 
 /** Parse + validate registry YAML. Declared classes REPLACE same-named defaults. */

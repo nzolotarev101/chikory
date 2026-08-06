@@ -786,18 +786,24 @@ broken (a false-green, not a follow-on fix).
 | `bench: REFUSING to launch — Running workflow(s) on the Temporal server` | **Earlier runs never sealed, and their workflows are still live.** The guard is right: a `Running` workflow re-attaches to the new worker and resumes spending. The usual cause was a run that could not seal — an ESCALATE with no `unattended` policy waiting forever for `chikory approve`, or a park sleeping past the harness cap, then SIGKILLed (bench-p3-rung-4-2026-08-03 🔴 **F-247/F-249 → WP-579/WP-581**; that arm stranded 3). List them with `temporal workflow list --address 127.0.0.1:7233 --query "ExecutionStatus='Running'"` and terminate each by id. Never `CHIKORY_BENCH_ALLOW_ORPHANS=1` unless you know the workflow belongs to a concurrent run you own. |
 | A run escalates with `executor FAILED N consecutive steps` where the failures were cap kills or quota parks | **A strike counted something the agent had no part in** (bench-p3-rung-4-2026-08-03 🔴 **F-246 → WP-578**). `brownfield-001` spent all three CG-1 strikes on two `step exceeded maxSeconds=840` kills and one `park-until-reset`, escalated, and burned 4 h waiting for an approver. `agent-loop.ts` was the last counter reading raw `status === "FAILED"`; it now uses `advanceStrikeCount`, where an infra failure neither adds nor resets. Seeing this on old code = rebuild the SDK. If the failures ARE substantive, the escalation is correct — read the step reasons before assuming. |
 | A step is journaled `no executor work was performed`, but the checkpoint right after it commits a real diff | **The record was fabricated, not the diff** (bench-p3-rung-4-2026-08-03 🔴 **F-248 → WP-580**). A wall read off the executor's own stderr arrives after it ran; the deferral used to overwrite the real `StepRecord` with an empty-diff / `ZERO_TOKENS` one. Trust the checkpoint. It also meant the ledger under-counted the tokens `decideLimitPacing` reads, so the NEXT park was computed off a lie. Fixed; on old code, read `git log` in the run workspace rather than the step summary. |
+| A Chikory-arm task reports `baseVerified: false` whose reason is a **dependency/lockfile** complaint (`error Your lockfile needs to be updated, but yarn was run with --frozen-lockfile`) rather than a failing test, with `testsPassed: 0` | **The harness verified the agent's output and called it the base** (bench-p3-rung-4-2026-08-06 🔴 **F-258 → WP-587**). `chikoryAdapter` reported no `baseVerification`, so `runSuite` fell back to `ctx.workspaceDir` — which `adapter.ts` has by then overwritten with the POST-agent tree. Any task that legitimately edits its lockfile (every dependency-upgrade task) fails a frozen install by construction; `brownfield-001` did, while the SAME pin verified green (117 passed) through `commandAdapter`. Tasks that leave lockfiles alone passed by luck. **Tell it apart from a real red base:** zero tests ran, and the message is about installing, not testing — re-measure with `commandAdapter` or a manual clone of the pin before believing it. Fixed: both adapters verify pre-agent through one `verifyPinnedBase`, and the fallback now reports `adapter 'x' did not report a base verification` instead of guessing. Seeing this on old code = rebuild the harness. |
+| `NOT promoting a canonical summary: 1 of 5 tasks selected` | **Working as intended** (bench-p3-rung-4-2026-08-06 🟠 **F-259 → WP-587**). `chikory-bench run` writes `<out>/summary.json` only for a full-corpus run, so a `--filter <one-task>` diagnostic cannot overwrite the arm two summaries are compared from. The hand-promote it replaced was `ls -d <out>/*-chikory \| tail -1` — "newest directory" — which would have published a one-task diagnostic as the five-task arm. Re-run without the narrow `--filter` to promote. |
+| The raw Claude Code baseline arm finishes in minutes with every task scoring its no-op baseline | **The agent got an empty prompt** (bench-p3-rung-4-2026-08-06 🟠 **F-260 → WP-587**). `claude -p` / `--print` is a BOOLEAN flag, so `--cmd 'claude -p "$(cat {goalFile})" …'` passes the goal as a positional the CLI never consumes. Use `devbox run bench-baseline`, which puts the prompt on stdin. Do not hand-write this arm from notes — that is how it went stale the first time. |
 
 ## 8. Known P1 limitations (so you don't fight them)
 
-- **`TaskResult.baseVerification` is meaningless until dogfood-118 lands** (🔴 F-198,
-  dogfood-117). `benchmarks/harness/src/suite.ts:123-129` runs the base-green
-  verification with `cwd: workspaceDir`, and that directory is empty by contract
-  until the system under test clones into it (`suite.ts:120-121`, `adapter.ts:178`).
-  Every task therefore records the constant `green:false ·
-  "Unparseable suite output: could not find test summary"` — measured, not inferred.
-  Nothing gates on the field yet, so no published number is affected; do not start
-  reading it, and do not flip a task out of `status: blocked` on its say-so. The
-  module itself (`base-verify.ts`) is correct and stays.
+- **`TaskResult.baseVerification` is trustworthy as of WP-587 (2026-08-06) — and was
+  not before.** Two eras of the same defect: 🔴 F-198 (dogfood-117) had `runSuite`
+  verify an *empty* `workspaceDir`, so every task recorded the constant
+  `green:false · "Unparseable suite output: could not find test summary"`; WP-540
+  fixed that for `commandAdapter`. 🔴 F-258 (bench-p3-rung-4-2026-08-06) is the same
+  mistake surviving in the Chikory arm, where the fallback verified the
+  **post-agent** workspace instead. **Do not read `baseVerified` off any Chikory-arm
+  result produced before WP-587** — including `20260803-131837-chikory` and
+  `20260805-234219-chikory`. Both adapters now verify the pin themselves, pre-agent,
+  through one `verifyPinnedBase`; `runSuite` no longer verifies anything and says so
+  by name when an adapter reports nothing. The module itself (`base-verify.ts`) was
+  correct throughout and is unchanged.
 - **~~A benchmark "fix-until-green" task cannot terminally SUCCEED~~ ✅ FIXED AND
   LIVE-PROVEN (WP-533/F-159; landed `b0ec0cb`, proven 2026-07-23 by suite
   `20260723-222341` — `brownfield-001` 2/3 → 3/3, `brownfield-003` 4/4, suite 7/7 at

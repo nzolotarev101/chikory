@@ -151,7 +151,7 @@ classes:
     expect(issues.join("\n")).toMatch(/member id 'dup' appears twice/);
   });
 
-  it("rejects a member id reused across classes (cooldowns are keyed by member id)", () => {
+  it("rejects a member id reused across classes with a different endpoint (cooldowns are keyed by member id)", () => {
     const issues = issuesOf(`
 version: 1
 classes:
@@ -163,6 +163,26 @@ classes:
     primary: { id: shared, adapter: codex, family: openai, backend: openai, model: gpt-5.6-terra }
 `);
     expect(issues.join("\n")).toMatch(/globally unique/);
+  });
+
+  it("allows a member id reused across classes when every declaration describes the same endpoint (F-255)", () => {
+    // A bench class file mirrors a shipped default's real members under
+    // bench-only class names on purpose (WP-585), so a missed load fails
+    // loud instead of silently reverting to the Claude-bearing defaults.
+    // That intentional redeclaration must not collide with the global
+    // uniqueness check.
+    const registry = parseAgentClassRegistry(`
+version: 1
+classes:
+  exec-a:
+    role: executor
+    primary: { id: shared, adapter: gemini-cli, family: gemini, backend: gemini, model: gemini-3.6-flash-high }
+  exec-b:
+    role: executor
+    primary: { id: shared, adapter: gemini-cli, family: gemini, backend: gemini, model: gemini-3.6-flash-high }
+`);
+    expect(resolveAgentClass(registry, "exec-a", "executor").primary.id).toBe("shared");
+    expect(resolveAgentClass(registry, "exec-b", "executor").primary.id).toBe("shared");
   });
 
   it("rejects an adapter paired with the wrong family or backend", () => {

@@ -8,7 +8,7 @@
  *   (`chikory trace --json`, the JIF interchange) is kept as the run artifact.
  */
 import { execFileSync } from "node:child_process";
-import { createWriteStream, cpSync, existsSync, mkdirSync, readdirSync, statSync, writeFileSync } from "node:fs";
+import { createWriteStream, cpSync, existsSync, mkdirSync, readdirSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { stringify as stringifyYaml } from "yaml";
 
@@ -171,6 +171,83 @@ export function ensureGitWorkspace(workspaceDir: string, repoUrl: string, repoRe
   }
 }
 
+interface PinnedBaseVerification {
+  verification: VerifyBaseGreenResult;
+  /** Set when the clone/checkout itself failed — there is nothing to run against. */
+  materializeError?: string;
+}
+
+/**
+ * Materialize a task's pinned base into `cwd` and prove its suite is green there.
+ *
+ * F-258: extracted so BOTH adapters produce identical reason text for identical
+ * conditions. The two arms of a published comparison are only comparable if
+ * `baseVerified` means the same thing in each — which it did not, because
+ * `chikoryAdapter` did not verify at all and let `runSuite`'s fallback verify
+ * the POST-agent workspace instead.
+ *
+ * The caller decides WHERE `cwd` is, and that differs by adapter for a real
+ * reason: `commandAdapter`'s agent works in the graded workspace, so verifying
+ * in place is both correct and free. `chikoryAdapter`'s agent works in
+ * `dataDir/runs/<id>/workspace` and the harness copies that back over the graded
+ * workspace afterwards, so it must verify in a scratch clone it then deletes —
+ * see the call site.
+ */
+async function verifyPinnedBase(
+  task: BenchmarkTask,
+  cwd: string,
+  ctx: AdapterContext,
+): Promise<PinnedBaseVerification> {
+  const repo = task.repo;
+  if (repo === undefined) throw new Error("verifyPinnedBase called for a task with no repo pin");
+
+  try {
+    ensureGitWorkspace(cwd, repo.url, repo.ref);
+  } catch (err) {
+    const materializeError = (err as Error).message;
+    return {
+      verification: {
+        green: false,
+        reason: `Failed to materialize base ref: ${materializeError}`,
+        testsPassed: 0,
+        testsFailed: 0,
+      },
+      materializeError,
+    };
+  }
+
+  if (!task.baseVerificationCommand) {
+    return {
+      verification: {
+        green: false,
+        reason: "No base verification command declared (base_verification_command is missing)",
+        testsPassed: 0,
+        testsFailed: 0,
+      },
+    };
+  }
+
+  try {
+    return {
+      verification: await verifyBaseGreen({
+        command: task.baseVerificationCommand,
+        cwd,
+        provisioning: ctx.nodeProvisioning ?? { type: "ambient" },
+        ...(ctx.baseVerifyTimeoutMs !== undefined ? { timeoutMs: ctx.baseVerifyTimeoutMs } : {}),
+      }),
+    };
+  } catch (err) {
+    return {
+      verification: {
+        green: false,
+        reason: `Failed to verify base ref: ${(err as Error).message}`,
+        testsPassed: 0,
+        testsFailed: 0,
+      },
+    };
+  }
+}
+
 /**
  * Baseline cell: run a command template in the workspace. Placeholders:
  * `{workspace}`, `{goalFile}` (task goal written to a file — no quoting games),
@@ -189,48 +266,18 @@ export function commandAdapter(name: string, template: string): RunnerAdapter {
 
         let baseVerification: VerifyBaseGreenResult | undefined;
         if (task.repo) {
-          try {
-            ensureGitWorkspace(ctx.workspaceDir, task.repo.url, task.repo.ref);
-          } catch (err) {
+          // In place: this adapter's agent works in the graded workspace, so the
+          // pristine clone it verifies IS the tree the agent then edits.
+          const base = await verifyPinnedBase(task, ctx.workspaceDir, ctx);
+          baseVerification = base.verification;
+          if (base.materializeError !== undefined) {
             return {
               exitCode: 1,
               wallClockMs: Date.now() - started,
               artifacts: [goalFile, logPath],
-              notes: [`Failed to materialize repo base: ${(err as Error).message}`],
-              baseVerification: {
-                green: false,
-                reason: `Failed to materialize base ref: ${(err as Error).message}`,
-                testsPassed: 0,
-                testsFailed: 0,
-              },
+              notes: [`Failed to materialize repo base: ${base.materializeError}`],
+              baseVerification,
             };
-          }
-
-          if (!task.baseVerificationCommand) {
-            baseVerification = {
-              green: false,
-              reason: "No base verification command declared (base_verification_command is missing)",
-              testsPassed: 0,
-              testsFailed: 0,
-            };
-          } else {
-            try {
-              baseVerification = await verifyBaseGreen({
-                command: task.baseVerificationCommand,
-                cwd: ctx.workspaceDir,
-                provisioning: ctx.nodeProvisioning ?? { type: "ambient" },
-                ...(ctx.baseVerifyTimeoutMs !== undefined
-                  ? { timeoutMs: ctx.baseVerifyTimeoutMs }
-                  : {}),
-              });
-            } catch (err) {
-              baseVerification = {
-                green: false,
-                reason: `Failed to verify base ref: ${(err as Error).message}`,
-                testsPassed: 0,
-                testsFailed: 0,
-              };
-            }
           }
         }
 
@@ -294,10 +341,25 @@ export function buildChikorySpec(
   workspaceDir: string,
 ): Record<string, unknown> {
   const executor = opts.executor ?? { adapter: "gemini-cli", family: "gemini" };
-  let judge = opts.judge ?? { family: executor.family === "gemini" ? "anthropic" : "gemini" };
+  // F-257: this guess only makes sense with no agent_classes to derive the
+  // judge family from — `spec.judge.family` is checked independently of
+  // `routing.stages` by `missingProviderEnv`, so a stale guess left in place
+  // when agent_classes IS set (the bench-run.sh call never passes opts.judge)
+  // demanded ANTHROPIC_API_KEY even though the derived routing correctly
+  // pointed the judge stage at the class member's own openai-compat transport.
+  let judge =
+    opts.judge ??
+    (opts.agentClasses !== undefined
+      ? {}
+      : { family: executor.family === "gemini" ? "anthropic" : "gemini" });
   let routing = opts.routing;
 
-  if (process.env.OPENAI_COMPAT_BASE_URL) {
+  // F-256: when agent_classes is set, routing must be DERIVED from the class
+  // members (parseTaskSpec refuses both `agent_classes` and an explicit
+  // `routing` together) — this override predates WP-585 and would just
+  // duplicate what `policyFromMembers` already produces from the class
+  // members' own transport/model.
+  if (process.env.OPENAI_COMPAT_BASE_URL && opts.agentClasses === undefined) {
     judge = { family: "openai-compat" };
     routing = {
       stages: {
@@ -359,10 +421,46 @@ export function chikoryAdapter(opts: ChikoryAdapterOptions = {}): RunnerAdapter 
         writeFileSync(specPath, stringifyYaml(spec));
         const dataDir = join(ctx.outDir, ".chikory");
         const logPath = join(ctx.outDir, "adapter.log");
-        
+
+        // F-258: verify the base BEFORE the agent runs, in a scratch clone this
+        // adapter owns and then deletes.
+        //
+        // This used to be omitted entirely, and `runSuite`'s fallback picked it
+        // up — but by the time that fallback runs, `ctx.workspaceDir` holds the
+        // POST-agent tree copied out of `dataDir/runs/<id>/workspace` below. So
+        // "is the base green" was answered by testing the agent's own output.
+        // p3-rung-4's `brownfield-001` (a real zod v3→v4 upgrade) failed it on
+        // `Your lockfile needs to be updated, but yarn was run with
+        // --frozen-lockfile` — a frozen install against the `yarn.lock` the
+        // agent had legitimately rewritten. The same pin, same command, verified
+        // green (117 passed) through `commandAdapter`, which verifies pre-agent.
+        // The other four tasks passed by luck: they do not perturb their
+        // lockfiles enough to trip a frozen install.
+        //
+        // The scratch dir is NOT `ctx.workspaceDir`, unlike `commandAdapter`:
+        // the `cpSync(..., { force: true })` below MERGES the final agent
+        // workspace into it rather than replacing it, so a base-verification
+        // `node_modules` (base-ref dependency versions) left behind would
+        // survive into the graded artifact and could decide a grading check.
+        // Deleting it also keeps the footprint transient — dogfood-122 died of
+        // a full disk.
+        let baseVerification: VerifyBaseGreenResult | undefined;
+        if (task.repo) {
+          const baseDir = join(ctx.outDir, "base-verify");
+          mkdirSync(baseDir, { recursive: true });
+          try {
+            baseVerification = (await verifyPinnedBase(task, baseDir, ctx)).verification;
+          } finally {
+            rmSync(baseDir, { recursive: true, force: true });
+          }
+        }
+
         console.log(`\n  [chikory] Running ${task.id}...`);
         console.log(`  [chikory] Logs are streaming to: tail -f ${logPath}\n`);
 
+        // Deliberately AFTER the base verification: `wallClockMs` is the time the
+        // agent ran, and it is checked against the adapter cap (WP-582). A 45 min
+        // base verify folded into it would make every arm look like an overrun.
         const started = Date.now();
         const { code, timedOut, output } = await runShell(
           `${bin} run ${JSON.stringify(specPath)} --data-dir ${JSON.stringify(dataDir)}`,
@@ -432,6 +530,7 @@ export function chikoryAdapter(opts: ChikoryAdapterOptions = {}): RunnerAdapter 
           wallClockMs: Date.now() - started,
           artifacts: [specPath, logPath, dataDir],
           notes: timedOut ? ["timed out"] : [],
+          ...(baseVerification !== undefined ? { baseVerification } : {}),
         };
       });
     },
