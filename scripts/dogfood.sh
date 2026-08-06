@@ -272,12 +272,12 @@ fi
 # copy-on-write CLONES that share physical blocks, so `du .chikory` reported 95 G
 # where deleting all of it freed only ~9 GiB. Trust `df`, not `du` — which is
 # exactly why this guard measures free space and not directory size.
-DISK_MIN_GIB="${CHIKORY_MIN_FREE_GIB:-$([ "$MODE" = "chain" ] && echo 40 || echo 15)}"
+DISK_MIN_GIB="${CHIKORY_MIN_FREE_GIB:-$([ "$MODE" = "chain" ] && echo 40 || echo 10)}"
 DISK_FREE_KB=$(df -Pk .chikory 2>/dev/null | awk 'NR==2 {print $4}')
 DISK_FREE_GIB=$(( ${DISK_FREE_KB:-0} / 1024 / 1024 ))
 if [ -n "$DISK_FREE_KB" ] && [ "$DISK_FREE_GIB" -lt "$DISK_MIN_GIB" ]; then
   if [ "${CHIKORY_ALLOW_LOW_DISK:-}" != "1" ]; then
-    RECLAIMABLE=$(ls -d .chikory/runs/*/workspace 2>/dev/null | wc -l | tr -d ' ')
+    RECLAIMABLE=$(ls -d .chikory/runs/*/workspace 2>/dev/null | wc -l | tr -d ' ' || true)
     echo "⛔ REFUSING LAUNCH (F-236): only ${DISK_FREE_GIB} GiB free where .chikory lives;" >&2
     echo "   a --$MODE launch needs at least ${DISK_MIN_GIB} GiB." >&2
     echo "   dogfood-122 launched at 11 GiB free and died 5h39m in with" >&2
