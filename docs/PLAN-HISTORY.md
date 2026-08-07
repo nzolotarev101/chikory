@@ -1,3 +1,31 @@
+## 2026-08-06 — displaced from docs/DOGFOODING.md status block by the dogfood-123 review
+
+**Status (2026-07-30, bounded — update discipline: REPLACE this block, ≤15 lines;
+displaced prose moves verbatim to [`PLAN-HISTORY.md`](PLAN-HISTORY.md); per-run detail:
+`docs/reports/`; queue + course correction: `plan.md` §6/§7).**
+⛔ **dogfood-121 FAILED at node `N-3` — but the brownfield corpus grew 3 → 5, so P3-rung-4's
+precondition is now MET** (`chain-86fbe5a7-…`, 2/5 nodes SUCCESS, 10 steps, **$0.8869/$60**, 1h 05m,
+`docs/reports/dogfood-121.md`). The plan gate PROCEEDed **first pass** — WP-549/550/551 held.
+`N-1`/`N-2` authored `brownfield-004` (react-hook-form #13613) and `brownfield-005` (trpc #7390);
+**provenance re-verified against GitHub — fix SHA, parent SHA and message match exactly on both.**
+Harvested by node-run-id (each node's `chikory-base` is its PARENT's tip — harvest nodes separately).
+🔴 **F-229**: `N-3` sealed FAILED twice on **zero-byte** diffs with every AC and rubric item passing —
+the judge reasoned about a cumulative deliverable while shown the incremental diff; the auto-resume
+could only repeat it. 🔴 **F-228**: `N-3-r1` then hit `Individual quota reached … Resets in 1h0m8s`
+on all 4 steps — `StepRecord.limitSignal` was read by the runner and set by NOBODY, so park-until-reset
+was injection-only, and `quota reached` matched no pattern. 🔴 **F-234**: `1h0m8s` parsed as **8s**.
+🟡 **F-230**: JD-7 warned 12× on a share no cadence can change (keyless executor = $0).
+**All hand-fixed: WP-553 · WP-554 · WP-555** (1184 TS / 128 harness / 84 py green). 🟡 F-231/F-232
+(delivered-prose defects, data corrected) → WP-556; 🟡 F-233 → WP-557.
+Progression ✅ PROGRESSING (rung 4 vs 0). **NEXT = relaunch rung 4 for the two arms + the comparison
+bundle only** — and give that node an oracle that settles on its OWN deliverable.
+
+
+## 2026-08-06 — displaced from plan.md §-top status block by the dogfood-123 review (F-261…F-266)
+
+- **Latest / next:** ⛔ **dogfood-122 FAILED — the rung-4 relaunch died of a full disk, and two of its five nodes were paid to redo landed work** (`chain-ebecd792-3907-48da-ab65-8679fd4b5c78`, 5-node plan, 3/5 sealed, 7 steps, **$0.6545/$60**, 5h 39m, `docs/reports/dogfood-122.md`). Nothing salvageable: no arm produced a `summary.json`. 🔴 **F-237** — `N-1`/`N-2` were told to author `brownfield-004`/`brownfield-005`, both landed in `1bec8bb` a day earlier, so their oracles were green on entry and cosmetic 4-line diffs sealed SUCCESS; `evaluateBaselinePrecheck` had been unit-tested for exactly this since WP-228 with **zero production callers**. 🔴 **F-236** — launched at **11 GiB free** (98% full) with no disk gate; the run died on 🔴 **F-235** `chikory: unable to open database file` with no path, no errno, crash site still unidentified. 🔴 **F-239** — `N-3` ran **four concurrent** benchmark suites. 🔴 **F-238** — every base verification blamed the parser (`Unparseable suite output`) because the exit code was checked second and discarded. 🟡 **F-241** — base verification wore the 120 s judge-check cap. ✅ **WP-553 live-proven** (F-197 signature banked): a Gemini `Individual quota reached … Resets in 4h6m22s` parked `sleepMs 14768000` and resumed cleanly — journal entries 1, 2, 12. **Eight fixes hand-landed: WP-558…WP-565** (1197 TS / 147 harness green, 20/20 preflight cases). Two found by the fixes themselves: 🔴 **F-242** (`brownfield-001`'s base could never verify — ambient Yarn Berry vs a Classic v1 lockfile) and 🔴 **F-243** (a HOME-level `~/.yarnrc.yml` `yarnPath` re-execs Berry from any directory, so even `npx -y yarn@1.22.22` ran 3.6.4). **Part-3 gate now PASSES: 5/5 base verifications green** (117 / 1128 / 3680 / 1208 / 22 tests, 87 s for the whole corpus). **NEXT = run both arms BY HAND** via `scripts/bench-run.sh` — sequential, single-flight, outside the agent loop — then dogfood-123 covers only the publication bundle (AC-1 regression guard + AC-2 as its own oracle). dogfood-121's five-node chain is **not** being relaunched: `N-1`/`N-2` can only be re-graded, and `N-3`/`N-4` ask an LLM executor with no resume to supervise a multi-hour, disk-heavy, quota-bound benchmark.
+
+
 ## 2026-07-30 — displaced from docs/DOGFOODING.md status block by the dogfood-121 review
 
 ⛔ **dogfood-121 never launched a node** — the plan meta-judge gate stopped the chain after

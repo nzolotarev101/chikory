@@ -25,7 +25,9 @@
 #   class:       product (router/executors/runner/judge/chain/memory runtime)
 #                | meta (scripts/, examples/dogfood/, launch prechecks,
 #                        spec hygiene, verifier plumbing) — DOGFOODING §1.5
-#   rung:        highest WP-265 horizon-ladder rung this run satisfied (0 = none)
+#   rung:        highest CURRENT-PHASE ladder rung this run satisfied (0 = none).
+#                Phase-scoped: P2 = WP-265 horizon ladder (retired at rung 5),
+#                P3 = WP-530 moat ladder (plan.md §7).
 #   rollbacks:   judge ROLLBACK verdicts in the run (`chikory trace` totals) —
 #                feeds the §1.4 per-step reliability KPI. Rows before dogfood-084
 #                predate the column; they are EXCLUDED from the KPI (not read
@@ -36,7 +38,7 @@
 #      one thesis axis: max steps survived, ladder rung, a real resume, a loose
 #      spec where there was none.
 #   ⛔ STALLED — no thesis axis moved. The ONLY permitted next headline is the
-#      current WP-265 ladder rung; new 🔴 friction is hand-fixed (TASK-PROTOCOL
+#      current phase's ladder rung; new 🔴 friction is hand-fixed (TASK-PROTOCOL
 #      §4), it does NOT headline.
 #   Additionally: 🔴 CAP BUSTED when >1 harness-meta headline in the trailing 3
 #      (DOGFOODING §1.5) — the next headline MUST be class=product.
@@ -180,11 +182,11 @@ OUT=$(awk -F, '
 
     progressing = (maxA > maxB) || (rungA > rungB) || (resA > 0) || (looseA > looseB)
     if (progressing) {
-      printf "✅ **PROGRESSING** — a thesis axis moved. Next headline: the next WP-265 ladder rung (plan.md §6 queue).\n"
+      printf "✅ **PROGRESSING** — a thesis axis moved. Next headline: the next rung of the CURRENT phase ladder (P3 = WP-530, plan.md §7).\n"
       printf "FLAG:0\n"
     } else {
       printf "⛔ **STALLED** — no thesis axis (horizon, ladder rung, resume, spec looseness) moved over the last 3 runs.\n"
-      printf "BINDING: the next headline MUST be the current WP-265 ladder rung (plan.md §6 queue); new 🔴 friction is HAND-FIXED (TASK-PROTOCOL §4), it does not headline.\n"
+      printf "BINDING: the next headline MUST be the current phase ladder rung (P3 = WP-530, plan.md §7); new 🔴 friction is HAND-FIXED (TASK-PROTOCOL §4), it does not headline.\n"
       printf "FLAG:1\n"
     }
   }' "$LEDGER")

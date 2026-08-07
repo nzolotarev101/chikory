@@ -1,0 +1,68 @@
+{
+  "suite": "benchmarks/tasks",
+  "adapter": "command",
+  "startedAt": "2026-08-06T00:28:07.228Z",
+  "endedAt": "2026-08-06T00:58:26.423Z",
+  "tasks": 5,
+  "tasksVerified": 5,
+  "unverifiedTasks": [],
+  "requirementsTotal": 19,
+  "requirementsSatisfied": 18,
+  "requirementsVerifiedTotal": 19,
+  "requirementsVerifiedSatisfied": 18,
+  "dependencyVerifiedSatisfied": 16,
+  "iSr": 0.9473684210526315,
+  "dSr": 0.8421052631578947,
+  "perTask": [
+    {
+      "taskId": "brownfield-001",
+      "satisfied": 2,
+      "dependencySatisfied": 0,
+      "total": 3,
+      "exitCode": 0,
+      "wallClockMs": 307401,
+      "baseVerified": true,
+      "sealed": true
+    },
+    {
+      "taskId": "brownfield-002",
+      "satisfied": 4,
+      "dependencySatisfied": 4,
+      "total": 4,
+      "exitCode": 0,
+      "wallClockMs": 612682,
+      "baseVerified": true,
+      "sealed": true
+    },
+    {
+      "taskId": "brownfield-003",
+      "satisfied": 4,
+      "dependencySatisfied": 4,
+      "total": 4,
+      "exitCode": 0,
+      "wallClockMs": 235357,
+      "baseVerified": true,
+      "sealed": true
+    },
+    {
+      "taskId": "brownfield-004",
+      "satisfied": 4,
+      "dependencySatisfied": 4,
+      "total": 4,
+      "exitCode": 0,
+      "wallClockMs": 107393,
+      "baseVerified": true,
+      "sealed": true
+    },
+    {
+      "taskId": "brownfield-005",
+      "satisfied": 4,
+      "dependencySatisfied": 4,
+      "total": 4,
+      "exitCode": 0,
+      "wallClockMs": 471469,
+      "baseVerified": true,
+      "sealed": true
+    }
+  ]
+}

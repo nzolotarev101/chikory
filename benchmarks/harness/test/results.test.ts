@@ -1,3 +1,7 @@
+import { mkdirSync, mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { isAbsolute, join } from "node:path";
+
 import { describe, expect, it } from "vitest";
 import type { SuiteSummary, TaskResult } from "../src/results.js";
 import { compareSummaries, isTaskVerified, summarize, wilsonScoreInterval } from "../src/results.js";
@@ -240,6 +244,40 @@ describe("compareSummaries", () => {
       expect(typeof arm.rawResultsDir).toBe("string");
       expect(arm.rawResultsDir!.length).toBeGreaterThan(0);
     }
+  });
+
+  it("refuses to publish a raw-results pointer into an ephemeral run workspace (F-261)", () => {
+    // dogfood-123 published exactly this: the executor ran `compare` inside its
+    // own run workspace, so every arm's trace link pointed at a directory
+    // `scripts/prune-runs.sh` deletes.
+    expect(() =>
+      compareSummaries(makeFiveTaskSummary("chikory", [4, 4, 4, 4, 4]), makeFiveTaskSummary("command", [3, 3, 3, 3, 3]), {
+        refA: "/repo/.chikory/runs/run-3e2a6791/workspace/benchmarks/results/p3-rung-4/chikory/summary.json",
+        refB: "/repo/benchmarks/results/p3-rung-4/raw/summary.json",
+      }),
+    ).toThrow(/ephemeral Chikory run workspace/);
+  });
+
+  it("emits a repo-relative raw-results pointer when the evidence is inside a git repo (F-261)", () => {
+    const root = mkdtempSync(join(tmpdir(), "rung4-refroot-"));
+    mkdirSync(join(root, ".git"), { recursive: true });
+    mkdirSync(join(root, "benchmarks/results/p3-rung-4/chikory"), { recursive: true });
+    mkdirSync(join(root, "benchmarks/results/p3-rung-4/raw"), { recursive: true });
+
+    const res = compareSummaries(
+      makeFiveTaskSummary("chikory", [4, 4, 4, 4, 4]),
+      makeFiveTaskSummary("command", [3, 3, 3, 3, 3]),
+      {
+        refA: join(root, "benchmarks/results/p3-rung-4/chikory/summary.json"),
+        refB: join(root, "benchmarks/results/p3-rung-4/raw/summary.json"),
+      },
+    );
+
+    expect(res.armA.rawResultsDir).toBe(join("benchmarks", "results", "p3-rung-4", "chikory"));
+    expect(res.armB.rawResultsDir).toBe(join("benchmarks", "results", "p3-rung-4", "raw"));
+    for (const arm of res.arms) expect(isAbsolute(arm.rawResultsDir!)).toBe(false);
+
+    rmSync(root, { recursive: true, force: true });
   });
 
   it("omits rawResultsDir when no summary reference was supplied", () => {

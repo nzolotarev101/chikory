@@ -1,0 +1,155 @@
+{
+  "armA": {
+    "label": "chikory",
+    "suite": "benchmarks/tasks",
+    "adapter": "chikory",
+    "startedAt": "2026-08-06T20:37:53.243Z",
+    "endedAt": "2026-08-06T21:22:10.671Z",
+    "tasks": 5,
+    "tasksVerified": 5,
+    "requirementsTotal": 19,
+    "requirementsSatisfied": 19,
+    "dependencySatisfied": 19,
+    "iSr": 1,
+    "iSrCi": {
+      "lower": 0.8318207759473837,
+      "upper": 1,
+      "low": 0.8318207759473837,
+      "high": 1
+    },
+    "iSrRange": {
+      "low": 0.8318207759473837,
+      "high": 1
+    },
+    "dSr": 1,
+    "dSrCi": {
+      "lower": 0.8318207759473837,
+      "upper": 1,
+      "low": 0.8318207759473837,
+      "high": 1
+    },
+    "dSrRange": {
+      "low": 0.8318207759473837,
+      "high": 1
+    },
+    "reference": "../results/p3-rung-4/chikory/summary.json",
+    "rawResultsDir": "benchmarks/results/p3-rung-4/chikory"
+  },
+  "armB": {
+    "label": "raw-claude-code",
+    "suite": "benchmarks/tasks",
+    "adapter": "command",
+    "startedAt": "2026-08-06T00:28:07.228Z",
+    "endedAt": "2026-08-06T00:58:26.423Z",
+    "tasks": 5,
+    "tasksVerified": 5,
+    "requirementsTotal": 19,
+    "requirementsSatisfied": 18,
+    "dependencySatisfied": 16,
+    "iSr": 0.9473684210526315,
+    "iSrCi": {
+      "lower": 0.753612688331012,
+      "upper": 0.9906480059376995,
+      "low": 0.753612688331012,
+      "high": 0.9906480059376995
+    },
+    "iSrRange": {
+      "low": 0.753612688331012,
+      "high": 0.9906480059376995
+    },
+    "dSr": 0.8421052631578947,
+    "dSrCi": {
+      "lower": 0.6243452472967093,
+      "upper": 0.9447952836146585,
+      "low": 0.6243452472967093,
+      "high": 0.9447952836146585
+    },
+    "dSrRange": {
+      "low": 0.6243452472967093,
+      "high": 0.9447952836146585
+    },
+    "reference": "../results/p3-rung-4/raw-claude-code/summary.json",
+    "rawResultsDir": "benchmarks/results/p3-rung-4/raw-claude-code"
+  },
+  "arms": [
+    {
+      "label": "chikory",
+      "suite": "benchmarks/tasks",
+      "adapter": "chikory",
+      "startedAt": "2026-08-06T20:37:53.243Z",
+      "endedAt": "2026-08-06T21:22:10.671Z",
+      "tasks": 5,
+      "tasksVerified": 5,
+      "requirementsTotal": 19,
+      "requirementsSatisfied": 19,
+      "dependencySatisfied": 19,
+      "iSr": 1,
+      "iSrCi": {
+        "lower": 0.8318207759473837,
+        "upper": 1,
+        "low": 0.8318207759473837,
+        "high": 1
+      },
+      "iSrRange": {
+        "low": 0.8318207759473837,
+        "high": 1
+      },
+      "dSr": 1,
+      "dSrCi": {
+        "lower": 0.8318207759473837,
+        "upper": 1,
+        "low": 0.8318207759473837,
+        "high": 1
+      },
+      "dSrRange": {
+        "low": 0.8318207759473837,
+        "high": 1
+      },
+      "reference": "../results/p3-rung-4/chikory/summary.json",
+      "rawResultsDir": "benchmarks/results/p3-rung-4/chikory"
+    },
+    {
+      "label": "raw-claude-code",
+      "suite": "benchmarks/tasks",
+      "adapter": "command",
+      "startedAt": "2026-08-06T00:28:07.228Z",
+      "endedAt": "2026-08-06T00:58:26.423Z",
+      "tasks": 5,
+      "tasksVerified": 5,
+      "requirementsTotal": 19,
+      "requirementsSatisfied": 18,
+      "dependencySatisfied": 16,
+      "iSr": 0.9473684210526315,
+      "iSrCi": {
+        "lower": 0.753612688331012,
+        "upper": 0.9906480059376995,
+        "low": 0.753612688331012,
+        "high": 0.9906480059376995
+      },
+      "iSrRange": {
+        "low": 0.753612688331012,
+        "high": 0.9906480059376995
+      },
+      "dSr": 0.8421052631578947,
+      "dSrCi": {
+        "lower": 0.6243452472967093,
+        "upper": 0.9447952836146585,
+        "low": 0.6243452472967093,
+        "high": 0.9447952836146585
+      },
+      "dSrRange": {
+        "low": 0.6243452472967093,
+        "high": 0.9447952836146585
+      },
+      "reference": "../results/p3-rung-4/raw-claude-code/summary.json",
+      "rawResultsDir": "benchmarks/results/p3-rung-4/raw-claude-code"
+    }
+  ],
+  "taskIds": [
+    "brownfield-001",
+    "brownfield-002",
+    "brownfield-003",
+    "brownfield-004",
+    "brownfield-005"
+  ]
+}

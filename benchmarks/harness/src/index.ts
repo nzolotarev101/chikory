@@ -48,6 +48,7 @@ export {
 } from "./adapter.js";
 export {
   compareSummaries,
+  publishableRawResultsDir,
   sanitizeFileName,
   suiteOutDirName,
   summarize,

@@ -1,0 +1,239 @@
+# Plain: Turn published benchmark bundles into a leaderboard that ranks by the score RANGE and
+# refuses to name a winner when two arms' ranges overlap.
+# WP: WP-303 (leaderboard and methodology), the data half of the P3 exit gate
+# Ladder-rung: 5
+# Thesis-KPI: published ranges, ranked honestly — an overlap is reported as "no separation", never as a win
+# Format: loose — the outcome and the output contract are fixed; layout and prose are the executor's
+#
+# Launch mode: RUN (single node — one deliverable).
+#   CHIKORY_PREFLIGHT_ONLY=1 devbox run run-dogfood
+#   devbox run run-dogfood
+#
+# WHY THIS IS THE RUNG-5 SLICE (dogfood-123 review, 2026-08-06):
+#   dogfood-123 climbed rung-4 and published the first head-to-head numbers:
+#     Chikory 19/19 I-SR [83.2%, 100.0%]  vs  raw Claude Code 18/19 I-SR [75.4%, 99.1%].
+#   Those intervals OVERLAP. A leaderboard that sorts by the point estimate would print
+#   "Chikory 100% — 1st" and be wrong about the only thing that matters. NF-5 ("communicate
+#   benchmark figures in ranges") is the requirement this run makes executable instead of aspirational.
+#   Rung-5's other half — a corpus wide enough that the intervals CAN separate — is an operator-owned
+#   authoring lift (WP-302, brownfield-006+), not an agent loop: dogfood-120/121/122 each failed trying.
+#   This slice builds the thing that will report that corpus honestly when it exists, and is
+#   independently useful today.
+#
+# Designed traps — the plausible-but-wrong deliveries the acceptance criteria exist to reject:
+#   A. Ranking by the point estimate. The oracle contains an arm with the HIGHER point estimate and
+#      the LOWER interval lower bound (5/5 = 100%, range low 0.5655) against one with a lower point
+#      estimate and a higher lower bound (90/100 = 90%, range low 0.8256). A point-estimate sort
+#      puts them in the wrong order; the ranking key is the lower bound of the interval.
+#   B. Naming a winner from overlapping ranges. Two arms are separated at 95% only when their
+#      intervals are DISJOINT. Overlap must surface as separated false, with no winner.
+#   C. Recomputing rates or intervals from raw counts. A bundle's comparison.json is published
+#      evidence; the leaderboard reads it. Recomputing invites a second, disagreeing definition
+#      of I-SR — exactly the defect WP-584 closed.
+#   D. Building a website. No HTML, no CSS, no static-site generator, no new dependency. The static
+#      site is a later, separate piece of work that consumes this data.
+#
+# PRECONDITIONS, ALL MEASURED (do not re-litigate; re-measure if stale):
+#   * benchmarks/publications/p3-rung-4/ is committed and holds a real two-arm comparison.json
+#     whose arms are labelled chikory and raw-claude-code, with overlapping I-SR ranges.
+#   * wilsonScoreInterval already produces the endpoints both criteria assert; it is READ, not rebuilt.
+#   * publishableRawResultsDir (WP-588) already refuses a pointer into a Chikory run workspace, so a
+#     leaderboard generated inside a run workspace inherits that guard.
+
+name: dogfood-124-wp303-leaderboard-interval-ranking
+goal: >
+  Give the benchmark harness a leaderboard that is honest about uncertainty, and publish it over the
+  rung-4 result that already exists.
+
+  Add a `leaderboard` command to the chikory-bench CLI that reads one or more PUBLISHED bundle directories
+  and writes a ranked, auditable summary:
+
+      chikory-bench leaderboard --bundle <dir> [--bundle <dir> ...] --out <dir>
+
+  Each input directory is a publication bundle holding a `comparison.json` produced by
+  the compare command. The command writes `leaderboard.json` and `leaderboard.md` into the output
+  directory.
+
+  The contract the output must satisfy:
+
+    * `leaderboard.json` carries an `entries` array, ordered best-first, and an `orderedBy` field
+      naming the ordering key. **The ordering key is the LOWER BOUND of the 95% interval
+      (`iSrRange.low`), never the point estimate.** An arm with a higher point estimate and a wider
+      interval ranks BELOW an arm whose interval starts higher.
+
+    * Every entry reproduces the arm's published `label`, `adapter`, `iSr`, `iSrRange`, `dSr`,
+      `dSrRange` and `rawResultsDir` from the bundle's `comparison.json` unchanged, plus the bundle
+      directory it came from. Read the published values; do not recompute them from counts.
+
+    * `leaderboard.json` carries a `pairwise` array with one record per pair of ranked arms. Each
+      record states `separated` — true only when the two arms' `iSrRange` intervals are DISJOINT —
+      and a plain-language `reason`. When arms are separated the record names the higher arm; when
+      they are not, it must name no winner.
+
+    * `leaderboard.md` presents the same ranking with the interval as the headline figure, and for
+      every non-separated pair states in plain words that the arms are not separated at 95%
+      confidence. It must not declare a winner for any pair whose intervals overlap.
+
+    * The run publishes the real result: `benchmarks/publications/leaderboard/` generated from
+      `benchmarks/publications/p3-rung-4/`.
+
+  Constraints: TypeScript stays strict ESM with named exports and no `any`; no new dependency, no
+  provider SDK, no API key, no global install, no frozen contract change, no HTML or static-site
+  output, and no change to how `compare` computes a range. Project commands run sequentially inside
+  the already-activated Devbox environment, so invoke pinned tools directly and never nest
+  devbox run. Writes stay within the benchmarks/harness workspace and `benchmarks/publications/leaderboard/`.
+  Every existing test remains green.
+
+repos:
+  - url: /Users/nikitazolotarev/repos/chikory
+    writable: true
+
+acceptance_criteria:
+  - id: AC-1
+    description: >
+      THIS NODE'S OWN ORACLE — RED on HEAD, green only once the command exists and ranks correctly.
+      Against synthetic bundles whose geometry this check specifies itself, the leaderboard must
+      order by the interval lower bound (trap A), refuse to separate overlapping intervals (trap B),
+      and reproduce the published values rather than recomputing them (trap C). Executor-authored
+      tests are not the oracle; the inputs and the expected decisions are written here.
+    check: |
+      cd benchmarks/harness && pnpm exec tsc && node --input-type=module -e '
+      import {mkdtempSync,mkdirSync,writeFileSync,readFileSync} from "node:fs";
+      import {execFileSync} from "node:child_process";
+      import {tmpdir} from "node:os";
+      import {join} from "node:path";
+      const A=(c,m)=>{if(!c){console.error("FAIL: "+m);process.exit(1);}};
+      const root=mkdtempSync(join(tmpdir(),"rung5-leaderboard-"));
+      const arm=(label,adapter,sat,total,low,high)=>({
+        label,suite:"rung5",adapter,startedAt:"2026-01-01T00:00:00Z",endedAt:"2026-01-01T01:00:00Z",
+        tasks:5,tasksVerified:5,requirementsTotal:total,requirementsSatisfied:sat,
+        dependencySatisfied:sat,iSr:sat/total,iSrCi:{lower:low,upper:high,low,high},
+        iSrRange:{low,high},dSr:sat/total,dSrCi:{lower:low,upper:high,low,high},dSrRange:{low,high},
+        reference:"/evidence/"+label+"/summary.json",rawResultsDir:"benchmarks/results/rung5/"+label});
+      const bundle=(name,a,b)=>{
+        const dir=join(root,name); mkdirSync(dir,{recursive:true});
+        writeFileSync(join(dir,"comparison.json"),
+          JSON.stringify({armA:a,armB:b,arms:[a,b],taskIds:["t1","t2","t3","t4","t5"]},null,2));
+        return dir;};
+      // Trap A: "wide" has the HIGHER point estimate (100%) and the LOWER interval floor (0.5655)
+      // than "narrow" (90%, floor 0.8256). A point-estimate sort gets this backwards.
+      const wide=arm("wide","chikory",5,5,0.5655,1.0);
+      const narrow=arm("narrow","command",90,100,0.8256,0.9448);
+      // Trap B control: these two are genuinely disjoint and MUST separate.
+      const top=arm("top","chikory",19,19,0.8318,1.0);
+      const bottom=arm("bottom","command",2,19,0.0294,0.3139);
+      const overlapping=bundle("overlapping",wide,narrow);
+      const disjoint=bundle("disjoint",top,bottom);
+      const out=join(root,"out");
+      execFileSync("node",["dist/bin.js","leaderboard","--bundle",overlapping,"--out",out],{stdio:"inherit"});
+      const lb=JSON.parse(readFileSync(join(out,"leaderboard.json"),"utf8"));
+      A(String(lb.orderedBy).includes("iSrRange")&&String(lb.orderedBy).includes("low"),
+        "orderedBy must name the interval lower bound, got "+lb.orderedBy);
+      A(lb.entries.length===2,"expected 2 entries, got "+lb.entries.length);
+      A(lb.entries[0].label==="narrow",
+        "trap A: ranking must use the interval lower bound (narrow 0.8256 outranks wide 0.5655), got "
+        +lb.entries[0].label+" first");
+      A(lb.entries[0].iSr===0.9&&lb.entries[1].iSr===1,
+        "trap C: entries must reproduce the published iSr unchanged");
+      A(lb.entries[0].rawResultsDir==="benchmarks/results/rung5/narrow",
+        "each entry must carry its published rawResultsDir");
+      A(Array.isArray(lb.pairwise)&&lb.pairwise.length===1,"expected exactly 1 pairwise record");
+      A(lb.pairwise[0].separated===false,
+        "trap B: [0.8256,0.9448] and [0.5655,1.0] OVERLAP and must not be separated");
+      A(!JSON.stringify(lb.pairwise[0]).toLowerCase().includes("winner")||
+        lb.pairwise[0].winner===null||lb.pairwise[0].winner===undefined,
+        "trap B: a non-separated pair must name no winner");
+      A(typeof lb.pairwise[0].reason==="string"&&lb.pairwise[0].reason.length>0,
+        "every pairwise record needs a plain-language reason");
+      const md=readFileSync(join(out,"leaderboard.md"),"utf8");
+      A(md.includes("narrow")&&md.includes("wide"),"leaderboard.md must name both arms");
+      A(/not\s+separated|no\s+separation|cannot\s+be\s+separated/i.test(md),
+        "leaderboard.md must state plainly that overlapping arms are not separated at 95%");
+      const out2=join(root,"out2");
+      execFileSync("node",["dist/bin.js","leaderboard","--bundle",disjoint,"--out",out2],{stdio:"inherit"});
+      const lb2=JSON.parse(readFileSync(join(out2,"leaderboard.json"),"utf8"));
+      A(lb2.entries[0].label==="top","disjoint case: top must rank first");
+      A(lb2.pairwise[0].separated===true,
+        "[0.8318,1.0] and [0.0294,0.3139] are disjoint and MUST separate");
+      A(JSON.stringify(lb2.pairwise[0]).includes("top"),
+        "a separated pair must name the higher arm");
+      const out3=join(root,"out3");
+      execFileSync("node",["dist/bin.js","leaderboard","--bundle",overlapping,"--bundle",disjoint,
+        "--out",out3],{stdio:"inherit"});
+      const lb3=JSON.parse(readFileSync(join(out3,"leaderboard.json"),"utf8"));
+      A(lb3.entries.length===4,"two bundles must contribute all 4 arms, got "+lb3.entries.length);
+      A(lb3.entries.map((e)=>e.label).join(",")==="top,narrow,wide,bottom",
+        "cross-bundle ranking must be by interval floor (top,narrow,wide,bottom), got "
+        +lb3.entries.map((e)=>e.label).join(","));
+      A(lb3.pairwise.length===6,"4 arms produce 6 pairwise records, got "+lb3.pairwise.length);
+      A(lb3.entries.every((e)=>typeof e.bundle==="string"&&e.bundle.length>0),
+        "every entry must name the bundle directory it came from");
+      console.log("AC-1 OK: the leaderboard ranks by interval, separates only disjoint arms, and copies published values");
+      '
+
+  - id: AC-2
+    description: >
+      The published artifact over the REAL rung-4 bundle. `benchmarks/publications/leaderboard/` must
+      be generated from `benchmarks/publications/p3-rung-4/`, carry both real arms with the values
+      that bundle already publishes, and report the honest verdict: Chikory's [83.2%, 100.0%] and raw
+      Claude Code's [75.4%, 99.1%] OVERLAP, so the leaderboard names no winner.
+    check: |
+      cd benchmarks/harness && pnpm exec tsc && node --input-type=module -e '
+      import {readFileSync,existsSync} from "node:fs";
+      const L="../publications/leaderboard/";
+      const B="../publications/p3-rung-4/comparison.json";
+      const A=(c,m)=>{if(!c){console.error("FAIL: "+m);process.exit(1);}};
+      for (const f of ["leaderboard.json","leaderboard.md"]) A(existsSync(L+f),"missing "+L+f);
+      const src=JSON.parse(readFileSync(B,"utf8"));
+      const lb=JSON.parse(readFileSync(L+"leaderboard.json","utf8"));
+      A(lb.entries.length===2,"the rung-4 leaderboard has exactly 2 arms, got "+lb.entries.length);
+      const by=Object.fromEntries(lb.entries.map((e)=>[e.label,e]));
+      A(by.chikory&&by["raw-claude-code"],"both real arms must appear by label");
+      for (const a of src.arms) {
+        const e=by[a.label];
+        A(e.iSr===a.iSr&&e.dSr===a.dSr,a.label+": published rates must be copied, not recomputed");
+        A(e.iSrRange.low===a.iSrRange.low&&e.iSrRange.high===a.iSrRange.high,
+          a.label+": published interval must be copied unchanged");
+        A(e.rawResultsDir===a.rawResultsDir,a.label+": raw-results pointer must be carried through");
+        A(!e.rawResultsDir.includes(".chikory"),
+          a.label+": a published pointer may not cite a Chikory run workspace (WP-588/F-261)");
+      }
+      A(lb.entries[0].label==="chikory",
+        "chikory 0.8318 outranks raw-claude-code 0.7536 on the interval floor, got "+lb.entries[0].label);
+      A(lb.pairwise.length===1&&lb.pairwise[0].separated===false,
+        "the real rung-4 intervals OVERLAP; the leaderboard must report no separation");
+      const md=readFileSync(L+"leaderboard.md","utf8");
+      A(md.includes("chikory")&&/claude/i.test(md),"leaderboard.md must name both real arms");
+      A(/not\s+separated|no\s+separation|cannot\s+be\s+separated/i.test(md),
+        "leaderboard.md must say plainly that the two arms are not separated at 95%");
+      A(!/\bwinner\b/i.test(md)||/no\s+winner/i.test(md),
+        "leaderboard.md must not crown a winner from overlapping intervals");
+      A(!/<html|<!doctype|<div/i.test(md),"trap D: no website — markdown and JSON only");
+      console.log("AC-2 OK: the published rung-4 leaderboard ranks by interval and declares no winner");
+      '
+
+budget_usd: 15
+max_steps: 12
+
+step_limits:
+  max_turns: 40
+  # 840 is the hard ceiling (MAX_STEP_MAX_SECONDS): above it the executeStep
+  # activity's Temporal startToCloseTimeout kills the step first.
+  max_seconds: 840
+
+pacing:
+  mode: auto
+  autoCalibrate: true
+
+unattended:
+  escalation: seal_resumable_failed
+
+# WP-566 agent classes. Primaries unchanged — Gemini executes, Codex judges.
+# routing.stages is DERIVED from the selected members and must not be restated here.
+agent_classes:
+  executor: executor-default
+  judge: judge-default
+
+judge:
+  cadence: 1
+  max_cost_share: 0.5

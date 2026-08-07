@@ -5,25 +5,24 @@ This is the complete operating manual for executing Phase 2+ work packages
 task spec for a WP (every field explained), how to launch, supervise, and
 recover a run, and how to land the result as a normal PR.
 
-**Status (2026-07-30, bounded — update discipline: REPLACE this block, ≤15 lines;
+**Status (2026-08-06, bounded — update discipline: REPLACE this block, ≤15 lines;
 displaced prose moves verbatim to [`PLAN-HISTORY.md`](PLAN-HISTORY.md); per-run detail:
 `docs/reports/`; queue + course correction: `plan.md` §6/§7).**
-⛔ **dogfood-121 FAILED at node `N-3` — but the brownfield corpus grew 3 → 5, so P3-rung-4's
-precondition is now MET** (`chain-86fbe5a7-…`, 2/5 nodes SUCCESS, 10 steps, **$0.8869/$60**, 1h 05m,
-`docs/reports/dogfood-121.md`). The plan gate PROCEEDed **first pass** — WP-549/550/551 held.
-`N-1`/`N-2` authored `brownfield-004` (react-hook-form #13613) and `brownfield-005` (trpc #7390);
-**provenance re-verified against GitHub — fix SHA, parent SHA and message match exactly on both.**
-Harvested by node-run-id (each node's `chikory-base` is its PARENT's tip — harvest nodes separately).
-🔴 **F-229**: `N-3` sealed FAILED twice on **zero-byte** diffs with every AC and rubric item passing —
-the judge reasoned about a cumulative deliverable while shown the incremental diff; the auto-resume
-could only repeat it. 🔴 **F-228**: `N-3-r1` then hit `Individual quota reached … Resets in 1h0m8s`
-on all 4 steps — `StepRecord.limitSignal` was read by the runner and set by NOBODY, so park-until-reset
-was injection-only, and `quota reached` matched no pattern. 🔴 **F-234**: `1h0m8s` parsed as **8s**.
-🟡 **F-230**: JD-7 warned 12× on a share no cadence can change (keyless executor = $0).
-**All hand-fixed: WP-553 · WP-554 · WP-555** (1184 TS / 128 harness / 84 py green). 🟡 F-231/F-232
-(delivered-prose defects, data corrected) → WP-556; 🟡 F-233 → WP-557.
-Progression ✅ PROGRESSING (rung 4 vs 0). **NEXT = relaunch rung 4 for the two arms + the comparison
-bundle only** — and give that node an oracle that settles on its OWN deliverable.
+🟢 **P3-rung-4 CLIMBED — dogfood-123 published Chikory's first head-to-head benchmark result**
+(`run-3e2a6791-cab1-46c7-bc5b-b3d0730b92c5`, SUCCESS **1 step $0.0457/$15.00**, 3m 20s, 2/2 criteria
++ 6/6 rubric, `docs/reports/dogfood-123.md`). **Chikory 19/19 I-SR [83.2%, 100.0%] vs raw Claude Code
+18/19 I-SR [75.4%, 99.1%] / 16/19 D-SR [62.4%, 94.5%]** over `brownfield-001…005`, both arms 5/5
+base-verified. Separation is `brownfield-001` alone (zod v3→v4). **The intervals OVERLAP** — 19
+requirements cannot separate two arms at 95%; rung-5 needs corpus, not harness.
+**The operator ran both arms BY HAND** (`scripts/bench-run.sh`, sequential) and the spec published only —
+dogfood-122's lesson holds: an LLM executor may not supervise a multi-hour, quota-bound suite.
+Agent classes live-checked: `park-until-reset` **0**, no rotation needed, 6/6 members probed at $0.
+🔴 **F-261** (published trace link pointed inside a prunable run workspace) → **WP-588 hand-fixed**;
+🟠 **F-263** (report prose cited a superseded suite run's versions) hand-fixed + provenance table;
+ℹ️ **F-266** (progression gate named the retired P2 ladder) hand-fixed. **Queued: WP-589** (the
+write-boundary rubric reads `git diff`, so 2.1 GiB / 95,068 gitignored writes scored ✓) · **WP-590**
+(`gemini-cli` records `toolCalls: 0`). Progression ✅ PROGRESSING (rung 4). **NEXT = P3-rung-5, the
+phase EXIT gate** — published DevAI-extended ranges + leaderboard, on a corpus that can separate.
 
 Related docs: [`docs/spec/task-spec.md`](spec/task-spec.md) (schema
 reference) · [`docs/TASK-PROTOCOL.md`](TASK-PROTOCOL.md) (WP etiquette, §7 is
@@ -791,6 +790,42 @@ broken (a false-green, not a follow-on fix).
 | The raw Claude Code baseline arm finishes in minutes with every task scoring its no-op baseline | **The agent got an empty prompt** (bench-p3-rung-4-2026-08-06 🟠 **F-260 → WP-587**). `claude -p` / `--print` is a BOOLEAN flag, so `--cmd 'claude -p "$(cat {goalFile})" …'` passes the goal as a positional the CLI never consumes. Use `devbox run bench-baseline`, which puts the prompt on stdin. Do not hand-write this arm from notes — that is how it went stale the first time. |
 
 ## 8. Known P1 limitations (so you don't fight them)
+
+- **A published bundle's raw-evidence pointer is guarded, but only since WP-588
+  (2026-08-06).** 🔴 F-261 (dogfood-123): `compareSummaries` derived `rawResultsDir`
+  as `dirname(resolve(reference))`, so a `compare` run *inside* a Chikory run
+  workspace published both arms' trace links as absolute host paths under
+  `.chikory/runs/<run-id>/workspace/…` — a directory `scripts/prune-runs.sh` deletes.
+  `publishableRawResultsDir` now **throws** on any reference under a `.chikory/runs`
+  segment and otherwise emits a repo-relative path. **If you regenerate an
+  older bundle, expect that throw — it is the fix working.** Regenerate from the
+  operator's own `benchmarks/results/…` copy, never from a run workspace copy of it.
+
+- **An AC that asserts a path-shaped field is `typeof === "string"` proves nothing**
+  (🟠 F-262, dogfood-123). AC-2 accepted a string pointing at a directory scheduled
+  for deletion. Any AC over a path field must additionally `existsSync` it, assert it
+  is **relative**, and assert it is not under `.chikory/`. Same family as the
+  dogfood-113 lesson: a check that proves a symbol EXISTS cannot prove it computes
+  the right answer.
+
+- **The judge's write-boundary rubric reads `git diff`, so gitignored writes are
+  invisible** (🔴 F-264 → WP-589, dogfood-123). A run whose declared boundary was
+  `benchmarks/publications/p3-rung-4/` wrote **2.1 GiB across 95,068 files** into
+  gitignored `benchmarks/results/` and scored `scope_matches_instruction ✓`. Both
+  statements were true. **Practical rule when writing a spec: never write an AC that
+  reads gitignored host state from inside the workspace** — the workspace is a clone
+  of HEAD, so the only way to satisfy such an AC is to import that state into the
+  sandbox, burning disk against the WP-560 10 GiB launch floor and leaving it in the
+  retained audit trail. Pass the evidence in as an operator-resolved input instead.
+
+- **The `gemini-cli` adapter records `toolCalls: 0` and a message-only transcript**
+  (🟡 F-265 → WP-590, dogfood-123). 162 s that rsynced 95k files, ran
+  `chikory-bench compare`, and ran two test suites left **no** record of a single
+  command, and the reported 2,343/1,401 tokens (which feed the pacing governor's
+  projection) are implausible for that work. Do not use a `gemini-cli` step's
+  `toolCalls` or token counts as evidence of what happened; read the diff.
+  Its `costUsd: 0` is *correct* — subscription-linked metering, declared in the
+  `capability` journal entry.
 
 - **`TaskResult.baseVerification` is trustworthy as of WP-587 (2026-08-06) — and was
   not before.** Two eras of the same defect: 🔴 F-198 (dogfood-117) had `runSuite`

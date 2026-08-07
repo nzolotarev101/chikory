@@ -3,8 +3,8 @@
  * published number links to its raw trace. One dir per suite run:
  * `benchmarks/results/<stamp>-<adapter>/` with a per-task JSON + summary.json.
  */
-import { mkdirSync, writeFileSync } from "node:fs";
-import { dirname, join, resolve } from "node:path";
+import { existsSync, mkdirSync, writeFileSync } from "node:fs";
+import { dirname, join, relative, resolve, sep } from "node:path";
 
 import type { AdapterResult } from "./adapter.js";
 import type { TaskGradeReport } from "./grade.js";
@@ -224,6 +224,45 @@ export function wilsonScoreInterval(k: number, n: number, z = 1.959963984540054)
   return { lower, upper, low: lower, high: upper };
 }
 
+/**
+ * F-261 (WP-588): the raw-results pointer a published bundle carries must be a
+ * reference a reader can still follow.
+ *
+ * `dirname(resolve(reference))` alone produced two unusable pointers on the
+ * dogfood-123 rung-4 bundle: an ABSOLUTE host path (meaningless off this
+ * machine) that pointed INSIDE `.chikory/runs/<run-id>/workspace` — a run
+ * workspace `scripts/prune-runs.sh` deletes. A published number whose trace
+ * link dies with the next prune is not auditable, which is the field's entire
+ * purpose.
+ *
+ * So: refuse an ephemeral run workspace outright (fail loud at publication
+ * time, not at read time), and otherwise emit the path relative to the
+ * enclosing git repo root so the pointer survives being copied elsewhere.
+ * A reference outside any repo keeps its absolute path — there is nothing
+ * better to say about it.
+ */
+export function publishableRawResultsDir(reference: string): string {
+  const absolute = dirname(resolve(reference));
+  const segments = absolute.split(sep);
+  const runsAt = segments.findIndex(
+    (segment, i) => segment === ".chikory" && segments[i + 1] === "runs",
+  );
+  if (runsAt !== -1) {
+    throw new Error(
+      `raw results directory ${absolute} is inside an ephemeral Chikory run workspace; ` +
+        `a published comparison must cite durable evidence (re-run compare against the ` +
+        `operator's benchmarks/results/… copy, not a run workspace copy of it)`,
+    );
+  }
+  for (let dir = absolute; ; dir = dirname(dir)) {
+    if (existsSync(join(dir, ".git"))) {
+      const rel = relative(dir, absolute);
+      return rel.length > 0 ? rel : ".";
+    }
+    if (dirname(dir) === dir) return absolute;
+  }
+}
+
 function buildArmDetail(
   summary: SuiteSummary,
   label?: string,
@@ -268,7 +307,7 @@ function buildArmDetail(
     dSrRange: { low: dSrCi.lower, high: dSrCi.upper },
     reference,
     ...(reference !== undefined && reference.length > 0
-      ? { rawResultsDir: dirname(resolve(reference)) }
+      ? { rawResultsDir: publishableRawResultsDir(reference) }
       : {}),
   };
 }
