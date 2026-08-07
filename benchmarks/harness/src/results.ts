@@ -242,14 +242,30 @@ export function wilsonScoreInterval(k: number, n: number, z = 1.959963984540054)
  * better to say about it.
  */
 export function publishableRawResultsDir(reference: string): string {
-  const absolute = dirname(resolve(reference));
+  return publishableRepoPath(dirname(resolve(reference)), "raw results directory");
+}
+
+/**
+ * Anchor a directory a published artifact points at, so the pointer resolves
+ * from one stated place — the enclosing git repo root — instead of from
+ * whatever CWD happened to run the command.
+ *
+ * F-267 (WP-591): the leaderboard stored `--bundle` verbatim, so
+ * `benchmarks/publications/leaderboard/leaderboard.json` published
+ * `../publications/p3-rung-4` — a path that only resolves from
+ * `benchmarks/harness/`, and resolves to nothing from the artifact's own
+ * directory or from the repo root. That is F-262 again: the acceptance check
+ * asserted the field was a non-empty string, never that it RESOLVED.
+ */
+export function publishableRepoPath(target: string, what = "published path"): string {
+  const absolute = resolve(target);
   const segments = absolute.split(sep);
   const runsAt = segments.findIndex(
     (segment, i) => segment === ".chikory" && segments[i + 1] === "runs",
   );
   if (runsAt !== -1) {
     throw new Error(
-      `raw results directory ${absolute} is inside an ephemeral Chikory run workspace; ` +
+      `${what} ${absolute} is inside an ephemeral Chikory run workspace; ` +
         `a published comparison must cite durable evidence (re-run compare against the ` +
         `operator's benchmarks/results/… copy, not a run workspace copy of it)`,
     );

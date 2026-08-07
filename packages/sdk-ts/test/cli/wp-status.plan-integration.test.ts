@@ -31,10 +31,12 @@ describe("parseWpStatus against production plan.md (F-81)", () => {
   });
 
   it("reads an untouched P3 WP as red/fresh despite its 🟡/🟢 complexity Tag", () => {
-    // WP-303 (leaderboard) is unstarted; its Tag emoji encodes complexity,
+    // WP-305 (OSS launch polish) is unstarted; its Tag emoji encodes complexity,
     // not completion — reading it as done would re-invert the gate.
-    // (Previous anchor WP-301 went genuinely DONE 2026-07-11 — see below.)
-    expect(parseWpStatus(plan, "WP-303")).toBe("red");
+    // Anchor rotation: WP-301 went genuinely DONE 2026-07-11, and WP-303 took a
+    // done-marker on 2026-08-07 when dogfood-124 landed its leaderboard half
+    // (the static site + methodology remain open, so the row itself is honest).
+    expect(parseWpStatus(plan, "WP-305")).toBe("red");
   });
 
   it("reads the hand-landed P3 track-B WPs as green/stale", () => {

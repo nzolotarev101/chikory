@@ -5,24 +5,23 @@ This is the complete operating manual for executing Phase 2+ work packages
 task spec for a WP (every field explained), how to launch, supervise, and
 recover a run, and how to land the result as a normal PR.
 
-**Status (2026-08-06, bounded — update discipline: REPLACE this block, ≤15 lines;
+**Status (2026-08-07, bounded — update discipline: REPLACE this block, ≤15 lines;
 displaced prose moves verbatim to [`PLAN-HISTORY.md`](PLAN-HISTORY.md); per-run detail:
 `docs/reports/`; queue + course correction: `plan.md` §6/§7).**
-🟢 **P3-rung-4 CLIMBED — dogfood-123 published Chikory's first head-to-head benchmark result**
-(`run-3e2a6791-cab1-46c7-bc5b-b3d0730b92c5`, SUCCESS **1 step $0.0457/$15.00**, 3m 20s, 2/2 criteria
-+ 6/6 rubric, `docs/reports/dogfood-123.md`). **Chikory 19/19 I-SR [83.2%, 100.0%] vs raw Claude Code
-18/19 I-SR [75.4%, 99.1%] / 16/19 D-SR [62.4%, 94.5%]** over `brownfield-001…005`, both arms 5/5
-base-verified. Separation is `brownfield-001` alone (zod v3→v4). **The intervals OVERLAP** — 19
-requirements cannot separate two arms at 95%; rung-5 needs corpus, not harness.
-**The operator ran both arms BY HAND** (`scripts/bench-run.sh`, sequential) and the spec published only —
-dogfood-122's lesson holds: an LLM executor may not supervise a multi-hour, quota-bound suite.
-Agent classes live-checked: `park-until-reset` **0**, no rotation needed, 6/6 members probed at $0.
-🔴 **F-261** (published trace link pointed inside a prunable run workspace) → **WP-588 hand-fixed**;
-🟠 **F-263** (report prose cited a superseded suite run's versions) hand-fixed + provenance table;
-ℹ️ **F-266** (progression gate named the retired P2 ladder) hand-fixed. **Queued: WP-589** (the
-write-boundary rubric reads `git diff`, so 2.1 GiB / 95,068 gitignored writes scored ✓) · **WP-590**
-(`gemini-cli` records `toolCalls: 0`). Progression ✅ PROGRESSING (rung 4). **NEXT = P3-rung-5, the
-phase EXIT gate** — published DevAI-extended ranges + leaderboard, on a corpus that can separate.
+🟢 **P3-rung-5 HALF CLIMBED — dogfood-124 gave the harness an interval-ranked leaderboard**
+(`run-80fe6b8f-5ceb-4089-b13b-195390bf682b`, SUCCESS **1 step $0.0442/$15.00**, 2m 18s, 2/2 criteria
++ 6/6 rubric, harvest byte-IDENTICAL 6/6, `docs/reports/dogfood-124.md`). `chikory-bench leaderboard
+--bundle <dir>… --out <dir>` ranks by the **interval FLOOR** (`orderedBy: "iSrRange.low"`), marks a
+pair `separated` only when the intervals are DISJOINT, and copies published rates instead of
+recomputing them. `benchmarks/publications/leaderboard/` says it plainly: **Chikory [83.2%, 100.0%]
+vs raw Claude Code [75.4%, 99.1%] — not separated at 95%, no winner.** All 4 designed traps rejected.
+🟠 **F-267** (the published `bundle` pointer resolved only from `benchmarks/harness/` — **F-262
+verbatim, one review later**) → **WP-591 hand-fixed**: `publishableRepoPath` anchors it to the repo
+root, the dead `reference` is dropped, harness 183→**186** green. 🟡 **F-268 → WP-592** (executor
+model id is bare `gemini` → no `PRICE_TABLE` row → every gemini-cli run meters **$0.00 on real
+tokens**). ℹ️ F-265 recurrence (`0 tool calls`) — already WP-590. Progression ✅ PROGRESSING with a
+⚠️ LADDER-PACE warning (rung 4 for 3 headlines). **NEXT = WP-593 (dogfood-125): `chikory-bench
+probe` — red@base / green@fix per requirement, the gate the rung-5 corpus lift needs first.**
 
 Related docs: [`docs/spec/task-spec.md`](spec/task-spec.md) (schema
 reference) · [`docs/TASK-PROTOCOL.md`](TASK-PROTOCOL.md) (WP etiquette, §7 is
@@ -807,6 +806,34 @@ broken (a false-green, not a follow-on fix).
   is **relative**, and assert it is not under `.chikory/`. Same family as the
   dogfood-113 lesson: a check that proves a symbol EXISTS cannot prove it computes
   the right answer.
+
+- **F-262 recurred one review later — the rule now lives in code, not in spec authors'
+  heads** (🟠 F-267 → WP-591, dogfood-124). `leaderboard.ts` stored the `--bundle`
+  argument verbatim, so the published `leaderboard.json` cited
+  `../publications/p3-rung-4` — a path resolvable ONLY from `benchmarks/harness/`,
+  the CWD that ran the command, and from neither the artifact's own directory nor the
+  repo root. AC-2 had asserted exactly `typeof e.bundle === "string" && length > 0`.
+  **Any directory a published artifact points at now goes through
+  `publishableRepoPath()` (`benchmarks/harness/src/results.ts:244`)**, which refuses a
+  `.chikory/runs` path and otherwise emits repo-root-relative. A pointer inherited from
+  another artifact and written relative to an unrecorded CWD (the old `reference`
+  field) cannot be re-anchored — **drop it, do not republish it dead.**
+
+- **A done-marker in a `plan.md` Notes cell can break the test suite** (ℹ️ F-269,
+  dogfood-124). `packages/sdk-ts/test/cli/wp-status.plan-integration.test.ts` reads
+  the PRODUCTION `plan.md` and anchors on an untouched P3 WP to prove the F-81 gate
+  is not inverted. Writing `✅ … LANDED` into WP-303's Notes flipped it green and
+  failed the suite. **Any review that marks a WP row done — even half-done — must
+  re-run `devbox run test` before committing**, and if the anchor went stale, rotate
+  it to a genuinely untouched WP and record the rotation in the test comment.
+
+- **A `gemini-cli` step meters $0.00 no matter how many tokens it burns** (🟡 F-268 →
+  WP-592, dogfood-124). The executor endpoint records the model as bare `gemini`;
+  `PRICE_TABLE` (`packages/sdk-ts/src/pricing.ts`) is keyed on versioned ids
+  (`gemini-3.6-flash`, `gemini-3.1-pro`, …), so nothing matches and the trace prints
+  `⚠ cost meter blind (unpriced tokens)`. **`budget_usd` therefore constrains the
+  judge only** — do not treat a low run total as evidence the executor was cheap, and
+  do not "fix" it by adding a `"gemini"` catch-all row, which would invent a price.
 
 - **The judge's write-boundary rubric reads `git diff`, so gitignored writes are
   invisible** (🔴 F-264 → WP-589, dogfood-123). A run whose declared boundary was

@@ -49,6 +49,7 @@ export {
 export {
   compareSummaries,
   publishableRawResultsDir,
+  publishableRepoPath,
   sanitizeFileName,
   suiteOutDirName,
   summarize,
@@ -79,3 +80,12 @@ export {
   type VerifyBaseGreenOptions,
   type VerifyBaseGreenResult,
 } from "./base-verify.js";
+export {
+  buildLeaderboard,
+  generateLeaderboardMarkdown,
+  writeLeaderboard,
+  type LeaderboardData,
+  type LeaderboardEntry,
+  type PairwiseRecord,
+} from "./leaderboard.js";
+

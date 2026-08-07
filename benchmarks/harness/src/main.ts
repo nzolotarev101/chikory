@@ -15,6 +15,7 @@ import {
 } from "./family-preflight.js";
 import { commandComplete, makeJudgeGrader } from "./judge-grader.js";
 import { compareSummaries, writeSuiteSummary, type SuiteSummary } from "./results.js";
+import { writeLeaderboard } from "./leaderboard.js";
 import { acquireSuiteLock, SuiteAlreadyRunningError } from "./suite-lock.js";
 import { loadTaskDir, runSuite } from "./suite.js";
 import { isRunnable } from "./task.js";
@@ -53,14 +54,18 @@ commands:
       [--left-label <str>]                  label for left arm
       [--right-label <str>]                 label for right arm
       [--out <file>]                        output path to save comparison JSON
+  leaderboard --bundle <dir> [--bundle <dir> ...] --out <dir>
+                           build a ranked summary across published bundles ordered by 95% CI lower bound
 
 exit codes: 0 ok · 1 invalid input or failed run
 `;
 
 interface Flags {
   values: Record<string, string>;
+  multiValues: Record<string, string[]>;
   positionals: string[];
 }
+
 
 /** Map a friendly `--executor` name to a Chikory `{adapter, family}` pair. */
 function resolveExecutor(name: string): { adapter: string; family: string } | undefined {
@@ -105,23 +110,28 @@ export function pickClassRefs(
 
 function parseFlags(argv: string[]): Flags {
   const values: Record<string, string> = {};
+  const multiValues: Record<string, string[]> = {};
   const positionals: string[] = [];
   for (let i = 0; i < argv.length; i++) {
     const arg = argv[i]!;
     if (arg.startsWith("--")) {
       const key = arg.slice(2);
       const next = argv[i + 1];
-      if (next === undefined || next.startsWith("--")) {
-        values[key] = "true";
-      } else {
-        values[key] = next;
+      let val = "true";
+      if (next !== undefined && !next.startsWith("--")) {
+        val = next;
         i++;
       }
+      values[key] = val;
+      if (!multiValues[key]) {
+        multiValues[key] = [];
+      }
+      multiValues[key].push(val);
     } else {
       positionals.push(arg);
     }
   }
-  return { values, positionals };
+  return { values, multiValues, positionals };
 }
 
 export async function main(argv: string[], io = { out: console.log, err: console.error }): Promise<number> {
@@ -130,7 +140,7 @@ export async function main(argv: string[], io = { out: console.log, err: console
     io.out(USAGE);
     return command === undefined ? 1 : 0;
   }
-  const { values, positionals } = parseFlags(rest);
+  const { values, multiValues, positionals } = parseFlags(rest);
 
   if (command === "validate" || command === "list") {
     if (positionals.length === 0) {
@@ -424,7 +434,29 @@ export async function main(argv: string[], io = { out: console.log, err: console
     }
   }
 
+  if (command === "leaderboard") {
+    const bundles = multiValues["bundle"];
+    const outDir = values["out"];
+
+    if (!bundles || bundles.length === 0 || !outDir) {
+      io.err("chikory-bench leaderboard: --bundle <dir> and --out <dir> are required");
+      return 1;
+    }
+
+    try {
+      const { jsonPath, mdPath, data } = writeLeaderboard(bundles, outDir);
+      io.out(`leaderboard generated across ${data.entries.length} arms (${bundles.length} bundle(s)):`);
+      io.out(`  JSON: ${jsonPath}`);
+      io.out(`  Markdown: ${mdPath}`);
+      return 0;
+    } catch (err) {
+      io.err(`chikory-bench leaderboard: ${(err as Error).message}`);
+      return 1;
+    }
+  }
+
   io.err(`chikory-bench: unknown command '${command}'`);
   io.err(USAGE);
   return 1;
 }
+

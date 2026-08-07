@@ -1,0 +1,276 @@
+# Plain: Before a benchmark task is allowed to count, prove mechanically that its checks FAIL on the
+# untouched code and PASS on the real upstream fix — so a task that everyone passes for free can
+# never enter the corpus.
+# WP: WP-593 (task discrimination probe), the gate the P3-rung-5 corpus lift needs first
+# Ladder-rung: 5 (prerequisite — see WHY below)
+# Thesis-KPI: every corpus task is proven discriminating (red@base, green@fix) before it is scored
+# Format: loose — the outcome and the output contract are fixed; layout and internals are the executor's
+#
+# Launch mode: RUN (single node — one deliverable).
+#   CHIKORY_PREFLIGHT_ONLY=1 devbox run run-dogfood
+#   devbox run run-dogfood
+#
+# WHY THIS AND NOT THE RUNG ITSELF (dogfood-124 review, 2026-08-07):
+#   Progression gate: ✅ PROGRESSING, with a ⚠️ LADDER-PACE warning (rung 4 across the trailing 3
+#   headlines). Rung-5 is the P3 exit gate: published ranges + a leaderboard, on a corpus wide enough
+#   that the intervals can SEPARATE. dogfood-124 landed the leaderboard half and published the honest
+#   verdict — Chikory [83.2%, 100.0%] vs raw Claude Code [75.4%, 99.1%] are NOT separated at 95%.
+#   The remaining half is corpus width, and that cannot be one dogfood: 19 requirements over 5 tasks
+#   cannot separate 100% from 94.7%, and dogfood-120/121/122 each proved an LLM executor may not
+#   supervise a multi-hour, quota-bound suite.
+#
+#   The corpus lift is also not safe to start yet, and this is the measured reason:
+#     `chikory-bench` has exactly `validate` · `list` · `fetch-devai` · `run` · `compare` ·
+#     `leaderboard` (main.ts, grep-verified 2026-08-07) and NOTHING that proves a task's requirement
+#     checks are unsatisfied at its own pinned base. `base_verification_command` (WP-540/541) answers
+#     a different question — whether the base's OWN SUITE is green.
+#   So a task whose checks already pass at base scores free for EVERY arm. Adding such tasks pushes
+#   BOTH intervals up and makes separation HARDER — the exact opposite of the rung-5 goal. This run
+#   builds that gate; the WP-302 authoring campaign then widens the corpus without inflating it.
+#
+# Designed traps — the plausible-but-wrong deliveries the acceptance criteria exist to reject:
+#   A. Reading a non-zero exit at base as proof of discrimination. A workspace with no dependencies
+#      installed fails EVERY check, so a probe that skips the base's own suite reports 100%
+#      discriminating over garbage. This is F-255/F-258 again (WP-587: base verification measured the
+#      agent's output, not the base). A red base must yield `inconclusive`, never `discriminating`.
+#   B. Running both refs in ONE workspace. Build output, lockfiles and marker files from the base pass
+#      leak into the fix pass. The oracle plants a marker at base and a requirement that is green at
+#      fix only if the fix workspace never saw it.
+#   C. Passing a task that does not discriminate. A requirement green at base (free for everyone) or
+#      red at fix (unsatisfiable check) must be named as such, and the command must exit non-zero.
+#   D. Making the network the oracle. The probe must work against any git repo the pin names,
+#      including a local path — otherwise it can only be tested by cloning GitHub.
+#
+# PRECONDITIONS, ALL MEASURED (do not re-litigate; re-measure if stale):
+#   * `ensureGitWorkspace(cwd, url, ref)` already materializes a pinned ref (`adapter.ts`), and
+#     `verifyBaseGreen` already runs + parses a base suite (`base-verify.ts`, 45-min cap, WP-587).
+#     Both are READ and reused, not rebuilt.
+#   * `parseTestSummary` needs a `Tests …` summary line; the oracle's fixture emits one.
+#   * The task schema (`task.ts`) has `repo: {url, ref}` and `base_verification_command`; it has NO
+#     notion of a fix ref, so `repo.fix_ref` is new and the strict loader rejects it on HEAD today.
+
+name: dogfood-125-wp593-task-discrimination-probe
+goal: >
+  Make it impossible for a benchmark task to enter the corpus without mechanical proof that it
+  discriminates — that its requirement checks fail on the untouched pinned base and pass on the real
+  upstream fix.
+
+  Teach the task format a fix ref, and add a `probe` command to the chikory-bench CLI:
+
+      chikory-bench probe --task <file> [--out <dir>]
+
+  `repo.fix_ref` is a new optional task field, validated exactly like `repo.ref` (a full 40-hex sha
+  once the task is pinned). `probe` requires it and says so by name when it is missing.
+
+  The contract the command must satisfy:
+
+    * The base ref and the fix ref are materialized into **separate** workspaces. Nothing either ref's
+      checks write may be visible to the other.
+
+    * Before any requirement is classified, the task's `base_verification_command` runs at BOTH refs.
+      **If either verification is not green, the whole probe is `inconclusive`** — every requirement is
+      reported `inconclusive`, no requirement may be reported `discriminating`, and the command exits
+      non-zero. A red environment makes every check fail; that is not evidence a check discriminates.
+
+    * With both verifications green, every requirement's `check` runs in each workspace and is
+      classified from the pair of exit codes:
+        - `discriminating`     — non-zero at base, zero at fix. The only acceptable outcome.
+        - `non-discriminating` — zero at base. The requirement is free for every arm and inflates
+                                 the score without measuring anything.
+        - `unsatisfiable`      — non-zero at base AND non-zero at fix. The check is wrong: the real
+                                 upstream fix does not satisfy it.
+
+    * The command writes probe.json into the directory `--out` names, always prints a human-readable
+      summary, and **exits 0 only when the probe is conclusive and every requirement is
+      `discriminating`.** `probe.json` carries: `taskId`, `baseRef`, `fixRef`, `baseWorkspace`,
+      `fixWorkspace`, `baseVerification` and `fixVerification` (each `{green, reason}`), a top-level
+      `verdict` of `discriminating` | `not-discriminating` | `inconclusive`, and a `requirements`
+      array whose entries carry `id`, `base` (`"red"`/`"green"`), `fix`, `classification`, and a
+      plain-language `reason`.
+
+  Constraints: TypeScript stays strict ESM with named exports and no `any`; no new dependency, no
+  provider SDK, no API key, no global install, no HTML output, no change to how `compare`,
+  `leaderboard` or runSuite behave, and no edit to any existing task file under benchmarks/tasks.
+  Reuse ensureGitWorkspace and verifyBaseGreen rather than reimplementing ref materialization or
+  suite verification. A published or reported path goes through publishableRepoPath (WP-591), never a
+  raw argument. Project commands run sequentially inside the already-activated Devbox environment, so
+  invoke pinned tools directly and never nest devbox run. Every existing test remains green.
+
+repos:
+  - url: /Users/nikitazolotarev/repos/chikory
+    writable: true
+
+acceptance_criteria:
+  - id: AC-1
+    description: >
+      THIS NODE'S OWN ORACLE — RED on HEAD, green only once the probe exists and classifies
+      correctly. Against a local two-commit git fixture this check builds itself, the probe must
+      separate the four requirement shapes (trap C), keep the two refs in separate workspaces
+      (trap B), refuse to classify anything when the base suite is red (trap A), work off a local
+      repo path with no network (trap D), and gate its exit code on the verdict. Executor-authored
+      tests are not the oracle; the inputs and the expected decisions are written here.
+    check: |
+      cd benchmarks/harness && pnpm exec tsc && node --input-type=module -e '
+      import {mkdtempSync,mkdirSync,writeFileSync,readFileSync,existsSync} from "node:fs";
+      import {execFileSync,spawnSync} from "node:child_process";
+      import {tmpdir} from "node:os";
+      import {join} from "node:path";
+      const A=(c,m)=>{if(!c){console.error("FAIL: "+m);process.exit(1);}};
+      const root=mkdtempSync(join(tmpdir(),"probe-fixture-"));
+      const origin=join(root,"origin"); mkdirSync(origin,{recursive:true});
+      const git=(...a)=>execFileSync("git",["-C",origin,...a],{stdio:"pipe"}).toString().trim();
+      const w=(p,s)=>writeFileSync(join(origin,p),s);
+      execFileSync("git",["init","-q","-b","main",origin],{stdio:"pipe"});
+      git("config","user.email","probe@chikory.local"); git("config","user.name","probe");
+      w("README.md","fixture\n"); w("value.txt","BROKEN\n");
+      w("verify.sh","echo \"Tests  3 passed (3)\"\nexit 0\n");
+      w("verify-red.sh","echo \"Tests  1 failed | 2 passed (3)\"\nexit 1\n");
+      git("add","-A"); git("commit","-q","-m","base"); const base=git("rev-parse","HEAD");
+      w("value.txt","FIXED\n");
+      git("add","-A"); git("commit","-q","-m","fix"); const fix=git("rev-parse","HEAD");
+      const task=(name,verify,reqs)=>{
+        const p=join(root,name+".yaml");
+        writeFileSync(p,"id: brownfield-900\nclass: brownfield\nstatus: pinned\nrepo:\n"+
+          "  url: "+JSON.stringify(origin)+"\n  ref: "+base+"\n  fix_ref: "+fix+"\n"+
+          "base_verification_command: sh "+verify+"\nhorizon: 1h\ngoal: |\n  probe fixture\n"+
+          "requirements:\n"+reqs);
+        return p;};
+      // R1 discriminating · R2 free for everyone · R3 unsatisfiable · R4 plants a marker at base
+      // only · R5 is green at fix ONLY if the fix workspace never saw R4 base marker (trap B).
+      const REQS=
+        "  - id: R1\n    description: discriminating\n    check: grep -q FIXED value.txt\n"+
+        "  - id: R2\n    description: green everywhere\n    check: grep -q fixture README.md\n"+
+        "  - id: R3\n    description: never satisfiable\n    check: grep -q NEVER value.txt\n"+
+        "  - id: R4\n    description: leaks a marker at base only\n"+
+        "    check: grep -q FIXED value.txt || { touch leaked-base.txt; false; }\n"+
+        "  - id: R5\n    description: green at fix only in a clean workspace\n"+
+        "    check: grep -q FIXED value.txt && ! ls leaked-base.txt >/dev/null 2>&1\n";
+      const run=(taskPath,out)=>spawnSync("node",
+        ["dist/bin.js","probe","--task",taskPath,"--out",out],{encoding:"utf8"});
+      const readProbe=(out,r)=>{
+        A(existsSync(join(out,"probe.json")),
+          "probe must write probe.json into --out; nothing at "+join(out,"probe.json")+
+          " (exit "+r.status+") stderr="+String(r.stderr).slice(-300));
+        return JSON.parse(readFileSync(join(out,"probe.json"),"utf8"));};
+      // ── 1. mixed task: correct classification, workspace isolation, non-zero exit ──
+      const mixed=task("mixed","verify.sh",REQS);
+      const out1=join(root,"out1");
+      const r1=run(mixed,out1);
+      A(r1.status!==0,"a task that does not fully discriminate must exit non-zero, got "+r1.status);
+      const p1=readProbe(out1,r1);
+      A(p1.verdict==="not-discriminating","verdict must be not-discriminating, got "+p1.verdict);
+      A(p1.baseRef===base&&p1.fixRef===fix,"probe.json must record both refs");
+      A(p1.baseVerification.green===true&&p1.fixVerification.green===true,
+        "both verifications are green in this fixture, got base="+p1.baseVerification.green+
+        " fix="+p1.fixVerification.green);
+      A(p1.baseWorkspace!==p1.fixWorkspace,"trap B: the two refs need SEPARATE workspaces");
+      const by=Object.fromEntries(p1.requirements.map((r)=>[r.id,r]));
+      A(by.R1.classification==="discriminating"&&by.R1.base==="red"&&by.R1.fix==="green",
+        "R1 is red@base green@fix, got "+JSON.stringify(by.R1));
+      A(by.R2.classification==="non-discriminating",
+        "trap C: R2 passes at base and is free for every arm, got "+by.R2.classification);
+      A(by.R3.classification==="unsatisfiable",
+        "trap C: R3 fails at the real fix, so its check is wrong, got "+by.R3.classification);
+      A(by.R5.classification==="discriminating",
+        "trap B: R5 is green at fix ONLY if the fix workspace never saw the base marker; got "+
+        by.R5.classification+" — the two refs shared a workspace");
+      A(p1.requirements.every((r)=>typeof r.reason==="string"&&r.reason.length>0),
+        "every requirement needs a plain-language reason");
+      // ── 2. red base: inconclusive, and NOTHING may be called discriminating (trap A) ──
+      const redbase=task("redbase","verify-red.sh",REQS);
+      const out2=join(root,"out2");
+      const r2=run(redbase,out2);
+      A(r2.status!==0,"an inconclusive probe must exit non-zero, got "+r2.status);
+      const p2=readProbe(out2,r2);
+      A(p2.verdict==="inconclusive","trap A: a red base yields inconclusive, got "+p2.verdict);
+      A(p2.baseVerification.green===false,"the red base must be reported not green");
+      A(p2.requirements.every((r)=>r.classification==="inconclusive"),
+        "trap A: a red environment fails every check; none of that is evidence of discrimination — "+
+        "got "+JSON.stringify(p2.requirements.map((r)=>r.id+":"+r.classification)));
+      // ── 3. fully discriminating task: exit 0 ──
+      const clean=task("clean","verify.sh",
+        "  - id: R1\n    description: discriminating\n    check: grep -q FIXED value.txt\n");
+      const out3=join(root,"out3");
+      const r3=run(clean,out3);
+      A(r3.status===0,"a fully discriminating task must exit 0, got "+r3.status+
+        " stderr="+String(r3.stderr).slice(-300));
+      const p3=readProbe(out3,r3);
+      A(p3.verdict==="discriminating","verdict must be discriminating, got "+p3.verdict);
+      A(p3.taskId==="brownfield-900","probe.json must name the task, got "+p3.taskId);
+      console.log("AC-1 OK: the probe proves red@base/green@fix per requirement, isolates the two refs, and refuses to judge a red base");
+      '
+
+  - id: AC-2
+    description: >
+      The fix ref is a first-class, validated part of the frozen task format — not a field the probe
+      reads loosely off untyped YAML — and no existing corpus task was edited to make the run pass.
+    check: |
+      cd benchmarks/harness && pnpm exec tsc && node --input-type=module -e '
+      import {readFileSync} from "node:fs";
+      import {pathToFileURL} from "node:url";
+      import {join} from "node:path";
+      const A=(c,m)=>{if(!c){console.error("FAIL: "+m);process.exit(1);}};
+      const {parseAuthoredTask}=await import(pathToFileURL(join(process.cwd(),"dist/task.js")).href);
+      const sha=(c)=>c.repeat(40).slice(0,40);
+      const yaml=(fixRef)=>
+        "id: brownfield-901\nclass: brownfield\nstatus: pinned\nrepo:\n"+
+        "  url: https://example.invalid/r\n  ref: "+sha("a")+"\n"+
+        (fixRef===null?"":"  fix_ref: "+fixRef+"\n")+
+        "base_verification_command: \"true\"\nhorizon: 1h\ngoal: |\n  x\n"+
+        "requirements:\n  - id: R1\n    description: d\n    check: \"true\"\n";
+      const load=(text,file)=>{ try { return parseAuthoredTask(text,file); }
+        catch (e) { A(false,file+" must load once repo.fix_ref is part of the format: "+
+          String(e && e.message).slice(0,200)); } };
+      const ok=load(yaml(sha("b")),"ok.yaml");
+      A(ok.repo!==undefined&&ok.repo.fixRef===sha("b"),
+        "a pinned fix_ref must survive the loader onto the task, got "+JSON.stringify(ok.repo));
+      const none=load(yaml(null),"none.yaml");
+      A(none.repo!==undefined&&none.repo.fixRef===undefined,
+        "fix_ref stays optional for tasks that have not declared one");
+      let threw=false;
+      try { parseAuthoredTask(yaml("not-a-sha"),"bad.yaml"); } catch { threw=true; }
+      A(threw,"a pinned task with a malformed fix_ref must be REJECTED by the loader, not accepted");
+      // The corpus is untouched: no existing task may be edited or fix-pinned to green this run.
+      const CORPUS={
+        "brownfield-001-dependency-major-upgrade":"6e6f3b3dbc3fdd62bc2c043efbdcd0254823fcb4",
+        "brownfield-002-cross-cutting-refactor":"a061eaa112fa18885dd4de0cea6c0e51094cad0c",
+        "brownfield-003-bug-archaeology":"b6b1288277e6ca87dab0ad1c7251b92612b7445c",
+        "brownfield-004":"d96c5ceef12cb53266ce1ae5e65fba301a31fe57",
+        "brownfield-005":"cdbc28049889a9da9ea2abb6bd6519afe2279ead"};
+      for (const [name,ref] of Object.entries(CORPUS)) {
+        const f="../tasks/"+name+".yaml";
+        const t=load(readFileSync(f,"utf8"),f);
+        A(t.status==="pinned"&&t.repo!==undefined&&t.repo.ref===ref,
+          name+" must keep its pinned ref "+ref+", got "+JSON.stringify(t.repo));
+        A(t.repo.fixRef===undefined,
+          name+" must NOT be fix-pinned by this run — the corpus lift is a separate, reviewed change");
+      }
+      console.log("AC-2 OK: repo.fix_ref is validated by the frozen loader and the corpus is untouched");
+      '
+
+
+budget_usd: 15
+max_steps: 12
+
+step_limits:
+  max_turns: 40
+  # 840 is the hard ceiling (MAX_STEP_MAX_SECONDS): above it the executeStep
+  # activity's Temporal startToCloseTimeout kills the step first.
+  max_seconds: 840
+
+pacing:
+  mode: auto
+  autoCalibrate: true
+
+unattended:
+  escalation: seal_resumable_failed
+
+# WP-566 agent classes. Primaries unchanged — Gemini executes, Codex judges.
+# routing.stages is DERIVED from the selected members and must not be restated here.
+agent_classes:
+  executor: executor-default
+  judge: judge-default
+
+judge:
+  cadence: 1
+  max_cost_share: 0.5
