@@ -403,7 +403,8 @@ export async function cmdRun(
   if (planText !== null) {
     // WP-260: extract the staleness target from the parsed goal, not the raw
     // yamlText (whose comment preamble name-drops many WPs → wrong target).
-    const precheck = evaluateSpecStalenessPrecheck(spec.goal, planText);
+    // spec.wp (when set) is authoritative over goal prose — see dogfood-125.
+    const precheck = evaluateSpecStalenessPrecheck(spec.goal, planText, spec.wp);
     if (precheck.warning !== null) {
       ioPair.err(precheck.warning);
       // Launcher-guard family (WP-261/267): refuse at zero LLM cost by

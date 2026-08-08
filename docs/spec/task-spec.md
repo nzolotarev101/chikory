@@ -18,6 +18,25 @@ name: wp-201-python-contracts-parity
 
 ---
 
+### `wp` (optional, string, format `WP-nnn`)
+
+Authoritative target-WP id for `chikory run`'s stale-spec precheck (WP-260/WP-261).
+When set, the precheck checks THIS id against `plan.md` and never reads `goal`
+prose. When absent, the precheck falls back to scanning `goal` for the first
+`WP-\d+` mention (skipping `F-n/WP-n` friction-lineage citations).
+
+Set it whenever `goal` cites any OTHER WP inline (e.g. "reuse `publishableRepoPath`
+(WP-591)") — the bare `<phrase> (WP-nnn)` shape is used across specs both for a
+spec's own target and for a prior-art citation, and the two are lexically
+indistinguishable. Relying on prose in that case can make the precheck pick the
+cited WP instead of the real target and falsely refuse to launch (dogfood-125).
+
+```yaml
+wp: WP-593
+```
+
+---
+
 ### `goal` (required, string)
 
 **The most important field.** By default, this exact text is the executor's

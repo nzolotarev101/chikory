@@ -241,6 +241,7 @@ export const TaskSpecSchema = z
   .object({
     name: z.string().min(1),
     goal: z.string().min(1),
+    wp: z.string().min(1).optional(),
     repos: z.array(RepoSpecSchema).min(1),
     acceptanceCriteria: z.array(AcceptanceCriterionSchema).min(1),
     budgetUsd: z.number().gt(0),

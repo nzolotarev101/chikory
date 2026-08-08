@@ -72,6 +72,12 @@ export interface TaskSpec {
   name: string;
   /** OB-3: success criteria upfront. */
   goal: string;
+  /**
+   * Authoritative target-WP id for the stale-spec precheck — goal prose is
+   * ambiguous, since the same "(WP-nnn)" shape cites both a spec's own
+   * target and reused prior art (dogfood-125).
+   */
+  wp?: string;
   /** 1 repo in P1; N in P2 (WP-214). */
   repos: RepoSpec[];
   acceptanceCriteria: AcceptanceCriterion[];

@@ -235,6 +235,19 @@ if [ -n "$SPEC" ]; then
     echo "⚠️  No '# Thesis-KPI: <§1.4 KPI this run pushes>' header."
   fi
 
+  # dogfood-125: the stale-spec precheck reads the FIRST 'WP-nnn' in goal prose
+  # unless a top-level 'wp:' field is set — and the same "<phrase> (WP-nnn)"
+  # shape cites both a spec's own target and reused prior art, so a goal that
+  # mentions any WP without a declared 'wp:' can resolve to the WRONG target.
+  if printf '%s\n' "$GOAL_BLOCK" | grep -qE '\bWP-[0-9]+\b'; then
+    if grep -qE '^wp: *WP-[0-9]+' "$SPEC"; then
+      echo "🟢 $(grep -E '^wp:' "$SPEC" | head -1) (stale-spec precheck target, declared)"
+    else
+      echo "⚠️  goal cites a WP but no top-level 'wp:' field is set — the stale-spec"
+      echo "    precheck may pick the wrong target (see dogfood-125). Add 'wp: WP-nnn'."
+    fi
+  fi
+
   # ---------- WP-266: loose-spec AC-check lint (F-82 file-pin + F-83 prose-grep) ----------
   # A LOOSE spec delegates file layout AND implementation to the executor, so its ACs must
   # anchor on OUTCOME SYMBOLS the goal NAMES — never file-exist-pin a delegated path (F-82,

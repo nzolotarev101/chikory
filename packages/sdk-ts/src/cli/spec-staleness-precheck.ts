@@ -30,12 +30,19 @@ export function extractTargetWpId(goalText: string): string | null {
 /**
  * Pure launch precheck: warns only when the target WP is already complete.
  * WP-260: `goalText` is the parsed `spec.goal`, not the raw YAML preamble.
+ *
+ * `declaredWp` is the spec's structured `wp:` field. When set it is
+ * authoritative and goal prose is never consulted — the same
+ * "<phrase> (WP-nnn)" shape cites both a spec's own target and reused prior
+ * art (dogfood-125 false-refused on a prior-art citation), so prose is only
+ * a fallback for specs that omit `wp:`.
  */
 export function evaluateSpecStalenessPrecheck(
   goalText: string,
   planText: string,
+  declaredWp?: string,
 ): SpecStalenessPrecheckResult {
-  const targetWpId = extractTargetWpId(goalText);
+  const targetWpId = declaredWp ?? extractTargetWpId(goalText);
   if (targetWpId === null) {
     return { targetWpId: null, warning: null };
   }

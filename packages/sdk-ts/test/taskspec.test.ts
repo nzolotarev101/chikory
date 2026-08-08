@@ -53,6 +53,18 @@ describe("parseTaskSpec", () => {
     expect(withFloor.minNodes).toBe(4);
   });
 
+  it("parses the optional structured target-WP id `wp` (dogfood-125)", () => {
+    expect(parseTaskSpec(read("valid-minimal.yaml"), { env }).wp).toBeUndefined();
+
+    const withWp = parseTaskSpec(`${read("valid-minimal.yaml")}\nwp: WP-123\n`, { env });
+    expect(TaskSpecSchema.safeParse(withWp).success).toBe(true);
+    expect(withWp.wp).toBe("WP-123");
+
+    expect(() => parseTaskSpec(`${read("valid-minimal.yaml")}\nwp: not-a-wp\n`, { env })).toThrow(
+      TaskSpecValidationError,
+    );
+  });
+
   it("maps optional bounded work-unit chunks from YAML to camel-case policy input", () => {
     const spec = parseTaskSpec(
       `${read("valid-minimal.yaml")}

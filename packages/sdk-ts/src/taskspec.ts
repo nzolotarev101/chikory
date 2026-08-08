@@ -151,6 +151,17 @@ const RawTaskSpecYaml = z
   .object({
     name: z.string().min(1),
     goal: z.string().min(1),
+    /**
+     * Authoritative target-WP id for the stale-spec precheck. Goal prose is
+     * ambiguous — the same "<phrase> (WP-nnn)" shape cites both a spec's own
+     * target and reused prior art (dogfood-125 false-refused on a prior-art
+     * citation). When set, the precheck uses this directly and never sniffs
+     * goal text.
+     */
+    wp: z
+      .string()
+      .regex(/^WP-\d+$/, "wp must look like WP-123")
+      .optional(),
     repos: z
       .array(
         z
@@ -400,6 +411,7 @@ export function parseTaskSpec(yamlText: string, opts: ParseTaskSpecOptions = {})
   const spec: TaskSpec = {
     name: raw.name,
     goal: raw.goal,
+    ...(raw.wp !== undefined ? { wp: raw.wp } : {}),
     repos: raw.repos.map((r) => ({ url: r.url, ref: r.ref, writable: r.writable })),
     acceptanceCriteria: raw.acceptance_criteria.map((c) => ({
       id: c.id,

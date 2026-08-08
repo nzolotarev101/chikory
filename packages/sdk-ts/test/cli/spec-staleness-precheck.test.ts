@@ -98,6 +98,42 @@ goal: Implement the requested pure module.
     expect(result.targetWpId).toBeNull();
     expect(result.warning).toBeNull();
   });
+
+  it("dogfood-125: declared wp wins over an ambiguous prior-art citation in goal", () => {
+    // The goal's only WP mention is a reused-code citation, not the target —
+    // same shape dogfood-058/062 use for a REAL self-target, so prose alone
+    // cannot tell these apart (see spec-staleness-precheck.ts doc comment).
+    const goalText =
+      "A published or reported path goes through publishableRepoPath (WP-591), never a raw argument.";
+    const planText = `
+| WP | Title | Status |
+| --- | --- | --- |
+| WP-591 | publishableRepoPath | 🟢 |
+| WP-593 | task discrimination probe | 🟡 |
+`;
+
+    const stale = evaluateSpecStalenessPrecheck(goalText, planText, "WP-591");
+    expect(stale.targetWpId).toBe("WP-591");
+    expect(stale.warning).toContain("stale");
+
+    const fresh = evaluateSpecStalenessPrecheck(goalText, planText, "WP-593");
+    expect(fresh.targetWpId).toBe("WP-593");
+    expect(fresh.warning).toBeNull();
+  });
+
+  it("declared wp absent falls back to prose extraction", () => {
+    const goalText = "Implement WP-258.";
+    const planText = `
+| WP | Title | Status |
+| --- | --- | --- |
+| WP-258 | Wire spec staleness gate | 🟢 |
+`;
+
+    const result = evaluateSpecStalenessPrecheck(goalText, planText);
+
+    expect(result.targetWpId).toBe("WP-258");
+    expect(result.warning).toContain("stale");
+  });
 });
 
 describe("cmdRun staleness gate — refuse by default", () => {
@@ -152,6 +188,58 @@ judge:
       const stderr = errLines.join("\n");
       expect(stderr).toContain("stale spec: target WP-258 already done");
       expect(stderr).toContain("CHIKORY_ALLOW_STALE_SPEC=1");
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("dogfood-125: a declared `wp:` field drives the refusal even when goal prose names a different WP", async () => {
+    // Mirrors the real bug shape: the goal's only WP mention (WP-999, an open
+    // id with no plan.md row) is NOT the target — the spec's structured `wp:`
+    // is. If the wiring regressed to reading goal prose, this would resolve to
+    // "target not found" (fresh) and cmdRun would proceed past the gate.
+    process.env["ANTHROPIC_API_KEY"] ??= "test-key";
+    process.env["GEMINI_API_KEY"] ??= "test-key";
+    const { mkdtempSync, rmSync, writeFileSync } = await import("node:fs");
+    const { tmpdir } = await import("node:os");
+    const { join } = await import("node:path");
+    const { cmdRun } = await import("../../src/cli/commands.js");
+
+    const SPEC_YAML_WITH_WP = `
+name: stale-wire-test-structured
+wp: WP-258
+goal: Reuse the WP-999 helper for follow-up work
+repos:
+  - url: file:///tmp/nowhere
+    writable: true
+acceptance_criteria:
+  - id: AC-1
+    description: n/a
+budget_usd: 1
+executor:
+  adapter: claude-code
+  family: anthropic
+judge:
+  family: gemini
+`;
+
+    const dir = mkdtempSync(join(tmpdir(), "chikory-stale-structured-"));
+    try {
+      const specPath = join(dir, "spec.yaml");
+      writeFileSync(specPath, SPEC_YAML_WITH_WP);
+      const errLines: string[] = [];
+      const code = await cmdRun(
+        { file: specPath, watch: false, json: false, dataDir: dir },
+        {
+          readPlanText: async () => STALE_PLAN,
+          env: {},
+          err: (line) => errLines.push(line),
+          out: () => {},
+        },
+      );
+      expect(code).toBe(1);
+      const stderr = errLines.join("\n");
+      expect(stderr).toContain("stale spec: target WP-258 already done");
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }

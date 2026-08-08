@@ -126,8 +126,11 @@ export const CHAIN_TEMPLATE_FIELDS = {
    *   chunks belong to the run consuming them).
    * - `debug` seams are armed PER NODE from env (`debugPark`, `debugSeedBadDiff`,
    *   `seedFailNodeId`), which is why they have their own template fields.
+   * - `wp` (dogfood-125) is the launch-time stale-spec precheck target for the
+   *   WHOLE spec, consumed once in `cmdRun` before a chain plan exists. A node
+   *   has no WP id of its own to precheck.
    */
-  deliberatelyExcluded: ["minNodes", "chain", "boundedWorkUnit", "debug"],
+  deliberatelyExcluded: ["minNodes", "chain", "boundedWorkUnit", "debug", "wp"],
 } as const satisfies Record<string, readonly (keyof TaskSpec)[]>;
 
 type ClassifiedTaskSpecField =

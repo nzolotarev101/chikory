@@ -50,6 +50,7 @@
 #     notion of a fix ref, so `repo.fix_ref` is new and the strict loader rejects it on HEAD today.
 
 name: dogfood-125-wp593-task-discrimination-probe
+wp: WP-593
 goal: >
   Make it impossible for a benchmark task to enter the corpus without mechanical proof that it
   discriminates — that its requirement checks fail on the untouched pinned base and pass on the real
