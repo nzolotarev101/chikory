@@ -48,6 +48,10 @@ export {
 } from "./adapter.js";
 export {
   compareSummaries,
+  getLedgerEntry,
+  isTaskDiscriminationVerified,
+  parseDiscriminationLedger,
+  readDiscriminationLedger,
   publishableRawResultsDir,
   publishableRepoPath,
   sanitizeFileName,
@@ -58,6 +62,9 @@ export {
   writeTaskResult,
   type ArmComparisonDetail,
   type ConfidenceInterval,
+  type DiscriminationLedger,
+  type DiscriminationLedgerEntry,
+  type DiscriminationRequirementEntry,
   type SuiteComparisonResult,
   type SuiteSummary,
   type TaskResult,

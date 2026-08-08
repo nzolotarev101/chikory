@@ -1,4 +1,4 @@
-import { mkdirSync, mkdtempSync, rmSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { isAbsolute, join } from "node:path";
 
@@ -7,7 +7,9 @@ import type { SuiteSummary, TaskResult } from "../src/results.js";
 import {
   compareSummaries,
   isTaskVerified,
+  parseDiscriminationLedger,
   publishableRepoPath,
+  readDiscriminationLedger,
   summarize,
   wilsonScoreInterval,
 } from "../src/results.js";
@@ -175,6 +177,53 @@ describe("summarize", () => {
   });
 });
 
+describe("parseDiscriminationLedger (F-275)", () => {
+  const entry = {
+    taskId: "brownfield-001",
+    baseRef: "aaa",
+    fixRef: "bbb",
+    verdict: "discriminating",
+    probedAt: "2026-08-08T00:00:00.000Z",
+    requirements: [{ id: "R1", classification: "discriminating" }],
+  };
+
+  it("accepts both persisted shapes and keys every entry by task id", () => {
+    const fromObject = parseDiscriminationLedger(
+      JSON.stringify({ "brownfield-001": entry }),
+      "obj.json",
+    );
+    const fromArray = parseDiscriminationLedger(JSON.stringify([entry]), "arr.json");
+    expect(fromObject["brownfield-001"]?.verdict).toBe("discriminating");
+    expect(fromArray).toEqual(fromObject);
+  });
+
+  it("REFUSES a damaged ledger instead of silently starting from an empty one", () => {
+    expect(() => parseDiscriminationLedger("{not json", "x.json")).toThrow(/not valid JSON/);
+    expect(() => parseDiscriminationLedger('"a string"', "x.json")).toThrow(
+      /must be a JSON object or array/,
+    );
+    expect(() => parseDiscriminationLedger("[42]", "x.json")).toThrow(/non-object entry/);
+    expect(() => parseDiscriminationLedger('[{"baseRef":"aaa"}]', "x.json")).toThrow(
+      /entry with no taskId/,
+    );
+  });
+
+  it("readDiscriminationLedger reads the file and names it in the error", () => {
+    const dir = mkdtempSync(join(tmpdir(), "ledger-read-"));
+    try {
+      const good = join(dir, "good.json");
+      writeFileSync(good, JSON.stringify({ "brownfield-001": entry }));
+      expect(readDiscriminationLedger(good)["brownfield-001"]?.baseRef).toBe("aaa");
+
+      const bad = join(dir, "bad.json");
+      writeFileSync(bad, "{oops");
+      expect(() => readDiscriminationLedger(bad)).toThrow(new RegExp(bad.replace(/\//g, "\\/")));
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});
+
 describe("wilsonScoreInterval", () => {
   it("calculates 95% Wilson confidence intervals for sample proportions", () => {
     const ci = wilsonScoreInterval(15, 20);
@@ -213,6 +262,7 @@ describe("compareSummaries", () => {
         exitCode: 0,
         wallClockMs: 1000,
         baseVerified: true,
+        discriminationVerified: true,
         sealed: true,
       })),
     };

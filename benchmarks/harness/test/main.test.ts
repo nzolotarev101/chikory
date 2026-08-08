@@ -311,6 +311,88 @@ describe("chikory-bench CLI", () => {
     expect(outJson.arms[0].iSrRange.low).toBeCloseTo(0.49, 2);
   });
 
+  /**
+   * F-274: WP-595 gates the score on probe evidence, but `run` had no way to
+   * supply a ledger — `runSuite`'s option had no caller, so the gate could not
+   * bind any real suite. Same shape as F-180: detected, never enforced.
+   */
+  it("run: --discrimination-ledger gates the published rate, and a broken one is refused", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "bench-cli-ledger-"));
+    writeFileSync(join(dir, "greenfield-002.yaml"), GOOD);
+    const ledgerDir = mkdtempSync(join(tmpdir(), "bench-cli-ledgerfile-"));
+    const runArgs = (results: string, extra: string[] = []) => [
+      "run", "--tasks", dir, "--adapter", "command", "--cmd", "touch hi.txt",
+      "--out", results, "--suite", "smoke", ...extra,
+    ];
+    const summaryOf = (o: ReturnType<typeof io>) =>
+      JSON.parse(
+        readFileSync(join(o.lines.out.join("\n").match(/^artifacts: (.+)$/m)![1], "summary.json"), "utf8"),
+      );
+
+    // no flag → today's behavior, unchanged
+    const bare = io();
+    expect(await main(runArgs(mkdtempSync(join(tmpdir(), "bench-r-"))), bare)).toBe(0);
+    const before = summaryOf(bare);
+    expect(before.iSr).toBe(1);
+    expect(before.requirementsVerifiedTotal).toBe(1);
+    expect(before.unverifiedTasks).toHaveLength(0);
+
+    // a ledger that never probed this task → kept in the summary, out of the rate
+    const ledgerFile = join(ledgerDir, "discrimination.json");
+    writeFileSync(
+      ledgerFile,
+      JSON.stringify({
+        "brownfield-001": {
+          taskId: "brownfield-001",
+          baseRef: "aaa",
+          fixRef: "bbb",
+          verdict: "discriminating",
+          probedAt: "2026-08-08T00:00:00.000Z",
+          requirements: [],
+        },
+      }),
+    );
+    const gated = io();
+    expect(
+      await main(
+        runArgs(mkdtempSync(join(tmpdir(), "bench-r-")), ["--discrimination-ledger", ledgerFile]),
+        gated,
+      ),
+    ).toBe(0);
+    const after = summaryOf(gated);
+    expect(after.tasks).toBe(1);
+    expect(after.perTask).toHaveLength(1);
+    expect(after.perTask[0].discriminationVerified).toBe(false);
+    expect(after.requirementsTotal).toBe(1);
+    expect(after.requirementsVerifiedTotal).toBe(0);
+    expect(after.iSr).toBe(0);
+    expect(after.unverifiedTasks[0]).toMatchObject({ taskId: "greenfield-002" });
+    expect(after.unverifiedTasks[0].reason).toMatch(/never probed/);
+
+    // a missing or damaged ledger is refused at $0, before any task runs
+    const missing = io();
+    expect(
+      await main(
+        runArgs(mkdtempSync(join(tmpdir(), "bench-r-")), [
+          "--discrimination-ledger", join(ledgerDir, "nope.json"),
+        ]),
+        missing,
+      ),
+    ).toBe(1);
+    expect(missing.lines.err.join("\n")).toMatch(/--discrimination-ledger not found/);
+
+    const damagedFile = join(ledgerDir, "damaged.json");
+    writeFileSync(damagedFile, "{oops");
+    const damaged = io();
+    expect(
+      await main(
+        runArgs(mkdtempSync(join(tmpdir(), "bench-r-")), ["--discrimination-ledger", damagedFile]),
+        damaged,
+      ),
+    ).toBe(1);
+    expect(damaged.lines.err.join("\n")).toMatch(/not valid JSON/);
+  });
+
   it("rejects unknown commands and missing flags", async () => {
     expect(await main(["frobnicate"], io())).toBe(1);
     expect(await main(["run", "--tasks", "x"], io())).toBe(1);

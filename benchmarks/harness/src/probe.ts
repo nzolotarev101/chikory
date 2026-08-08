@@ -9,7 +9,11 @@ import { runBounded, scrubExecutorEnv } from "@chikory/sdk";
 import { ensureGitWorkspace } from "./adapter.js";
 import { verifyBaseGreen } from "./base-verify.js";
 import { decideTargetNode, discoverNodeToolchains, pinnedNodeProvisioning } from "./engine.js";
-import { publishableRepoPath } from "./results.js";
+import {
+  parseDiscriminationLedger,
+  publishableRepoPath,
+  type DiscriminationLedgerEntry,
+} from "./results.js";
 import { parseAuthoredTask } from "./task.js";
 
 export interface ProbeRequirementResult {
@@ -43,6 +47,7 @@ const FIX_WORKSPACE_DIR = "fix-workspace";
 export interface RunProbeOptions {
   taskPath: string;
   outDir?: string;
+  recordFile?: string;
   baseVerifyTimeoutMs?: number;
 }
 
@@ -229,6 +234,29 @@ export async function runProbe(options: RunProbeOptions): Promise<{ result: Prob
 
   const probeJsonPath = join(targetOutDir, "probe.json");
   writeFileSync(probeJsonPath, JSON.stringify(probeResult, null, 2));
+
+  if (options.recordFile) {
+    const recordPath = resolve(options.recordFile);
+    mkdirSync(dirname(recordPath), { recursive: true });
+    // F-275: an unreadable ledger is refused, never silently replaced — a reset
+    // to `{}` here would drop every verdict already recorded on the write below.
+    const ledger: Record<string, DiscriminationLedgerEntry> = existsSync(recordPath)
+      ? parseDiscriminationLedger(readFileSync(recordPath, "utf8"), recordPath)
+      : {};
+    const entry: DiscriminationLedgerEntry = {
+      taskId: probeResult.taskId,
+      baseRef: probeResult.baseRef,
+      fixRef: probeResult.fixRef,
+      verdict: probeResult.verdict,
+      probedAt: new Date().toISOString(),
+      requirements: probeResult.requirements.map((req) => ({
+        id: req.id,
+        classification: req.classification,
+      })),
+    };
+    ledger[probeResult.taskId] = entry;
+    writeFileSync(recordPath, JSON.stringify(ledger, null, 2));
+  }
 
   return { result: probeResult, outDir: targetOutDir, code: exitCode };
 }

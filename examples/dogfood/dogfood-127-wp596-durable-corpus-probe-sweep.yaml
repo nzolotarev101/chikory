@@ -1,0 +1,359 @@
+# Plain: Probing the whole benchmark corpus is a multi-hour job. It must behave like the durable
+# execution this project sells: every verdict is written the moment it is earned, a kill loses only
+# the task in flight, a re-run never re-does proven work, and one broken task cannot end the sweep.
+# WP: WP-596 (durable corpus probe sweep) — the last machinery before the operator's rung-5 probe
+# Ladder-rung: 5 (prerequisite — see WHY below)
+# Thesis-KPI: a killed corpus sweep resumes without re-probing any task already proven at its ref pair
+# Format: loose — the outcome, the CLI surface and the persisted shapes are fixed; internals are the executor's
+#
+# Launch mode: RUN (single node — one deliverable).
+#   CHIKORY_PREFLIGHT_ONLY=1 devbox run run-dogfood
+#   devbox run run-dogfood
+#
+# WHY THIS AND NOT THE RUNG ITSELF (dogfood-126 review, 2026-08-08):
+#   Progression gate: ⛔ STALLED + ⚠️ LADDER-PACE (rung 4 across the trailing 3 headlines), which binds
+#   the next headline to the P3 ladder rung. **Rung 5 is the P3 exit gate** — published ranges plus a
+#   leaderboard over a corpus wide enough for the intervals to SEPARATE. dogfood-123 published the
+#   first bundle (Chikory [83.2%, 100.0%] vs raw Claude Code [75.4%, 99.1%] — OVERLAPPING), dogfood-124
+#   landed the leaderboard, dogfood-125 the probe, dogfood-126 the scoring gate. What is missing is
+#   EVIDENCE, and the rung cannot be run as a dogfood — the reason is measured, not cautious:
+#   probing one real task runs `base_verification_command` at TWO refs (brownfield-001 is 1,128 tests
+#   after a full install), so a corpus probe is a multi-hour, quota-bound job, exactly the shape
+#   dogfood-120/121/122 each proved an LLM executor may not supervise. The operator probes and
+#   fix-pins BY HAND; the dogfood builds the machinery that makes the hand-run result binding and
+#   survivable. Same split the gate already accepted for rung-4 (dogfood-123: the run publishes, the
+#   operator executes).
+#
+#   And a multi-hour hand-run sweep is not survivable today. `probe` takes exactly one `--task`
+#   (`main.ts:432-470`). Probing five tasks means five invocations, five `--record` writes, and no
+#   memory: re-running after a laptop sleep re-probes everything from zero, and a task whose base is
+#   red kills that invocation with nothing recorded. WP-595 made the ledger binding; nothing yet
+#   makes producing it affordable.
+#
+# Designed traps — the plausible-but-wrong deliveries the acceptance criteria exist to reject:
+#   A. Writing the ledger ONCE at the end of the sweep. This is the whole thesis inverted: three hours
+#      of probe evidence held in memory, one kill from zero. AC-1 kills the sweep in flight and
+#      demands the finished task's verdict be on disk.
+#   B. Skipping on task id alone. A recorded verdict is proof only for the ref pair it was taken at
+#      (WP-595's trap A, F-258's shape). Move `fix_ref` and the task MUST be re-probed — AC-1 moves it.
+#   C. Re-probing what is already proven. The mirror error: correct but unaffordable, since it makes
+#      resuming cost the same as starting over. A skip must leave `probedAt` untouched.
+#   D. Aborting the sweep on one bad task. A task with no `fix_ref`, or whose base is red, is a
+#      RESULT — the remaining tasks must still be probed and the failure named in the summary.
+#   E. Regressing the single-task path or the WP-595 gate. `probe --task` and
+#      `run --discrimination-ledger` keep their exact behavior; the ledger a sweep writes is the same
+#      file the scoring gate reads, proven end-to-end rather than asserted.
+#
+# PRECONDITIONS, ALL MEASURED (do not re-litigate; re-measure if stale):
+#   * `runProbe({taskPath, outDir?, recordFile?})` returns `{result, outDir, code}` and, given
+#     `recordFile`, upserts one entry per task id into a ledger (`probe.ts:234-268`). It THROWS when
+#     the task has no `repo.fix_ref` (`probe.ts:75-79`) — today that throw ends the process.
+#   * `parseDiscriminationLedger` / `readDiscriminationLedger` (`results.ts:118-157`) accept an object
+#     keyed by task id or a flat array, and REFUSE a damaged file (F-275). Both readers use them.
+#   * `chikory-bench run --discrimination-ledger <file>` loads a ledger and gates the I-SR/D-SR
+#     denominator (`main.ts:322-338`, WP-595/F-274); a missing or damaged file exits 1 before any
+#     task runs.
+#   * `loadTaskDir(dir)` returns `{tasks, invalid}` and `isRunnable(task)` is `status === "pinned"`
+#     (`task.ts:77-79`) — the same selection `run` uses.
+#   * NO task under `benchmarks/tasks/` carries `repo.fix_ref`, and no ledger exists in the repo
+#     (grep-verified 2026-08-08). This WP adds no task file and probes no real corpus task.
+
+name: dogfood-127-wp596-durable-corpus-probe-sweep
+wp: WP-596
+goal: >
+  Make probing a whole task directory survivable and affordable, so the corpus probe the P3 exit gate
+  needs can run for hours, be killed, and resume without losing or repeating work.
+
+  Extend the existing probe command with a sweep mode:
+
+      chikory-bench probe --tasks <dir> --record <file> [--out <dir>]
+
+  `--tasks` selects every runnable task in the directory (the same selection `run` uses) and probes
+  them one at a time, in a stable order. `--task` and `--tasks` are mutually exclusive; supplying
+  neither, or both, is a usage error that exits 1 without probing anything. `--record` is REQUIRED in
+  sweep mode — a sweep with nowhere to persist is refused before the first task.
+
+  The contract the sweep must satisfy:
+
+    * **Durable as it goes.** Each task's verdict is written to the ledger as soon as that task
+      finishes, before the next one starts. A sweep killed after task N has tasks 1..N on disk.
+
+    * **Resumable, and honest about what it may skip.** A task whose ledger entry has BOTH the same
+      `baseRef` AND the same `fixRef` as the task file declares today is already proven: it is
+      skipped, its entry is left untouched (`probedAt` unchanged), and it is counted as skipped. If
+      either ref moved, or there is no entry, the task is probed and its entry REPLACED. A recorded
+      `not-discriminating` or `inconclusive` verdict at the current ref pair is also a settled result
+      and is skipped — re-deciding it is the operator's job, via a re-probe of that one task.
+
+    * **One bad task is a result, not the end of the sweep.** A task that cannot be probed at all —
+      no `fix_ref`, an unreachable repo, a probe that throws — is recorded as a failure for that task
+      id, named in the output, and the sweep CONTINUES with the next task.
+
+    * **A summary the operator can act on.** The command prints, for every task, its id and outcome,
+      and ends with one line carrying the counts: probed, skipped, failed, and how many hold a
+      `discriminating` verdict. Exit 0 only when every selected task ends the sweep with a
+      `discriminating` verdict in the ledger; otherwise exit 1.
+
+    * **Nothing else moves.** `probe --task` keeps its exact behavior, output and exit codes; the
+      ledger a sweep writes is byte-compatible with the one a single `probe --task` run records and with
+      what `run --discrimination-ledger` reads; `summarize`'s gate is unchanged.
+
+  Constraints: TypeScript stays strict ESM with named exports and no `any`; no new dependency, no
+  provider SDK, no API key, no global install, no HTML output. Do not edit any task file under
+  benchmarks/tasks, any artifact under benchmarks/results or benchmarks/publications, or the
+  scoring logic in `summarize`. A published or reported path goes through `publishableRepoPath`
+  (WP-591), never a raw argument, and that helper's behavior for its EXISTING callers must not
+  change — assert it, do not assume it (F-270). Project commands run sequentially inside the
+  already-activated Devbox environment, so invoke pinned tools directly and never nest devbox run.
+  Every existing test remains green.
+
+repos:
+  - url: /Users/nikitazolotarev/repos/chikory
+    writable: true
+
+acceptance_criteria:
+  - id: AC-1
+    description: >
+      THIS NODE'S OWN ORACLE — RED on HEAD, green only once the sweep exists and is durable. Against
+      a local git fixture this check builds itself, the sweep is KILLED in flight and must have
+      persisted the finished task (trap A); a re-run must SKIP what is already proven at the same ref
+      pair without touching `probedAt` (trap C); moving `fix_ref` must force a re-probe (trap B); and
+      a task that cannot be probed must not end the sweep (trap D). Executor-authored tests are not
+      the oracle; the inputs and the expected decisions are written here.
+    check: |
+      cd benchmarks/harness && pnpm exec tsc && node --input-type=module -e '
+      import {mkdtempSync,mkdirSync,writeFileSync,readFileSync,existsSync} from "node:fs";
+      import {execFileSync,spawn,spawnSync} from "node:child_process";
+      import {tmpdir} from "node:os";
+      import {join} from "node:path";
+      const A=(c,m)=>{if(!c){console.error("FAIL: "+m);process.exit(1);}};
+      const sleep=(ms)=>new Promise((r)=>setTimeout(r,ms));
+      const root=mkdtempSync(join(tmpdir(),"sweep-fixture-"));
+      const origin=join(root,"origin"); mkdirSync(origin,{recursive:true});
+      const git=(...a)=>execFileSync("git",["-C",origin,...a],{stdio:"pipe"}).toString().trim();
+      const w=(p,s)=>writeFileSync(join(origin,p),s);
+      execFileSync("git",["init","-q","-b","main",origin],{stdio:"pipe"});
+      git("config","user.email","probe@chikory.local"); git("config","user.name","probe");
+      w("value.txt","BROKEN\n"); w("verify.sh","echo \"Tests  3 passed (3)\"\nexit 0\n");
+      w("slow.sh","sleep 8\necho \"Tests  3 passed (3)\"\nexit 0\n");
+      git("add","-A"); git("commit","-q","-m","base"); const base=git("rev-parse","HEAD");
+      w("value.txt","FIXED\n");
+      git("add","-A"); git("commit","-q","-m","fix"); const fix=git("rev-parse","HEAD");
+      w("value.txt","FIXED\n"); w("extra.txt","second fix\n");
+      git("add","-A"); git("commit","-q","-m","fix2"); const fix2=git("rev-parse","HEAD");
+      const tasks=join(root,"tasks"); mkdirSync(tasks,{recursive:true});
+      const R1="  - id: R1\n    description: discriminating\n    check: grep -q FIXED value.txt\n";
+      const FREE="  - id: R2\n    description: free\n    check: grep -q value value.txt\n";
+      const task=(name,{fixRef=fix,verify="sh verify.sh",reqs=R1}={})=>{
+        writeFileSync(join(tasks,name+".yaml"),
+          "id: "+name+"\nclass: brownfield\nstatus: pinned\nrepo:\n"+
+          "  url: "+JSON.stringify(origin)+"\n  ref: "+base+
+          (fixRef?"\n  fix_ref: "+fixRef:"")+"\n"+
+          "base_verification_command: "+verify+"\nhorizon: 1h\ngoal: |\n  fixture\n"+
+          "requirements:\n"+reqs);};
+      // 900 = clean & fast · 901 = SLOW (holds the sweep open) · 902 = not fix-pinned (trap D)
+      task("brownfield-900");
+      task("brownfield-901",{verify:"sh slow.sh",reqs:R1+FREE});
+      task("brownfield-902",{fixRef:null});
+      const ledger=join(root,"discrimination.json");
+      const sweep=(extra=[])=>spawnSync("node",
+        ["dist/bin.js","probe","--tasks",tasks,"--record",ledger,"--out",
+         join(root,"out-"+Math.random().toString(36).slice(2)),...extra],
+        {encoding:"utf8"});
+      const read=()=>JSON.parse(readFileSync(ledger,"utf8"));
+      const entryOf=(id)=>{
+        const l=read(); const all=Array.isArray(l)?l:Object.values(l);
+        const hits=all.filter((e)=>e&&e.taskId===id);
+        A(hits.length<=1,"at most ONE entry per task id, got "+hits.length+" for "+id);
+        return hits[0];};
+      // ── usage: a sweep with nowhere to persist, or both selectors, is refused ──
+      const noRecord=spawnSync("node",["dist/bin.js","probe","--tasks",tasks],{encoding:"utf8"});
+      A(noRecord.status===1,"a sweep with no --record must exit 1, got "+noRecord.status);
+      A(!existsSync(ledger),"the refused sweep must not have probed anything");
+      const both=spawnSync("node",
+        ["dist/bin.js","probe","--tasks",tasks,"--task",join(tasks,"brownfield-900.yaml"),
+         "--record",ledger],{encoding:"utf8"});
+      A(both.status===1,"--task and --tasks together must exit 1, got "+both.status);
+      A(!existsSync(ledger),"the refused sweep must not have written a ledger");
+      // ── trap A: kill the sweep in flight; the finished task must already be on disk ──
+      const child=spawn("node",
+        ["dist/bin.js","probe","--tasks",tasks,"--record",ledger,"--out",join(root,"out-kill")],
+        {stdio:"ignore"});
+      let sawFirst=false;
+      for (let i=0;i<50;i++) {                       // ≤5 s — 901 alone needs 16 s, so a sweep that
+                                                     // writes once at the END cannot have finished
+        await sleep(100);
+        if (existsSync(ledger)) { try { if (entryOf("brownfield-900")) { sawFirst=true; break; } } catch {} }
+      }
+      child.kill("SIGKILL");
+      await sleep(300);
+      A(sawFirst,"trap A: the ledger must hold brownfield-900 BEFORE the sweep ends — a sweep that "+
+        "writes once at the end loses every hour it spent");
+      const killed=entryOf("brownfield-900");
+      A(killed.verdict==="discriminating"&&killed.baseRef===base&&killed.fixRef===fix,
+        "the persisted entry must be verdict-faithful and pin both refs, got "+JSON.stringify(killed));
+      const probedAt1=killed.probedAt;
+      A(typeof probedAt1==="string"&&!Number.isNaN(Date.parse(probedAt1)),
+        "probedAt must be ISO-8601, got "+JSON.stringify(probedAt1));
+      // ── resume: 900 is skipped untouched, 901 probed, 902 fails without ending the sweep ──
+      const r2=sweep();
+      A(r2.status===1,"exit 1 while any selected task lacks a discriminating verdict, got "+r2.status);
+      const out2=(r2.stdout??"")+(r2.stderr??"");
+      A(entryOf("brownfield-900").probedAt===probedAt1,
+        "trap C: a task already proven at the SAME ref pair must be skipped, probedAt untouched — was "+
+        probedAt1+", now "+entryOf("brownfield-900").probedAt);
+      A(entryOf("brownfield-901")?.verdict==="not-discriminating",
+        "an unclean verdict is evidence and must be recorded, got "+
+        JSON.stringify(entryOf("brownfield-901")?.verdict));
+      A(!entryOf("brownfield-902")||entryOf("brownfield-902").verdict!=="discriminating",
+        "trap D: an unprobeable task must never be recorded as proof");
+      A(/brownfield-902/.test(out2),"trap D: the failed task must be NAMED in the output");
+      A(/brownfield-901/.test(out2)&&/brownfield-900/.test(out2),
+        "every selected task must appear in the output");
+      A(/(probed|skipped|failed)/i.test(out2)&&/\b1\b/.test(out2),
+        "the sweep must end with counts the operator can act on (probed/skipped/failed), got:\n"+out2);
+      // a third sweep changes nothing that is already settled
+      const before3=JSON.stringify(read());
+      const r3=sweep();
+      A(r3.status===1,"a settled sweep still reports the unproven tasks, got "+r3.status);
+      A(JSON.stringify(read())===before3,
+        "trap C: re-running a settled sweep must re-probe nothing at all");
+      // ── trap B: move fix_ref and the proof is stale — the task MUST be re-probed ──
+      task("brownfield-900",{fixRef:fix2});
+      const r4=sweep();
+      const after=entryOf("brownfield-900");
+      A(after.fixRef===fix2,"trap B: a moved fix_ref must force a re-probe, entry still pins "+after.fixRef);
+      A(after.probedAt!==probedAt1,"trap B: the re-probe must replace probedAt, still "+after.probedAt);
+      A(after.verdict==="discriminating","the re-probe at the new fix ref still discriminates, got "+
+        after.verdict);
+      A(r4.status===1,"901/902 are still unproven, so the sweep still exits 1, got "+r4.status);
+      // ── exit 0 only when every selected task is proven ──
+      const solo=join(root,"tasks-solo"); mkdirSync(solo,{recursive:true});
+      writeFileSync(join(solo,"brownfield-900.yaml"),
+        readFileSync(join(tasks,"brownfield-900.yaml"),"utf8"));
+      const soloLedger=join(root,"solo.json");
+      const r5=spawnSync("node",
+        ["dist/bin.js","probe","--tasks",solo,"--record",soloLedger,"--out",join(root,"out-solo")],
+        {encoding:"utf8"});
+      A(r5.status===0,"a fully discriminating sweep exits 0, got "+r5.status+"\n"+
+        ((r5.stdout??"")+(r5.stderr??"")));
+      console.log("AC-1 OK: the sweep persists each verdict as it lands, skips only proof taken at the current ref pair, and one bad task does not end it");
+      '
+
+  - id: AC-2
+    description: >
+      The sweep's ledger is the SAME artifact the scoring gate reads — proven end to end through the
+      real CLIs, not asserted (trap E). A ledger produced by `probe --tasks` is fed to
+      `chikory-bench run --discrimination-ledger`, and the resulting summary must count only the
+      task the sweep proved while retaining and naming the other. The single-task path and
+      `publishableRepoPath` must be unchanged (F-270).
+    check: |
+      cd benchmarks/harness && pnpm exec tsc && node --input-type=module -e '
+      import {mkdtempSync,mkdirSync,writeFileSync,readFileSync,rmSync} from "node:fs";
+      import {execFileSync,spawnSync} from "node:child_process";
+      import {tmpdir} from "node:os";
+      import {join} from "node:path";
+      import {pathToFileURL} from "node:url";
+      const A=(c,m)=>{if(!c){console.error("FAIL: "+m);process.exit(1);}};
+      const root=mkdtempSync(join(tmpdir(),"sweep-gate-"));
+      const origin=join(root,"origin"); mkdirSync(origin,{recursive:true});
+      const git=(...a)=>execFileSync("git",["-C",origin,...a],{stdio:"pipe"}).toString().trim();
+      const w=(p,s)=>writeFileSync(join(origin,p),s);
+      execFileSync("git",["init","-q","-b","main",origin],{stdio:"pipe"});
+      git("config","user.email","probe@chikory.local"); git("config","user.name","probe");
+      w("value.txt","BROKEN\n"); w("verify.sh","echo \"Tests  3 passed (3)\"\nexit 0\n");
+      git("add","-A"); git("commit","-q","-m","base"); const base=git("rev-parse","HEAD");
+      w("value.txt","FIXED\n");
+      git("add","-A"); git("commit","-q","-m","fix"); const fix=git("rev-parse","HEAD");
+      const tasks=join(root,"tasks"); mkdirSync(tasks,{recursive:true});
+      const R1="  - id: R1\n    description: discriminating\n    check: grep -q FIXED value.txt\n";
+      const FREE="  - id: R2\n    description: free\n    check: grep -q value value.txt\n";
+      const mk=(name,reqs)=>writeFileSync(join(tasks,name+".yaml"),
+        "id: "+name+"\nclass: brownfield\nstatus: pinned\nrepo:\n"+
+        "  url: "+JSON.stringify(origin)+"\n  ref: "+base+"\n  fix_ref: "+fix+"\n"+
+        "base_verification_command: sh verify.sh\nhorizon: 1h\ngoal: |\n  fixture\n"+
+        "requirements:\n"+reqs);
+      mk("brownfield-900",R1); mk("brownfield-901",R1+FREE);
+      const ledger=join(root,"discrimination.json");
+      const swept=spawnSync("node",
+        ["dist/bin.js","probe","--tasks",tasks,"--record",ledger,"--out",join(root,"out")],
+        {encoding:"utf8"});
+      A(swept.status===1,"901 is not discriminating, so the sweep exits 1, got "+swept.status);
+      // ── the swept ledger drives the REAL scoring CLI ──
+      const results=join(root,"results");
+      const run=spawnSync("node",
+        ["dist/bin.js","run","--tasks",tasks,"--adapter","command","--cmd","true",
+         "--out",results,"--suite","fixture","--discrimination-ledger",ledger],{encoding:"utf8"});
+      A(run.status===0,"the gated suite must complete, got "+run.status+"\n"+
+        ((run.stdout??"")+(run.stderr??"")));
+      const dir=((run.stdout??"").match(/^artifacts: (.+)$/m)||[])[1];
+      A(typeof dir==="string","the run must report its artifacts dir, got:\n"+(run.stdout??""));
+      const s=JSON.parse(readFileSync(join(dir,"summary.json"),"utf8"));
+      A(s.tasks===2&&s.perTask.length===2,"every task is retained, got "+JSON.stringify(s.perTask));
+      A(s.requirementsTotal===3,"requirementsTotal counts every task, got "+s.requirementsTotal);
+      A(s.requirementsVerifiedTotal===1,
+        "only the task the SWEEP proved may reach the denominator, got "+s.requirementsVerifiedTotal);
+      const by=Object.fromEntries(s.perTask.map((t)=>[t.taskId,t]));
+      A(by["brownfield-900"].discriminationVerified===true,"the proven task is verified");
+      A(by["brownfield-901"].discriminationVerified===false,"the unclean task is flagged, not dropped");
+      A(s.unverifiedTasks.some((u)=>u.taskId==="brownfield-901"),
+        "the excluded task must be NAMED, got "+JSON.stringify(s.unverifiedTasks));
+      // ── the single-task path is untouched ──
+      const solo=join(root,"solo.json");
+      const one=spawnSync("node",
+        ["dist/bin.js","probe","--task",join(tasks,"brownfield-900.yaml"),"--record",solo,
+         "--out",join(root,"out-one")],{encoding:"utf8"});
+      A(one.status===0,"probe --task on a discriminating task still exits 0, got "+one.status);
+      A(/probe taskId: brownfield-900/.test(one.stdout??""),
+        "probe --task output is unchanged, got:\n"+(one.stdout??""));
+      const soloLedger=JSON.parse(readFileSync(solo,"utf8"));
+      const soloAll=Array.isArray(soloLedger)?soloLedger:Object.values(soloLedger);
+      A(soloAll.length===1&&soloAll[0].taskId==="brownfield-900",
+        "one invocation, one entry, got "+JSON.stringify(soloAll.map((e)=>e.taskId)));
+      // ── F-270/F-275: the shared helpers still answer for callers outside this delivery ──
+      const H=pathToFileURL(join(process.cwd(),"dist/results.js")).href;
+      const {publishableRepoPath,parseDiscriminationLedger}=await import(H);
+      const outer=mkdtempSync(join(tmpdir(),"pub-guard-"));
+      try {
+        mkdirSync(join(outer,".git"),{recursive:true});
+        const inner=join(outer,"nested","repo"); mkdirSync(join(inner,".git"),{recursive:true});
+        A(publishableRepoPath(inner)===".","a target that IS a repo root publishes as \".\", got "+
+          publishableRepoPath(inner));
+        A(publishableRepoPath(join(outer,"results"))==="results",
+          "a path inside a repo stays relative to THAT repo, got "+
+          publishableRepoPath(join(outer,"results")));
+        let threw=false;
+        try { publishableRepoPath(join(outer,".chikory","runs","run-x","workspace")); } catch { threw=true; }
+        A(threw,"an ephemeral run-workspace path must still be REFUSED (WP-588)");
+      } finally { rmSync(outer,{recursive:true,force:true}); }
+      let refused=false;
+      try { parseDiscriminationLedger("{oops","x.json"); } catch { refused=true; }
+      A(refused,"a damaged ledger is still REFUSED, never silently emptied (F-275)");
+      console.log("AC-2 OK: the swept ledger gates the real scoring CLI end to end, and the single-task path and shared helpers are unchanged");
+      '
+
+budget_usd: 15
+max_steps: 12
+
+step_limits:
+  max_turns: 40
+  # 840 is the hard ceiling (MAX_STEP_MAX_SECONDS): above it the executeStep
+  # activity's Temporal startToCloseTimeout kills the step first.
+  max_seconds: 840
+
+pacing:
+  mode: auto
+  autoCalibrate: true
+
+unattended:
+  escalation: seal_resumable_failed
+
+# WP-566 agent classes. Primaries unchanged — Gemini executes, Codex judges.
+# routing.stages is DERIVED from the selected members and must not be restated here.
+agent_classes:
+  executor: executor-default
+  judge: judge-default
+
+judge:
+  cadence: 1
+  max_cost_share: 0.5

@@ -3,12 +3,28 @@
  * published number links to its raw trace. One dir per suite run:
  * `benchmarks/results/<stamp>-<adapter>/` with a per-task JSON + summary.json.
  */
-import { existsSync, mkdirSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join, relative, resolve, sep } from "node:path";
 
 import type { AdapterResult } from "./adapter.js";
 import type { TaskGradeReport } from "./grade.js";
 import type { VerifyBaseGreenResult } from "./base-verify.js";
+
+export interface DiscriminationRequirementEntry {
+  id: string;
+  classification: "discriminating" | "non-discriminating" | "unsatisfiable" | "inconclusive";
+}
+
+export interface DiscriminationLedgerEntry {
+  taskId: string;
+  baseRef: string;
+  fixRef: string;
+  verdict: "discriminating" | "not-discriminating" | "inconclusive";
+  probedAt: string;
+  requirements: DiscriminationRequirementEntry[];
+}
+
+export type DiscriminationLedger = Record<string, DiscriminationLedgerEntry>;
 
 export interface TaskResult {
   taskId: string;
@@ -20,6 +36,7 @@ export interface TaskResult {
   run: AdapterResult;
   grading: TaskGradeReport;
   baseVerification?: VerifyBaseGreenResult;
+  repoRef?: string;
 }
 
 
@@ -59,6 +76,7 @@ export interface SuiteSummary {
     exitCode: number | null;
     wallClockMs: number;
     baseVerified: boolean;
+    discriminationVerified: boolean;
     /**
      * F-252 (WP-584): did the system under test reach a terminal state, or was
      * it killed at the cap mid-run? Three of p3-rung-4's five tasks were graded
@@ -83,6 +101,90 @@ export function isTaskVerified(result: TaskResult): boolean {
   return result.baseVerification.green === true;
 }
 
+export function getLedgerEntry(
+  ledger: DiscriminationLedger | DiscriminationLedgerEntry[] | undefined,
+  taskId: string,
+): DiscriminationLedgerEntry | undefined {
+  if (!ledger) return undefined;
+  if (Array.isArray(ledger)) {
+    return ledger.find((e) => e && e.taskId === taskId);
+  }
+  if (typeof ledger === "object") {
+    return ledger[taskId];
+  }
+  return undefined;
+}
+
+/**
+ * F-275: a ledger file that will not parse is evidence of damage, not an empty
+ * ledger. Starting over from `{}` would let the next `--record` write overwrite
+ * every verdict already recorded, so both readers REFUSE instead.
+ * Accepts either persisted shape (object keyed by task id, or a flat array).
+ */
+export function parseDiscriminationLedger(text: string, source: string): DiscriminationLedger {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(text);
+  } catch (err) {
+    throw new Error(
+      `discrimination ledger ${source} is not valid JSON: ${err instanceof Error ? err.message : String(err)}`,
+    );
+  }
+  const items = Array.isArray(parsed)
+    ? parsed
+    : parsed !== null && typeof parsed === "object"
+      ? Object.values(parsed as Record<string, unknown>)
+      : undefined;
+  if (items === undefined) {
+    throw new Error(`discrimination ledger ${source} must be a JSON object or array of entries`);
+  }
+  const ledger: DiscriminationLedger = {};
+  for (const item of items) {
+    if (item === null || typeof item !== "object") {
+      throw new Error(`discrimination ledger ${source} contains a non-object entry`);
+    }
+    const entry = item as Partial<DiscriminationLedgerEntry>;
+    if (typeof entry.taskId !== "string" || entry.taskId === "") {
+      throw new Error(`discrimination ledger ${source} contains an entry with no taskId`);
+    }
+    ledger[entry.taskId] = entry as DiscriminationLedgerEntry;
+  }
+  return ledger;
+}
+
+export function readDiscriminationLedger(path: string): DiscriminationLedger {
+  return parseDiscriminationLedger(readFileSync(path, "utf8"), path);
+}
+
+export function isTaskDiscriminationVerified(
+  result: TaskResult,
+  ledger?: DiscriminationLedger | DiscriminationLedgerEntry[],
+): { verified: boolean; reason?: string } {
+  if (!ledger) {
+    return { verified: true };
+  }
+  const entry = getLedgerEntry(ledger, result.taskId);
+  if (!entry) {
+    return {
+      verified: false,
+      reason: `Task ${result.taskId} was never probed`,
+    };
+  }
+  if (entry.baseRef !== result.repoRef) {
+    return {
+      verified: false,
+      reason: `Task probed at ref ${entry.baseRef}, but scored at ref ${result.repoRef ?? "undefined"} (stale proof)`,
+    };
+  }
+  if (entry.verdict !== "discriminating") {
+    return {
+      verified: false,
+      reason: `Task discrimination verdict was '${entry.verdict}' (not discriminating)`,
+    };
+  }
+  return { verified: true };
+}
+
 export function suiteOutDirName(adapter: string, now: Date): string {
   const stamp = now.toISOString().replace(/[-:]/g, "").replace(/\..+/, "").replace("T", "-");
   return `${stamp}-${adapter}`;
@@ -94,21 +196,48 @@ export function summarize(
   startedAt: string,
   endedAt: string,
   results: TaskResult[],
+  ledger?: DiscriminationLedger | DiscriminationLedgerEntry[],
 ): SuiteSummary {
   const requirementsTotal = results.reduce((s, r) => s + r.grading.total, 0);
   const requirementsSatisfied = results.reduce((s, r) => s + r.grading.satisfied, 0);
 
-  const verifiedResults = results.filter((r) => isTaskVerified(r));
+  const unverifiedTasks: { taskId: string; reason: string }[] = [];
+  const verifiedResults: TaskResult[] = [];
+  const perTaskInfo: SuiteSummary["perTask"] = [];
+
+  for (const r of results) {
+    const baseVerified = isTaskVerified(r);
+    const discCheck = isTaskDiscriminationVerified(r, ledger);
+    const discriminationVerified = discCheck.verified;
+
+    if (baseVerified && discriminationVerified) {
+      verifiedResults.push(r);
+    } else {
+      let reason: string;
+      if (!baseVerified) {
+        reason = r.baseVerification?.reason ?? "Unverified base ref";
+      } else {
+        reason = discCheck.reason ?? "Discrimination unverified";
+      }
+      unverifiedTasks.push({ taskId: r.taskId, reason });
+    }
+
+    perTaskInfo.push({
+      taskId: r.taskId,
+      satisfied: r.grading.satisfied,
+      dependencySatisfied: r.grading.dependencySatisfied,
+      total: r.grading.total,
+      exitCode: r.run.exitCode,
+      wallClockMs: r.run.wallClockMs,
+      baseVerified,
+      discriminationVerified,
+      sealed: isRunSealed(r.run),
+    });
+  }
+
   const verifiedTotal = verifiedResults.reduce((s, r) => s + r.grading.total, 0);
   const verifiedSatisfied = verifiedResults.reduce((s, r) => s + r.grading.satisfied, 0);
   const verifiedDependencySatisfied = verifiedResults.reduce((s, r) => s + r.grading.dependencySatisfied, 0);
-
-  const unverifiedTasks = results
-    .filter((r) => !isTaskVerified(r))
-    .map((r) => ({
-      taskId: r.taskId,
-      reason: r.baseVerification?.reason ?? "Unverified base ref",
-    }));
 
   return {
     suite,
@@ -125,16 +254,7 @@ export function summarize(
     dependencyVerifiedSatisfied: verifiedDependencySatisfied,
     iSr: verifiedTotal > 0 ? verifiedSatisfied / verifiedTotal : 0,
     dSr: verifiedTotal > 0 ? verifiedDependencySatisfied / verifiedTotal : 0,
-    perTask: results.map((r) => ({
-      taskId: r.taskId,
-      satisfied: r.grading.satisfied,
-      dependencySatisfied: r.grading.dependencySatisfied,
-      total: r.grading.total,
-      exitCode: r.run.exitCode,
-      wallClockMs: r.run.wallClockMs,
-      baseVerified: isTaskVerified(r),
-      sealed: isRunSealed(r.run),
-    })),
+    perTask: perTaskInfo,
   };
 }
 

@@ -14,7 +14,13 @@ import {
   resolveBenchFamilies,
 } from "./family-preflight.js";
 import { commandComplete, makeJudgeGrader } from "./judge-grader.js";
-import { compareSummaries, writeSuiteSummary, type SuiteSummary } from "./results.js";
+import {
+  compareSummaries,
+  readDiscriminationLedger,
+  writeSuiteSummary,
+  type DiscriminationLedger,
+  type SuiteSummary,
+} from "./results.js";
 import { writeLeaderboard } from "./leaderboard.js";
 import { runProbe } from "./probe.js";
 import { acquireSuiteLock, SuiteAlreadyRunningError } from "./suite-lock.js";
@@ -27,7 +33,7 @@ commands:
   validate <task-dir>...   validate every task file (authored YAML + DevAI JSON);
                            exit 1 if any file is invalid
   list <task-dir>...       list loaded tasks (id, class, status, requirements)
-  probe --task <file> [--out <dir>]
+  probe --task <file> [--out <dir>] [--record <file>]
                            probe task requirement discrimination (red@base, green@fix)
   fetch-devai              download the 55 DevAI instance JSONs
       [--ref <git-ref>]      upstream ref (default main)
@@ -50,6 +56,10 @@ commands:
       [--base-verify-minutes <n>]
                              cap for each task's base verification: install +
                              the target's FULL suite (default 45)
+      [--discrimination-ledger <file>]
+                             ledger written by 'probe --record'; a task with no
+                             clean verdict AT THE SCORED REF is kept in the
+                             summary but excluded from I-SR/D-SR (WP-595)
   compare <summary-a.json> <summary-b.json>
                            compare two 5-task run summaries with 95% Wilson CIs
       [--arm-a <file>] / [--left <file>]    path to summary A
@@ -309,6 +319,24 @@ export async function main(argv: string[], io = { out: console.log, err: console
       return 1;
     }
 
+    // F-274: WP-595 gates the score on probe evidence, but a gate no operator can
+    // arm binds nothing (F-180 verbatim). This is the only path that supplies one.
+    const ledgerPath = values["discrimination-ledger"];
+    let ledger: DiscriminationLedger | undefined;
+    if (ledgerPath !== undefined) {
+      const resolvedLedger = resolve(ledgerPath);
+      if (!existsSync(resolvedLedger)) {
+        io.err(`chikory-bench run: --discrimination-ledger not found: ${resolvedLedger}`);
+        return 1;
+      }
+      try {
+        ledger = readDiscriminationLedger(resolvedLedger);
+      } catch (err) {
+        io.err(`chikory-bench run: ${err instanceof Error ? err.message : String(err)}`);
+        return 1;
+      }
+    }
+
     // F-239: one suite at a time per results root. dogfood-122's node ran four
     // concurrently against the same root; none finished, and every wall-clock
     // they reported was contended.
@@ -333,6 +361,7 @@ export async function main(argv: string[], io = { out: console.log, err: console
         resultsDir,
         judge,
         log: io.out,
+        ...(ledger !== undefined ? { ledger } : {}),
         ...(baseVerifyMinutes !== undefined
           ? { baseVerifyTimeoutMs: Number(baseVerifyMinutes) * 60_000 }
           : {}),
@@ -444,8 +473,9 @@ export async function main(argv: string[], io = { out: console.log, err: console
       return 1;
     }
     const outDir = values["out"];
+    const recordFile = values["record"];
     try {
-      const { result, outDir: actualOutDir, code } = await runProbe({ taskPath, outDir });
+      const { result, outDir: actualOutDir, code } = await runProbe({ taskPath, outDir, recordFile });
       io.out(`probe taskId: ${result.taskId}`);
       io.out(`  baseRef: ${result.baseRef}`);
       io.out(`  fixRef: ${result.fixRef}`);

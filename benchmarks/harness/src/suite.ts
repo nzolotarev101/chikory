@@ -14,6 +14,8 @@ import {
   writeSuiteSummary,
   writeTaskResult,
   sanitizeFileName,
+  type DiscriminationLedger,
+  type DiscriminationLedgerEntry,
   type SuiteSummary,
   type TaskResult,
 } from "./results.js";
@@ -56,6 +58,7 @@ export interface RunSuiteOptions {
   /** Root under which per-suite-run artifact dirs are created. */
   resultsDir: string;
   judge?: JudgeFn;
+  ledger?: DiscriminationLedger | DiscriminationLedgerEntry[];
   checkTimeoutMs?: number;
   adapterTimeoutMs?: number;
   /** F-241: cap for install + full base suite; NOT the 120 s judge-check cap. */
@@ -182,6 +185,7 @@ export async function runSuite(opts: RunSuiteOptions): Promise<{ summary: SuiteS
       run,
       grading,
       baseVerification,
+      ...(task.repo?.ref ? { repoRef: task.repo.ref } : {}),
     };
 
     writeTaskResult(outDir, result);
@@ -192,7 +196,7 @@ export async function runSuite(opts: RunSuiteOptions): Promise<{ summary: SuiteS
     );
   }
 
-  const summary = summarize(opts.suite, opts.adapter.name, startedAt, now().toISOString(), results);
+  const summary = summarize(opts.suite, opts.adapter.name, startedAt, now().toISOString(), results, opts.ledger);
   writeSuiteSummary(outDir, summary);
   return { summary, outDir };
 }

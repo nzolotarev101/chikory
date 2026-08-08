@@ -1,3 +1,27 @@
+## 2026-08-08 — displaced from docs/DOGFOODING.md status block by the dogfood-126 review
+
+**Status (2026-08-07, bounded — update discipline: REPLACE this block, ≤15 lines;
+displaced prose moves verbatim to [`PLAN-HISTORY.md`](PLAN-HISTORY.md); per-run detail:
+`docs/reports/`; queue + course correction: `plan.md` §6/§7).**
+🔴 **dogfood-125 DELIVERED WP-593 and was sealed FAILED WRONGLY** (`run-f3d47cf8-6d56-4c7b-85d1-fcfe185badef`,
+4 steps **$0.1899/$15.00**, 7m 04s, `docs/reports/dogfood-125.md`). `chikory-bench probe --task <file>
+[--out <dir>]` proves a task discriminates before it may be scored: base ref + new `repo.fix_ref` in
+SEPARATE workspaces, `base_verification_command` at BOTH refs, red base ⇒ `inconclusive` (never
+`discriminating`). Both ACs PASS, all 4 traps rejected, corpus untouched. Two 🔴 hand-fixes: **F-270** —
+the executor greened its own trap by mutating SHARED `publishableRepoPath` (`results.ts:273`), so a repo
+root published as `repos/chikory` off an ancestor repo — F-267 from the other end, in WP-591's own helper;
+reverted, probe re-anchored on its out dir, harness 186→**192**. **F-271** — the judge passed **2/2 criteria
++ 6/6 rubric**, then one false free-text concern became an unattended FAILED seal because the F-229
+carve-out demanded `diffRef.bytes === 0`; **the empty diff was never the load-bearing signal** — it now keys
+on `allCriteriaPass && allRubricPass` (`agent-loop.ts:1110-1128`), sdk-ts 1,303→**1,304**. 🟠 **F-272 →
+WP-594** (`compact` ×3 at 106% window, 0 folds — the `keepLastN: 5` floor beats the governor on short runs) ·
+🟡 **F-273** (no gate asks what an edited SHARED function returns for callers outside the diff). Progression
+✅ PROGRESSING, ⚠️ LADDER-PACE (rung 4 ×3). **NEXT = WP-302 (dogfood-126): fix-pin + probe-verify the corpus.**
+
+## 2026-08-08 — displaced from plan.md status block by the dogfood-126 review
+
+- **Latest / next:** 🔴 **WP-593 DELIVERED, RUN SEALED FAILED WRONGLY — dogfood-125 built the task-discrimination probe, then two quality gates produced the review's two worst defects** (`run-f3d47cf8-6d56-4c7b-85d1-fcfe185badef`, FAILED 4 steps, **$0.1899/$15.00**, 7m 04s, `docs/reports/dogfood-125.md`). **Delivery is correct and landed:** `chikory-bench probe --task <file> [--out <dir>]` materializes `repo.ref` and the new validated `repo.fix_ref` into SEPARATE workspaces, runs `base_verification_command` at BOTH refs, and refuses to classify anything when either is red (`inconclusive`, exit 1); otherwise it classifies each requirement `discriminating` (red@base/green@fix) · `non-discriminating` (green@base — free for every arm) · `unsatisfiable` (red@fix), writes `probe.json`, and exits 0 only on a fully discriminating verdict. All four designed traps rejected; both ACs PASS; corpus untouched. **Two 🔴 defects, both HAND-FIXED this sitting:** **F-270** — to green its own trap-B the executor edited the SHARED `publishableRepoPath` walk to start at `dirname(absolute)` (`results.ts:273`), so any target that IS a repo root resolved against an ancestor repo on the operator's disk (`<repo>` → `repos/chikory`) — **F-267 from the other end, inside the helper WP-591 added to prevent it**, and a `leaderboard.ts` caller the spec's constraints declared off-limits. Reverted; the real fix anchors the probe on its OUT DIR (`probe.ts:126-133`); +6 tests, harness 186 → **192**. **F-271** — the judge marked **2/2 criteria + 6/6 rubric PASS**, then wrote one free-text concern (factually false: the full suite does pass), and verdict rule 4 turned that sentence into an unattended FAILED seal, because the F-229 carve-out also demanded `diffRef.bytes === 0`. **The empty diff was never the load-bearing signal** — the step that DELIVERS the last fix is the most converged state a run reaches. Carve-out now keys on `allCriteriaPass && allRubricPass` alone (`agent-loop.ts:1110-1128`), matching the F-107 discipline the completion review already enforces; +1 test, sdk-ts 1,303 → **1,304**. Also 🟠 **F-272 → WP-594 queued** (pacing recommended `compact` ×3 at peak window 106%, folded 0 — the pressure policy still keeps `keepLastN: 5` verbatim, so a short run can never fold) · 🟡 **F-273** (no gate asks what an edited SHARED function returns for callers outside the diff; `publishableRepoPath` had no direct unit test — now it does) · ℹ️ F-268/F-265 recurrences, already WP-592/WP-590. Progression ✅ PROGRESSING; ledger `rung=4` — WP-593 is the rung-5 PREREQUISITE, not the rung. **NEXT = WP-302 (dogfood-126): fix-pin and probe-verify the existing corpus, then author the first probe-proven new task — the corpus half of the P3 exit gate.**
+
 ## 2026-08-07 — displaced from docs/DOGFOODING.md status block by the dogfood-125 review
 
 **Status (2026-08-07, bounded — update discipline: REPLACE this block, ≤15 lines;

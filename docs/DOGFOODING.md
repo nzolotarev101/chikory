@@ -5,23 +5,22 @@ This is the complete operating manual for executing Phase 2+ work packages
 task spec for a WP (every field explained), how to launch, supervise, and
 recover a run, and how to land the result as a normal PR.
 
-**Status (2026-08-07, bounded — update discipline: REPLACE this block, ≤15 lines;
+**Status (2026-08-08, bounded — update discipline: REPLACE this block, ≤15 lines;
 displaced prose moves verbatim to [`PLAN-HISTORY.md`](PLAN-HISTORY.md); per-run detail:
 `docs/reports/`; queue + course correction: `plan.md` §6/§7).**
-🔴 **dogfood-125 DELIVERED WP-593 and was sealed FAILED WRONGLY** (`run-f3d47cf8-6d56-4c7b-85d1-fcfe185badef`,
-4 steps **$0.1899/$15.00**, 7m 04s, `docs/reports/dogfood-125.md`). `chikory-bench probe --task <file>
-[--out <dir>]` proves a task discriminates before it may be scored: base ref + new `repo.fix_ref` in
-SEPARATE workspaces, `base_verification_command` at BOTH refs, red base ⇒ `inconclusive` (never
-`discriminating`). Both ACs PASS, all 4 traps rejected, corpus untouched. Two 🔴 hand-fixes: **F-270** —
-the executor greened its own trap by mutating SHARED `publishableRepoPath` (`results.ts:273`), so a repo
-root published as `repos/chikory` off an ancestor repo — F-267 from the other end, in WP-591's own helper;
-reverted, probe re-anchored on its out dir, harness 186→**192**. **F-271** — the judge passed **2/2 criteria
-+ 6/6 rubric**, then one false free-text concern became an unattended FAILED seal because the F-229
-carve-out demanded `diffRef.bytes === 0`; **the empty diff was never the load-bearing signal** — it now keys
-on `allCriteriaPass && allRubricPass` (`agent-loop.ts:1110-1128`), sdk-ts 1,303→**1,304**. 🟠 **F-272 →
-WP-594** (`compact` ×3 at 106% window, 0 folds — the `keepLastN: 5` floor beats the governor on short runs) ·
-🟡 **F-273** (no gate asks what an edited SHARED function returns for callers outside the diff). Progression
-✅ PROGRESSING, ⚠️ LADDER-PACE (rung 4 ×3). **NEXT = WP-302 (dogfood-126): fix-pin + probe-verify the corpus.**
+🟢 **dogfood-126 DELIVERED WP-595 CLEAN — an unproven requirement no longer counts toward a published
+score** (`run-14291f34-7144-43b3-9a82-2ef776b4d008`, SUCCESS **1 step $0.0469/$15.00**, 3m 58s, 2/2
+criteria + 6/6 rubric, harvest byte-IDENTICAL 6/6, `docs/reports/dogfood-126.md`). `probe --record <file>`
+upserts a durable discrimination ledger (re-probe REPLACES; an unclean verdict is recorded as evidence);
+`summarize(…, ledger?)` counts a task only when it is base-verified AND holds a `discriminating` verdict
+**taken at the ref it was scored at** — every task stays in `perTask`, exclusions are NAMED. With no
+ledger, every published artifact re-summarizes unchanged. All 5 traps rejected. Two hand-fixes: 🔴 **F-274**
+— the gate had NO operator path (`runSuite`'s `ledger` option had no caller: F-180 verbatim, WP-593's
+unread `probe.json` one level up) → `run --discrimination-ledger <file>`, refusing a missing/damaged ledger
+at $0 before any task runs. 🟠 **F-275** — a damaged ledger was silently reset to `{}` and written back,
+destroying prior verdicts → both readers now throw naming the file. +4 tests, harness 192→**196**. 🟡
+**F-276** (`fan-in-handoff` flakes under full-suite load — §7). Progression ⛔ **STALLED** + ⚠️ LADDER-PACE.
+**NEXT = WP-596 (dogfood-127): `probe --tasks <dir>` — a kill-survivable corpus sweep.**
 
 Related docs: [`docs/spec/task-spec.md`](spec/task-spec.md) (schema
 reference) · [`docs/TASK-PROTOCOL.md`](TASK-PROTOCOL.md) (WP etiquette, §7 is
@@ -687,6 +686,8 @@ broken (a false-green, not a follow-on fix).
 |---|---|
 | `Invalid task spec: provider 'x' … missing env var Y` | Parse-time key validation. Export the key, or use the §3.8 routing workaround for keyless CLI runs. |
 | `Is the Temporal dev server up?` | It isn't. `devbox run temporal-dev`. |
+| `packages/sdk-ts/test/chain/fan-in-handoff.test.ts` fails in a FULL `devbox run test` but passes when run alone | **Load flake, not a regression (F-276, 2026-08-08).** The fan-in chain test starts three real chain nodes; under the full suite's parallelism (344 s of test work compressed into a ~48 s wall) node `N-3` can seal `FAILED`/`HALT` on a timeout. Re-run the single file (`pnpm exec vitest run test/chain/fan-in-handoff.test.ts`) before believing a red — and if it fails in ISOLATION, that is a real regression. Do not paper over a red full suite by re-running it blind. |
+| A benchmark arm's I-SR looks the same with and without probe evidence | You did not pass the ledger. Since WP-595 the gate is opt-in and lives on the CLI: `chikory-bench run … --discrimination-ledger <file>` (the file `probe --record <file>` writes). With NO ledger the score is deliberately unchanged, so a forgotten flag is silent (F-274). A missing or damaged ledger is refused before any task runs — an exit 1 naming the file is the flag working, not a bug. |
 | A track-B robustness gap (e.g. an F-n queued "track-B, fix pending") tempts you to re-launch the already-green headline spec to fix it | Don't — a re-run of a closed spec consumes a dogfood slot the ladder queue owns and double-counts in the ledger (F-102, dogfood-083 re-run `run-03d161e9` fixed F-101 this way). Land a documented track-B fix as a NORMAL PR against the WP's real code; keep dogfood headlines for the WP-265 ladder rung. (The re-run's fix is legitimate and kept — the process, not the code, is the friction.) |
 | The evidence pack (`scripts/dogfood-verify.sh`) prints `⚠ acceptance checks FAILED` on a run that is actually GREEN | **✅ FIXED 2026-07-11 (track-B hand-fix, F-128 closed).** Was: §3 re-ran the run's ACs from the Chikory repo root, so a scaffold-hosted run (writes only into git-ignored `.chikory-examples/…`, never harvested) false-failed (dogfood-095 **F-128**). §3 now reads the spec's `repos` from the journal and picks the check cwd itself — a writable repo == this checkout → working tree (brownfield, verifies the harvest); otherwise → the run's own workspace — and prints which (`cwd:` line). Re-verified on dogfood-095's journal: AC-1 20/20 PASS in-workspace. If it still reads wrong, the `HOSTREPO` heuristic mis-detected — check `task_json.repos` in the journal. |
 | Steps fail instantly, `executor exited with code 1` | Read the failure: `pnpm chikory trace <run-id> --step 1`. Check the executor binary works headless in your env (`codex exec`/`claude -p` smoke test). |
