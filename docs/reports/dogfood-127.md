@@ -215,6 +215,21 @@ Not a defect in this delivery; a defect in the campaign it completes.
 sweep over the real corpus today probes nothing: all five tasks throw
 `missing repo.fix_ref` and are counted as failures.
 
+The sharper version: **four of the five tasks already know where their fix
+lives, in prose no tool can read.**
+
+| task | where the fix is recorded today | machine-readable? |
+|---|---|---|
+| `brownfield-002` | header comment: "pinned BEFORE #3036" | ✗ PR number only |
+| `brownfield-003` | header comment: "pinned BEFORE #5855" | ✗ PR number only |
+| `brownfield-004` | header comment: "fixed by commit `69da9545…`" | ✗ **the sha, in a comment** |
+| `brownfield-005` | header comment: "fixed by commit `dfbafa8e…`" | ✗ **the sha, in a comment** |
+| `brownfield-001` | "upstream never did this migration" | n/a — genuinely has none |
+
+And `AUTHORING.md`'s pin checklist already requires "Every check verified green
+on at least one known-good solution (**yours**)" — the author is required to
+produce the gold patch and then throw it away.
+
 Worse, arming the WP-595 gate over today's corpus would make the published
 comparison *weaker*, not stronger. dogfood-123's separation comes from
 `brownfield-001` alone — and `brownfield-001` is a **self-performed** zod v3→v4
@@ -301,3 +316,76 @@ passed its own acceptance criteria honestly. Nobody asked, until now, whether
 the inputs existed. That is F-274 at campaign altitude: not "a gate with no
 switch" but *a switch with nothing wired to the other end.* The next run wires
 it.
+
+## NEXT RUN
+
+**Every benchmark task will say, in a field a tool can read, which commit fixes
+it — so the machinery that proves a task is worth scoring finally has something
+to prove it against, and the one task that genuinely has no upstream fix says so
+out loud instead of looking broken.**
+
+- **Spec:** `examples/dogfood/dogfood-128-wp597-probeable-corpus.yaml`
+- **WP:** WP-597 (probeable corpus) — the missing INPUT to WP-593 (task
+  discrimination probe) / WP-595 (probe-verified scoring gate) / WP-596 (durable
+  corpus probe sweep). Also advances WP-302 (brownfield task authoring).
+
+**Why this and not the ladder rung.** §0 progression is ⛔ **STALLED** +
+⚠️ **LADDER-PACE**, which binds the next headline to the P3 ladder rung
+(WP-530 moat ladder). **Rung 5 is the P3 exit gate** — published ranges over a
+corpus wide enough for the intervals to SEPARATE, plus the leaderboard — and it
+cannot run: dogfood-123 published 19 requirements with OVERLAPPING intervals,
+and separation needs more requirements (ST-1's 60–100-task target), a hand-run
+research lift dogfood-120/121/122 each proved an LLM executor may not supervise.
+This run removes the blocker under that lift: every task authored from here
+inherits the missing-gold-patch hole, and the gate must not be armed over
+today's corpus because it would exclude `brownfield-001`, the only task
+separating the two published arms.
+
+**The designed trap.** A fabricated `fix_ref`. Forty hex characters pass the
+existing validator (`task.ts:206`) and prove nothing — the probe would then
+report a confident verdict about a commit that does not exist, into the ledger
+the scoring gate trusts. AC-2 resolves **every** declared ref against that
+task's **own** `repo.url` and requires the pinned `ref` to be an ancestor of it.
+Second trap: giving `brownfield-001` a ref to make the count go up. AC-2
+requires it to have none and to state why.
+
+**Gate verdicts**
+
+| gate | verdict | one line |
+|---|---|---|
+| §0 progression | 🟡 | ⛔ STALLED + ⚠️ LADDER-PACE binds the headline to the rung; the rung is blocked on corpus size, and this is the blocker under it — stated, not implied |
+| §1.1 failure surface | ✅ | cross-file (`task` selection, `validate`, the sweep, `AUTHORING.md`, 4 task files) plus real upstream research; two of four fix refs exist only as PR numbers |
+| §1.2 product progress | ✅ | real open `plan.md` §6/§7 WPs — WP-597 and WP-302; no scaffold, no disposable utility |
+| §1.3 mission-critical | ✅ **PROCEED** | not busy work, not scaffold-hosted; it unblocks the entire WP-593/595/596 investment |
+| §1.5 friction budget | ✅ | `class=product` (primary surface `benchmarks/harness/src` + `benchmarks/tasks`); trailing-3 harness-meta **0/3**, cap intact |
+
+**AC arming evidence.** `scripts/dogfood-progression.sh --spec` classes both ACs
+as **VERIFY-SUITE**, so neither was dry-run by the preflight. Both were
+hand-verified in **both** directions against the 120 s judge cap:
+
+| AC | RED on HEAD | GREEN on a throwaway reference | vs 120 s cap |
+|---|---|---|---|
+| AC-1 | ✅ exit **1**, **2.8 s** — `--require-probeable must exit 1 when a runnable task can never be probed, got 0` | ✅ exit 0, **3.5 s** | 3 % of cap |
+| AC-2 | ✅ exit **1**, **2.5 s** — `at least 4 of the 5 pinned brownfield tasks must declare a gold-patch fix_ref, got 0` | ✅ exit 0, **12 s** (8 network fetches included) | 10 % of cap |
+
+Each AC was additionally run against a **deliberately broken** reference and
+rejected it:
+
+- **trap A** — one real sha altered by its last character →
+  `FAIL: brownfield-004: 69da9545…f7 does not resolve in its own declared repo
+  https://github.com/react-hook-form/react-hook-form — a sha that cannot be
+  fetched is not evidence, it is a guess`
+- **trap D** — the sweep reporting an unprobeable task as `failed` →
+  `FAIL: trap D: a missing gold patch is not a probe failure — the operator must
+  be able to tell them apart, got: "brownfield-901: failed (missing repo.fix_ref)"`
+
+The throwaway reference (4 pinned refs, `--require-probeable`, the sweep
+outcome, and the `AUTHORING.md` section) was discarded with `git reset --hard`;
+`benchmarks/harness` was rebuilt at HEAD afterwards.
+
+**Commit everything before launching — the workspace clones HEAD.**
+
+```sh
+CHIKORY_PREFLIGHT_ONLY=1 devbox run run-dogfood   # $0 preflight first
+devbox run run-dogfood
+```
