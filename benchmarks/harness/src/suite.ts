@@ -27,28 +27,39 @@ export interface LoadReport {
   tasks: BenchmarkTask[];
   /** file → issues; non-empty means the corpus does not validate. */
   invalid: Record<string, string[]>;
+  /**
+   * task id → the file it was loaded from. F-281: `probe --tasks` needs a path
+   * per task, and re-walking the directory itself let the sweep's selection
+   * drift from the one `run` uses. One walk, one set of rules.
+   */
+  sources: Record<string, string>;
 }
 
 /** Load every task in a directory: `.json` = DevAI instance, `.yaml` = authored. */
 export function loadTaskDir(dir: string): LoadReport {
   const tasks: BenchmarkTask[] = [];
   const invalid: Record<string, string[]> = {};
+  const sources: Record<string, string> = {};
   for (const name of readdirSync(dir).sort()) {
     const ext = extname(name);
     const path = join(dir, name);
     if (ext === ".json" && name !== "manifest.json") {
       try {
-        tasks.push(parseDevAITask(readFileSync(path, "utf8"), name));
+        const task = parseDevAITask(readFileSync(path, "utf8"), name);
+        tasks.push(task);
+        sources[task.id] = path;
       } catch (err) {
         invalid[name] = [(err as Error).message];
       }
     } else if (ext === ".yaml" || ext === ".yml") {
       const { task, issues } = validateAuthoredTask(readFileSync(path, "utf8"), name);
-      if (task) tasks.push(task);
-      else invalid[name] = issues;
+      if (task) {
+        tasks.push(task);
+        sources[task.id] = path;
+      } else invalid[name] = issues;
     }
   }
-  return { tasks, invalid };
+  return { tasks, invalid, sources };
 }
 
 export interface RunSuiteOptions {

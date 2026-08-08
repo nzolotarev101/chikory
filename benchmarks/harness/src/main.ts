@@ -22,7 +22,7 @@ import {
   type SuiteSummary,
 } from "./results.js";
 import { writeLeaderboard } from "./leaderboard.js";
-import { runProbe } from "./probe.js";
+import { runProbe, runProbeSweep } from "./probe.js";
 import { acquireSuiteLock, SuiteAlreadyRunningError } from "./suite-lock.js";
 import { loadTaskDir, runSuite } from "./suite.js";
 import { isRunnable } from "./task.js";
@@ -35,6 +35,19 @@ commands:
   list <task-dir>...       list loaded tasks (id, class, status, requirements)
   probe --task <file> [--out <dir>] [--record <file>]
                            probe task requirement discrimination (red@base, green@fix)
+  probe --tasks <dir> --record <file> [--out <dir>]
+                           sweep every runnable task in a dir, one at a time, in
+                           a stable order (WP-596). Each verdict is written the
+                           moment it is earned, so a killed sweep keeps what it
+                           proved; a re-run skips only tasks already proven AT
+                           THE REFS DECLARED TODAY, and one unprobeable task is
+                           a recorded result, not the end of the sweep.
+                           --task and --tasks are mutually exclusive.
+                           exit 0 only when every selected task is discriminating
+      [--base-verify-minutes <n>]
+                           cap for EACH ref's base verification: install + the
+                           target's FULL suite (default 45). Applies to both
+                           probe modes.
   fetch-devai              download the 55 DevAI instance JSONs
       [--ref <git-ref>]      upstream ref (default main)
       [--out <dir>]          default benchmarks/devai/instances
@@ -468,14 +481,59 @@ export async function main(argv: string[], io = { out: console.log, err: console
 
   if (command === "probe") {
     const taskPath = values["task"];
-    if (!taskPath) {
-      io.err("chikory-bench probe: --task <file> is required");
+    const tasksDir = values["tasks"];
+    if (taskPath && tasksDir) {
+      io.err("chikory-bench probe: --task and --tasks are mutually exclusive");
       return 1;
     }
+    if (!taskPath && !tasksDir) {
+      io.err("chikory-bench probe: --task <file> or --tasks <dir> is required");
+      return 1;
+    }
+
+    // F-278: probing runs the target's FULL suite at TWO refs, so it needs the
+    // same escape hatch `run` has. Without this the 45-minute default was the
+    // only cap any operator could ever get — `baseVerifyTimeoutMs` existed on
+    // both probe APIs with no path from the CLI to reach it (F-274's shape).
+    const probeBaseVerifyMinutes = values["base-verify-minutes"];
+    if (probeBaseVerifyMinutes !== undefined && !/^\d+$/.test(probeBaseVerifyMinutes)) {
+      io.err(`chikory-bench probe: --base-verify-minutes must be a whole number of minutes`);
+      return 1;
+    }
+    const probeBaseVerifyTimeoutMs =
+      probeBaseVerifyMinutes !== undefined ? Number(probeBaseVerifyMinutes) * 60_000 : undefined;
+
+    if (tasksDir) {
+      const recordFile = values["record"];
+      if (!recordFile) {
+        io.err("chikory-bench probe: --record <file> is required in sweep mode");
+        return 1;
+      }
+      const outDir = values["out"];
+      return runProbeSweep(
+        {
+          tasksDir,
+          recordFile,
+          outDir,
+          ...(probeBaseVerifyTimeoutMs !== undefined
+            ? { baseVerifyTimeoutMs: probeBaseVerifyTimeoutMs }
+            : {}),
+        },
+        io,
+      );
+    }
+
     const outDir = values["out"];
     const recordFile = values["record"];
     try {
-      const { result, outDir: actualOutDir, code } = await runProbe({ taskPath, outDir, recordFile });
+      const { result, outDir: actualOutDir, code } = await runProbe({
+        taskPath,
+        outDir,
+        recordFile,
+        ...(probeBaseVerifyTimeoutMs !== undefined
+          ? { baseVerifyTimeoutMs: probeBaseVerifyTimeoutMs }
+          : {}),
+      });
       io.out(`probe taskId: ${result.taskId}`);
       io.out(`  baseRef: ${result.baseRef}`);
       io.out(`  fixRef: ${result.fixRef}`);

@@ -393,9 +393,52 @@ describe("chikory-bench CLI", () => {
     expect(damaged.lines.err.join("\n")).toMatch(/not valid JSON/);
   });
 
+  /**
+   * F-278: probing runs the target's FULL suite at TWO refs, so it needs `run`'s
+   * escape hatch from the 45-minute default. `baseVerifyTimeoutMs` existed on
+   * both probe APIs with no CLI path to reach it — F-274's shape exactly.
+   */
+  it("probe: --base-verify-minutes is reachable and validated in both modes", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "bench-cli-probe-cap-"));
+    writeFileSync(join(dir, "greenfield-002.yaml"), GOOD);
+
+    const badSweep = io();
+    expect(
+      await main(
+        ["probe", "--tasks", dir, "--record", join(dir, "l.json"), "--base-verify-minutes", "90m"],
+        badSweep,
+      ),
+    ).toBe(1);
+    expect(badSweep.lines.err.join("\n")).toMatch(/--base-verify-minutes must be a whole number/);
+
+    const badSingle = io();
+    expect(
+      await main(
+        ["probe", "--task", join(dir, "greenfield-002.yaml"), "--base-verify-minutes", "-1"],
+        badSingle,
+      ),
+    ).toBe(1);
+    expect(badSingle.lines.err.join("\n")).toMatch(/--base-verify-minutes must be a whole number/);
+
+    // A well-formed value gets past the flag check and fails on the task's own
+    // merits (no repo.fix_ref), not on the cap.
+    const accepted = io();
+    expect(
+      await main(
+        ["probe", "--task", join(dir, "greenfield-002.yaml"), "--base-verify-minutes", "90"],
+        accepted,
+      ),
+    ).toBe(1);
+    expect(accepted.lines.err.join("\n")).toMatch(/missing repo\.fix_ref/);
+  });
+
   it("rejects unknown commands and missing flags", async () => {
     expect(await main(["frobnicate"], io())).toBe(1);
     expect(await main(["run", "--tasks", "x"], io())).toBe(1);
     expect(await main(["run", "--tasks", "x", "--adapter", "command"], io())).toBe(1);
+    // WP-596 sweep-mode usage errors, refused before anything is probed.
+    expect(await main(["probe"], io())).toBe(1);
+    expect(await main(["probe", "--tasks", "x"], io())).toBe(1);
+    expect(await main(["probe", "--tasks", "x", "--task", "y", "--record", "z"], io())).toBe(1);
   });
 });

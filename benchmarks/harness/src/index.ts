@@ -97,10 +97,12 @@ export {
 } from "./leaderboard.js";
 export {
   runProbe,
+  runProbeSweep,
   type ProbeRequirementResult,
   type ProbeResult,
   type ProbeVerificationReport,
   type RunProbeOptions,
+  type RunProbeSweepOptions,
 } from "./probe.js";
 
 

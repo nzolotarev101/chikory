@@ -8,19 +8,21 @@ recover a run, and how to land the result as a normal PR.
 **Status (2026-08-08, bounded — update discipline: REPLACE this block, ≤15 lines;
 displaced prose moves verbatim to [`PLAN-HISTORY.md`](PLAN-HISTORY.md); per-run detail:
 `docs/reports/`; queue + course correction: `plan.md` §6/§7).**
-🟢 **dogfood-126 DELIVERED WP-595 CLEAN — an unproven requirement no longer counts toward a published
-score** (`run-14291f34-7144-43b3-9a82-2ef776b4d008`, SUCCESS **1 step $0.0469/$15.00**, 3m 58s, 2/2
-criteria + 6/6 rubric, harvest byte-IDENTICAL 6/6, `docs/reports/dogfood-126.md`). `probe --record <file>`
-upserts a durable discrimination ledger (re-probe REPLACES; an unclean verdict is recorded as evidence);
-`summarize(…, ledger?)` counts a task only when it is base-verified AND holds a `discriminating` verdict
-**taken at the ref it was scored at** — every task stays in `perTask`, exclusions are NAMED. With no
-ledger, every published artifact re-summarizes unchanged. All 5 traps rejected. Two hand-fixes: 🔴 **F-274**
-— the gate had NO operator path (`runSuite`'s `ledger` option had no caller: F-180 verbatim, WP-593's
-unread `probe.json` one level up) → `run --discrimination-ledger <file>`, refusing a missing/damaged ledger
-at $0 before any task runs. 🟠 **F-275** — a damaged ledger was silently reset to `{}` and written back,
-destroying prior verdicts → both readers now throw naming the file. +4 tests, harness 192→**196**. 🟡
-**F-276** (`fan-in-handoff` flakes under full-suite load — §7). Progression ⛔ **STALLED** + ⚠️ LADDER-PACE.
-**NEXT = WP-596 (dogfood-127): `probe --tasks <dir>` — a kill-survivable corpus sweep.**
+🟢 **dogfood-127 DELIVERED WP-596 CLEAN — a corpus probe sweep now survives a kill and never re-probes
+proven work** (`run-41fb5957-933b-467e-a16d-36df443f6f41`, SUCCESS **1 step $0.0472/$15.00**, 3m 53s, 2/2
+criteria + 6/6 rubric, harvest byte-IDENTICAL 4/4, `docs/reports/dogfood-127.md`). `probe --tasks <dir>
+--record <file>` walks every runnable task in stable order, persists each verdict the moment it lands,
+skips only proof taken at the refs the task declares TODAY (`probedAt` untouched), re-probes a moved ref,
+and names an unprobeable task instead of ending the sweep. All 5 traps rejected. **Six hand-fixes:** 🔴
+**F-277** — a sweep with no `--out` shared ONE output dir: `probe.json` clobbered per task, and one git
+workspace re-pointed across repos left the prior target's untracked `node_modules`/build output for the
+next base verification (**F-258's family — a false base verdict into the ledger the gate trusts**). 🟠
+**F-282** non-atomic ledger write → temp+rename. 🟡 **F-278** `--base-verify-minutes` unreachable from
+either probe mode (F-274's shape) · **F-279** stale entries counted as proof · **F-281** the sweep forked
+`run`'s selection · **F-280** a test name claiming a case its body never ran. +3 tests, harness 196→**199**.
+🔴 **F-283 → WP-597**: NO corpus task carries `fix_ref` and `AUTHORING.md` never mentions it — three
+headlines built for evidence nobody can produce. Progression ⛔ **STALLED** + ⚠️ LADDER-PACE.
+**NEXT = WP-597 (dogfood-128): make the corpus probeable — a documented, validated gold-patch ref.**
 
 Related docs: [`docs/spec/task-spec.md`](spec/task-spec.md) (schema
 reference) · [`docs/TASK-PROTOCOL.md`](TASK-PROTOCOL.md) (WP etiquette, §7 is
@@ -687,6 +689,9 @@ broken (a false-green, not a follow-on fix).
 | `Invalid task spec: provider 'x' … missing env var Y` | Parse-time key validation. Export the key, or use the §3.8 routing workaround for keyless CLI runs. |
 | `Is the Temporal dev server up?` | It isn't. `devbox run temporal-dev`. |
 | `packages/sdk-ts/test/chain/fan-in-handoff.test.ts` fails in a FULL `devbox run test` but passes when run alone | **Load flake, not a regression (F-276, 2026-08-08).** The fan-in chain test starts three real chain nodes; under the full suite's parallelism (344 s of test work compressed into a ~48 s wall) node `N-3` can seal `FAILED`/`HALT` on a timeout. Re-run the single file (`pnpm exec vitest run test/chain/fan-in-handoff.test.ts`) before believing a red — and if it fails in ISOLATION, that is a real regression. Do not paper over a red full suite by re-running it blind. |
+| `chikory-bench probe --tasks benchmarks/tasks …` reports every task `failed (… missing repo.fix_ref)` | Expected as of 2026-08-08 — **not a probe bug (F-283)**. NO task under `benchmarks/tasks/` carries `repo.fix_ref`, so nothing in the real corpus is probeable yet and the WP-593/595/596 pipeline has no input. `AUTHORING.md` does not yet require or explain the field. Tracked as **WP-597** (gold-patch ref: a real commit where every requirement check passes, self-authored where upstream never made one). Do NOT arm `run --discrimination-ledger` over the real corpus until then: today it would exclude every task, and `brownfield-001` — the only task separating the two published arms — has no upstream fix commit by construction. |
+| A probe sweep's per-task `probe.json` files are missing or all describe the same task | You are on a pre-F-277 build. Before the fix, `probe --tasks` without `--out` sent every task to the SAME `<task-dir>/probe-output`, so each task overwrote the previous one's report **and** reused one git workspace across repos — leaving the prior target's untracked `node_modules`/build output in the tree the next task's `base_verification_command` runs in. Fixed 2026-08-08: the per-task dir is now unconditional (`<out-or-task-dir>/probe-output/<task-id>/`). A ledger recorded by an older build is suspect for every task after the first. |
+| A probe of a large target dies at 45 minutes | That is `DEFAULT_BASE_VERIFY_TIMEOUT_MS`, and a probe runs the target's FULL suite at **two** refs. Raise it: `probe --task … --base-verify-minutes <n>` or `probe --tasks … --base-verify-minutes <n>` (wired for both modes 2026-08-08, F-278; before that the option existed in the API with no CLI path to reach it). |
 | A benchmark arm's I-SR looks the same with and without probe evidence | You did not pass the ledger. Since WP-595 the gate is opt-in and lives on the CLI: `chikory-bench run … --discrimination-ledger <file>` (the file `probe --record <file>` writes). With NO ledger the score is deliberately unchanged, so a forgotten flag is silent (F-274). A missing or damaged ledger is refused before any task runs — an exit 1 naming the file is the flag working, not a bug. |
 | A track-B robustness gap (e.g. an F-n queued "track-B, fix pending") tempts you to re-launch the already-green headline spec to fix it | Don't — a re-run of a closed spec consumes a dogfood slot the ladder queue owns and double-counts in the ledger (F-102, dogfood-083 re-run `run-03d161e9` fixed F-101 this way). Land a documented track-B fix as a NORMAL PR against the WP's real code; keep dogfood headlines for the WP-265 ladder rung. (The re-run's fix is legitimate and kept — the process, not the code, is the friction.) |
 | The evidence pack (`scripts/dogfood-verify.sh`) prints `⚠ acceptance checks FAILED` on a run that is actually GREEN | **✅ FIXED 2026-07-11 (track-B hand-fix, F-128 closed).** Was: §3 re-ran the run's ACs from the Chikory repo root, so a scaffold-hosted run (writes only into git-ignored `.chikory-examples/…`, never harvested) false-failed (dogfood-095 **F-128**). §3 now reads the spec's `repos` from the journal and picks the check cwd itself — a writable repo == this checkout → working tree (brownfield, verifies the harvest); otherwise → the run's own workspace — and prints which (`cwd:` line). Re-verified on dogfood-095's journal: AC-1 20/20 PASS in-workspace. If it still reads wrong, the `HOSTREPO` heuristic mis-detected — check `task_json.repos` in the journal. |

@@ -2,7 +2,7 @@
  * Task discrimination probe (WP-593) — mechanical proof that a task's requirement
  * checks fail on the untouched pinned base and pass on the real upstream fix.
  */
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { runBounded, scrubExecutorEnv } from "@chikory/sdk";
 
@@ -10,11 +10,16 @@ import { ensureGitWorkspace } from "./adapter.js";
 import { verifyBaseGreen } from "./base-verify.js";
 import { decideTargetNode, discoverNodeToolchains, pinnedNodeProvisioning } from "./engine.js";
 import {
+  getLedgerEntry,
   parseDiscriminationLedger,
   publishableRepoPath,
+  readDiscriminationLedger,
+  sanitizeFileName,
+  type DiscriminationLedger,
   type DiscriminationLedgerEntry,
 } from "./results.js";
-import { parseAuthoredTask } from "./task.js";
+import { loadTaskDir } from "./suite.js";
+import { isRunnable, parseAuthoredTask, type BenchmarkTask } from "./task.js";
 
 export interface ProbeRequirementResult {
   id: string;
@@ -66,6 +71,24 @@ async function runCheck(
     bounded.timedOut ? `\n[check timed out after ${timeoutMs}ms]` : ""
   }`;
   return { code, output };
+}
+
+/**
+ * F-282: the ledger is the ONLY durable product of a multi-hour sweep, and a
+ * kill landing inside a plain `writeFileSync` truncates it — which F-275 then
+ * (correctly) refuses to parse, losing every verdict already earned. Write a
+ * sibling temp file and rename: on POSIX the rename is atomic, so a reader ever
+ * sees the old ledger or the new one, never half of either.
+ */
+function writeLedgerAtomically(recordPath: string, ledger: Record<string, DiscriminationLedgerEntry>): void {
+  const tempPath = `${recordPath}.${process.pid}.tmp`;
+  writeFileSync(tempPath, JSON.stringify(ledger, null, 2));
+  try {
+    renameSync(tempPath, recordPath);
+  } catch (err) {
+    rmSync(tempPath, { force: true });
+    throw err;
+  }
 }
 
 export async function runProbe(options: RunProbeOptions): Promise<{ result: ProbeResult; outDir: string; code: number }> {
@@ -255,8 +278,137 @@ export async function runProbe(options: RunProbeOptions): Promise<{ result: Prob
       })),
     };
     ledger[probeResult.taskId] = entry;
-    writeFileSync(recordPath, JSON.stringify(ledger, null, 2));
+    writeLedgerAtomically(recordPath, ledger);
   }
 
   return { result: probeResult, outDir: targetOutDir, code: exitCode };
+}
+
+export interface RunProbeSweepOptions {
+  tasksDir: string;
+  recordFile: string;
+  outDir?: string;
+  baseVerifyTimeoutMs?: number;
+}
+
+export async function runProbeSweep(
+  options: RunProbeSweepOptions,
+  io = { out: console.log, err: console.error },
+): Promise<number> {
+  const absoluteTasksDir = resolve(options.tasksDir);
+  if (!existsSync(absoluteTasksDir)) {
+    io.err(`chikory-bench probe: tasks dir not found: ${absoluteTasksDir}`);
+    return 1;
+  }
+
+  const recordPath = resolve(options.recordFile);
+  mkdirSync(dirname(recordPath), { recursive: true });
+
+  const { tasks, invalid, sources } = loadTaskDir(absoluteTasksDir);
+  if (Object.keys(invalid).length > 0) {
+    for (const [file, issues] of Object.entries(invalid)) {
+      io.err(`INVALID ${file}: ${issues.join("; ")}`);
+    }
+    return 1;
+  }
+
+  // F-281: one walk, the SAME selection `run` performs — a second hand-rolled
+  // walk here would drift the moment either side's rules change.
+  const selected: { task: BenchmarkTask; path: string }[] = [];
+  for (const task of tasks) {
+    const path = sources[task.id];
+    if (isRunnable(task) && path !== undefined) selected.push({ task, path });
+  }
+
+  if (selected.length === 0) {
+    io.err(`chikory-bench probe: no runnable tasks selected in ${options.tasksDir}`);
+    return 1;
+  }
+
+  let probedCount = 0;
+  let skippedCount = 0;
+  let failedCount = 0;
+
+  for (const { task, path: taskPath } of selected) {
+    let ledger: DiscriminationLedger = {};
+    if (existsSync(recordPath)) {
+      ledger = readDiscriminationLedger(recordPath);
+    }
+
+    const entry = getLedgerEntry(ledger, task.id);
+    const taskBaseRef = task.repo?.ref;
+    const taskFixRef = task.repo?.fixRef;
+
+    const isProvenAtSameRefPair =
+      entry !== undefined &&
+      taskBaseRef !== undefined &&
+      taskFixRef !== undefined &&
+      entry.baseRef === taskBaseRef &&
+      entry.fixRef === taskFixRef;
+
+    if (isProvenAtSameRefPair) {
+      skippedCount++;
+      io.out(`${task.id}: skipped (${entry.verdict})`);
+      continue;
+    }
+
+    // F-277: every task in a sweep gets its OWN output dir. `runProbe`'s default
+    // (`<task-dir>/probe-output`) is shared by every task in the same directory,
+    // so a sweep without --out overwrote each task's probe.json with the next
+    // one's, and re-pointed one base/fix git workspace at each successive repo —
+    // leaving the previous target's untracked node_modules/dist behind for the
+    // next task's base verification to run against (F-258's family).
+    const taskOutDir = join(
+      options.outDir ? resolve(options.outDir) : join(dirname(resolve(taskPath)), "probe-output"),
+      sanitizeFileName(task.id),
+    );
+
+    try {
+      const { result } = await runProbe({
+        taskPath,
+        outDir: taskOutDir,
+        recordFile: recordPath,
+        ...(options.baseVerifyTimeoutMs !== undefined
+          ? { baseVerifyTimeoutMs: options.baseVerifyTimeoutMs }
+          : {}),
+      });
+      probedCount++;
+      io.out(`${task.id}: probed (${result.verdict})`);
+    } catch (err) {
+      failedCount++;
+      const errMsg = err instanceof Error ? err.message : String(err);
+      io.out(`${task.id}: failed (${errMsg})`);
+    }
+  }
+
+  let finalLedger: DiscriminationLedger = {};
+  if (existsSync(recordPath)) {
+    finalLedger = readDiscriminationLedger(recordPath);
+  }
+
+  // F-279: proof counts only at the ref pair the task declares TODAY. A task
+  // whose re-probe failed keeps its stale entry on disk; counting it verdict-only
+  // reported coverage the sweep does not have.
+  let discriminatingCount = 0;
+  for (const { task } of selected) {
+    const entry = getLedgerEntry(finalLedger, task.id);
+    if (
+      entry?.verdict === "discriminating" &&
+      entry.baseRef === task.repo?.ref &&
+      entry.fixRef === task.repo?.fixRef
+    ) {
+      discriminatingCount++;
+    }
+  }
+
+  io.out(
+    `sweep summary: ${probedCount} probed, ${skippedCount} skipped, ${failedCount} failed, ${discriminatingCount} discriminating`,
+  );
+
+  const allDiscriminating =
+    selected.length > 0 &&
+    discriminatingCount === selected.length &&
+    failedCount === 0;
+
+  return allDiscriminating ? 0 : 1;
 }

@@ -66,3 +66,4 @@ bench-20260725,WP-535,bench,SUCCESS,2,0.00,loose,product,0,0,3,0
 124,WP-303,run,SUCCESS,1,0.0442,loose,product,0,0,4,0
 125,WP-593,run,FAILED,4,0.1899,loose,product,0,1,4,0
 126,WP-595,run,SUCCESS,1,0.0469,loose,product,0,0,4,0
+127,WP-596,run,SUCCESS,1,0.0472,loose,product,0,0,4,0
