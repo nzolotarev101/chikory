@@ -4,7 +4,13 @@ import { isAbsolute, join } from "node:path";
 
 import { describe, expect, it } from "vitest";
 import type { SuiteSummary, TaskResult } from "../src/results.js";
-import { compareSummaries, isTaskVerified, summarize, wilsonScoreInterval } from "../src/results.js";
+import {
+  compareSummaries,
+  isTaskVerified,
+  publishableRepoPath,
+  summarize,
+  wilsonScoreInterval,
+} from "../src/results.js";
 
 function mockTaskResult(overrides: Partial<TaskResult> & { taskId: string }): TaskResult {
   return {
@@ -243,6 +249,28 @@ describe("compareSummaries", () => {
     for (const arm of res.arms) {
       expect(typeof arm.rawResultsDir).toBe("string");
       expect(arm.rawResultsDir!.length).toBeGreaterThan(0);
+    }
+  });
+
+  it("anchors on the target's OWN repo root, never an ancestor repo (F-270)", () => {
+    // dogfood-125 loosened this walk to start at dirname(target) so that two
+    // materialized git workspaces would stop both publishing as ".". That made a
+    // repo root resolve against whatever ancestor repo the operator happened to
+    // have on disk (a home-dir dotfiles repo published `<repo>` as
+    // `repos/chikory`) — an unresolvable, host-shaped path, which is F-267 again.
+    const outer = mkdtempSync(join(tmpdir(), "pub-outer-"));
+    try {
+      mkdirSync(join(outer, ".git"), { recursive: true });
+      const inner = join(outer, "nested", "repo");
+      mkdirSync(join(inner, ".git"), { recursive: true });
+
+      // The target IS a repo root → it publishes as ".", not relative to `outer`.
+      expect(publishableRepoPath(inner)).toBe(".");
+      // A path inside a repo stays relative to THAT repo, not the ancestor.
+      expect(publishableRepoPath(join(inner, "pkg", "out"))).toBe(join("pkg", "out"));
+      expect(publishableRepoPath(join(outer, "results"))).toBe("results");
+    } finally {
+      rmSync(outer, { recursive: true, force: true });
     }
   });
 

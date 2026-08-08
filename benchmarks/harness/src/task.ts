@@ -51,7 +51,7 @@ export interface BenchmarkTask {
   goal: string;
   requirements: BenchmarkRequirement[];
   preferences: BenchmarkPreference[];
-  repo?: { url: string; ref: string };
+  repo?: { url: string; ref: string; fixRef?: string };
   baseVerificationCommand?: string;
   /**
    * F-254 (WP-586): exact Node version this task is graded on, overriding the
@@ -95,7 +95,14 @@ const AuthoredTaskYaml = z
     class: z.enum(["brownfield", "greenfield"]),
     status: z.enum(["draft", "pinned", "blocked"]),
     blocked_reason: z.string().min(1).optional(),
-    repo: z.object({ url: z.string().min(1), ref: z.string().min(1) }).strict().optional(),
+    repo: z
+      .object({
+        url: z.string().min(1),
+        ref: z.string().min(1),
+        fix_ref: z.string().min(1).optional(),
+      })
+      .strict()
+      .optional(),
     base_verification_command: z.string().min(1).optional(),
     /** F-254: exact `x.y.z` Node the task is graded on; overrides repo `engines`. */
     node_version: z
@@ -196,6 +203,9 @@ export function validateAuthoredTask(
       if (!SHA_RE.test(t.repo.ref)) {
         issues.push(`${t.status} task repo.ref must be a full 40-hex commit sha, got '${t.repo.ref}'`);
       }
+      if (t.repo.fix_ref !== undefined && !SHA_RE.test(t.repo.fix_ref)) {
+        issues.push(`${t.status} task repo.fix_ref must be a full 40-hex commit sha, got '${t.repo.fix_ref}'`);
+      }
     }
     for (const r of t.requirements) {
       if (r.check.trim() === "TBD") issues.push(`${t.status} task has ${r.id} check TBD`);
@@ -229,7 +239,14 @@ export function validateAuthoredTask(
     goal: t.goal,
     requirements,
     preferences: [],
-    repo: t.repo && t.repo.url !== "TBD" ? { url: t.repo.url, ref: t.repo.ref } : undefined,
+    repo:
+      t.repo && t.repo.url !== "TBD"
+        ? {
+            url: t.repo.url,
+            ref: t.repo.ref,
+            ...(t.repo.fix_ref ? { fixRef: t.repo.fix_ref } : {}),
+          }
+        : undefined,
     baseVerificationCommand: t.base_verification_command,
     nodeVersion: t.node_version,
     horizon: t.horizon === undefined ? undefined : String(t.horizon),

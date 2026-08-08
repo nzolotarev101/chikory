@@ -323,13 +323,54 @@ describe.skipIf(address === null)("verdict gating (WP-132)", () => {
     }
   });
 
-  test("F-229: an out-of-rubric ESCALATE over a NON-empty diff still seals FAILED unattended", async () => {
-    // The dogfood-121 `N-1` path, which recovered correctly: the concern was
-    // raised over real work, so there IS something the executor can answer.
-    // Convergence must be inferred from the empty diff alone — never from the
-    // escalate class, or a first advisory concern would end every run early.
+  test("F-271: the step that DELIVERS the last fix seals SUCCESS, empty diff or not", async () => {
+    // dogfood-125 replayed, and the case that disproves the older premise that
+    // convergence must be read off an empty diff alone. Step 4 delivered a
+    // 632-byte fix that turned BOTH acceptance criteria and all six rubric
+    // items green — the most converged state a run reaches — and the judge
+    // added one free-text line ("no judge-executed full-suite result was
+    // provided"). That sealed FAILED. Had the judge written nothing in that
+    // field, the identical tree would have sealed SUCCESS: the outcome hung on
+    // a prose remark, not on evidence. `allCriteriaPass && allRubricPass` is
+    // the load-bearing signal; the diff's size is not.
     const wire = await startFakeJudgeWire([
-      judgeForm({ criteria: { "AC-1": true }, concerns: ["horizon claim is not supported"] }),
+      judgeForm({
+        criteria: { "AC-1": true },
+        concerns: ["no judge-executed full-suite result was provided"],
+      }),
+      // Never consumed: the seal fires on the escalating pass itself.
+      judgeForm({ criteria: { "AC-1": true } }),
+    ]);
+    const { dataDir, handle } = await run(wire, {
+      unattended: { escalation: "seal_resumable_failed" },
+    });
+
+    const report = await awaitTerminal(handle);
+    expect(report.status).toBe("SUCCESS");
+    expect(verdictKinds(dataDir, handle.runId)).toEqual(["ESCALATE"]);
+
+    const journal = new Journal(journalPath(dataDir, handle.runId));
+    try {
+      const terminal = journal.entries("terminal")[0]!.payload as { status: string; reason?: string };
+      expect(terminal.status).toBe("SUCCESS");
+      expect(terminal.reason ?? "").toContain("converged out-of-rubric escalation");
+      // The concern survives into the seal — sealing SUCCESS never drops it.
+      expect(terminal.reason ?? "").toContain("no judge-executed full-suite result was provided");
+    } finally {
+      journal.close();
+    }
+  });
+
+  test("F-271: an out-of-rubric ESCALATE with a criterion still UNMET seals FAILED unattended", async () => {
+    // The guard the empty-diff condition was standing in for. Here the executor
+    // HAS something to answer — AC-1 is not met — so a first advisory concern
+    // must not end the run early. Convergence is read from the criteria and the
+    // rubric, never from the escalate class alone.
+    const wire = await startFakeJudgeWire([
+      judgeForm({
+        criteria: { "AC-1": false },
+        concerns: ["horizon claim is not supported"],
+      }),
     ]);
     const { dataDir, handle } = await run(wire, {
       unattended: { escalation: "seal_resumable_failed" },

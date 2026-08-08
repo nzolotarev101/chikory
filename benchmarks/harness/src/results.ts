@@ -270,6 +270,10 @@ export function publishableRepoPath(target: string, what = "published path"): st
         `operator's benchmarks/results/… copy, not a run workspace copy of it)`,
     );
   }
+  // F-270: start at `absolute`, NOT `dirname(absolute)`. A target that IS a repo
+  // root must publish as ".". Starting a level up walks past it to whatever
+  // ancestor repo happens to exist on the operator's disk (a home-dir dotfiles
+  // repo turned `<repo>` into `repos/chikory`) — F-267 again, from the other end.
   for (let dir = absolute; ; dir = dirname(dir)) {
     if (existsSync(join(dir, ".git"))) {
       const rel = relative(dir, absolute);

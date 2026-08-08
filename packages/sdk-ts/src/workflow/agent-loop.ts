@@ -1107,17 +1107,31 @@ export async function agentLoop(spec: TaskSpec): Promise<RunStatus> {
         // operator who asked to adjudicate, and F-154 already seals SUCCESS the
         // moment they approve. This only replaces the seal that would otherwise
         // fire with nobody there to answer.
+        //
+        // F-271 (dogfood-125): the empty diff was NOT the load-bearing signal —
+        // `allCriteriaPass && allRubricPass` is. The step that DELIVERS the last
+        // fix is the most converged state a run reaches, and gating on
+        // `diffRef.bytes === 0` sealed exactly that FAILED: step 4 turned both
+        // acceptance criteria and all six rubric items green in 632 bytes, and
+        // the judge's free-text "I'd want to see the full suite myself" killed
+        // the run. Had it written nothing in that field the identical tree would
+        // have sealed SUCCESS — the outcome hung on a prose remark, not evidence.
+        // Same conclusion the completion review already enforces ("never parking
+        // a run whose criteria all pass", the F-107 discipline), and strictly
+        // more conservative than the attended approve path below, which needs
+        // only `allCriteriaPass`. A concern raised while ANY criterion or rubric
+        // item is unmet still seals FAILED — there the executor has something to
+        // answer, so a first advisory concern cannot end a run early.
         if (
           spec.unattended?.escalation === "seal_resumable_failed" &&
           verdict.escalateClass === "out_of_rubric" &&
           allCriteriaPass(verdict) &&
-          allRubricPass(verdict) &&
-          record.diffRef.bytes === 0
+          allRubricPass(verdict)
         ) {
           return seal(
             "SUCCESS",
-            `converged out-of-rubric escalation over an empty diff, all criteria and rubric pass — ` +
-              `${verdict.escalateReason ?? verdict.rationale} (F-229)`,
+            `converged out-of-rubric escalation, all criteria and rubric pass — ` +
+              `${verdict.escalateReason ?? verdict.rationale} (F-229/F-271)`,
           );
         }
         const escalationWait = decideEscalationWait(

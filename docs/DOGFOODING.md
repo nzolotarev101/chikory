@@ -8,20 +8,20 @@ recover a run, and how to land the result as a normal PR.
 **Status (2026-08-07, bounded — update discipline: REPLACE this block, ≤15 lines;
 displaced prose moves verbatim to [`PLAN-HISTORY.md`](PLAN-HISTORY.md); per-run detail:
 `docs/reports/`; queue + course correction: `plan.md` §6/§7).**
-🟢 **P3-rung-5 HALF CLIMBED — dogfood-124 gave the harness an interval-ranked leaderboard**
-(`run-80fe6b8f-5ceb-4089-b13b-195390bf682b`, SUCCESS **1 step $0.0442/$15.00**, 2m 18s, 2/2 criteria
-+ 6/6 rubric, harvest byte-IDENTICAL 6/6, `docs/reports/dogfood-124.md`). `chikory-bench leaderboard
---bundle <dir>… --out <dir>` ranks by the **interval FLOOR** (`orderedBy: "iSrRange.low"`), marks a
-pair `separated` only when the intervals are DISJOINT, and copies published rates instead of
-recomputing them. `benchmarks/publications/leaderboard/` says it plainly: **Chikory [83.2%, 100.0%]
-vs raw Claude Code [75.4%, 99.1%] — not separated at 95%, no winner.** All 4 designed traps rejected.
-🟠 **F-267** (the published `bundle` pointer resolved only from `benchmarks/harness/` — **F-262
-verbatim, one review later**) → **WP-591 hand-fixed**: `publishableRepoPath` anchors it to the repo
-root, the dead `reference` is dropped, harness 183→**186** green. 🟡 **F-268 → WP-592** (executor
-model id is bare `gemini` → no `PRICE_TABLE` row → every gemini-cli run meters **$0.00 on real
-tokens**). ℹ️ F-265 recurrence (`0 tool calls`) — already WP-590. Progression ✅ PROGRESSING with a
-⚠️ LADDER-PACE warning (rung 4 for 3 headlines). **NEXT = WP-593 (dogfood-125): `chikory-bench
-probe` — red@base / green@fix per requirement, the gate the rung-5 corpus lift needs first.**
+🔴 **dogfood-125 DELIVERED WP-593 and was sealed FAILED WRONGLY** (`run-f3d47cf8-6d56-4c7b-85d1-fcfe185badef`,
+4 steps **$0.1899/$15.00**, 7m 04s, `docs/reports/dogfood-125.md`). `chikory-bench probe --task <file>
+[--out <dir>]` proves a task discriminates before it may be scored: base ref + new `repo.fix_ref` in
+SEPARATE workspaces, `base_verification_command` at BOTH refs, red base ⇒ `inconclusive` (never
+`discriminating`). Both ACs PASS, all 4 traps rejected, corpus untouched. Two 🔴 hand-fixes: **F-270** —
+the executor greened its own trap by mutating SHARED `publishableRepoPath` (`results.ts:273`), so a repo
+root published as `repos/chikory` off an ancestor repo — F-267 from the other end, in WP-591's own helper;
+reverted, probe re-anchored on its out dir, harness 186→**192**. **F-271** — the judge passed **2/2 criteria
++ 6/6 rubric**, then one false free-text concern became an unattended FAILED seal because the F-229
+carve-out demanded `diffRef.bytes === 0`; **the empty diff was never the load-bearing signal** — it now keys
+on `allCriteriaPass && allRubricPass` (`agent-loop.ts:1110-1128`), sdk-ts 1,303→**1,304**. 🟠 **F-272 →
+WP-594** (`compact` ×3 at 106% window, 0 folds — the `keepLastN: 5` floor beats the governor on short runs) ·
+🟡 **F-273** (no gate asks what an edited SHARED function returns for callers outside the diff). Progression
+✅ PROGRESSING, ⚠️ LADDER-PACE (rung 4 ×3). **NEXT = WP-302 (dogfood-126): fix-pin + probe-verify the corpus.**
 
 Related docs: [`docs/spec/task-spec.md`](spec/task-spec.md) (schema
 reference) · [`docs/TASK-PROTOCOL.md`](TASK-PROTOCOL.md) (WP etiquette, §7 is
@@ -818,6 +818,31 @@ broken (a false-green, not a follow-on fix).
   `.chikory/runs` path and otherwise emits repo-root-relative. A pointer inherited from
   another artifact and written relative to an unrecorded CWD (the old `reference`
   field) cannot be re-anchored — **drop it, do not republish it dead.**
+
+- **"No change to how X behaves" is prose, not a gate — pin X's output for a
+  caller OUTSIDE the delivery** (🔴 F-270 / 🟡 F-273, dogfood-125). The dogfood-125
+  spec said "no change to how `compare`, `leaderboard` or runSuite behave". To green
+  its own trap, the executor edited the shared `publishableRepoPath` walk to start at
+  `dirname(absolute)` — after which any target that IS a repo root resolved against
+  whatever ancestor repo happened to exist on the operator's disk (`<repo>` →
+  `repos/chikory`). Both ACs passed, all six rubric items passed, and the judge called
+  it *"a focused change [that] preserves the existing abstraction"*: it reasoned from
+  the diff, and no gate asks **what the edited function now returns for the callers
+  not in the diff**. WP-591 had also shipped `publishableRepoPath` with no direct unit
+  test to regress against. **Rule: when a spec forbids changing a shared surface, one
+  AC must assert that surface's output for an input the delivery does not touch** —
+  and any extracted shared helper gets its own unit test the day it lands.
+
+- **A judge's free-text concern can outrank its own all-green form** (🔴 F-271,
+  dogfood-125 — **fixed**, recorded because the shape recurs). Verdict rule 4
+  (`judge/verdict.ts:126-129`) escalates on any concern with no rubric basis, and
+  unattended that sealed FAILED even with **2/2 criteria and 6/6 rubric passing**,
+  because the F-229 carve-out also demanded `diffRef.bytes === 0`. The step that
+  *delivers* the last fix is the most converged state a run reaches, so gating on an
+  empty diff failed exactly that. The carve-out now keys on `allCriteriaPass &&
+  allRubricPass` alone. **If a run seals FAILED with a green form, read the concern
+  before relaunching** — and a concern raised while any criterion is still unmet
+  still seals FAILED, which is correct: there the executor has something to answer.
 
 - **A done-marker in a `plan.md` Notes cell can break the test suite** (ℹ️ F-269,
   dogfood-124). `packages/sdk-ts/test/cli/wp-status.plan-integration.test.ts` reads

@@ -1,0 +1,319 @@
+# Plain: A benchmark score may only count requirements that were PROVEN to discriminate — and the
+# proof has to have been taken at the exact commit the task was scored at. A stale proof, or no
+# proof at all, must visibly exclude the task from the rate rather than quietly inflate it.
+# WP: WP-595 (probe-verified scoring gate), the half that makes WP-593 binding
+# Ladder-rung: 5 (prerequisite — see WHY below)
+# Thesis-KPI: a published I-SR counts only requirements proven discriminating at the scored ref
+# Format: loose — the outcome and the persisted shapes are fixed; layout and internals are the executor's
+#
+# Launch mode: RUN (single node — one deliverable).
+#   CHIKORY_PREFLIGHT_ONLY=1 devbox run run-dogfood
+#   devbox run run-dogfood
+#
+# WHY THIS AND NOT THE RUNG ITSELF (dogfood-125 review, 2026-08-07):
+#   Progression gate: ⛔ STALLED + ⚠️ LADDER-PACE (rung 4 across the trailing 3 headlines), which
+#   binds the next headline to the P3 ladder rung. Rung-5 is the P3 exit gate: published ranges + a
+#   leaderboard on a corpus wide enough for the intervals to SEPARATE. dogfood-124 landed the
+#   leaderboard; dogfood-125 landed the probe. **The rung itself cannot be run as a dogfood at all**,
+#   and the reason is measured, not cautious:
+#   probing one real task runs `base_verification_command` at TWO refs (brownfield-001 is 1,128 tests
+#   after a full install), so a 5-task corpus probe is a multi-hour, quota-bound suite — exactly what
+#   dogfood-120/121/122 each proved an LLM executor may not supervise. The operator probes and
+#   fix-pins BY HAND (the dogfood-123 pattern, where the rung-4 arms were also operator-run); the
+#   dogfood builds the machinery that makes those hand-run results binding. This is the SAME
+#   split the gate already accepted for rung-4 — the run publishes and gates, the operator executes.
+#
+#   And they are NOT binding today. `chikory-bench probe` (WP-593) writes a `probe.json` that
+#   nothing reads. `runSuite`/`summarize` gate the I-SR denominator on `baseVerification` only
+#   (`results.ts:79-84`, `isTaskVerified`), so a task whose checks pass for free at its own base
+#   still scores 1.0 for every arm — the exact inflation WP-593 was built to detect and cannot yet
+#   prevent. A gate that measures but does not bind is F-180 again (WP-537: the judge detected and
+#   did not gate).
+#
+# Designed traps — the plausible-but-wrong deliveries the acceptance criteria exist to reject:
+#   A. Honoring a STALE proof. A probe taken at an older `repo.ref` says nothing about the commit
+#      actually scored. The record must be matched on the ref pair, not on the task id alone — the
+#      whole failure shape of F-258 (`baseVerified` believed for a run that measured something else).
+#   B. Counting a probe that did not come back clean. `inconclusive` (red environment) and
+#      `not-discriminating` (some requirement free for every arm) are NOT proof; only a
+#      `discriminating` verdict is.
+#   C. DROPPING an unproven task from the summary instead of retaining it and excluding it from the
+#      rate. WP-541's rule is explicit: summaries retain every task and NAME the excluded ones. A
+#      quietly shorter task list is how a suite launders its own gaps.
+#   D. Gating the headline while leaving the published comparison to recompute from the ungated
+#      totals — F-252/WP-584 verbatim, where `buildArmDetail` published 17/19 for a summary that
+#      said 14/15.
+#   E. Breaking every already-published artifact. `benchmarks/publications/p3-rung-4/` and the
+#      rung-4 summaries predate any probe; with no ledger they must read and re-summarize exactly
+#      as they do today.
+#
+# PRECONDITIONS, ALL MEASURED (do not re-litigate; re-measure if stale):
+#   * `runProbe` returns `{result, outDir, code}` with `result.verdict` ∈ discriminating |
+#     not-discriminating | inconclusive, plus `taskId`/`baseRef`/`fixRef` (`probe.ts`, landed
+#     2026-08-07). `probe --task <file> [--out <dir>]` is wired at `main.ts`.
+#   * `isTaskVerified(result)` (`results.ts:79-84`) returns TRUE when `baseVerification` is absent —
+#     that is the backward-compatibility rule for pre-WP-541 artifacts, and the same rule this WP
+#     must follow for pre-WP-595 ones.
+#   * `summarize(suite, adapter, startedAt, endedAt, results)` already splits verified vs unverified
+#     (`tasksVerified`, `unverifiedTasks`, `requirementsVerified*`) — this WP EXTENDS that split, it
+#     does not invent a second one.
+#   * NO task under `benchmarks/tasks/` carries a `repo.fix_ref` today, and no discrimination ledger
+#     exists anywhere in the repo (grep-verified 2026-08-07).
+
+name: dogfood-126-wp595-discrimination-gates-the-score
+wp: WP-595
+goal: >
+  Make the benchmark score refuse to count a requirement that was never proven to discriminate at
+  the commit it was scored at.
+
+  Teach the probe command to persist its verdict, and teach the scoring path to read it:
+
+      chikory-bench probe --task <file> [--out <dir>] [--record <file>]
+
+  `--record` upserts this task's entry into a durable discrimination ledger — a JSON file keyed by
+  task id, each entry carrying `taskId`, `baseRef`, `fixRef`, `verdict`, `probedAt` (ISO-8601), and a
+  `requirements` array of `{id, classification}`. Re-probing the same task REPLACES its entry rather
+  than appending a second one. The ledger is written whatever the verdict is — a
+  `not-discriminating` result is evidence and must be recorded, not suppressed.
+
+  The contract the scoring path must satisfy:
+
+    * A task result record carries the ref it was actually scored at, as `repoRef`. A task is
+      `discriminationVerified` only when the ledger holds an entry for it whose `baseRef` equals
+      that `repoRef` AND whose `verdict` is `discriminating`. An entry taken at a different
+      `baseRef` is STALE and proves nothing; an `inconclusive` or `not-discriminating` entry is not
+      proof.
+
+    * `summarize` keeps its five existing parameters and its current base-verification behavior, and
+      takes the ledger as an OPTIONAL sixth parameter. Given one, it narrows the I-SR/D-SR
+      denominator further: `requirementsVerifiedTotal`,
+      `requirementsVerifiedSatisfied`, `dependencyVerifiedSatisfied`, `iSr` and `dSr` count only
+      tasks that are BOTH base-verified AND discrimination-verified.
+
+    * Every task stays in the summary. `perTask` gains `discriminationVerified`, and a task excluded
+      for discrimination is named in `unverifiedTasks` with a reason that says which of the three
+      cases applied (never probed · probed at a different ref · verdict was not `discriminating`).
+
+    * **A summary built with no ledger behaves exactly as it does today.** With no discrimination
+      information for a task, `discriminationVerified` is true and the rates are unchanged — the
+      already-published suite summaries and comparison bundles must re-summarize byte-identically.
+
+    * `compare` and the published comparison keep reading the summary's own verified counts, never
+      recomputing a denominator of their own.
+
+  Constraints: TypeScript stays strict ESM with named exports and no `any`; no new dependency, no
+  provider SDK, no API key, no global install, no HTML output. Do not change what the probe command prints or
+  what its probe output JSON contains, do not change `leaderboard`'s ranking, and do not edit any task file
+  under benchmarks/tasks or any artifact under benchmarks/results or benchmarks/publications. A
+  published or reported path goes through publishableRepoPath (WP-591), never a raw argument, and
+  that helper's behavior for its EXISTING callers must not change — assert it, do not assume it
+  (F-270). Project commands run sequentially inside the already-activated Devbox environment, so
+  invoke pinned tools directly and never nest devbox run. Every existing test remains green.
+
+repos:
+  - url: /Users/nikitazolotarev/repos/chikory
+    writable: true
+
+acceptance_criteria:
+  - id: AC-1
+    description: >
+      THIS NODE'S OWN ORACLE — RED on HEAD, green only once the ledger exists and the scoring path
+      honors it. Against a local two-commit git fixture this check builds itself, `probe --record`
+      must persist a replaceable, verdict-faithful entry (traps A/B), and `summarize` must exclude a
+      task whose proof is stale, missing or unclean while KEEPING it in the task list and naming why
+      (trap C). Executor-authored tests are not the oracle; the inputs and the expected decisions are
+      written here.
+    check: |
+      cd benchmarks/harness && pnpm exec tsc && node --input-type=module -e '
+      import {mkdtempSync,mkdirSync,writeFileSync,readFileSync,existsSync} from "node:fs";
+      import {execFileSync,spawnSync} from "node:child_process";
+      import {tmpdir} from "node:os";
+      import {join} from "node:path";
+      import {pathToFileURL} from "node:url";
+      const A=(c,m)=>{if(!c){console.error("FAIL: "+m);process.exit(1);}};
+      const root=mkdtempSync(join(tmpdir(),"disc-fixture-"));
+      const origin=join(root,"origin"); mkdirSync(origin,{recursive:true});
+      const git=(...a)=>execFileSync("git",["-C",origin,...a],{stdio:"pipe"}).toString().trim();
+      const w=(p,s)=>writeFileSync(join(origin,p),s);
+      execFileSync("git",["init","-q","-b","main",origin],{stdio:"pipe"});
+      git("config","user.email","probe@chikory.local"); git("config","user.name","probe");
+      w("value.txt","BROKEN\n"); w("verify.sh","echo \"Tests  3 passed (3)\"\nexit 0\n");
+      git("add","-A"); git("commit","-q","-m","base"); const base=git("rev-parse","HEAD");
+      w("value.txt","FIXED\n");
+      git("add","-A"); git("commit","-q","-m","fix"); const fix=git("rev-parse","HEAD");
+      const task=(name,reqs)=>{
+        const p=join(root,name+".yaml");
+        writeFileSync(p,"id: "+name+"\nclass: brownfield\nstatus: pinned\nrepo:\n"+
+          "  url: "+JSON.stringify(origin)+"\n  ref: "+base+"\n  fix_ref: "+fix+"\n"+
+          "base_verification_command: sh verify.sh\nhorizon: 1h\ngoal: |\n  fixture\n"+
+          "requirements:\n"+reqs);
+        return p;};
+      const CLEAN="  - id: R1\n    description: discriminating\n    check: grep -q FIXED value.txt\n";
+      const DIRTY=CLEAN+"  - id: R2\n    description: free\n    check: grep -q value value.txt\n";
+      const ledger=join(root,"discrimination.json");
+      const probe=(taskPath,out)=>spawnSync("node",
+        ["dist/bin.js","probe","--task",taskPath,"--out",out,"--record",ledger],{encoding:"utf8"});
+      // ── 1. --record persists a verdict-faithful entry, and re-probing REPLACES it ──
+      const good=task("brownfield-900",CLEAN);
+      probe(good,join(root,"o1"));
+      A(existsSync(ledger),"--record must create the ledger at the named path");
+      const read=()=>JSON.parse(readFileSync(ledger,"utf8"));
+      const entryOf=(l,id)=>{
+        const all=Array.isArray(l)?l:Object.values(l);
+        const hits=all.filter((e)=>e&&e.taskId===id);
+        A(hits.length===1,"exactly ONE entry per task id, got "+hits.length+" for "+id);
+        return hits[0];};
+      const e1=entryOf(read(),"brownfield-900");
+      A(e1.verdict==="discriminating","a clean probe records verdict discriminating, got "+e1.verdict);
+      A(e1.baseRef===base&&e1.fixRef===fix,"the entry must pin BOTH refs, got "+JSON.stringify(e1));
+      A(typeof e1.probedAt==="string"&&!Number.isNaN(Date.parse(e1.probedAt)),
+        "probedAt must be an ISO-8601 timestamp, got "+JSON.stringify(e1.probedAt));
+      A(Array.isArray(e1.requirements)&&e1.requirements.some((r)=>r.id==="R1"&&
+        r.classification==="discriminating"),"per-requirement classifications must persist");
+      const dirty=task("brownfield-901",DIRTY);
+      probe(dirty,join(root,"o2"));
+      const e2=entryOf(read(),"brownfield-901");
+      A(e2.verdict==="not-discriminating",
+        "trap B: an unclean probe is EVIDENCE and must be recorded as such, got "+e2.verdict);
+      entryOf(read(),"brownfield-900");   // re-assert: still exactly one entry for the first task
+      probe(good,join(root,"o3"));
+      entryOf(read(),"brownfield-900");   // trap: re-probing REPLACES, never appends
+      // ── 2. the scoring path honors the ledger ──
+      const H=pathToFileURL(join(process.cwd(),"dist/results.js")).href;
+      const {summarize}=await import(H);
+      const mk=(taskId,ref,satisfied,total)=>({
+        taskId,source:"authored",class:"brownfield",adapter:"stub",
+        startedAt:"2026-08-07T00:00:00.000Z",endedAt:"2026-08-07T00:01:00.000Z",
+        run:{exitCode:0,wallClockMs:1000,notes:[]},
+        grading:{satisfied,dependencySatisfied:satisfied,total,
+          requirements:[],preferences:[]},
+        baseVerification:{green:true,reason:"stub base green"},
+        repoRef:ref});
+      const L=read();
+      const sum=(results)=>summarize("fixture","stub",
+        "2026-08-07T00:00:00.000Z","2026-08-07T00:02:00.000Z",results,L);
+      // proven at the scored ref → counts
+      const s1=sum([mk("brownfield-900",base,4,4)]);
+      A(s1.requirementsVerifiedTotal===4&&s1.iSr===1,
+        "a task proven discriminating at the SCORED ref must count, got "+
+        JSON.stringify({n:s1.requirementsVerifiedTotal,iSr:s1.iSr}));
+      A(s1.perTask[0].discriminationVerified===true,"perTask must carry discriminationVerified");
+      // trap A — the SAME task scored at a DIFFERENT ref: the proof is stale
+      const s2=sum([mk("brownfield-900",fix,4,4)]);
+      A(s2.requirementsVerifiedTotal===0,
+        "trap A: a probe taken at another ref proves nothing about THIS commit; denominator must be "+
+        "0, got "+s2.requirementsVerifiedTotal);
+      A(s2.perTask.length===1&&s2.perTask[0].taskId==="brownfield-900",
+        "trap C: an excluded task STAYS in perTask, got "+JSON.stringify(s2.perTask.map(t=>t.taskId)));
+      A(s2.perTask[0].discriminationVerified===false,"the stale task must be flagged, not dropped");
+      A(s2.unverifiedTasks.some((u)=>u.taskId==="brownfield-900"&&/ref/i.test(u.reason)),
+        "trap C: the exclusion must be NAMED with a reason mentioning the ref, got "+
+        JSON.stringify(s2.unverifiedTasks));
+      A(s2.tasks===1,"every task is retained in the count, got "+s2.tasks);
+      // trap B — recorded, but the verdict was not clean
+      const s3=sum([mk("brownfield-901",base,2,2)]);
+      A(s3.requirementsVerifiedTotal===0,
+        "trap B: a not-discriminating verdict is not proof, got "+s3.requirementsVerifiedTotal);
+      A(s3.unverifiedTasks.some((u)=>u.taskId==="brownfield-901"),
+        "the unclean task must be named in unverifiedTasks");
+      // never probed at all
+      const s4=sum([mk("brownfield-902",base,3,3)]);
+      A(s4.requirementsVerifiedTotal===0,
+        "an unprobed task cannot count once a ledger is in play, got "+s4.requirementsVerifiedTotal);
+      // mixed suite: only the proven task reaches the rate, both are reported
+      const s5=sum([mk("brownfield-900",base,4,4),mk("brownfield-901",base,2,2)]);
+      A(s5.requirementsVerifiedTotal===4&&s5.requirementsVerifiedSatisfied===4&&s5.iSr===1&&
+        s5.dependencyVerifiedSatisfied===4&&s5.dSr===1,
+        "trap D: the rate is over PROVEN requirements only, got "+
+        JSON.stringify({n:s5.requirementsVerifiedTotal,k:s5.requirementsVerifiedSatisfied,
+          d:s5.dependencyVerifiedSatisfied,iSr:s5.iSr,dSr:s5.dSr}));
+      A(s5.requirementsTotal===6,"requirementsTotal still counts every task, got "+s5.requirementsTotal);
+      A(s5.tasks===2&&s5.perTask.length===2,"both tasks are retained");
+      console.log("AC-1 OK: the ledger persists one verdict-faithful entry per task and a score counts only proof taken at the scored ref");
+      '
+
+  - id: AC-2
+    description: >
+      Backward compatibility is mechanical, not asserted in prose: with NO ledger the summary is
+      byte-identical to today (trap E), and `publishableRepoPath` still returns what its existing
+      callers depend on (F-270 — the shared surface this spec forbids moving).
+    check: |
+      cd benchmarks/harness && pnpm exec tsc && node --input-type=module -e '
+      import {mkdtempSync,mkdirSync,rmSync} from "node:fs";
+      import {tmpdir} from "node:os";
+      import {join} from "node:path";
+      import {pathToFileURL} from "node:url";
+      const A=(c,m)=>{if(!c){console.error("FAIL: "+m);process.exit(1);}};
+      const H=pathToFileURL(join(process.cwd(),"dist/results.js")).href;
+      const {summarize,publishableRepoPath}=await import(H);
+      const mk=(taskId,satisfied,total)=>({
+        taskId,source:"authored",class:"brownfield",adapter:"stub",
+        startedAt:"2026-08-07T00:00:00.000Z",endedAt:"2026-08-07T00:01:00.000Z",
+        run:{exitCode:0,wallClockMs:1000,notes:[]},
+        grading:{satisfied,dependencySatisfied:satisfied,total,requirements:[],preferences:[]},
+        baseVerification:{green:true,reason:"stub base green"}});
+      // ── trap E: no ledger ⇒ every pre-WP-595 artifact re-summarizes UNCHANGED ──
+      const results=[mk("brownfield-001",4,4),mk("brownfield-002",3,4)];
+      const before={suite:"bench",adapter:"stub",tasks:2,tasksVerified:2,
+        requirementsTotal:8,requirementsSatisfied:7,requirementsVerifiedTotal:8,
+        requirementsVerifiedSatisfied:7,iSr:7/8,dSr:7/8,unverified:0};
+      const s=summarize("bench","stub","2026-08-07T00:00:00.000Z","2026-08-07T00:02:00.000Z",results);
+      const got={suite:s.suite,adapter:s.adapter,tasks:s.tasks,tasksVerified:s.tasksVerified,
+        requirementsTotal:s.requirementsTotal,requirementsSatisfied:s.requirementsSatisfied,
+        requirementsVerifiedTotal:s.requirementsVerifiedTotal,
+        requirementsVerifiedSatisfied:s.requirementsVerifiedSatisfied,
+        iSr:s.iSr,dSr:s.dSr,unverified:s.unverifiedTasks.length};
+      A(JSON.stringify(got)===JSON.stringify(before),
+        "trap E: with NO ledger the summary must be unchanged from today.\n  expected "+
+        JSON.stringify(before)+"\n  got      "+JSON.stringify(got));
+      for (const t of s.perTask) {
+        A(t.discriminationVerified===true,
+          "perTask must ALWAYS carry discriminationVerified, and with no ledger it is true (the "+
+          "pre-WP-541 compatibility rule isTaskVerified already follows); got "+
+          JSON.stringify(t.discriminationVerified)+" for "+t.taskId);
+      }
+      // ── F-270: the shared publication helper still answers for callers outside this delivery ──
+      const outer=mkdtempSync(join(tmpdir(),"pub-guard-"));
+      try {
+        mkdirSync(join(outer,".git"),{recursive:true});
+        const inner=join(outer,"nested","repo");
+        mkdirSync(join(inner,".git"),{recursive:true});
+        A(publishableRepoPath(inner)===".",
+          "a target that IS a repo root publishes as \".\", got "+publishableRepoPath(inner));
+        A(publishableRepoPath(join(outer,"results"))==="results",
+          "a path inside a repo stays relative to THAT repo, got "+
+          publishableRepoPath(join(outer,"results")));
+        let threw=false;
+        try { publishableRepoPath(join(outer,".chikory","runs","run-x","workspace")); }
+        catch { threw=true; }
+        A(threw,"an ephemeral run-workspace path must still be REFUSED (WP-588)");
+      } finally { rmSync(outer,{recursive:true,force:true}); }
+      console.log("AC-2 OK: no ledger means no behavior change, and the shared publication helper is untouched");
+      '
+
+
+budget_usd: 15
+max_steps: 12
+
+step_limits:
+  max_turns: 40
+  # 840 is the hard ceiling (MAX_STEP_MAX_SECONDS): above it the executeStep
+  # activity's Temporal startToCloseTimeout kills the step first.
+  max_seconds: 840
+
+pacing:
+  mode: auto
+  autoCalibrate: true
+
+unattended:
+  escalation: seal_resumable_failed
+
+# WP-566 agent classes. Primaries unchanged — Gemini executes, Codex judges.
+# routing.stages is DERIVED from the selected members and must not be restated here.
+agent_classes:
+  executor: executor-default
+  judge: judge-default
+
+judge:
+  cadence: 1
+  max_cost_share: 0.5

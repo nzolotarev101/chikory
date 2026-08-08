@@ -88,4 +88,12 @@ export {
   type LeaderboardEntry,
   type PairwiseRecord,
 } from "./leaderboard.js";
+export {
+  runProbe,
+  type ProbeRequirementResult,
+  type ProbeResult,
+  type ProbeVerificationReport,
+  type RunProbeOptions,
+} from "./probe.js";
+
 

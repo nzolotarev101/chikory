@@ -16,6 +16,7 @@ import {
 import { commandComplete, makeJudgeGrader } from "./judge-grader.js";
 import { compareSummaries, writeSuiteSummary, type SuiteSummary } from "./results.js";
 import { writeLeaderboard } from "./leaderboard.js";
+import { runProbe } from "./probe.js";
 import { acquireSuiteLock, SuiteAlreadyRunningError } from "./suite-lock.js";
 import { loadTaskDir, runSuite } from "./suite.js";
 import { isRunnable } from "./task.js";
@@ -26,6 +27,8 @@ commands:
   validate <task-dir>...   validate every task file (authored YAML + DevAI JSON);
                            exit 1 if any file is invalid
   list <task-dir>...       list loaded tasks (id, class, status, requirements)
+  probe --task <file> [--out <dir>]
+                           probe task requirement discrimination (red@base, green@fix)
   fetch-devai              download the 55 DevAI instance JSONs
       [--ref <git-ref>]      upstream ref (default main)
       [--out <dir>]          default benchmarks/devai/instances
@@ -430,6 +433,34 @@ export async function main(argv: string[], io = { out: console.log, err: console
       return 0;
     } catch (err) {
       io.err(`chikory-bench compare: ${(err as Error).message}`);
+      return 1;
+    }
+  }
+
+  if (command === "probe") {
+    const taskPath = values["task"];
+    if (!taskPath) {
+      io.err("chikory-bench probe: --task <file> is required");
+      return 1;
+    }
+    const outDir = values["out"];
+    try {
+      const { result, outDir: actualOutDir, code } = await runProbe({ taskPath, outDir });
+      io.out(`probe taskId: ${result.taskId}`);
+      io.out(`  baseRef: ${result.baseRef}`);
+      io.out(`  fixRef: ${result.fixRef}`);
+      io.out(`  baseWorkspace: ${result.baseWorkspace}`);
+      io.out(`  fixWorkspace: ${result.fixWorkspace}`);
+      io.out(`  baseVerification: green=${result.baseVerification.green} (${result.baseVerification.reason})`);
+      io.out(`  fixVerification: green=${result.fixVerification.green} (${result.fixVerification.reason})`);
+      io.out(`  verdict: ${result.verdict}`);
+      for (const req of result.requirements) {
+        io.out(`  req ${req.id}: ${req.classification} (base=${req.base}, fix=${req.fix}) — ${req.reason}`);
+      }
+      io.out(`probe output written to ${actualOutDir}/probe.json`);
+      return code;
+    } catch (err) {
+      io.err(`chikory-bench probe error: ${(err as Error).message}`);
       return 1;
     }
   }
