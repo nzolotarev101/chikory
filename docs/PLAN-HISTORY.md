@@ -93,3 +93,25 @@ either probe mode (F-274's shape) · **F-279** stale entries counted as proof ·
 🔴 **F-283 → WP-597**: NO corpus task carries `fix_ref` and `AUTHORING.md` never mentions it — three
 headlines built for evidence nobody can produce. Progression ⛔ **STALLED** + ⚠️ LADDER-PACE.
 **NEXT = WP-597 (dogfood-128): make the corpus probeable — a documented, validated gold-patch ref.**
+
+### 2026-08-09 — displaced from plan.md status block (dogfood-129 review)
+
+- **Latest / next:** 🟢 **WP-597 (probeable corpus) DELIVERED — the benchmark corpus can now produce the evidence WP-593/595/596 consume, for 4 of 5 tasks** (`run-951a565d-73a5-4cc8-a230-9b63d872fba9`, SUCCESS **1 step, $0.0425/$15.00**, 2m 46s, 2/2 criteria + 6/6 rubric, harvest byte-IDENTICAL 8/8, `docs/reports/dogfood-128.md`). `brownfield-002/003/004/005` now carry a real `repo.fix_ref`; each was fetched and read by hand and is the **direct child** of its pinned base with a subject matching the PR the task already named in prose (#3036 · #5855 · #13613 · #7390) — transcription, not invention. `AUTHORING.md` carries the gold-patch rule in the frozen Format v1 block + the pin checklist, and probeability is something the PRODUCT reports: `validate --require-probeable` exits 1 naming each runnable task that can never be probed and the field it lacks, and `probe --tasks` records it as its OWN outcome (`unprobeable`), never folded into the failure count. All 5 designed traps rejected. **🟠 F-284 — IT DID NOT UNBLOCK THE RUNG:** `brownfield-001` is the ONLY task separating the two published arms (dogfood-123: Chikory [83.2%, 100.0%] vs raw Claude Code [75.4%, 99.1%]) and is a SELF-PERFORMED migration with no upstream fix commit, so it still has no gold patch — `validate --require-probeable` over the real corpus exits 1 forever, `probe --tasks benchmarks/tasks` can never exit 0, and arming the WP-595 gate today would DROP the only discriminating task. `runProbe` materializes the fix from the task's own `repo.url` (`probe.ts:121-122`), so a self-authored patch cannot be expressed at all. Review hand-fix: 🟡 **F-285** — `--require-probeable` was undocumented and `parseFlags` silently ignored unknown flags, so a one-letter typo exited 0 (a false green on the check that catches an unprobeable corpus) → USAGE entry + `VALIDATE_FLAGS` allowlist (`main.ts:35-38,141-142,183-191`), +2 tests, harness 199 → **201**. 🟡 F-286 (the rule is enforced nowhere `devbox run bench` runs — `scripts/bench.sh:20` omits the flag) folds into WP-598. 🟡 F-287 track-B (an AC greping a file for prose was satisfied by prose that PREDATED the run). Progression ⛔ **STALLED** + ⚠️ LADDER-PACE, ledger `rung=4` — the FOURTH consecutive rung-5 prerequisite. **NEXT = WP-598 (dogfood-129): a gold patch upstream never authored must still be probeable — declare the fix source separately from `repo.url`, and put `--require-probeable` into the $0 `devbox run bench` guard.**
+
+### 2026-08-09 — displaced from docs/DOGFOODING.md status block (dogfood-129 review)
+
+🟢 **dogfood-128 DELIVERED WP-597 — the benchmark corpus can finally produce the evidence the
+scoring gate consumes, for 4 of 5 tasks** (`run-951a565d-73a5-4cc8-a230-9b63d872fba9`, SUCCESS **1 step
+$0.0425/$15.00**, 2m 46s, 2/2 criteria + 6/6 rubric, harvest byte-IDENTICAL 8/8, `docs/reports/dogfood-128.md`).
+`brownfield-002/003/004/005` carry a real `repo.fix_ref` — each fetched and read by hand, each the direct
+child of its pinned base, subjects matching the PRs the tasks already named in prose (#3036 · #5855 ·
+#13613 · #7390). `AUTHORING.md` carries the gold-patch rule; `validate --require-probeable` names each
+runnable task that can never be probed; `probe --tasks` records `unprobeable` as its OWN outcome.
+🟡 **F-285 HAND-FIXED** — the flag was undocumented and `parseFlags` swallowed unknown flags, so
+`--require-probable` exited **0**: USAGE + `VALIDATE_FLAGS` allowlist, +2 tests, harness 199→**201**.
+**🟠 F-284 — the rung is STILL blocked:** `brownfield-001` (the ONLY task separating
+the two published arms) is a self-performed migration with no upstream fix, so `--require-probeable` over
+the real corpus exits 1 forever and the sweep can never exit 0 — `runProbe` fetches the fix from the
+task's own `repo.url` (`probe.ts:121-122`), so a self-authored patch is inexpressible. 🟡 F-286 (the rule
+is enforced nowhere `devbox run bench` runs) folds in. Progression ⛔ **STALLED** + ⚠️ LADDER-PACE, `rung=4`.
+**NEXT = WP-598 (dogfood-129): make a gold patch upstream never authored probeable, then arm the $0 guard.**

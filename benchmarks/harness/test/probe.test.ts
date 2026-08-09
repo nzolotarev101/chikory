@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { isAbsolute, join } from "node:path";
 
 import { describe, expect, it } from "vitest";
-import { runProbe, runProbeSweep } from "../src/probe.js";
+import { findRepoRoot, resolvePatchPath, runProbe, runProbeSweep } from "../src/probe.js";
 
 /**
  * WP-593 task discrimination probe. The probe answers one question mechanically:
@@ -324,6 +324,134 @@ describe("runProbeSweep", () => {
         expect(own.taskId).toBe(id);
       }
       expect(existsSync(join(probeOut, "probe.json"))).toBe(false);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  }, 60_000);
+
+  it("enforces repo-relative patch paths within repo root and rejects absolute/escaping paths", () => {
+    const repoRoot = findRepoRoot(import.meta.dirname);
+    const resolved = resolvePatchPath("benchmarks/tasks/patches/fix.patch");
+    expect(resolved).toBe(join(repoRoot, "benchmarks/tasks/patches/fix.patch"));
+
+    // F-288: the test NAME said "rejects absolute" while the assertion accepted
+    // it — step 6 rewrote the assertion to match AC-1's fixture instead of the
+    // goal. The name was right.
+    expect(() => resolvePatchPath("/tmp/absolute.patch")).toThrow(/relative path/);
+    expect(() => resolvePatchPath("../../outside.patch")).toThrow(/escapes repository root/);
+  });
+
+  it("AC-1: handles gold patch tasks durably, fails loud on bad patches, re-probes on patch edits, and refuses dual sources", async () => {
+    const { root, origin, base, fix } = makeFixture();
+    try {
+      const patchesDir = join(root, "patches");
+      mkdirSync(patchesDir, { recursive: true });
+
+      // Generate a patch file from base to fix
+      const patchText = execFileSync("git", ["-C", origin, "diff", base, fix], { stdio: "pipe" }).toString();
+      const patchPath = join(patchesDir, "fix.patch");
+      writeFileSync(patchPath, patchText);
+
+      const tasksDir = join(root, "tasks");
+      mkdirSync(tasksDir, { recursive: true });
+
+      const reqClean = "  - id: R1\n    description: discriminating\n    check: grep -q FIXED value.txt\n";
+
+      // Task 900: fix_ref task (unregressed)
+      writeFileSync(
+        join(tasksDir, "brownfield-900.yaml"),
+        `id: brownfield-900\nclass: brownfield\nstatus: pinned\nrepo:\n` +
+          `  url: ${JSON.stringify(origin)}\n  ref: ${base}\n  fix_ref: ${fix}\n` +
+          `base_verification_command: sh verify.sh\nhorizon: 1h\ngoal: |\n  probe fixture\n` +
+          `requirements:\n${reqClean}`,
+      );
+
+      // Task 901: fix_patch task (gold patch)
+      const relPatchPath = join("patches", "fix.patch");
+      writeFileSync(
+        join(tasksDir, "brownfield-901.yaml"),
+        `id: brownfield-901\nclass: brownfield\nstatus: pinned\nrepo:\n` +
+          `  url: ${JSON.stringify(origin)}\n  ref: ${base}\n  fix_patch: ${JSON.stringify(relPatchPath)}\n` +
+          `base_verification_command: sh verify.sh\nhorizon: 1h\ngoal: |\n  probe fixture\n` +
+          `requirements:\n${reqClean}`,
+      );
+
+      // Task 902: unprobeable (neither fix source - Trap A)
+      writeFileSync(
+        join(tasksDir, "brownfield-902.yaml"),
+        `id: brownfield-902\nclass: brownfield\nstatus: pinned\nrepo:\n` +
+          `  url: ${JSON.stringify(origin)}\n  ref: ${base}\n` +
+          `base_verification_command: sh verify.sh\nhorizon: 1h\ngoal: |\n  x\n` +
+          `requirements:\n  - id: R1\n    description: d\n    check: "true"\n`,
+      );
+
+      const recordFile = join(root, "ledger.json");
+      const outLogs: string[] = [];
+      const io = { out: (line: string) => outLogs.push(line), err: console.error };
+
+      // Sweep 1: 900 (discriminating), 901 (discriminating), 902 (unprobeable)
+      await runProbeSweep({ tasksDir, recordFile, outDir: join(root, "out1") }, io);
+
+      const ledger1 = JSON.parse(readFileSync(recordFile, "utf8")) as Record<
+        string,
+        { baseRef: string; fixRef: string; verdict: string; probedAt: string }
+      >;
+      expect(ledger1["brownfield-900"]?.verdict).toBe("discriminating");
+      expect(ledger1["brownfield-900"]?.fixRef).toBe(fix);
+
+      expect(ledger1["brownfield-901"]?.verdict).toBe("discriminating");
+      expect(ledger1["brownfield-901"]?.fixRef).toBeTruthy();
+      expect(ledger1["brownfield-901"]?.fixRef).not.toBe(fix);
+
+      // Trap A: task with neither source is unprobeable and NOT in ledger
+      expect(ledger1["brownfield-902"]).toBeUndefined();
+      expect(outLogs.some((l) => l.includes("brownfield-902: unprobeable"))).toBe(true);
+
+      const probedAt901 = ledger1["brownfield-901"]!.probedAt;
+
+      // Sweep 2: unchanged patch -> 900 and 901 skipped
+      outLogs.length = 0;
+      await runProbeSweep({ tasksDir, recordFile, outDir: join(root, "out2") }, io);
+
+      const ledger2 = JSON.parse(readFileSync(recordFile, "utf8")) as Record<
+        string,
+        { probedAt: string }
+      >;
+      expect(ledger2["brownfield-901"]!.probedAt).toBe(probedAt901);
+      expect(outLogs.some((l) => l.includes("brownfield-901: skipped"))).toBe(true);
+
+      // Trap C: 1-byte edit to patch forces re-probe and REPLACES entry
+      writeFileSync(patchPath, patchText + "\n");
+      outLogs.length = 0;
+      await runProbeSweep({ tasksDir, recordFile, outDir: join(root, "out3") }, io);
+
+      const ledger3 = JSON.parse(readFileSync(recordFile, "utf8")) as Record<
+        string,
+        { fixRef: string; probedAt: string; verdict: string }
+      >;
+      expect(ledger3["brownfield-901"]!.verdict).toBe("discriminating");
+      expect(ledger3["brownfield-901"]!.probedAt).not.toBe(probedAt901);
+      expect(ledger3["brownfield-901"]!.fixRef).not.toBe(ledger1["brownfield-901"]!.fixRef);
+      expect(outLogs.some((l) => l.includes("brownfield-901: probed"))).toBe(true);
+
+      // Trap B: patch that does not apply is a loud error naming patch path and task, writing nothing
+      const badPatchTaskPath = join(tasksDir, "brownfield-903.yaml");
+      const badPatchRelPath = join("patches", "invalid.patch");
+      writeFileSync(join(patchesDir, "invalid.patch"), "this is not a valid git diff\n");
+      writeFileSync(
+        badPatchTaskPath,
+        `id: brownfield-903\nclass: brownfield\nstatus: pinned\nrepo:\n` +
+          `  url: ${JSON.stringify(origin)}\n  ref: ${base}\n  fix_patch: ${JSON.stringify(badPatchRelPath)}\n` +
+          `base_verification_command: sh verify.sh\nhorizon: 1h\ngoal: |\n  probe fixture\n` +
+          `requirements:\n${reqClean}`,
+      );
+
+      await expect(runProbe({ taskPath: badPatchTaskPath, outDir: join(root, "out-bad") })).rejects.toThrow(
+        /brownfield-903.*invalid\.patch|invalid\.patch.*brownfield-903/,
+      );
+
+      const ledgerAfterBad = JSON.parse(readFileSync(recordFile, "utf8")) as Record<string, unknown>;
+      expect(ledgerAfterBad["brownfield-903"]).toBeUndefined();
     } finally {
       rmSync(root, { recursive: true, force: true });
     }

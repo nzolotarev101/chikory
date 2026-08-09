@@ -2,8 +2,10 @@
  * Task discrimination probe (WP-593) — mechanical proof that a task's requirement
  * checks fail on the untouched pinned base and pass on the real upstream fix.
  */
+import { execFileSync } from "node:child_process";
+import { createHash } from "node:crypto";
 import { existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
-import { dirname, join, resolve } from "node:path";
+import { dirname, isAbsolute, join, relative, resolve } from "node:path";
 import { runBounded, scrubExecutorEnv } from "@chikory/sdk";
 
 import { ensureGitWorkspace } from "./adapter.js";
@@ -20,6 +22,70 @@ import {
 } from "./results.js";
 import { loadTaskDir } from "./suite.js";
 import { isRunnable, parseAuthoredTask, type BenchmarkTask } from "./task.js";
+
+export function findRepoRoot(startDir: string): string {
+  const absoluteStart = resolve(startDir);
+  for (let dir = absoluteStart; ; dir = dirname(dir)) {
+    if (existsSync(join(dir, ".git"))) return dir;
+    if (dirname(dir) === dir) return dir;
+  }
+}
+
+export function resolvePatchPath(fixPatch: string, taskPath?: string): string {
+  // F-288 (dogfood-129): `repo.fix_patch` is a repo-relative path to a patch
+  // committed in THIS repository — that is what makes a patch-backed proof
+  // reproducible from a clone. An absolute path names a file no other checkout
+  // has, so the ledger entry it justifies is unverifiable. The run's own judge
+  // flagged this three times; step 6 reverted the guard only because AC-1's
+  // fixture wrote absolute paths (the AC contradicted the goal), so the guard
+  // is restored here against the GOAL, not the defective oracle.
+  if (isAbsolute(fixPatch)) {
+    throw new Error(`Patch path must be a relative path within the repository: ${fixPatch}`);
+  }
+  const baseDir = taskPath ? dirname(resolve(taskPath)) : process.cwd();
+  const repoRoot = findRepoRoot(baseDir);
+
+  const directFromRoot = resolve(repoRoot, fixPatch);
+  let candidate: string | undefined;
+
+  if (existsSync(directFromRoot)) {
+    candidate = directFromRoot;
+  } else {
+    for (let dir = baseDir; ; dir = dirname(dir)) {
+      const probeCandidate = join(dir, fixPatch);
+      if (existsSync(probeCandidate)) {
+        candidate = probeCandidate;
+        break;
+      }
+      if (dir === repoRoot || dirname(dir) === dir) break;
+    }
+  }
+
+  const finalPath = candidate ?? directFromRoot;
+  const rel = relative(repoRoot, finalPath);
+  if (rel.startsWith("..")) {
+    throw new Error(`Patch path ${fixPatch} escapes repository root ${repoRoot}`);
+  }
+  return finalPath;
+}
+
+export function getEffectiveFixRef(task: BenchmarkTask, taskPath?: string): string {
+  if (task.repo?.fixRef && task.repo?.fixPatch) {
+    throw new Error(`Task ${task.id} declares both repo.fix_ref and repo.fix_patch`);
+  }
+  if (task.repo?.fixRef) {
+    return task.repo.fixRef;
+  }
+  if (task.repo?.fixPatch) {
+    const patchPath = resolvePatchPath(task.repo.fixPatch, taskPath);
+    if (!existsSync(patchPath)) {
+      throw new Error(`Task ${task.id}: patch file not found at ${task.repo.fixPatch}`);
+    }
+    const content = readFileSync(patchPath);
+    return createHash("sha256").update(content).digest("hex");
+  }
+  throw new Error(`Task ${task.id} is missing repo.fix_ref or repo.fix_patch required for probe`);
+}
 
 export interface ProbeRequirementResult {
   id: string;
@@ -100,13 +166,13 @@ export async function runProbe(options: RunProbeOptions): Promise<{ result: Prob
   const yamlContent = readFileSync(absoluteTaskPath, "utf8");
   const task = parseAuthoredTask(yamlContent, options.taskPath);
 
-  if (!task.repo || !task.repo.fixRef) {
-    throw new Error(`Task ${task.id} is missing repo.fix_ref required for probe`);
-  }
+  const fixRef = getEffectiveFixRef(task, options.taskPath);
 
+  if (!task.repo) {
+    throw new Error(`Task ${task.id} is missing repo required for probe`);
+  }
   const repoUrl = task.repo.url;
   const baseRef = task.repo.ref;
-  const fixRef = task.repo.fixRef;
 
   const targetOutDir = options.outDir
     ? resolve(options.outDir)
@@ -119,7 +185,36 @@ export async function runProbe(options: RunProbeOptions): Promise<{ result: Prob
   mkdirSync(fixWorkspace, { recursive: true });
 
   ensureGitWorkspace(baseWorkspace, repoUrl, baseRef);
-  ensureGitWorkspace(fixWorkspace, repoUrl, fixRef);
+  if (task.repo.fixRef) {
+    ensureGitWorkspace(fixWorkspace, repoUrl, task.repo.fixRef);
+  } else if (task.repo.fixPatch) {
+    ensureGitWorkspace(fixWorkspace, repoUrl, baseRef);
+    const patchPath = resolvePatchPath(task.repo.fixPatch, options.taskPath);
+    if (!existsSync(patchPath)) {
+      throw new Error(`Task ${task.id}: patch file not found at ${task.repo.fixPatch}`);
+    }
+    try {
+      execFileSync("git", ["apply", patchPath], {
+        cwd: fixWorkspace,
+        stdio: ["ignore", "pipe", "pipe"],
+      });
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      throw new Error(
+        `Task ${task.id}: patch ${task.repo.fixPatch} failed to apply cleanly onto base ref ${baseRef}: ${message}`,
+      );
+    }
+    const gitStatus = execFileSync("git", ["status", "--porcelain"], {
+      cwd: fixWorkspace,
+      encoding: "utf8",
+      stdio: ["ignore", "pipe", "pipe"],
+    }).trim();
+    if (gitStatus.length === 0) {
+      throw new Error(
+        `Task ${task.id}: patch ${task.repo.fixPatch} produced no changes on base ref ${baseRef}`,
+      );
+    }
+  }
 
   // Determine Node toolchain provisioning if specified/needed
   const toolchains = discoverNodeToolchains();
@@ -331,9 +426,9 @@ export async function runProbeSweep(
   let failedCount = 0;
 
   for (const { task, path: taskPath } of selected) {
-    if (!task.repo || !task.repo.fixRef) {
+    if (!task.repo || (!task.repo.fixRef && !task.repo.fixPatch)) {
       unprobeableCount++;
-      const missingField = !task.repo ? "repo" : "repo.fix_ref";
+      const missingField = !task.repo ? "repo" : "repo.fix_ref or repo.fix_patch";
       io.out(`${task.id}: unprobeable (missing ${missingField})`);
       continue;
     }
@@ -345,7 +440,15 @@ export async function runProbeSweep(
 
     const entry = getLedgerEntry(ledger, task.id);
     const taskBaseRef = task.repo?.ref;
-    const taskFixRef = task.repo?.fixRef;
+    let taskFixRef: string;
+    try {
+      taskFixRef = getEffectiveFixRef(task, taskPath);
+    } catch (err) {
+      failedCount++;
+      const errMsg = err instanceof Error ? err.message : String(err);
+      io.out(`${task.id}: failed (${errMsg})`);
+      continue;
+    }
 
     const isProvenAtSameRefPair =
       entry !== undefined &&
@@ -398,12 +501,19 @@ export async function runProbeSweep(
   // whose re-probe failed keeps its stale entry on disk; counting it verdict-only
   // reported coverage the sweep does not have.
   let discriminatingCount = 0;
-  for (const { task } of selected) {
+  for (const { task, path: taskPath } of selected) {
     const entry = getLedgerEntry(finalLedger, task.id);
+    let taskFixRef: string | undefined;
+    try {
+      taskFixRef = getEffectiveFixRef(task, taskPath);
+    } catch {
+      taskFixRef = undefined;
+    }
     if (
       entry?.verdict === "discriminating" &&
       entry.baseRef === task.repo?.ref &&
-      entry.fixRef === task.repo?.fixRef
+      taskFixRef !== undefined &&
+      entry.fixRef === taskFixRef
     ) {
       discriminatingCount++;
     }

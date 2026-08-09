@@ -110,4 +110,26 @@ describe("authored task format v1 (WP-301 freeze)", () => {
     const { issues } = validateAuthoredTask(emptyCmd, "empty.yaml");
     expect(issues.join()).toMatch(/base_verification_command/);
   });
+
+  it("accepts a task declaring repo.fix_patch instead of repo.fix_ref", () => {
+    const yaml = VALID_PINNED.replace(
+      /repo:\n {2}url:.*\n {2}ref:.*\n/,
+      "repo:\n  url: https://github.com/example/app\n  ref: 0123456789abcdef0123456789abcdef01234567\n  fix_patch: benchmarks/tasks/patches/fix.patch\n",
+    );
+    const task = parseAuthoredTask(yaml, "patch.yaml");
+    expect(task.repo).toEqual({
+      url: "https://github.com/example/app",
+      ref: "0123456789abcdef0123456789abcdef01234567",
+      fixPatch: "benchmarks/tasks/patches/fix.patch",
+    });
+  });
+
+  it("refuses a task declaring both repo.fix_ref and repo.fix_patch (trap D)", () => {
+    const dual = VALID_PINNED.replace(
+      "ref: 0123456789abcdef0123456789abcdef01234567",
+      "ref: 0123456789abcdef0123456789abcdef01234567\n  fix_ref: 89abcdef0123456789abcdef0123456789abcdef\n  fix_patch: benchmarks/tasks/patches/fix.patch",
+    );
+    const { issues } = validateAuthoredTask(dual, "dual.yaml");
+    expect(issues.join()).toMatch(/task cannot declare both repo.fix_ref and repo.fix_patch/);
+  });
 });

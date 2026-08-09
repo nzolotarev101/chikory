@@ -34,7 +34,7 @@ commands:
                            exit 1 if any file is invalid
       [--require-probeable]  also exit 1 if any RUNNABLE task can never be
                              probed, naming each task and the field it lacks
-                             (a pinned brownfield task needs repo.fix_ref —
+                             (a pinned brownfield task needs repo.fix_ref or repo.fix_patch —
                              the gold patch, see benchmarks/tasks/AUTHORING.md)
   list <task-dir>...       list loaded tasks (id, class, status, requirements)
   probe --task <file> [--out <dir>] [--record <file>]
@@ -140,6 +140,7 @@ export function pickClassRefs(
 
 /** Every flag `validate`/`list` accepts. Anything else is a typo (F-285). */
 const VALIDATE_FLAGS = new Set(["require-probeable"]);
+const BOOLEAN_FLAGS = new Set(["require-probeable"]);
 
 function parseFlags(argv: string[]): Flags {
   const values: Record<string, string> = {};
@@ -148,12 +149,18 @@ function parseFlags(argv: string[]): Flags {
   for (let i = 0; i < argv.length; i++) {
     const arg = argv[i]!;
     if (arg.startsWith("--")) {
-      const key = arg.slice(2);
-      const next = argv[i + 1];
+      let key = arg.slice(2);
       let val = "true";
-      if (next !== undefined && !next.startsWith("--")) {
-        val = next;
-        i++;
+      if (key.includes("=")) {
+        const eqIdx = key.indexOf("=");
+        val = key.slice(eqIdx + 1);
+        key = key.slice(0, eqIdx);
+      } else if (!BOOLEAN_FLAGS.has(key)) {
+        const next = argv[i + 1];
+        if (next !== undefined && !next.startsWith("--")) {
+          val = next;
+          i++;
+        }
       }
       values[key] = val;
       if (!multiValues[key]) {
@@ -200,9 +207,9 @@ export async function main(argv: string[], io = { out: console.log, err: console
       }
       if (command === "validate" && requireProbeable) {
         for (const t of tasks) {
-          if (isRunnable(t) && (!t.repo || !t.repo.fixRef)) {
+          if (isRunnable(t) && (!t.repo || (!t.repo.fixRef && !t.repo.fixPatch))) {
             bad++;
-            const missingField = !t.repo ? "repo" : "repo.fix_ref";
+            const missingField = !t.repo ? "repo" : "repo.fix_ref or repo.fix_patch";
             io.err(`UNPROBEABLE ${t.id}: missing ${missingField}`);
           }
         }

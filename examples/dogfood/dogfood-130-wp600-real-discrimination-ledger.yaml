@@ -1,0 +1,484 @@
+# Plain: We published a head-to-head result over five benchmark tasks, but nobody has ever checked
+# whether those tasks' 19 checks can actually tell a good agent from a bad one. The tooling to check
+# that was built over the last five runs and has never been pointed at the real corpus once. This run
+# points it at the corpus for real — every task cloned at its before and after state, every check run
+# at both — and then re-derives the published numbers counting only the checks that proved they
+# discriminate, without re-running either arm.
+# WP: WP-600 (real discrimination ledger + evidence-only re-derivation)
+# Ladder-rung: 5 (the P3 exit gate — this is a SLICE of the rung, not another prerequisite; see WHY)
+# Thesis-KPI: corpus tasks with a REAL probe verdict 0/5 → ≥3/5; published requirements counted
+#   without discrimination proof 19/19 → 0; arms re-run to get there: 0
+# Format: loose — the outcomes and the two artifacts are fixed; internals are the executor's
+#
+# Launch mode: RUN (single node — one deliverable, two halves that are worthless apart).
+#   CHIKORY_PREFLIGHT_ONLY=1 devbox run run-dogfood
+#   devbox run run-dogfood
+#
+# WHY THIS AND NOT ANOTHER PREREQUISITE (dogfood-129 review, 2026-08-09):
+#   Progression gate: ⛔ STALLED + ⚠️ LADDER-PACE (rung 4 across the trailing 3 headlines), binding the
+#   next headline to the P3 ladder rung. Rung 5 IS the P3 exit gate. dogfood-125…129 each delivered a
+#   correct rung-5 prerequisite — probe (WP-593) → gate (WP-595) → durable sweep (WP-596) → probeable
+#   corpus (WP-597) → authored gold patch (WP-598) — and every one sealed at `rung=4`. **Five in a row.**
+#   The reason is always the same: each built a mechanism and none CONSUMED one. Measured on the landed
+#   tree 2026-08-09:
+#     $ node dist/bin.js validate ../tasks --require-probeable
+#     UNPROBEABLE brownfield-001: missing repo.fix_ref or repo.fix_patch   → exit 1
+#     $ ls benchmarks/results/discrimination.json
+#     (does not exist — NO corpus task has EVER been probed)
+#   So the published `benchmarks/publications/p3-rung-4/` result — Chikory 19/19 I-SR [83.2%, 100.0%]
+#   vs raw Claude Code 18/19 [75.4%, 99.1%] — counts 19 requirements, **zero** of which carry any
+#   evidence that they discriminate. That is the WP-595 gate's entire reason to exist, un-armed.
+#
+#   This run is the largest slice of rung 5 that can actually run today. It does NOT climb the rung:
+#   the exit gate needs intervals that SEPARATE, and 19 requirements cannot separate 100% from 94.7%
+#   at 95% confidence — that needs a wider corpus (WP-302 authoring campaign). What it does is turn
+#   "our corpus might be inflated" from a worry into a measurement, and produce the corrected baseline
+#   every later publication is built on.
+#
+# THE OPERATOR LIFT THIS RUN CANNOT DO (and which is now the critical path to the P3 exit gate):
+#   `brownfield-001` (ecyrbe/zodios, zod 3.22.4 → 4.x) is a SELF-PERFORMED migration — upstream never
+#   did it, so there is no commit to name. WP-598 (dogfood-129) made an authored gold patch expressible
+#   (`repo.fix_patch`, a repo-relative patch file), but writing the actual zod v4 migration is a 3–6h
+#   research lift — the task's own horizon — and it is an OPERATOR job, not a dogfood step. Until it
+#   exists, `brownfield-001` cannot be probed, and it is the ONLY task separating the two published
+#   arms. This run must therefore NAME it as unverified, never silently drop it.
+#
+# Designed traps — the plausible-but-wrong deliveries the acceptance criteria exist to reject:
+#   A. A hand-written ledger. The cheapest way to "arm the gate" is to author `discrimination.json`
+#      by hand with every task `discriminating` — green gate, zero evidence, both intervals unmoved.
+#      AC-2 requires each entry's `baseRef` to EQUAL the `repo.ref` in the task file and each
+#      ref-backed `fixRef` to EQUAL the task's declared `fix_ref` (transcription, not invention), each
+#      entry's requirement id set to equal the task's requirement ids EXACTLY, and a per-task
+#      `probe.json` to exist carrying the task's real `base_verification_command` in its verification
+#      reports. A fabricated ledger fails on the artifacts it cannot forge cheaply.
+#   B. Re-running the arms. Re-deriving the numbers by re-executing `chikory-bench run` burns hours of
+#      LLM quota, changes the evidence under the measurement, and makes the published result
+#      irreproducible from what is stored. AC-1 requires the re-derivation to work from STORED per-task
+#      results alone, on a fixture with no repo, no network and no adapter — and to finish fast.
+#   C. Re-deriving from the stored `summary.json` aggregates instead of the per-task evidence. Those
+#      aggregates are exactly what is under suspicion. AC-1 seeds a fixture whose `summary.json`
+#      DISAGREES with its own per-task files and requires the output to follow the per-task evidence.
+#   D. Silently dropping what cannot be verified. An excluded task that vanishes from the output turns
+#      a smaller denominator into a HIGHER score — the WP-541 retain-and-name rule exists for this.
+#      AC-1 requires every excluded task NAMED with a reason (absent from ledger · probed at a
+#      different ref · verdict not discriminating); AC-2 requires `brownfield-001` named in the real
+#      corrected publication.
+#   E. Copying the published interval instead of recomputing it. AC-1 requires the recomputed
+#      `iSrRange` to MOVE when requirements are excluded, and to be computed from the verified counts.
+#   F. Rewriting history. `benchmarks/publications/p3-rung-4/` is the dogfood-123 publication of record
+#      and must stay byte-identical; the corrected numbers go to a NEW bundle. AC-2 asserts both.
+#   G. Mislabelling the missing-scored-ref case (F-292, the discovery that reshaped this spec). Every
+#      stored suite predates `repoRef`, so `isTaskDiscriminationVerified` compares a real `baseRef`
+#      against `undefined` and emits "probed at ref X, but scored at ref undefined (stale proof)".
+#      That sentence is FALSE twice: the proof is not stale, and the task was not scored elsewhere —
+#      the suite simply never recorded what it scored. Reporting it as a stale proof, as an unprobed
+#      task, or "fixing" it by reading today's `repo.ref` out of the task file (which may have moved
+#      since the suite ran — the exact F-258 premise) are all wrong. AC-1 requires a FOURTH, distinct
+#      reason for it that says neither "stale" nor "never probed".
+#
+# PRECONDITIONS, ALL MEASURED 2026-08-09 (do not re-litigate; re-measure if stale):
+#   * A stored suite keeps FULL per-task evidence beside its aggregate: `benchmarks/results/p3-rung-4/
+#     chikory/20260806-203753-chikory/brownfield-00N.json` (5 files) + `summary.json`. The on-disk
+#     `TaskResult` shape is `{taskId, source, class, startedAt, endedAt, run:{exitCode, wallClockMs,
+#     artifacts, notes}, grading:{grades[], total, satisfied, dependencySatisfied}, baseVerification:
+#     {green, reason, …}, repoRef?}` — note `grading.grades`, not `requirements`.
+#   * 🟠 **F-292, measured 2026-08-09 across EVERY stored suite:** not one per-task result file
+#     carries `repoRef` — `suite.ts` began recording it only with WP-595 (dogfood-126, 2026-08-07),
+#     and every stored suite including the dogfood-123 publication of record predates that. So the
+#     WP-595 gate, applied to any suite that has already run, excludes 100% of tasks. This is a REAL
+#     finding to publish, not a bug to paper over. `isTaskVerified` returns true when
+#     `baseVerification` is absent (`results.ts:97-102`); `wilsonScoreInterval(k, 0)` returns
+#     `{low:0, high:0}` (`results.ts:334-335`), so a fully-unverifiable arm has a well-defined range.
+#   * `summarize(suite, adapter, startedAt, endedAt, results, ledger?)` (`results.ts:193-199`) ALREADY
+#     applies the WP-595 gate and emits `unverifiedTasks` — the gap is that nothing can feed it stored
+#     results. `--discrimination-ledger` exists ONLY on `run` (`main.ts:370-375`), which re-executes.
+#   * `runProbeSweep` walks a task dir, persists each verdict before the next task starts, skips a task
+#     already proven at the refs it declares, counts an unprobeable task separately, and exits 0 only
+#     when every selected task holds a current `discriminating` verdict (`probe.ts:419-460`).
+#   * Ledger verdicts are `"discriminating" | "not-discriminating" | "inconclusive"`
+#     (`results.ts:22`); per-REQUIREMENT classifications are `"discriminating" | "non-discriminating" |
+#     "unsatisfiable" | "inconclusive"` (`probe.ts:94`). The two spellings differ — do not unify them.
+#   * `--base-verify-minutes` is wired for both probe modes (`main.ts:36-50`), and both ledger readers
+#     throw on a damaged file rather than resetting it (F-275).
+#   * `validate`/`list` REFUSE an unknown flag (`VALIDATE_FLAGS`, `main.ts:142`, F-285); a new flag on
+#     those commands must join that set. `parseFlags` needs a boolean flag in `BOOLEAN_FLAGS`
+#     (`main.ts:143`) or it swallows the next argument.
+#   * A published or reported path goes through `publishableRepoPath` (WP-591, `results.ts:244-278`).
+#   * The four probeable tasks install with pinned package managers via `npx -y` and their verification
+#     commands are SCOPED (`--project zod`, a single `links.test.ts`), not whole-monorepo suites — but
+#     8 installs of real repos is still tens of minutes of wall clock. The sweep is durable by design
+#     (WP-596): a killed step resumes without re-probing proven work. Let it.
+
+name: dogfood-130-wp600-real-discrimination-ledger
+wp: WP-600
+goal: >
+  Arm the discrimination gate on the REAL corpus for the first time, and re-derive the published
+  head-to-head numbers through it without re-running either arm.
+
+  Two things must become true, and they are worthless apart — a ledger nobody consumes is another
+  unused mechanism, and a re-derivation over an invented ledger proves nothing.
+
+    * **The corpus carries real probe evidence.** Probing every runnable task in
+      benchmarks/tasks/ produces a durable discrimination ledger committed at
+      `benchmarks/results/discrimination.json`, with a real verdict per task and a real classification
+      per requirement, obtained by actually materializing each task's pinned base and its fix and
+      running its checks at both. `brownfield-001` has no fix source and CANNOT be probed: it must be
+      reported as unprobeable, named, and left out of the ledger — never fabricated, never exempted.
+      Every task that fails to probe is named with its reason and stepped over; the sweep's own
+      persistence and skip semantics are used as they are, not reimplemented. The per-task `probe.json`
+      artifacts are COMMITTED beside the ledger under `benchmarks/results/` — a verdict whose evidence
+      lives only in a scratch directory is not durable proof (WP-591's rule at the evidence altitude).
+
+    * **A published number can be re-derived from stored evidence alone.** A suite that has ALREADY
+      run can be re-summarized from its stored per-task result files plus a discrimination ledger,
+      producing a corrected summary that counts only requirements proven to discriminate at the ref
+      the task was scored at — with NO arm re-executed, no repository cloned, and no agent invoked.
+      Every task excluded by the gate is RETAINED and NAMED with the reason it was excluded; the
+      success rates and their confidence intervals are RECOMPUTED from the verified counts, never
+      copied from the stored aggregate. The stored per-task files are the evidence; the stored
+      aggregate summary is exactly what is under suspicion and must not be trusted as input.
+
+  Then point it at the real published suite and report what it finds, whatever that is. The stored
+  dogfood-123 evidence predates the field that records which ref each task was scored at, so a task
+  whose stored result carries no scored ref must be excluded under its OWN distinct reason — saying
+  "the stored suite did not record the ref it scored at" is honest; calling it a stale proof, or
+  guessing the ref from the task file as it stands today, is not. The finding goes into a NEW bundle
+  under `benchmarks/publications/` naming every excluded task and its reason, alongside a plain
+  statement of how many of the 19 published requirements can currently be verified.
+  benchmarks/publications/p3-rung-4/ is the publication of record and must remain byte-identical —
+  history is corrected by publishing beside it, never by editing it.
+
+  Everything already proven stays proven: probe --task / probe --tasks keep their flags, their
+  per-task `--out` scoping, their atomic ledger writes, their skip semantics and their exit contracts;
+  `summarize`'s gate logic and run --discrimination-ledger are not rewritten to make this work; no
+  task's goal, requirements, status, repo url, `repo.ref` or `repo.fix_ref` changes.
+
+  Authoring `brownfield-001`'s zod v4 migration patch is NOT part of this run — it is a 3–6h operator
+  lift. Report it as unprobeable and move on.
+
+  Constraints: TypeScript stays strict ESM with named exports and no `any`; no new dependency, no
+  provider SDK, no API key, no global install, no HTML output. A published or reported path goes
+  through the publishable-path helper (WP-591), never a raw argument. Project commands run
+  sequentially inside the already-activated Devbox environment, so invoke pinned tools directly and
+  never nest `devbox run`. Every existing test remains green, and `eslint` stays clean — run the
+  linter, not only the type-checker and the tests. Every existing test remains green.
+
+repos:
+  - url: /Users/nikitazolotarev/repos/chikory
+    writable: true
+
+acceptance_criteria:
+  - id: AC-1
+    description: >
+      THIS NODE'S OWN ORACLE — RED on HEAD, green only once a stored suite can be re-summarized from
+      its per-task evidence through a ledger. Against a fixture this check builds itself, with no
+      repository, no network and no agent: a task proven discriminating at the ref it was scored at
+      COUNTS; a task absent from the ledger, probed at a DIFFERENT ref, or holding a non-discriminating
+      verdict is EXCLUDED and NAMED with a reason (trap D); the aggregate in the fixture's own
+      `summary.json` disagrees with its per-task files and must be ignored (trap C); the recomputed
+      interval MOVES rather than being copied (trap E); and the whole thing finishes in seconds
+      (trap B). Executor-authored tests are not the oracle; the inputs and expected decisions are
+      written here.
+    check: |
+      cd benchmarks/harness && pnpm exec tsc && node --input-type=module -e '
+      import {mkdtempSync,mkdirSync,writeFileSync,readFileSync,existsSync,readdirSync} from "node:fs";
+      import {spawnSync} from "node:child_process";
+      import {tmpdir} from "node:os";
+      import {join} from "node:path";
+      const A=(c,m)=>{if(!c){console.error("FAIL: "+m);process.exit(1);}};
+      const root=mkdtempSync(join(tmpdir(),"resummarize-"));
+      const stored=join(root,"stored"); mkdirSync(stored,{recursive:true});
+      // FIVE stored tasks in the REAL on-disk TaskResult shape, 4 requirements each, all
+      // satisfied → the stored arm reads 20/20 = 100%.
+      const REFS={t1:"1111111111111111111111111111111111111111",
+                  t2:"2222222222222222222222222222222222222222",
+                  t3:"3333333333333333333333333333333333333333",
+                  t4:"4444444444444444444444444444444444444444",
+                  t5:"5555555555555555555555555555555555555555"};
+      const ids=["brownfield-t1","brownfield-t2","brownfield-t3","brownfield-t4","brownfield-t5"];
+      for (const id of ids) {
+        const key=id.split("-")[1];
+        const r={
+          taskId:id, source:id+".yaml", class:"brownfield",
+          startedAt:"2026-08-06T00:00:00.000Z", endedAt:"2026-08-06T00:10:00.000Z",
+          run:{exitCode:0,wallClockMs:1000,artifacts:[],notes:[]},
+          grading:{grades:[1,2,3,4].map((n)=>({id:"R"+n,satisfied:true,dependencySatisfied:true})),
+            total:4,satisfied:4,dependencySatisfied:4},
+          baseVerification:{green:true,reason:"Base suite is green"},
+        };
+        // t5 is the REAL WORLD case: a suite stored BEFORE the scored ref was recorded.
+        if (key!=="t5") r.repoRef=REFS[key];
+        writeFileSync(join(stored,id+".json"),JSON.stringify(r));
+      }
+      // trap C: the stored AGGREGATE lies — it claims 99 requirements and a 0.5 rate. The
+      // re-derivation must follow the per-task files, not this.
+      writeFileSync(join(stored,"summary.json"),JSON.stringify({
+        suite:"benchmarks/tasks", adapter:"chikory", tasks:5, tasksVerified:5,
+        requirementsTotal:99, requirementsSatisfied:50, dependencySatisfied:50,
+        iSr:0.5, iSrRange:{low:0.5,high:0.5}, dSr:0.5, dSrRange:{low:0.5,high:0.5},
+        perTask:ids.map((id)=>({taskId:id,satisfied:99,total:99})),
+      }));
+      // The ledger: t1 counts. t2 was probed at a DIFFERENT ref. t3 is not-discriminating.
+      // t4 is absent entirely. t5 IS proven — but the stored result never recorded a ref to
+      // check it against, which is its OWN reason, not a stale proof and not a missing probe.
+      const ledger=join(root,"discrimination.json");
+      const entry=(id,ref,verdict)=>({taskId:id,baseRef:ref,
+        fixRef:"ffffffffffffffffffffffffffffffffffffffff",verdict,
+        probedAt:"2026-08-09T00:00:00.000Z",
+        requirements:[1,2,3,4].map((n)=>({id:"R"+n,classification:"discriminating"}))});
+      writeFileSync(ledger,JSON.stringify({
+        "brownfield-t1":entry("brownfield-t1",REFS.t1,"discriminating"),
+        "brownfield-t2":entry("brownfield-t2","9999999999999999999999999999999999999999",
+                              "discriminating"),
+        "brownfield-t3":entry("brownfield-t3",REFS.t3,"not-discriminating"),
+        "brownfield-t5":entry("brownfield-t5",REFS.t5,"discriminating"),
+      }));
+      const out=join(root,"out");
+      const started=Date.now();
+      const cli=(...a)=>spawnSync("node",["dist/bin.js",...a],{encoding:"utf8"});
+      const text=(r)=>(r.stdout??"")+(r.stderr??"");
+      // The command must be discoverable from USAGE — an operator path nobody can find is F-274.
+      const usage=cli("--help");
+      A(/discrimination/i.test(text(usage)),
+        "the re-derivation must be documented in USAGE, got:\n"+text(usage).slice(0,2000));
+      let r;
+      for (const cmd of ["resummarize","re-summarize","summarize"]) {
+        r=cli(cmd,"--results",stored,"--discrimination-ledger",ledger,"--out",out);
+        if (r.status!==null && !/unknown command/i.test(text(r))) break;
+      }
+      const elapsed=Date.now()-started;
+      A(r.status===0,"re-deriving a stored suite through a ledger must exit 0, got "+r.status+
+        "\n"+text(r));
+      // trap B: nothing may be re-run. A fixture with no repo, no network and no agent cannot
+      // take minutes.
+      A(elapsed<60000,"trap B: re-derivation must work from stored evidence, not by re-running an "+
+        "arm — took "+elapsed+"ms");
+      const files=readdirSync(out);
+      const summaryFile=files.find((f)=>/summary\.json$/.test(f))??"summary.json";
+      A(existsSync(join(out,summaryFile)),
+        "a corrected summary must be written to --out, got "+JSON.stringify(files));
+      const s=JSON.parse(readFileSync(join(out,summaryFile),"utf8"));
+      // trap C: the per-task evidence wins over the lying aggregate.
+      A(s.requirementsTotal!==99,
+        "trap C: the stored aggregate must not be trusted as input, got requirementsTotal="+
+        s.requirementsTotal);
+      // ONLY t1 is proven at the ref it was scored at → 4 verified requirements, all satisfied.
+      const verified=s.requirementsVerified??s.requirementsVerifiedTotal;
+      A(verified===4,"only the task proven at the ref it was SCORED at may count — expected 4 "+
+        "verified requirements, got "+verified+" in "+JSON.stringify(s).slice(0,900));
+      // trap D: every excluded task is retained and NAMED with a reason.
+      const un=s.unverifiedTasks;
+      A(Array.isArray(un),"unverifiedTasks must be an array, got "+JSON.stringify(un));
+      const named=Object.fromEntries(un.map((u)=>[u.taskId,u.reason??""]));
+      for (const id of ["brownfield-t2","brownfield-t3","brownfield-t4","brownfield-t5"]) {
+        A(named[id]!==undefined,"trap D: excluded task "+id+" must be NAMED, got "+
+          JSON.stringify(un));
+        A(String(named[id]).trim().length>0,"trap D: "+id+" must carry a REASON, got "+
+          JSON.stringify(named[id]));
+      }
+      A(named["brownfield-t1"]===undefined,
+        "the task proven at its scored ref must NOT be reported unverified, got "+
+        JSON.stringify(un));
+      // the FOUR reasons must be DISTINGUISHABLE — moved-ref · wrong-verdict · never-probed ·
+      // and the real-world one: the stored suite never recorded the ref it scored at
+      A(new Set(["brownfield-t2","brownfield-t3","brownfield-t4","brownfield-t5"]
+          .map((id)=>named[id])).size===4,
+        "the four exclusion reasons must differ (probed at another ref · verdict not "+
+        "discriminating · never probed · stored suite recorded no scored ref), got "+
+        JSON.stringify(named));
+      // t5 is PROVEN discriminating — it must NOT be reported as a stale/moved proof, and it
+      // must NOT be reported as never probed. Its reason is about the STORED RESULT.
+      A(!/stale/i.test(named["brownfield-t5"])&&!/never probed/i.test(named["brownfield-t5"]),
+        "a task whose stored result records NO scored ref must not be mislabelled a stale proof "+
+        "or an unprobed task — it was probed, the stored suite just did not say what it scored. "+
+        "got: "+JSON.stringify(named["brownfield-t5"]));
+      A(/ref/i.test(named["brownfield-t5"]),
+        "the reason must say the stored result carries no scored ref, got "+
+        JSON.stringify(named["brownfield-t5"]));
+      // trap E: the interval is RECOMPUTED from the verified counts, not copied.
+      const range=s.iSrRange??s.iSrCi;
+      A(range&&typeof range.low==="number"&&typeof range.high==="number",
+        "a corrected iSr RANGE must be published, got "+JSON.stringify(range));
+      A(range.low!==0.5,"trap E: the interval must be recomputed, not copied from the stored "+
+        "aggregate, got "+JSON.stringify(range));
+      // 4/4 verified → the Wilson floor for n=4 is far below 1 and the high is 1.
+      A(range.high===1,"4 of 4 verified requirements satisfied → range.high must be 1, got "+
+        JSON.stringify(range));
+      A(range.low>0.3&&range.low<0.9,
+        "the recomputed floor must reflect n=4, not n=16 or n=99, got "+JSON.stringify(range));
+      // and it must REFUSE a damaged ledger rather than silently scoring everything (F-275)
+      const bad=join(root,"damaged.json"); writeFileSync(bad,"{not json");
+      const dr=cli("resummarize","--results",stored,"--discrimination-ledger",bad,"--out",
+                   join(root,"out2"));
+      A(dr.status!==0,"a damaged ledger must be refused, not silently ignored (F-275), got "+
+        dr.status+"\n"+text(dr));
+      console.log("AC-1 OK: a stored suite re-derives from its per-task evidence through a ledger "+
+        "with no arm re-run; every excluded task is named with a distinct reason; the lying "+
+        "aggregate is ignored and the interval is recomputed");
+      '
+
+  - id: AC-2
+    description: >
+      The REAL corpus carries REAL probe evidence, and the corrected publication is honest about what
+      it could not verify. `benchmarks/results/discrimination.json` holds entries obtained by actually
+      probing (trap A: every `baseRef` transcribed from the task's pinned `repo.ref`, every ref-backed
+      `fixRef` from its declared `fix_ref`, requirement ids matching the task file exactly, per-task
+      `probe.json` artifacts on disk); `brownfield-001` is absent from the ledger and NAMED as
+      unverified in the corrected publication rather than dropped; the new bundle publishes corrected
+      RANGES for both arms; and the dogfood-123 publication of record is byte-identical (trap F).
+    check: |
+      cd benchmarks/harness && pnpm exec tsc && node --input-type=module -e '
+      import {readdirSync,readFileSync,existsSync,statSync} from "node:fs";
+      import {execFileSync} from "node:child_process";
+      import {join,resolve} from "node:path";
+      import {pathToFileURL} from "node:url";
+      const A=(c,m)=>{if(!c){console.error("FAIL: "+m);process.exit(1);}};
+      const repo=resolve(process.cwd(),"..");
+      const corpus=join(repo,"tasks");
+      const T=pathToFileURL(join(process.cwd(),"dist/task.js")).href;
+      const {parseAuthoredTask,isRunnable}=await import(T);
+      // ── the ledger exists at the declared repo-relative path ──
+      const ledgerPath=join(repo,"results","discrimination.json");
+      A(existsSync(ledgerPath),
+        "the real corpus ledger must be committed at benchmarks/results/discrimination.json");
+      const raw=JSON.parse(readFileSync(ledgerPath,"utf8"));
+      const entries=Array.isArray(raw)?raw:Object.values(raw);
+      A(entries.length>=3,"at least 3 corpus tasks must carry a REAL probe verdict, got "+
+        entries.length+" ("+entries.map((e)=>e.taskId).join(", ")+")");
+      const byId=Object.fromEntries(entries.map((e)=>[e.taskId,e]));
+      // ── trap A: the ledger is TRANSCRIBED from the tasks, not invented ──
+      const tasks={};
+      for (const name of readdirSync(corpus).sort()) {
+        if (!/\.ya?ml$/.test(name)) continue;
+        const t=parseAuthoredTask(readFileSync(join(corpus,name),"utf8"),name);
+        if (t.class!=="brownfield"||!isRunnable(t)) continue;
+        tasks[t.id]=t;
+      }
+      A(Object.keys(tasks).length>=5,"expected the 5 pinned brownfield tasks, got "+
+        Object.keys(tasks).length);
+      for (const e of entries) {
+        const t=tasks[e.taskId];
+        A(t!==undefined,"the ledger names a task that is not in the corpus: "+e.taskId);
+        A(e.baseRef===t.repo.ref,
+          e.taskId+": ledger baseRef must be the task pinned repo.ref — expected "+t.repo.ref+
+          ", got "+e.baseRef);
+        if (t.repo.fixRef) {
+          A(e.fixRef===t.repo.fixRef,
+            e.taskId+": ledger fixRef must be the task declared repo.fix_ref — expected "+
+            t.repo.fixRef+", got "+e.fixRef);
+        }
+        const want=t.requirements.map((r)=>r.id).sort().join(",");
+        const got=(e.requirements??[]).map((r)=>r.id).sort().join(",");
+        A(want===got,e.taskId+": ledger requirement ids must match the task exactly — expected ["+
+          want+"], got ["+got+"]");
+        for (const r of e.requirements) {
+          A(typeof r.classification==="string"&&r.classification.length>0,
+            e.taskId+"/"+r.id+": every requirement needs a real classification, got "+
+            JSON.stringify(r));
+        }
+        A(typeof e.probedAt==="string"&&!Number.isNaN(Date.parse(e.probedAt)),
+          e.taskId+": probedAt must be a real timestamp, got "+JSON.stringify(e.probedAt));
+      }
+      // ── trap A: probing leaves artifacts a hand-written ledger does not have ──
+      const probeJsons=execFileSync("git",["-C",repo,"ls-files","--","results"],
+        {encoding:"utf8"}).trim().split("\n").filter((p)=>/(^|\/)probe\.json$/.test(p));
+      A(probeJsons.length>=3,
+        "trap A: each probed task must leave a COMMITTED probe.json artifact under "+
+        "benchmarks/results/, found "+JSON.stringify(probeJsons));
+      let withCommand=0;
+      for (const p of probeJsons) {
+        const pj=JSON.parse(readFileSync(join(repo,p),"utf8"));
+        const t=tasks[pj.taskId];
+        if (!t) continue;
+        A(pj.baseRef===t.repo.ref,p+": probe.json baseRef must be the task pinned ref");
+        const blob=JSON.stringify(pj);
+        if (t.baseVerificationCommand&&blob.includes(t.baseVerificationCommand.slice(0,24))) {
+          withCommand++;
+        }
+        A(pj.baseVerification&&pj.fixVerification,
+          p+": probe.json must record BOTH base and fix verification, got "+blob.slice(0,400));
+      }
+      A(withCommand>=1,
+        "trap A: at least one probe.json must carry the task real base_verification_command as "+
+        "evidence the checks actually ran");
+      // ── brownfield-001 cannot be probed: absent from the ledger, never fabricated ──
+      A(byId["brownfield-001"]===undefined,
+        "brownfield-001 has no fix source and MUST NOT have a fabricated ledger entry, got "+
+        JSON.stringify(byId["brownfield-001"]));
+      // ── the corrected publication: a NEW bundle that NAMES what it could not verify ──
+      const pubs=join(repo,"publications");
+      const bundles=readdirSync(pubs).filter((d)=>statSync(join(pubs,d)).isDirectory()&&
+        d!=="p3-rung-4"&&d!=="leaderboard");
+      A(bundles.length>=1,"a NEW corrected bundle must be published beside p3-rung-4, got "+
+        JSON.stringify(readdirSync(pubs)));
+      let found=null;
+      for (const b of bundles) {
+        for (const f of readdirSync(join(pubs,b))) {
+          if (!/\.json$/.test(f)) continue;
+          const j=JSON.parse(readFileSync(join(pubs,b,f),"utf8"));
+          const arms=[j,j.armA,j.armB,...(Array.isArray(j.arms)?j.arms:[])].filter(Boolean);
+          for (const arm of arms) {
+            if (Array.isArray(arm.unverifiedTasks)&&
+                arm.unverifiedTasks.some((u)=>u.taskId==="brownfield-001")) {
+              found={bundle:b,file:f,arm};
+            }
+          }
+        }
+      }
+      A(found!==null,
+        "the re-derivation over the real stored suite must NAME brownfield-001 as unverified "+
+        "(never silently drop the one task carrying the published separation), searched "+
+        JSON.stringify(bundles));
+      const u1=found.arm.unverifiedTasks.find((u)=>u.taskId==="brownfield-001");
+      A(String(u1.reason??"").trim().length>0,
+        "brownfield-001 must carry the REASON it could not be verified, got "+JSON.stringify(u1));
+      // The stored rung-4 evidence predates the scored-ref field, so EVERY task is unverifiable.
+      // The publication must say so for all five, not just the convenient one.
+      for (const id of ["brownfield-001","brownfield-002","brownfield-003","brownfield-004",
+                        "brownfield-005"]) {
+        A(found.arm.unverifiedTasks.some((u)=>u.taskId===id),
+          "every task the re-derivation could not verify must be NAMED — missing "+id+" in "+
+          JSON.stringify(found.arm.unverifiedTasks));
+      }
+      const vr=found.arm.requirementsVerified??found.arm.requirementsVerifiedTotal;
+      A(typeof vr==="number"&&vr<19,
+        "the re-derived arm must count FEWER than the 19 requirements it published without any "+
+        "discrimination proof, got "+vr+" in "+found.bundle+"/"+found.file);
+      const rg=found.arm.iSrRange??found.arm.iSrCi;
+      A(rg&&typeof rg.low==="number"&&typeof rg.high==="number",
+        "the re-derived arm must publish a RANGE, got "+JSON.stringify(rg));
+      A(rg.low!==0.8318207759473837,
+        "the floor must be RECOMPUTED from what is verifiable, never the rung-4 published value, "+
+        "got "+JSON.stringify(rg));
+      // and the bundle must state the finding in words an operator can read
+      const prose=readdirSync(join(pubs,found.bundle))
+        .filter((f)=>/\.md$/.test(f))
+        .map((f)=>readFileSync(join(pubs,found.bundle,f),"utf8")).join("\n");
+      A(prose.trim().length>0,
+        "the bundle must carry a readable report, found only "+
+        JSON.stringify(readdirSync(join(pubs,found.bundle))));
+      A(/\b19\b/.test(prose)&&/verif/i.test(prose),
+        "the report must state how many of the 19 published requirements can currently be "+
+        "verified, got:\n"+prose.slice(0,1200));
+      // ── trap F: the publication of record is untouched ──
+      const dirty=execFileSync("git",["-C",repo,"status","--porcelain","--",
+        "publications/p3-rung-4"],{encoding:"utf8"}).trim();
+      A(dirty==="","trap F: benchmarks/publications/p3-rung-4 is the dogfood-123 publication of "+
+        "record and must stay byte-identical, got:\n"+dirty);
+      console.log("AC-2 OK: the real corpus carries transcribed, artifact-backed probe evidence; "+
+        "brownfield-001 is named unverified rather than dropped; the corrected bundle publishes "+
+        "recomputed ranges; and the publication of record is untouched");
+      '
+
+# WP-566 agent classes. Primaries unchanged — Gemini executes, Codex judges.
+# routing.stages is DERIVED from the selected members and must not be restated here.
+agent_classes:
+  executor: executor-default
+  judge: judge-default
+
+judge:
+  cadence: 1
+  max_cost_share: 0.5
+
+budget_usd: 20
+max_steps: 12

@@ -51,7 +51,7 @@ export interface BenchmarkTask {
   goal: string;
   requirements: BenchmarkRequirement[];
   preferences: BenchmarkPreference[];
-  repo?: { url: string; ref: string; fixRef?: string };
+  repo?: { url: string; ref: string; fixRef?: string; fixPatch?: string };
   baseVerificationCommand?: string;
   /**
    * F-254 (WP-586): exact Node version this task is graded on, overriding the
@@ -100,6 +100,7 @@ const AuthoredTaskYaml = z
         url: z.string().min(1),
         ref: z.string().min(1),
         fix_ref: z.string().min(1).optional(),
+        fix_patch: z.string().min(1).optional(),
       })
       .strict()
       .optional(),
@@ -193,6 +194,9 @@ export function validateAuthoredTask(
   if (t.class === "brownfield" && !t.repo) {
     issues.push("brownfield task requires repo.url + repo.ref");
   }
+  if (t.repo && t.repo.fix_ref !== undefined && t.repo.fix_patch !== undefined) {
+    issues.push("task cannot declare both repo.fix_ref and repo.fix_patch");
+  }
 
   // Pinned/blocked = reproducible-quality: real repo ref, every check executable
   // (no TBD). A `blocked` task is a pinned task the env can't grade yet, so it
@@ -245,6 +249,7 @@ export function validateAuthoredTask(
             url: t.repo.url,
             ref: t.repo.ref,
             ...(t.repo.fix_ref ? { fixRef: t.repo.fix_ref } : {}),
+            ...(t.repo.fix_patch ? { fixPatch: t.repo.fix_patch } : {}),
           }
         : undefined,
     baseVerificationCommand: t.base_verification_command,

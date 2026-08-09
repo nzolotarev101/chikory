@@ -61,7 +61,7 @@ requirements:
     // the real flag reports the unprobeable task and exits 1
     const armed = io();
     expect(await main(["validate", dir, "--require-probeable"], armed)).toBe(1);
-    expect(armed.lines.err.join("\n")).toContain("UNPROBEABLE brownfield-901: missing repo.fix_ref");
+    expect(armed.lines.err.join("\n")).toContain("UNPROBEABLE brownfield-901: missing repo.fix_ref or repo.fix_patch");
 
     // a typo must NOT read as "corpus is fine"
     const typo = io();

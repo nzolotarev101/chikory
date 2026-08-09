@@ -8,21 +8,21 @@ recover a run, and how to land the result as a normal PR.
 **Status (2026-08-08, bounded — update discipline: REPLACE this block, ≤15 lines;
 displaced prose moves verbatim to [`PLAN-HISTORY.md`](PLAN-HISTORY.md); per-run detail:
 `docs/reports/`; queue + course correction: `plan.md` §6/§7).**
-🟢 **dogfood-128 DELIVERED WP-597 — the benchmark corpus can finally produce the evidence the
-scoring gate consumes, for 4 of 5 tasks** (`run-951a565d-73a5-4cc8-a230-9b63d872fba9`, SUCCESS **1 step
-$0.0425/$15.00**, 2m 46s, 2/2 criteria + 6/6 rubric, harvest byte-IDENTICAL 8/8, `docs/reports/dogfood-128.md`).
-`brownfield-002/003/004/005` carry a real `repo.fix_ref` — each fetched and read by hand, each the direct
-child of its pinned base, subjects matching the PRs the tasks already named in prose (#3036 · #5855 ·
-#13613 · #7390). `AUTHORING.md` carries the gold-patch rule; `validate --require-probeable` names each
-runnable task that can never be probed; `probe --tasks` records `unprobeable` as its OWN outcome.
-🟡 **F-285 HAND-FIXED** — the flag was undocumented and `parseFlags` swallowed unknown flags, so
-`--require-probable` exited **0**: USAGE + `VALIDATE_FLAGS` allowlist, +2 tests, harness 199→**201**.
-**🟠 F-284 — the rung is STILL blocked:** `brownfield-001` (the ONLY task separating
-the two published arms) is a self-performed migration with no upstream fix, so `--require-probeable` over
-the real corpus exits 1 forever and the sweep can never exit 0 — `runProbe` fetches the fix from the
-task's own `repo.url` (`probe.ts:121-122`), so a self-authored patch is inexpressible. 🟡 F-286 (the rule
-is enforced nowhere `devbox run bench` runs) folds in. Progression ⛔ **STALLED** + ⚠️ LADDER-PACE, `rung=4`.
-**NEXT = WP-598 (dogfood-129): make a gold patch upstream never authored probeable, then arm the $0 guard.**
+**Status (2026-08-09, bounded — update discipline: REPLACE this block, ≤15 lines;
+displaced prose moves verbatim to [`PLAN-HISTORY.md`](PLAN-HISTORY.md); per-run detail:
+`docs/reports/`; queue + course correction: `plan.md` §6/§7).**
+🟢 **dogfood-129 DELIVERED WP-598 — a benchmark task can carry its own gold patch**
+(`run-6ac4329e-c172-4f85-b1fc-c0ef9fb60851`, SUCCESS **6 steps $0.3634/$15.00**, 22m 14s, 2/2 criteria,
+harvest byte-IDENTICAL 7/7, `docs/reports/dogfood-129.md`). `repo.fix_patch` + apply-onto-base; a patch that
+fails to apply is a named error with nothing recorded; the ledger `fixRef` is the patch's **sha256**, so editing it re-probes via WP-596's skip test. No `exempt` escape hatch (trap A).
+🔴 **F-288 — the run shipped a hole its own judge named 3×.** AC-1 mandated ABSOLUTE patch paths against a
+goal demanding repo-relative; step 5 fixed it, AC-1 went RED, step 6 **reverted the fix to satisfy the AC**.
+The judge's out-of-rubric `concern` named the conflict verbatim; `verdict.ts:126` drops a concern whenever
+the rubric also failed → sealed SUCCESS. **→ WP-599.** 🔴 F-289 + 🟡 F-290 hand-fixed (`probe.ts:35-45`,
+`probe.test.ts:340`, `test/task.test.ts:116` — lint shipped RED). 🟠 **F-292:** no stored per-task result
+carries `repoRef`, so the WP-595 gate excludes 100% of any already-run suite. Progression ⛔ **STALLED**,
+`rung=4` — 5th consecutive rung-5 prerequisite. **NEXT = WP-600 (dogfood-130): consume the machinery —
+probe the real corpus, re-derive the published numbers. Then only an OPERATOR lift remains.**
 
 Related docs: [`docs/spec/task-spec.md`](spec/task-spec.md) (schema
 reference) · [`docs/TASK-PROTOCOL.md`](TASK-PROTOCOL.md) (WP etiquette, §7 is
@@ -844,6 +844,43 @@ broken (a false-green, not a follow-on fix).
 | The raw Claude Code baseline arm finishes in minutes with every task scoring its no-op baseline | **The agent got an empty prompt** (bench-p3-rung-4-2026-08-06 🟠 **F-260 → WP-587**). `claude -p` / `--print` is a BOOLEAN flag, so `--cmd 'claude -p "$(cat {goalFile})" …'` passes the goal as a positional the CLI never consumes. Use `devbox run bench-baseline`, which puts the prompt on stdin. Do not hand-write this arm from notes — that is how it went stale the first time. |
 
 ## 8. Known P1 limitations (so you don't fight them)
+
+- **An acceptance criterion that contradicts its own goal BEATS a correct judge
+  finding** (🔴 F-288/F-289, dogfood-129 — the sharpest lesson of the campaign).
+  dogfood-129's goal defined `repo.fix_patch` as "a repo-relative path to a patch
+  file in THIS repository"; AC-1's fixture wrote its patches to `mkdtempSync` and
+  declared them with ABSOLUTE paths. The judge's completion review caught the
+  resulting hole (`resolvePatchPath` accepting any absolute path), step 5 FIXED it,
+  AC-1 went red, and step 6 **reverted the fix** — "to allow absolute patch paths,
+  as required by the AC-1 oracle fixture script" — and rewrote the unit test so its
+  assertion contradicted its own name. The judge then raised an out-of-rubric
+  `concern` naming the conflict exactly, and the run still sealed 🟢 SUCCESS
+  (F-288: `verdict.ts:126` drops a concern whenever the rubric also failed).
+  **Rules:** (1) the AC is the gate and the judge is advisory, so a wrong AC drives
+  the delivery toward the anti-goal — before launch, read every AC back against the
+  goal sentence it enforces and check they agree; (2) arming in BOTH directions
+  cannot catch this — RED-on-HEAD and GREEN-on-reference both pass happily on the
+  wrong behavior; (3) when a review finds it after the fact, fix the CODE against
+  the goal and record the AC as retro-invalid in the report — never rewrite a spec
+  that already ran, and never preserve a green you know is wrong.
+
+- **No stored benchmark suite records the ref it scored each task at** (🟠 F-292,
+  found 2026-08-09 while arming dogfood-130). `suite.ts` began recording `repoRef`
+  only with WP-595 (dogfood-126, 2026-08-07); every suite stored before that —
+  including `benchmarks/results/p3-rung-4/`, the publication of record — lacks it.
+  So `isTaskDiscriminationVerified` (`results.ts:173`) compares a real `baseRef`
+  against `undefined` and excludes **100%** of tasks, reporting "probed at ref X,
+  but scored at ref undefined (stale proof)" — false twice: the proof is not stale
+  and the task was not scored elsewhere. **Do not "fix" it by reading today's
+  `repo.ref` out of the task file** — the ref may have moved since the suite ran,
+  which is the exact F-258 premise error. The case needs its own distinct reason.
+
+- **A dogfood delivery can seal SUCCESS with `devbox run lint` red** (🟡 F-290,
+  dogfood-129). Both ACs ran `pnpm exec tsc` and the suites; neither ran `eslint`,
+  and the executor's own verification table reported tsc + tests green — accurate
+  and incomplete. The harvest gate caught it and refused to land. **If a run's
+  goal says "every existing test remains green", say `eslint` too, or expect to
+  hand-fix it in review.**
 
 - **An AC that greps a file for PROSE is satisfiable by prose that already exists**
   (🟡 F-287, dogfood-128). AC-2 required `brownfield-001` to "STATE why it carries no
