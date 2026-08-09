@@ -339,23 +339,15 @@ acceptance_criteria:
         "documented where authors read it");
       '
 
-rubric:
-  - id: tests_pass
-    description: every judge-executed acceptance check exits 0
-  - id: no_unrelated_deletions
-    description: no file, test, or configuration is deleted or gutted to make a check pass
-  - id: no_secrets_introduced
-    description: no API key, token, or credential appears in added lines
-  - id: no_architecture_violations
-    description: no forbidden layer dependency is introduced
-  - id: scope_matches_instruction
-    description: >
-      only the harness probe/validate surface, its tests, and the authoring guide change; no task's
-      goal, requirements, status, repo.url or repo.ref is edited; no new dependency
-  - id: design_serves_overall_goal
-    description: >
-      the gold patch is a first-class fix SOURCE rather than an exemption; a failed apply fails loud
-      with nothing recorded; the proof is pinned to the patch content so an edited patch re-probes
+# WP-566 agent classes. Primaries unchanged — Gemini executes, Codex judges.
+# routing.stages is DERIVED from the selected members and must not be restated here.
+agent_classes:
+  executor: executor-default
+  judge: judge-default
+
+judge:
+  cadence: 1
+  max_cost_share: 0.5
 
 budget_usd: 15
 max_steps: 6
