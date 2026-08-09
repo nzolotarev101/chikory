@@ -13,9 +13,8 @@ scoring gate consumes, for 4 of 5 tasks** (`run-951a565d-73a5-4cc8-a230-9b63d872
 $0.0425/$15.00**, 2m 46s, 2/2 criteria + 6/6 rubric, harvest byte-IDENTICAL 8/8, `docs/reports/dogfood-128.md`).
 `brownfield-002/003/004/005` carry a real `repo.fix_ref` — each fetched and read by hand, each the direct
 child of its pinned base, subjects matching the PRs the tasks already named in prose (#3036 · #5855 ·
-#13613 · #7390). `AUTHORING.md` carries the gold-patch rule; `validate --require-probeable` exits 1 naming
-each runnable task that can never be probed and the field it lacks; `probe --tasks` records `unprobeable`
-as its OWN outcome, never a probe failure. All 5 traps rejected.
+#13613 · #7390). `AUTHORING.md` carries the gold-patch rule; `validate --require-probeable` names each
+runnable task that can never be probed; `probe --tasks` records `unprobeable` as its OWN outcome.
 🟡 **F-285 HAND-FIXED** — the flag was undocumented and `parseFlags` swallowed unknown flags, so
 `--require-probable` exited **0**: USAGE + `VALIDATE_FLAGS` allowlist, +2 tests, harness 199→**201**.
 **🟠 F-284 — the rung is STILL blocked:** `brownfield-001` (the ONLY task separating
@@ -610,6 +609,55 @@ Mid-run guidance injection (`chikory inject`) is P2 (WP-212) — today your
 levers are approve/reject, budget, and cancel.
 
 ## 6. Harvesting the result
+
+### The scripted review loop (2026-08-08)
+
+`/dogfood-review` used to be ~45 separately-approved shell calls plus three
+throwaway scripts rebuilt from scratch in every session. The mechanical half is
+now five commands; judgment (transcripts, anomaly hunt, prose, gate verdicts,
+the next spec's traps) stays with the reviewer.
+
+```sh
+# phase 0 — idempotent harvest + evidence pack + progression gate, one approval
+devbox run -- bash scripts/dogfood-open.sh [<run-id>]
+
+# phase 4 — report skeleton + the living-doc surgery (facts from phase 0)
+FACTS=.chikory/review/<run-id>.facts.json
+devbox run -- node scripts/dogfood-docs.mjs scaffold <NNN> --facts "$FACTS"
+devbox run -- node scripts/dogfood-docs.mjs block --target dogfooding --block <file>
+devbox run -- node scripts/dogfood-docs.mjs block --target plan-latest --block <file>
+devbox run -- node scripts/dogfood-docs.mjs ledger <NNN> --facts "$FACTS" --wp WP-n --catches N --rung N
+devbox run -- node scripts/dogfood-docs.mjs index  <NNN> --outcome <file>
+
+# phase 5 — arm the next spec's oracle in BOTH directions, timed vs the 120 s cap
+devbox run -- bash scripts/dogfood-arm.sh <spec>            # RED on HEAD
+devbox run -- bash scripts/dogfood-arm.sh <spec> --green    # vs a reference impl
+devbox run -- bash scripts/dogfood-arm.sh <spec> --table    # the report block
+
+# landing — gates, suite, commit, push (refuses to commit if any gate is red)
+devbox run -- bash scripts/dogfood-close.sh <NNN> --run-id <run-id>
+```
+
+Three properties worth knowing:
+
+- **`dogfood-open.sh` never harvests over unrelated work.** It harvests only when
+  no commit references the run AND the tree is clean; a dirty tree with no landed
+  commit is a refusal, not a merge.
+- **Numbers are derived, not retyped.** `dogfood-verify.sh --facts` writes every
+  trace value to `.chikory/review/<run-id>.facts.json`, and `scaffold`/`ledger`
+  read it. The ledger's judgment columns (`class`, `rung`, `judge_catches`,
+  `spec_format`) are still yours and have no defaults for the first three.
+- **Caps and citations are enforced, not remembered.** `block` refuses a
+  replacement that busts the ≤15/≤30-line cap and moves the displaced prose
+  verbatim to `PLAN-HISTORY.md`; `dogfood-close.sh` fails on any `file:line` in
+  the report that does not resolve. Both defects shipped in the dogfood-128
+  review when the same work was done by hand.
+
+`scripts/test-dogfood-review.sh` covers all of it, and `devbox run test-scripts`
+runs every `scripts/test-*.sh` (before this, `test-dogfood-ac-preflight.sh` and
+`test-dogfood-landed-scope.sh` existed but nothing ever executed them).
+
+### Landing the delivery
 
 The work lives in the run workspace, on a run-private branch:
 

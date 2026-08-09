@@ -12,42 +12,65 @@ order, and **do not skip phase 4 even when the run looks clean** — the
 report is a first-class plan input (TASK-PROTOCOL §7), and dogfood-002
 proved a SUCCESS run can still surface three plan-changing gaps.
 
-## 0. Run the mechanical evidence pack — one command
+## Scripted vs judgment — read this before anything else
 
-The repetitive phase 1–2 checks are scripted. Run it FIRST and reason over
-its output:
+Every step that is the same in every review is a script. **Use them.** Rebuilding
+one by hand in the scratchpad is how a review turns into 45 approval prompts and
+how transcription errors get into the report.
+
+| step | command | approvals |
+|---|---|---|
+| phase 0 — harvest + evidence + progression | `devbox run -- bash scripts/dogfood-open.sh [<run-id>]` | 1 |
+| phase 4 — report skeleton | `devbox run -- node scripts/dogfood-docs.mjs scaffold <nnn> --facts <json>` | 1 |
+| phase 4 — bounded status blocks | `… dogfood-docs.mjs block --target dogfooding\|plan-latest --block <file>` | 1 |
+| phase 4 — ledger row | `… dogfood-docs.mjs ledger <nnn> --facts <json> --wp WP-n --catches N --rung N` | 1 |
+| phase 4 — README index row | `… dogfood-docs.mjs index <nnn> --outcome <file>` / `--row <file>` | 1 |
+| phase 5 — arm the ACs | `devbox run -- bash scripts/dogfood-arm.sh <spec> [--green\|--table\|--discard]` | 1 |
+| landing — gates + suite + commit + push | `devbox run -- bash scripts/dogfood-close.sh <nnn> --run-id <id>` | 1 |
+
+**Yours, and not scripted:** reading every step transcript and judge pass · the
+line-by-line diff-vs-goal review · the phase-3 anomaly hunt · all report prose,
+friction severity and disposition · the §0–§1.5 gate verdicts · designing the next
+spec and its traps · writing the throwaway reference implementation for the GREEN
+arming pass.
+
+**Two environment traps that have cost real time — do not relearn them:**
+
+- **Never inline multi-line code into `devbox run -- node -e '…'`** — devbox mangles
+  the newlines and you get `SyntaxError: Expected unicode escape`. Write a file and
+  run it, or use a `node - <<'NODE'` heredoc with values passed through the
+  environment (never string-interpolated).
+- **Never `cd` out of the repo root, and remember the harness shell is zsh** — zsh
+  does not word-split unquoted `$var`, so `for x in "a b c"; set -- $x` silently
+  breaks; and a `cd` into `.chikory/runs/<id>/workspace` makes every later relative
+  read resolve against the run's tree instead of yours. Every script here anchors
+  itself with `cd "$(dirname "$0")/.."`; ad-hoc commands should use absolute paths.
+
+## 0. Open the review — one command
 
 ```sh
-devbox run -- bash scripts/dogfood-verify.sh <run-id>
-# or: devbox run dogfood-verify   # newest run
+devbox run -- bash scripts/dogfood-open.sh <run-id>   # or omit for the newest run
 ```
 
-Then run the **progression gate** (course correction 2026-07-02) and keep its
-output — phase 5 is bound by its verdict:
+This is phase 0 in a single approval, and it is **idempotent** — safe to re-run:
 
-```sh
-devbox run -- bash scripts/dogfood-progression.sh
-# ✅ PROGRESSING / ⛔ STALLED over docs/reports/dogfood-ledger.csv, + §1.5 cap check
-```
+1. **Harvest** the delivery onto the working tree, but only when it is
+   unambiguously safe: no commit already references the run AND the tree is clean.
+   Already landed → says so and reviews the tree as-is. Dirty tree with no landed
+   commit → **refuses**, rather than harvesting on top of unrelated work.
+2. **Evidence pack** (`dogfood-verify.sh --facts`): trace header/rows/totals ·
+   per-step diff bytes, cost, checkpoint chain, judge criteria/rubric/verdict ·
+   every acceptance check re-run against the tree the delivery lives in ·
+   `git status --short` · harvest byte-diff vs the run workspace · cost-share with
+   the empty-diff **probe step → F-11 %** data point.
+3. **Progression gate** — ✅ PROGRESSING / ⛔ STALLED plus the §1.5 cap check.
+   **Phase 5 is bound by this verdict.**
+4. A **state-of-play** summary, and a machine-readable facts blob at
+   `.chikory/review/<run-id>.facts.json`.
 
-It pulls the acceptance checks from the run's OWN journal (`task_json`, so
-they always match the run), and emits one markdown block:
-
-1. **Trace** — header · per-step rows · totals.
-2. **Per-step evidence** — diff bytes, cost, checkpoint chain, judge pass
-   (criteria/rubric/verdict/rationale) per step.
-3. **Acceptance checks re-run** against the working tree — `PASS/FAIL` +
-   exit code + output tail for each.
-4. **Scope** — `git status --short`.
-5. **Harvest byte-diff** — each changed `packages/…` file vs the run
-   workspace (`IDENTICAL`/`DIFFERS`/not-in-workspace).
-6. **Cost-share** — exact total (steps+judge), budget %, judge share, and
-   the empty-diff **probe step → F-11 % data point** (the WP-221 number).
-
-`devbox run` does NOT forward positional args to named scripts, and Devbox
-0.17.0 can make Vitest abort when `devbox run` is prefixed with an env
-assignment. Use the direct script form above for an explicit run-id. The
-script writes nothing and touches no doc; judgment stays yours (phases below).
+**That facts file is the single source for every number in the report and the
+ledger row.** Pass it to `dogfood-docs.mjs scaffold` and `ledger` — do not retype
+costs, steps, token counts or verdicts by hand.
 
 ## 1. Reconstruct what happened (journal is ground truth)
 
@@ -106,42 +129,72 @@ judgment is yours); each earlier hit became a WP:
 
 ## 4. Write the report and update the living docs
 
-1. **Report** `docs/reports/dogfood-<NNN>.md` — NNN matches the spec.
-   Mirror dogfood-002.md's shape: header line (WP/date/spec/run-id/landed
-   commit), trace excerpt, "Delivery quality (human review, post-landing)",
-   "New friction", "Verdict on the thesis". **Friction numbering is global
-   and sequential across all reports** (dogfood-001 = F-1…F-7,
-   dogfood-002 = F-8…F-10; continue from the highest existing F-n).
-   Every friction item states the evidence and names the WP it spawns (or
-   says why none).
-2. **plan.md** — mark the WP/slice done in §6 (cite run-id + landed
-   commit); a new friction item becomes a WP row **only within the
-   DOGFOODING §1.5 friction budget** (🔴 loop-integrity → may queue as
-   headline; anything else → track-B note or hand-fix, still recorded);
-   **REPLACE lines inside the bounded status block (hard cap ≤30 lines —
-   never prepend a new paragraph)**; displaced prose moves verbatim to
-   `docs/PLAN-HISTORY.md` under a dated header. Do NOT touch the §6 table
-   header schema (`| WP | Title | Tag | Notes |` — F-81: adding a `Status`
-   column would activate the staleness gate with inverted semantics).
-3. **docs/REQUIREMENTS.md** — new WPs into the requirement rows they
-   serve; reopen rows the findings prove aren't actually done; update WP
-   status (e.g. IF-2 in-progress with landed commit).
-4. **docs/DOGFOODING.md** — new operational gotchas into §7
-   (troubleshooting) or §8 (known limitations), citing the friction id;
-   **REPLACE the bounded header status block (≤15 lines, same
-   PLAN-HISTORY.md overflow rule — never stack "LATEST/Earlier"
-   paragraphs)**.
-5. **examples/dogfood/README.md** — index row for this campaign:
-   outcome, run-id, landed commit, report link.
-6. **docs/reports/dogfood-ledger.csv** — append THIS run's row (the
-   progression gate's data source; mandatory, one row per terminal run):
-   `run,wp,mode,outcome,steps,cost_usd,spec_format,class,resumes,judge_catches,rung,rollbacks`.
+The surgery is scripted; the prose is not. Start from the scaffold so the trace
+numbers are copied by a machine, then write into the `TODO` sections.
+
+```sh
+FACTS=.chikory/review/<run-id>.facts.json
+devbox run -- node scripts/dogfood-docs.mjs scaffold <NNN> --facts "$FACTS"
+```
+
+1. **Report** `docs/reports/dogfood-<NNN>.md` — NNN matches the spec. The
+   scaffold pre-fills the header, trace table, per-step table and harvest line.
+   You write: the **plain lead**, "Delivery quality (human review, post-landing)",
+   "New friction", the friction disposition table, "Verdict on the thesis" and the
+   KPI table. **Friction numbering is global and sequential across all reports**
+   (dogfood-001 = F-1…F-7, dogfood-002 = F-8…F-10; continue from the highest
+   existing F-n). Every friction item states the evidence and names the WP it
+   spawns (or says why none). **Cite `file:line` freely — `dogfood-close.sh`
+   verifies every citation resolves**, so a guessed line number is caught before
+   it lands (it was not, in dogfood-128).
+2. **plan.md** — mark the WP/slice done in §6 (cite run-id + landed commit); a new
+   friction item becomes a WP row **only within the DOGFOODING §1.5 friction
+   budget** (🔴 loop-integrity → may queue as headline; anything else → track-B
+   note or hand-fix, still recorded). For the bounded status block, write the
+   replacement to a file and run:
+
+   ```sh
+   devbox run -- node scripts/dogfood-docs.mjs block --target plan-latest \
+     --block <file> --note "dogfood-<NNN> review"
+   ```
+
+   It replaces the block, moves the displaced prose **verbatim** to
+   `docs/PLAN-HISTORY.md` under a dated header, and **refuses a replacement that
+   busts the ≤30-line cap**. Never prepend a new paragraph, and never raise a cap.
+   Do NOT touch the §6 table header schema (`| WP | Title | Tag | Notes |` — F-81:
+   adding a `Status` column would activate the staleness gate with inverted
+   semantics; the close-out gate checks this).
+3. **docs/REQUIREMENTS.md** — new WPs into the requirement rows they serve; reopen
+   rows the findings prove aren't actually done; update WP status (e.g. IF-2
+   in-progress with landed commit). Hand-edited — the rows are prose.
+4. **docs/DOGFOODING.md** — new operational gotchas into §7 (troubleshooting) or §8
+   (known limitations), citing the friction id; then replace the bounded header
+   status block with `dogfood-docs.mjs block --target dogfooding` (≤15 lines, same
+   verbatim-overflow rule — never stack "LATEST/Earlier" paragraphs).
+5. **examples/dogfood/README.md** — the campaign index row:
+
+   ```sh
+   devbox run -- node scripts/dogfood-docs.mjs index <NNN> --outcome <file>  # update
+   devbox run -- node scripts/dogfood-docs.mjs index <NNN> --row <file>      # insert new
+   ```
+6. **docs/reports/dogfood-ledger.csv** — append THIS run's row (the progression
+   gate's data source; mandatory, one row per terminal run):
+
+   ```sh
+   devbox run -- node scripts/dogfood-docs.mjs ledger <NNN> --facts "$FACTS" \
+     --wp WP-n --catches <n> --rung <n> [--format loose|prescribed] [--class product|meta]
+   ```
+
+   `outcome`, `steps`, `cost_usd`, `resumes` and `rollbacks` come from the facts
+   blob — never retype them. You supply only the judgment columns:
    `spec_format` = `loose`/`prescribed` (what the spec actually was);
    `class` = `product`/`meta` (§1.5 definition, by the deliverable's primary
    surface); `rung` = highest CURRENT-PHASE ladder rung this run satisfied (P2 =
    WP-265, P3 = WP-530; phase-scoped, 0 = off-ladder);
-   `judge_catches` = genuine true-positives only (not seam drills);
-   `rollbacks` = judge ROLLBACK verdicts from chikory trace totals (seam-drill rollbacks count here; drill catches still excluded from `judge_catches`; pre-084 rows lack the column).
+   `judge_catches` = genuine true-positives only (not seam drills). The script
+   validates the 12-column schema and refuses a duplicate run number.
+   (`rollbacks` counts judge ROLLBACK verdicts including seam drills; drill
+   catches stay excluded from `judge_catches`; pre-084 rows lack the column.)
 
 Constraints: never rewrite the `goal`/criteria of a spec that already ran;
 keep `.chikory/runs/<run-id>` (journal + artifacts are the audit trail);
@@ -245,7 +298,35 @@ executor wrote for itself — and it pinned the one case it got right. So:
   direction may be unsatisfiable, and you will not find out until the run burns.
 - `scripts/dogfood.sh` classes any check shelling out to `tsc`/`vitest`/`pnpm
   exec` as VERIFY-SUITE and will NOT dry-run it — those are exactly the
-  behavioral ACs, so hand-verify them and record the wall-clock vs the 120 s cap.
+  behavioral ACs. **`dogfood-arm.sh` exists precisely to close that gap: it runs
+  EVERY check, VERIFY-SUITE included, and times each against the 120 s judge cap.**
+
+```sh
+SPEC=examples/dogfood/dogfood-<NNN+1>-….yaml
+
+# 1. RED on HEAD — commit first; a dirty tree makes "RED on HEAD" meaningless
+#    (the script warns). Every AC must exit 1; exit 0 cannot gate new work and
+#    exit ≥2 is a broken check that can never pass (F-119 class).
+devbox run -- bash scripts/dogfood-arm.sh "$SPEC"
+
+# 2. Write a throwaway reference implementation, then prove GREEN.
+devbox run -- bash scripts/dogfood-arm.sh "$SPEC" --green
+
+# 3. Emit the arming table for the report + README, then discard the reference.
+devbox run -- bash scripts/dogfood-arm.sh "$SPEC" --table
+devbox run -- bash scripts/dogfood-arm.sh "$SPEC" --discard
+```
+
+  Results accumulate in `.chikory/review/arm-<spec>.json` across passes, and
+  `--table` flags any AC proven in only ONE direction — the failure mode that
+  burns a run. Paste its output into `## NEXT RUN` and the README cell.
+
+Then run the launch preflight at $0 and confirm the spec-pick glob resolves to
+the file you just wrote:
+
+```sh
+devbox run -- bash -c 'CHIKORY_PREFLIGHT_ONLY=1 bash scripts/dogfood.sh --run'
+```
 
 Finally, write the `## NEXT RUN` section required by the Output rules below. It
 is the last thing on the page and nothing follows it.
@@ -295,8 +376,19 @@ structured summary must additionally follow these rules:
    Nothing may follow `## NEXT RUN`. If the review ends without it, the review is
    incomplete.
 
-8. **Landing**: harvest the run FIRST (phase 0, before any doc edits), and
-   commit + push everything LAST, once the full suite is green. (Standing user
-   override of the older "leave edits uncommitted" rule.) State the commit SHA
-   and whether the push succeeded.
+8. **Landing**: harvest the run FIRST (`dogfood-open.sh`, before any doc edits),
+   and commit + push everything LAST, once every gate is green. (Standing user
+   override of the older "leave edits uncommitted" rule.) One command:
+
+   ```sh
+   devbox run -- bash scripts/dogfood-close.sh <NNN> --run-id <run-id>
+   ```
+
+   It runs the four gates in order and **refuses to commit if any is red**:
+   bounded blocks within cap · every `file:line` citation in the report resolves ·
+   living-doc coverage (report, plan.md, REQUIREMENTS, DOGFOODING, README, ledger
+   all carry this campaign) · full suite. Then it commits with the run-id in a
+   `Ref: run-id:` trailer and pushes. Use `--check-only` to run the gates without
+   landing, `--message` for a custom subject, `--no-push` to hold the commit local.
+   State the commit SHA and whether the push succeeded.
 

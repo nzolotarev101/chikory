@@ -20,12 +20,26 @@
       "temporal-dev": "temporal server start-dev",
       "lint": "pnpm -r lint && ruff check packages/sdk-py && ruff format --check packages/sdk-py",
       "typecheck": "pnpm -r typecheck && (cd packages/sdk-py && uv run pyright)",
-      "test": "pnpm -r test && (cd packages/sdk-py && uv run pytest) && bash scripts/test-harvest-chain.sh",
+      "test": "pnpm -r test && (cd packages/sdk-py && uv run pytest) && bash scripts/test-scripts.sh",
+      // Every scripts/test-*.sh in one place. Before this, test-dogfood-ac-preflight.sh
+      // and test-dogfood-landed-scope.sh existed but nothing ever ran them.
+      "test-scripts": "bash scripts/test-scripts.sh",
       "smoke": "bash scripts/smoke.sh",
       "run-dogfood": "bash scripts/dogfood.sh --run",
       "chain-dogfood": "bash scripts/dogfood.sh --chain",
       "dogfood-verify": "bash scripts/dogfood-verify.sh",
       "dogfood-progression": "bash scripts/dogfood-progression.sh",
+      // /dogfood-review, scripted. `devbox run` does NOT forward positional args
+      // to a named script, so the arg-taking forms are
+      // `devbox run -- bash scripts/<name>.sh <arg>` — still one approval.
+      //   open  = harvest (idempotent) + evidence pack + progression gate
+      //   arm   = run EVERY acceptance check, both directions, timed vs the 120s cap
+      //   docs  = bounded-block surgery · ledger row · README row · report scaffold
+      //   close = structure + citations + coverage + suite, then commit and push
+      "dogfood-open": "bash scripts/dogfood-open.sh",
+      "dogfood-arm": "bash scripts/dogfood-arm.sh",
+      "dogfood-docs": "node scripts/dogfood-docs.mjs",
+      "dogfood-close": "bash scripts/dogfood-close.sh",
       "bench": "bash scripts/bench.sh",
       // One-stop bench: brings up Temporal + the codex judge proxy, then runs the
       // runnable brownfield corpus with the directive arm (Gemini executes /

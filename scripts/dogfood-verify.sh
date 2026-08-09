@@ -27,8 +27,34 @@ set -uo pipefail
 cd "$(dirname "$0")/.."
 REPO_ROOT="$(pwd)"
 
-# ── resolve run-id (positional $1 > env > newest run dir) ────────────────────
-RUN_ID="${1:-${DOGFOOD_RUN_ID:-${RUN_ID:-}}}"
+# ── args: [<run-id>] [--facts [<path>]] ─────────────────────────────────────
+# --facts additionally writes every number this script already computes as JSON,
+# so the report scaffold and the ledger row stop being retyped by hand. The
+# markdown on stdout is unchanged either way.
+ARG_RUN_ID=""
+FACTS_PATH=""
+WANT_FACTS=0
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --facts)
+      WANT_FACTS=1
+      case "${2:-}" in
+        ""|--*) shift ;;
+        *) FACTS_PATH="$2"; shift 2 ;;
+      esac
+      ;;
+    -h|--help)
+      echo "Usage: $0 [<run-id>] [--facts [<path>]]" >&2; exit 0 ;;
+    --*)
+      echo "Error: unknown flag $1 (expected --facts)" >&2; exit 2 ;;
+    *)
+      [ -z "$ARG_RUN_ID" ] || { echo "Error: unexpected extra argument $1" >&2; exit 2; }
+      ARG_RUN_ID="$1"; shift ;;
+  esac
+done
+
+# ── resolve run-id (positional > env > newest run dir) ───────────────────────
+RUN_ID="${ARG_RUN_ID:-${DOGFOOD_RUN_ID:-${RUN_ID:-}}}"
 if [ -z "$RUN_ID" ]; then
   RUN_ID="$(ls -t .chikory/runs/ 2>/dev/null | head -n 1)"
 fi
@@ -41,6 +67,7 @@ fi
 export -n RUN_ID
 JOURNAL=".chikory/runs/$RUN_ID/journal.db"
 WORKSPACE=".chikory/runs/$RUN_ID/workspace"
+[ "$WANT_FACTS" -eq 1 ] && [ -z "$FACTS_PATH" ] && FACTS_PATH=".chikory/review/$RUN_ID.facts.json"
 
 # ── pull name / budget / repos / acceptance checks straight from the journal ─
 # Prints: "NAME<TAB>...", "BUDGET<TAB>...", "HOSTREPO<TAB>0|1", then
@@ -120,17 +147,38 @@ BUDGET="$(printf '%s\n' "$TRACE_OUT" | grep -oE '/ \$[0-9]+\.[0-9]+' | head -n 1
 JUDGE_SHARE="$(printf '%s\n' "$TRACE_OUT" | grep -oE 'judge passes [0-9]+ \(\$[0-9.]+, [0-9.]+%\)' | grep -oE '[0-9.]+%' | head -n 1)"
 STEPS="${STEPS:-0}"
 
+# ── facts the report header and the ledger row are otherwise retyped from ────
+# All of it already lives in the trace header + totals lines this script owns.
+TRACE_HEAD="$(printf '%s\n' "$TRACE_OUT" | grep -E "^run $RUN_ID ·" | head -n 1)"
+TERMINAL="$(printf '%s\n' "$TRACE_HEAD" | grep -oE '· (SUCCESS|FAILED|RUNNING|PARKED|HALTED) ·' | head -n 1 | tr -d '· ')"
+WALL_CLOCK="$(printf '%s\n' "$TRACE_HEAD" | grep -oE '· ([0-9]+h )?([0-9]+m )?[0-9]+s ·' | head -n 1 | sed 's/^· //; s/ ·$//')"
+EXECUTOR="$(printf '%s\n' "$TRACE_HEAD" | grep -oE 'executor [^·]+' | head -n 1 | sed 's/^executor //; s/ *$//')"
+JUDGE_FAMILY="$(printf '%s\n' "$TRACE_HEAD" | grep -oE 'judge [^·]+' | head -n 1 | sed 's/^judge //; s/ *$//')"
+totals_num() { printf '%s\n' "$TRACE_OUT" | grep -oE "$1 [0-9]+" | head -n 1 | grep -oE '[0-9]+$'; }
+ROLLBACKS="$(totals_num rollbacks)"; ESCALATIONS="$(totals_num escalations)"
+CHECKPOINTS="$(totals_num checkpoints)"; INJECTIONS="$(totals_num injections)"
+JUDGE_PASSES="$(totals_num 'judge passes')"
+# A resume re-executes a step, journalled as `resumed` — absent on clean runs.
+# Word-anchored: `resume` appears in judge rationales and must not inflate this.
+RESUMES="$(printf '%s\n' "$TRACE_OUT" | grep -cwE 'resumed' || true)"
+
 # ── 2. per-step salient lines (diff bytes · cost · checkpoint · judge) ───────
 echo "## 2. Per-step evidence (diff bytes · cost · checkpoint · judge)"
 PROBE_STEP=""
 PROBE_COST=""
 PRECISE_TOTAL=0   # sum of step + judge costs (exact denominator for cost-share)
+STEP_ROWS=""      # n \t cost \t diffBytes \t tokens \t wall \t verdict  (for --facts)
 for ((n=1; n<=STEPS; n++)); do
   S="$(trace "$RUN_ID" --step "$n")"
   HEAD_LINE="$(printf '%s\n' "$S" | grep -E "^step $n ·" | head -n 1)"
   STEP_COST="$(printf '%s\n' "$HEAD_LINE" | grep -oE '\$[0-9]+\.[0-9]+' | head -n 1 | tr -d '$')"
   DIFF_BYTES="$(printf '%s\n' "$S" | grep -E '^diff:' | grep -oE '[0-9]+ bytes' | head -n 1 | grep -oE '[0-9]+')"
   DIFF_BYTES="${DIFF_BYTES:-?}"
+  STEP_TOKENS="$(printf '%s\n' "$HEAD_LINE" | grep -oE '[0-9.]+k?/[0-9.]+k? tokens' | head -n 1 | sed 's/ tokens$//')"
+  STEP_WALL="$(printf '%s\n' "$HEAD_LINE" | grep -oE '· ([0-9]+h )?([0-9]+m )?[0-9]+s ·' | head -n 1 | sed 's/^· //; s/ ·$//')"
+  STEP_VERDICT="$(printf '%s\n' "$S" | grep -E '^verdict:' | head -n 1 | sed 's/^verdict: *//')"
+  STEP_ROWS="${STEP_ROWS}${n}	${STEP_COST:-}	${DIFF_BYTES}	${STEP_TOKENS:-}	${STEP_WALL:-}	${STEP_VERDICT:-}
+"
   # exact-cost accumulation: this step + any judge passes it carries
   JUDGE_COSTS="$(printf '%s\n' "$S" | grep -E '^judge pass' | grep -oE '\$[0-9]+\.[0-9]+' | tr -d '$' | paste -sd' ' -)"
   PRECISE_TOTAL="$(awk -v t="$PRECISE_TOTAL" -v s="${STEP_COST:-0}" -v j="$JUDGE_COSTS" 'BEGIN{ x=t+s; split(j,a," "); for(i in a) x+=a[i]; printf "%.4f", x }')"
@@ -151,6 +199,7 @@ echo
 echo "cwd: \`$AC_CWD\`"
 echo
 AC_FAILED=0
+AC_ROWS=""        # id \t PASS|FAIL \t exit  (for --facts)
 CHECK_LINES="$(printf '%s\n' "$JOURNAL_OUT" | grep '^CHECK')"
 if [ -z "$CHECK_LINES" ]; then
   echo "_(no acceptance_criteria found in journal task_json)_"
@@ -164,6 +213,8 @@ while IFS=$'\t' read -r _tag ID CHECK_B64; do
   RC=$?
   set -u
   if [ "$RC" -eq 0 ]; then STAT="PASS"; else STAT="FAIL"; AC_FAILED=1; fi
+  AC_ROWS="${AC_ROWS}${ID}	${STAT}	${RC}
+"
   echo "**$ID — $STAT** (exit $RC)"
   echo '```'
   echo "\$ $CHECK"
@@ -182,17 +233,28 @@ echo
 # ── 5. harvest byte-diff (working tree vs run workspace) ─────────────────────
 echo "## 5. Harvest byte-diff (working tree vs $WORKSPACE)"
 echo '```'
-(git diff --name-only; git diff --cached --name-only; git ls-files --others --exclude-standard) | sort -u | grep -E '^(packages|services|benchmarks)/' | while read -r f; do
-  if [ -f "$WORKSPACE/$f" ]; then
-    if diff -q "$f" "$WORKSPACE/$f" >/dev/null 2>&1; then
-      echo "IDENTICAL: $f"
+# Captured (not piped straight to stdout) so --facts can report the same verdicts
+# without re-walking the tree — a pipeline `while` runs in a subshell and would
+# lose them.
+HARVEST_ROWS="$(
+  (git diff --name-only; git diff --cached --name-only; git ls-files --others --exclude-standard) \
+    | sort -u | grep -E '^(packages|services|benchmarks)/' | while read -r f; do
+    if [ -f "$WORKSPACE/$f" ]; then
+      if diff -q "$f" "$WORKSPACE/$f" >/dev/null 2>&1; then
+        printf 'IDENTICAL\t%s\n' "$f"
+      else
+        printf 'DIFFERS\t%s\n' "$f"
+      fi
     else
-      echo "DIFFERS:   $f  (working tree ≠ run workspace — investigate)"
+      printf 'not-in-workspace\t%s\n' "$f"
     fi
-  else
-    echo "not-in-workspace: $f  (file the run did not produce — e.g. review docs)"
-  fi
-done
+  done
+)"
+printf '%s\n' "$HARVEST_ROWS" | awk -F'\t' 'NF>1{
+  if ($1 == "IDENTICAL")            printf "IDENTICAL: %s\n", $2;
+  else if ($1 == "DIFFERS")         printf "DIFFERS:   %s  (working tree ≠ run workspace — investigate)\n", $2;
+  else                              printf "not-in-workspace: %s  (file the run did not produce — e.g. review docs)\n", $2;
+}'
 echo '```'
 echo
 
@@ -228,6 +290,82 @@ else
 fi
 echo '```'
 echo
+
+# ── facts blob (--facts) ─────────────────────────────────────────────────────
+# Everything above, machine-readable, so `dogfood-docs.sh scaffold`/`ledger` do
+# not retype it. Values travel through the environment (never string-interpolated
+# into the node source) so a spec name or commit subject with quotes is safe.
+if [ "$WANT_FACTS" -eq 1 ]; then
+  mkdir -p "$(dirname "$FACTS_PATH")"
+  BUDGET_PCT=""
+  if [ -n "$TOTAL_COST" ] && [ -n "$BUDGET" ]; then
+    BUDGET_PCT="$(awk -v t="$TOTAL_COST" -v b="$BUDGET" 'BEGIN{ if(b>0) printf "%.1f", t/b*100 }')"
+  fi
+  F_RUN_ID="$RUN_ID" F_SPEC="${SPEC_NAME:-}" F_BUDGET="${SPEC_BUDGET:-}" \
+  F_TERMINAL="${TERMINAL:-}" F_STEPS="$STEPS" F_WALL="${WALL_CLOCK:-}" \
+  F_COST_HEADER="${TOTAL_COST:-}" F_COST_EXACT="${PRECISE_TOTAL:-}" \
+  F_BUDGET_PCT="${BUDGET_PCT:-}" F_JUDGE_SHARE="${JUDGE_SHARE:-}" \
+  F_EXECUTOR="${EXECUTOR:-}" F_JUDGE="${JUDGE_FAMILY:-}" \
+  F_ROLLBACKS="${ROLLBACKS:-0}" F_ESCALATIONS="${ESCALATIONS:-0}" \
+  F_CHECKPOINTS="${CHECKPOINTS:-0}" F_INJECTIONS="${INJECTIONS:-0}" \
+  F_JUDGE_PASSES="${JUDGE_PASSES:-0}" F_RESUMES="${RESUMES:-0}" \
+  F_HARVEST_COMMIT="${HARVEST_COMMIT:-}" F_HEAD="$(git log --oneline -1)" \
+  F_AC_FAILED="$AC_FAILED" F_AC_CWD_LABEL="$AC_CWD_LABEL" \
+  F_PROBE_STEP="${PROBE_STEP:-}" F_PROBE_COST="${PROBE_COST:-}" \
+  F_STEP_ROWS="$STEP_ROWS" F_AC_ROWS="$AC_ROWS" F_HARVEST_ROWS="$HARVEST_ROWS" \
+  F_OUT="$FACTS_PATH" node - <<'NODE'
+const { writeFileSync } = require("node:fs");
+const e = process.env;
+const rows = (raw, keys) =>
+  (raw ?? "").split("\n").filter((l) => l.trim() !== "").map((line) => {
+    const cells = line.split("\t");
+    return Object.fromEntries(keys.map((k, i) => [k, cells[i] ?? ""]));
+  });
+const num = (v) => (v === "" || v === undefined ? null : Number(v));
+const facts = {
+  runId: e.F_RUN_ID,
+  spec: e.F_SPEC || null,
+  head: e.F_HEAD || null,
+  harvestCommit: e.F_HARVEST_COMMIT || null,
+  harvested: Boolean(e.F_HARVEST_COMMIT),
+  terminal: e.F_TERMINAL || null,
+  steps: num(e.F_STEPS),
+  wallClock: e.F_WALL || null,
+  cost: {
+    header: num(e.F_COST_HEADER),
+    exact: num(e.F_COST_EXACT),
+    budget: num(e.F_BUDGET),
+    budgetPct: num(e.F_BUDGET_PCT),
+    judgeShare: e.F_JUDGE_SHARE || null,
+  },
+  executor: e.F_EXECUTOR || null,
+  judge: e.F_JUDGE || null,
+  totals: {
+    judgePasses: num(e.F_JUDGE_PASSES),
+    rollbacks: num(e.F_ROLLBACKS),
+    escalations: num(e.F_ESCALATIONS),
+    checkpoints: num(e.F_CHECKPOINTS),
+    injections: num(e.F_INJECTIONS),
+    resumes: num(e.F_RESUMES),
+  },
+  probeStep: e.F_PROBE_STEP ? { step: num(e.F_PROBE_STEP), costUsd: num(e.F_PROBE_COST) } : null,
+  acCwdLabel: e.F_AC_CWD_LABEL || null,
+  acAllPass: e.F_AC_FAILED === "0",
+  perStep: rows(e.F_STEP_ROWS, ["step", "costUsd", "diffBytes", "tokens", "wallClock", "verdict"]),
+  acceptanceChecks: rows(e.F_AC_ROWS, ["id", "status", "exit"]),
+  harvest: rows(e.F_HARVEST_ROWS, ["status", "path"]),
+};
+// null = nothing to compare (the delivery is already committed, so the working
+// tree is clean) — distinct from false, which means a file genuinely DIFFERS.
+facts.harvestIdentical =
+  facts.harvest.length === 0 ? null : facts.harvest.every((h) => h.status === "IDENTICAL");
+writeFileSync(e.F_OUT, JSON.stringify(facts, null, 2) + "\n");
+process.stderr.write(`facts written: ${e.F_OUT}\n`);
+NODE
+  echo
+  echo "_facts: \`$FACTS_PATH\` (machine-readable — feeds \`dogfood-docs.sh scaffold\`/\`ledger\`)_"
+  echo
+fi
 
 # ── verdict line ─────────────────────────────────────────────────────────────
 if [ "$AC_FAILED" -eq 0 ]; then
