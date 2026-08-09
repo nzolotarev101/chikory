@@ -25,6 +25,7 @@ status: pinned
 repo:
   url: https://github.com/gitify-app/gitify
   ref: a061eaa112fa18885dd4de0cea6c0e51094cad0c # pinned BEFORE #3036 (parent of the merge commit on main)
+  fix_ref: 8043b106324a5148e7a5ff82e11895f10677abd9
 # F-254 (2026-08-04): the repo's own engines range is ">=24", which resolves to
 # whatever the newest installed toolchain is — so this fully-pinned task was
 # still not reproducible. Measured on a clean clone of the base ref:

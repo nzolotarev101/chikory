@@ -32,6 +32,10 @@ const USAGE = `usage: chikory-bench <command> [options]
 commands:
   validate <task-dir>...   validate every task file (authored YAML + DevAI JSON);
                            exit 1 if any file is invalid
+      [--require-probeable]  also exit 1 if any RUNNABLE task can never be
+                             probed, naming each task and the field it lacks
+                             (a pinned brownfield task needs repo.fix_ref —
+                             the gold patch, see benchmarks/tasks/AUTHORING.md)
   list <task-dir>...       list loaded tasks (id, class, status, requirements)
   probe --task <file> [--out <dir>] [--record <file>]
                            probe task requirement discrimination (red@base, green@fix)
@@ -134,6 +138,9 @@ export function pickClassRefs(
   return { executor: byRole.executor[0]!, judge: byRole.judge[0]! };
 }
 
+/** Every flag `validate`/`list` accepts. Anything else is a typo (F-285). */
+const VALIDATE_FLAGS = new Set(["require-probeable"]);
+
 function parseFlags(argv: string[]): Flags {
   const values: Record<string, string> = {};
   const multiValues: Record<string, string[]> = {};
@@ -173,6 +180,16 @@ export async function main(argv: string[], io = { out: console.log, err: console
       io.err("chikory-bench: at least one task dir required");
       return 1;
     }
+    // F-285: parseFlags accepts any `--flag`, so a typo (`--require-probable`)
+    // used to be silently ignored and the command exited 0 — a false green on
+    // the very check meant to catch an unprobeable corpus. Refuse it instead.
+    const unknown = Object.keys(values).filter((k) => !VALIDATE_FLAGS.has(k));
+    if (unknown.length > 0) {
+      for (const flag of unknown) io.err(`chikory-bench ${command}: unknown flag --${flag}`);
+      io.err(`known flags: ${[...VALIDATE_FLAGS].map((f) => `--${f}`).join(", ")}`);
+      return 1;
+    }
+    const requireProbeable = values["require-probeable"] === "true";
     let bad = 0;
     for (const dir of positionals) {
       const { tasks, invalid } = loadTaskDir(resolve(dir));
@@ -180,6 +197,15 @@ export async function main(argv: string[], io = { out: console.log, err: console
         bad++;
         io.err(`INVALID ${join(dir, file)}`);
         for (const issue of issues) io.err(`  - ${issue}`);
+      }
+      if (command === "validate" && requireProbeable) {
+        for (const t of tasks) {
+          if (isRunnable(t) && (!t.repo || !t.repo.fixRef)) {
+            bad++;
+            const missingField = !t.repo ? "repo" : "repo.fix_ref";
+            io.err(`UNPROBEABLE ${t.id}: missing ${missingField}`);
+          }
+        }
       }
       if (command === "list") {
         for (const t of tasks) {

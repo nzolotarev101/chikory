@@ -26,6 +26,7 @@ status: pinned
 repo:
   url: https://github.com/trpc/trpc
   ref: cdbc28049889a9da9ea2abb6bd6519afe2279ead
+  fix_ref: dfbafa8ef178a5a3d23ef9461caa9494b3ef7f95
 base_verification_command: pnpm install --frozen-lockfile && pnpm vitest run packages/tests/server/links.test.ts
 # F-231: measured against the upstream fix above, not asserted. The EDIT is small; the work is
 # the diagnosis (teardown lifecycle across the client link stack) plus getting signal racing and

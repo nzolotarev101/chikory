@@ -19,6 +19,7 @@ status: pinned
 repo:
   url: https://github.com/react-hook-form/react-hook-form
   ref: d96c5ceef12cb53266ce1ae5e65fba301a31fe57
+  fix_ref: 69da9545b222aceb5fc8ea15e851cab83b1c84f6
 base_verification_command: pnpm install --frozen-lockfile && pnpm test
 # F-231: measured against the upstream fix above, not asserted. A two-line edit whose cost is the
 # diagnosis — the divergence between the published subscriber payload and the stored state is only

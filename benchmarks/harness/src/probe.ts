@@ -327,9 +327,17 @@ export async function runProbeSweep(
 
   let probedCount = 0;
   let skippedCount = 0;
+  let unprobeableCount = 0;
   let failedCount = 0;
 
   for (const { task, path: taskPath } of selected) {
+    if (!task.repo || !task.repo.fixRef) {
+      unprobeableCount++;
+      const missingField = !task.repo ? "repo" : "repo.fix_ref";
+      io.out(`${task.id}: unprobeable (missing ${missingField})`);
+      continue;
+    }
+
     let ledger: DiscriminationLedger = {};
     if (existsSync(recordPath)) {
       ledger = readDiscriminationLedger(recordPath);
@@ -402,13 +410,14 @@ export async function runProbeSweep(
   }
 
   io.out(
-    `sweep summary: ${probedCount} probed, ${skippedCount} skipped, ${failedCount} failed, ${discriminatingCount} discriminating`,
+    `sweep summary: ${probedCount} probed, ${skippedCount} skipped, ${unprobeableCount} unprobeable, ${failedCount} failed, ${discriminatingCount} discriminating`,
   );
 
   const allDiscriminating =
     selected.length > 0 &&
     discriminatingCount === selected.length &&
-    failedCount === 0;
+    failedCount === 0 &&
+    unprobeableCount === 0;
 
   return allDiscriminating ? 0 : 1;
 }

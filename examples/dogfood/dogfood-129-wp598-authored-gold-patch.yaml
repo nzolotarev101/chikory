@@ -1,0 +1,361 @@
+# Plain: A benchmark task can only be trusted once we've shown its checks fail before the fix and pass
+# after it. That needs a "fix" to point at. Four of the five tasks borrow one from upstream. The fifth —
+# the only task that separates the two arms we published — is a migration nobody upstream ever did, so
+# there is no commit to point at and the schema has no way to express one. This run lets a task carry
+# its own gold patch as a file in this repo, applied onto the pinned base, and makes a patch that does
+# not apply a loud error rather than a quiet wrong answer.
+# WP: WP-598 (authored gold patch) — the last product blocker under the P3 exit gate
+# Ladder-rung: 5 (prerequisite — see WHY below)
+# Thesis-KPI: corpus tasks whose discrimination CAN be proven, 4/5 → 5/5 expressible (mechanism proven
+#   on a fixture; brownfield-001's own patch is an operator lift tracked separately)
+# Format: loose — the outcome and the one new field are fixed; internals are the executor's
+#
+# Launch mode: RUN (single node — one deliverable).
+#   CHIKORY_PREFLIGHT_ONLY=1 devbox run run-dogfood
+#   devbox run run-dogfood
+#
+# WHY THIS AND NOT THE RUNG ITSELF (dogfood-128 review, 2026-08-08):
+#   Progression gate: ⛔ STALLED + ⚠️ LADDER-PACE (rung 4 across the trailing 3 headlines), which binds
+#   the next headline to the P3 ladder rung. **Rung 5 is the P3 exit gate** — published ranges over a
+#   corpus wide enough for the intervals to SEPARATE, plus the leaderboard (the leaderboard half went
+#   live in dogfood-124). This is the FIFTH consecutive rung-5 prerequisite (125 probe → 126 gate →
+#   127 sweep → 128 corpus → 129 this), and that is the loudest fact in this file. It is also the last
+#   one: after this the corpus can be probed end to end and widening it is an authoring lift, not a
+#   product gap.
+#
+#   The rung cannot run, measured rather than assumed. dogfood-128 landed `repo.fix_ref` on
+#   `brownfield-002/003/004/005` and the corpus went 0 → 4 probeable. Measured on the landed tree
+#   2026-08-08:
+#     $ node dist/bin.js validate ../tasks --require-probeable
+#     UNPROBEABLE brownfield-001: missing repo.fix_ref
+#     ../tasks: 5 valid, 0 invalid   → exit 1
+#   `brownfield-001` (ecyrbe/zodios, zod 3.22.4 → 4.x) is a **self-performed** migration: the header
+#   comment on `repo.ref` records that upstream never did it. So there is no commit to name — and
+#   `runProbe` materializes the fix by fetching `fixRef` from the task's OWN `repo.url`
+#   (`probe.ts:121-122`, `ensureGitWorkspace(fixWorkspace, repoUrl, fixRef)`), so an authored gold patch
+#   is **not expressible in the schema at all**. Consequences, all load-bearing for rung 5:
+#     * `validate --require-probeable` can never pass over `benchmarks/tasks/`, so it cannot be wired
+#       into the `devbox run bench` $0 guard (F-286).
+#     * `probe --tasks benchmarks/tasks` can never exit 0 — WP-596's exit contract is unsatisfiable
+#       over the only corpus it exists for.
+#     * Arming the WP-595 gate today DROPS `brownfield-001`, and dogfood-123's entire published
+#       separation (Chikory [83.2%, 100.0%] vs raw Claude Code [75.4%, 99.1%]) comes from that task.
+#
+#   OUT OF SCOPE, deliberately: authoring `brownfield-001`'s actual zod v4 migration patch. That is a
+#   3–6h research lift (the task's own horizon) and an operator job, not a dogfood step. This run
+#   delivers the MECHANISM and proves it on a fixture; the operator writes the patch afterwards, and
+#   only then does `--require-probeable` go into the $0 guard.
+#
+# Designed traps — the plausible-but-wrong deliveries the acceptance criteria exist to reject:
+#   A. An `exempt: true` escape hatch. The cheapest way to make the corpus "probeable" is to let a task
+#      declare itself excused and wave it past the gate — which un-does WP-593/595 exactly, re-inflating
+#      both published intervals with requirements nobody proved discriminate. AC-1 requires a task that
+#      declares NEITHER a fix ref NOR a patch to stay unprobeable, stay out of the ledger, and keep the
+#      sweep's exit code at 1.
+#   B. A patch that does not apply, treated as a verdict. If `git apply` fails and the fix workspace is
+#      left equal to the base tree, the probe reports a confident `non-discriminating` (or an
+#      `unsatisfiable` requirement) about a fix that was never applied — a WRONG answer written into
+#      the ledger the WP-595 gate trusts. AC-1 requires a failed apply to be a loud error naming the
+#      patch file, with NOTHING recorded.
+#   C. Pinning the ledger entry to something the patch cannot move. WP-596 skips a task whose entry
+#      matches the refs it declares TODAY; a patch-backed task has no upstream fix sha, so the naive
+#      entry records the base ref twice — and then EDITING the patch silently keeps the stale proof
+#      (F-258/F-279's family at the patch altitude). AC-1 sweeps twice (must skip), then edits the
+#      patch by one byte and sweeps again (must RE-PROBE and replace the entry).
+#   D. Accepting both `fix_ref` and a patch on one task. Two disagreeing sources of truth for "the fix"
+#      is a silent wrong-commit verdict waiting to happen. AC-1 requires `validate` to refuse it.
+#   E. Regressing the four tasks that already work. AC-2 asserts `brownfield-002/003/004/005` still
+#      carry their upstream `fix_ref`, the real corpus still `validate`s at exit 0, and
+#      `--require-probeable` still names `brownfield-001` — now naming BOTH fields it could satisfy.
+#
+# PRECONDITIONS, ALL MEASURED 2026-08-08 (do not re-litigate; re-measure if stale):
+#   * `repo` is a STRICT zod object `{url, ref, fix_ref?}` (`task.ts:98-105`) — an unknown key is a
+#     validation error today, so a new field must be added to the schema, not smuggled in.
+#   * `runProbe` refuses a task with no `fixRef` up front (`probe.ts:103-105`) and fetches base and fix
+#     from the same `repoUrl` (`probe.ts:110-122`).
+#   * `runProbeSweep` skips a task whose ledger entry matches both declared refs, re-probes a moved
+#     ref, and counts an unprobeable task separately (`probe.ts:330-341,410-424`).
+#   * `validate`/`list` now REFUSE an unknown flag (`VALIDATE_FLAGS`, `main.ts:141-142,183-191`,
+#     F-285) — a new flag must be added to that set or it exits 1.
+#   * `writeLedgerAtomically` temp+renames the ledger (`probe.ts:77-91`, F-282); both ledger readers
+#     throw on a damaged file rather than resetting it (F-275).
+#   * `git apply --3way` and `git am` are both available in the devbox toolchain (git 2.x).
+
+name: dogfood-129-wp598-authored-gold-patch
+wp: WP-598
+goal: >
+  Make a gold patch that upstream never authored expressible and probeable, without opening a hole in
+  the discrimination gate.
+
+  Three things must become true.
+
+    * **A task can declare its own gold patch.** A pinned brownfield task may carry
+      `repo.fix_patch` — a repo-relative path to a patch file in THIS repository — instead of
+      `repo.fix_ref`. `probe` materializes the fix workspace by checking out `repo.ref` and applying
+      that patch onto it, so a task whose fix exists nowhere upstream can still be proven to
+      discriminate. Exactly one of `fix_ref` / `fix_patch` may be declared: a task carrying both is a
+      validation error naming both fields, and a task carrying neither stays exactly as unprobeable as
+      it is today — there is no third state and no exemption.
+
+    * **A patch that does not apply is an error, never a verdict.** If the patch file is missing, or
+      does not apply cleanly onto the pinned base, the probe FAILS LOUD naming the patch path and the
+      task, writes no ledger entry, and never reports a requirement verdict. A fix workspace that
+      silently equals the base tree would put a confident wrong answer into the ledger the WP-595 gate
+      trusts — the F-255/F-258 failure mode one altitude up.
+
+    * **Editing the patch invalidates the proof.** WP-596 skips a task already proven at the refs it
+      declares today. For a patch-backed task the proof must be pinned to the patch CONTENT: two
+      consecutive sweeps skip the proven task untouched, but changing the patch by one byte forces a
+      re-probe that REPLACES the entry. Stale proof surviving a changed fix is the same defect F-279
+      fixed for a moved ref.
+
+  `validate --require-probeable` keeps its contract and gets more useful: it still exits 1 naming each
+  runnable task that can never be probed, and the line now names BOTH fields the task could satisfy.
+
+  Everything already proven stays proven: `brownfield-002/003/004/005` keep their upstream `fix_ref`
+  and are untouched; plain `validate benchmarks/tasks` still exits 0; `probe --task` and
+  `probe --tasks` keep their flags, their per-task `--out` scoping, their atomic ledger writes, their
+  skip semantics and their exit contracts; the WP-595 ledger gate is not edited.
+
+  Authoring `brownfield-001`'s actual zod v4 migration patch is NOT part of this run — it is a 3–6h
+  operator lift. Deliver the mechanism and prove it on a fixture.
+
+  Constraints: TypeScript stays strict ESM with named exports and no `any`; no new dependency, no
+  provider SDK, no API key, no global install, no HTML output. Do not change any task's goal,
+  requirements, status, repo url, or `repo.ref`. Do not edit `summarize` or the WP-595 ledger
+  gate, and do not edit anything under benchmarks/results or benchmarks/publications. A published
+  or reported path goes through the publishable-path helper (WP-591), never a raw argument. Project
+  commands run sequentially inside the already-activated Devbox environment, so invoke pinned tools
+  directly and never nest `devbox run`. Every existing test remains green.
+
+repos:
+  - url: /Users/nikitazolotarev/repos/chikory
+    writable: true
+
+acceptance_criteria:
+  - id: AC-1
+    description: >
+      THIS NODE'S OWN ORACLE — RED on HEAD, green only once an authored gold patch is a first-class,
+      safely-handled fix source. Against a local git fixture this check builds itself and drives
+      `probe --tasks`: a `repo.fix_patch` task probes to `discriminating` beside an unregressed
+      `repo.fix_ref` task (trap A's opposite), a task with neither source stays unprobeable and out of
+      the ledger (trap A), a patch that does not apply is a loud error naming the file with nothing
+      recorded (trap B), a one-byte edit to the patch forces a re-probe (trap C), and a task declaring
+      both sources is refused by `validate` (trap D). Executor-authored tests are not the oracle; the
+      inputs and the expected decisions are written here.
+    check: |
+      cd benchmarks/harness && pnpm exec tsc && node --input-type=module -e '
+      import {mkdtempSync,mkdirSync,writeFileSync,readFileSync,existsSync,unlinkSync} from "node:fs";
+      import {execFileSync,spawnSync} from "node:child_process";
+      import {tmpdir} from "node:os";
+      import {join} from "node:path";
+      const A=(c,m)=>{if(!c){console.error("FAIL: "+m);process.exit(1);}};
+      const root=mkdtempSync(join(tmpdir(),"goldpatch-"));
+      const origin=join(root,"origin"); mkdirSync(origin,{recursive:true});
+      const git=(...a)=>execFileSync("git",["-C",origin,...a],{stdio:"pipe"}).toString().trim();
+      const w=(p,s)=>writeFileSync(join(origin,p),s);
+      execFileSync("git",["init","-q","-b","main",origin],{stdio:"pipe"});
+      git("config","user.email","probe@chikory.local"); git("config","user.name","probe");
+      w("value.txt","BROKEN\n"); w("verify.sh","echo \"Tests  3 passed (3)\"\nexit 0\n");
+      git("add","-A"); git("commit","-q","-m","base"); const base=git("rev-parse","HEAD");
+      // an UPSTREAM fix commit, so the existing fix_ref path stays exercised side by side
+      w("value.txt","FIXED\n"); git("add","-A"); git("commit","-q","-m","fix");
+      const fix=git("rev-parse","HEAD");
+      // the AUTHORED gold patch: the same content change, as a file in THIS repo
+      const patches=join(root,"patches"); mkdirSync(patches,{recursive:true});
+      const PATCH=[
+        "diff --git a/value.txt b/value.txt",
+        "--- a/value.txt",
+        "+++ b/value.txt",
+        "@@ -1 +1 @@",
+        "-BROKEN",
+        "+FIXED",
+        "",
+      ].join("\n");
+      const patchPath=join(patches,"gold.patch"); writeFileSync(patchPath,PATCH);
+      const bogusPath=join(patches,"bogus.patch");
+      writeFileSync(bogusPath,PATCH.replace("-BROKEN","-NEVER_PRESENT_IN_BASE"));
+      const tasks=join(root,"tasks"); mkdirSync(tasks,{recursive:true});
+      const R1="  - id: R1\n    description: discriminating\n    check: grep -q FIXED value.txt\n";
+      const task=(id,extra)=>writeFileSync(join(tasks,id+".yaml"),
+        "id: "+id+"\nclass: brownfield\nstatus: pinned\nrepo:\n"+
+        "  url: "+JSON.stringify(origin)+"\n  ref: "+base+"\n"+extra+
+        "base_verification_command: sh verify.sh\nhorizon: 1h\ngoal: |\n  fixture\n"+
+        "requirements:\n"+R1);
+      // 910 patch-backed · 911 upstream ref · 912 neither · 913 bad patch · 914 BOTH
+      task("brownfield-910","  fix_patch: "+JSON.stringify(patchPath)+"\n");
+      task("brownfield-911","  fix_ref: "+fix+"\n");
+      task("brownfield-912","");
+      task("brownfield-913","  fix_patch: "+JSON.stringify(bogusPath)+"\n");
+      const cli=(...a)=>spawnSync("node",["dist/bin.js",...a],{encoding:"utf8"});
+      const text=(r)=>(r.stdout??"")+(r.stderr??"");
+      // ── trap D: two sources of truth for "the fix" is a validation error ──
+      task("brownfield-914","  fix_ref: "+fix+"\n  fix_patch: "+JSON.stringify(patchPath)+"\n");
+      const both=cli("validate",tasks);
+      A(both.status===1,"a task declaring BOTH fix_ref and fix_patch must be invalid, got "+
+        both.status+"\n"+text(both));
+      const bt=text(both);
+      A(/brownfield-914/.test(bt)&&/fix_ref/.test(bt)&&/fix_patch/.test(bt),
+        "the error must name the task and BOTH fields, got:\n"+bt);
+      unlinkSync(join(tasks,"brownfield-914.yaml"));
+      // the corpus is valid again once the ambiguous task is gone
+      const plain=cli("validate",tasks);
+      A(plain.status===0,"the remaining fixture corpus must validate, got "+plain.status+"\n"+
+        text(plain));
+      // ── trap A: neither source = unprobeable. There is no exemption. ──
+      const strict=cli("validate",tasks,"--require-probeable");
+      A(strict.status===1,"--require-probeable must still exit 1 for a task with neither source, got "+
+        strict.status+"\n"+text(strict));
+      const st=text(strict);
+      const l912=st.split("\n").find((l)=>l.includes("brownfield-912"));
+      A(l912!==undefined,"--require-probeable must NAME the task with neither source, got:\n"+st);
+      A(/fix_ref/.test(l912)&&/fix_patch/.test(l912),
+        "the line must name BOTH fields it could satisfy, got: "+JSON.stringify(l912));
+      A(!/brownfield-910/.test(st),"a patch-backed task is PROBEABLE and must not be reported, got:\n"+st);
+      A(!/brownfield-911/.test(st),"a ref-backed task must not be reported, got:\n"+st);
+      // ── the patch-backed task actually probes, and probes to discriminating ──
+      const ledger=join(root,"discrimination.json");
+      const sweep=cli("probe","--tasks",tasks,"--record",ledger,"--out",join(root,"out"));
+      const sw=text(sweep);
+      A(sweep.status===1,"the sweep still exits 1 while 912/913 are unproven, got "+sweep.status+
+        "\n"+sw);
+      const read=()=>{const j=JSON.parse(readFileSync(ledger,"utf8"));
+        return Array.isArray(j)?j:Object.values(j);};
+      const e910=read().find((e)=>e&&e.taskId==="brownfield-910");
+      A(e910&&e910.verdict==="discriminating",
+        "a patch-backed task must probe to discriminating, got "+JSON.stringify(e910));
+      const e911=read().find((e)=>e&&e.taskId==="brownfield-911");
+      A(e911&&e911.verdict==="discriminating",
+        "the upstream-ref path must be unregressed, got "+JSON.stringify(e911));
+      // ── trap A again: nothing excuses 912 into the ledger ──
+      A(!read().some((e)=>e&&e.taskId==="brownfield-912"),
+        "a task with neither source must never reach the ledger, got "+
+        JSON.stringify(read().map((e)=>e.taskId)));
+      // ── trap B: a patch that does not apply is a LOUD error, not a verdict ──
+      A(!read().some((e)=>e&&e.taskId==="brownfield-913"),
+        "a patch that does not apply must record NOTHING, got "+
+        JSON.stringify(read().map((e)=>e.taskId)));
+      const l913=sw.split("\n").find((l)=>l.includes("brownfield-913"));
+      A(l913!==undefined,"the sweep must NAME the task whose patch failed to apply, got:\n"+sw);
+      A(l913.includes("bogus.patch"),
+        "the line must name the PATCH FILE so the operator can fix it, got: "+JSON.stringify(l913));
+      A(!/\bdiscriminating\b/i.test(l913)&&!/\bnon-discriminating\b/i.test(l913),
+        "trap B: a patch that never applied must yield NO requirement verdict, got: "+
+        JSON.stringify(l913));
+      // ── WP-596 unchanged: a settled sweep re-probes nothing ──
+      const before=JSON.stringify(read());
+      const again=cli("probe","--tasks",tasks,"--record",ledger,"--out",join(root,"out2"));
+      A(JSON.stringify(read())===before,
+        "WP-596 unchanged: a second sweep must re-probe nothing already proven");
+      A(again.status===1,"still exits 1 while 912/913 are unproven, got "+again.status);
+      // ── trap C: editing the PATCH invalidates the proof ──
+      writeFileSync(patchPath,PATCH+"\n");
+      const third=cli("probe","--tasks",tasks,"--record",ledger,"--out",join(root,"out3"));
+      const t910=read().find((e)=>e&&e.taskId==="brownfield-910");
+      A(t910&&t910.verdict==="discriminating",
+        "the edited patch still discriminates, got "+JSON.stringify(t910));
+      A(JSON.stringify(t910)!==JSON.stringify(e910),
+        "trap C: changing the gold patch by one byte must force a RE-PROBE that replaces the entry — "+
+        "stale proof survived instead: "+JSON.stringify(t910));
+      const th=text(third);
+      const l910=th.split("\n").find((l)=>l.includes("brownfield-910"));
+      A(l910!==undefined&&!/skipped/i.test(l910),
+        "trap C: the sweep must report 910 as re-probed, not skipped, got: "+JSON.stringify(l910));
+      A(JSON.stringify(read().find((e)=>e&&e.taskId==="brownfield-911"))===JSON.stringify(e911),
+        "only the task whose patch moved may be re-probed; 911 must be untouched");
+      A(existsSync(join(root,"out","brownfield-910","probe.json")),
+        "F-277 unchanged: each task keeps its OWN probe output dir");
+      console.log("AC-1 OK: an authored gold patch is a first-class fix source; a patch that does not "+
+        "apply is a named error with nothing recorded; editing the patch invalidates the proof; and a "+
+        "task with neither source is still unprobeable with no exemption");
+      '
+
+  - id: AC-2
+    description: >
+      The real corpus is unregressed and the operator message is actionable (trap E).
+      `brownfield-002/003/004/005` still carry the upstream `repo.fix_ref` dogfood-128 pinned against
+      their own `repo.url`; `brownfield-001` still declares no fix source and is still named by
+      `validate --require-probeable` — now naming both fields it could satisfy; plain
+      `validate benchmarks/tasks` still exits 0; and `AUTHORING.md` tells an author what to do when
+      upstream never made the fix.
+    check: |
+      cd benchmarks/harness && pnpm exec tsc && node --input-type=module -e '
+      import {readdirSync,readFileSync} from "node:fs";
+      import {spawnSync} from "node:child_process";
+      import {join,resolve} from "node:path";
+      import {pathToFileURL} from "node:url";
+      const A=(c,m)=>{if(!c){console.error("FAIL: "+m);process.exit(1);}};
+      const corpus=resolve(process.cwd(),"../tasks");
+      const T=pathToFileURL(join(process.cwd(),"dist/task.js")).href;
+      const {validateAuthoredTask,isRunnable}=await import(T);
+      const pinned=[];
+      for (const name of readdirSync(corpus).sort()) {
+        if (!/\.ya?ml$/.test(name)) continue;
+        const raw=readFileSync(join(corpus,name),"utf8");
+        const {task,issues}=validateAuthoredTask(raw,name);
+        A(task,"every corpus file must still parse: "+name+" — "+JSON.stringify(issues));
+        if (task.class!=="brownfield"||!isRunnable(task)) continue;
+        pinned.push({id:task.id,repo:task.repo});
+      }
+      A(pinned.length>=5,"expected the 5 pinned brownfield tasks, found "+pinned.length);
+      const withRef=pinned.filter((t)=>t.repo && t.repo.fixRef!==undefined);
+      A(withRef.length>=4,
+        "the 4 upstream fix refs dogfood-128 pinned must survive, got "+withRef.length+
+        " ("+withRef.map((t)=>t.id).join(", ")+")");
+      for (const t of withRef) {
+        A(/^[0-9a-f]{40}$/.test(t.repo.fixRef),t.id+": fix_ref must stay a 40-hex sha");
+        A(t.repo.fixRef!==t.repo.ref,t.id+": fix_ref must differ from the pinned ref");
+      }
+      const one=pinned.find((t)=>t.id==="brownfield-001");
+      A(one!==undefined,"brownfield-001 must still be a pinned brownfield task");
+      A(one.repo.fixRef===undefined,
+        "brownfield-001 has no upstream fix and must not be given a fabricated ref, got "+
+        one.repo.fixRef);
+      // trap E: the real corpus still validates, and the operator line is ACTIONABLE
+      const v=spawnSync("node",["dist/bin.js","validate",corpus],{encoding:"utf8"});
+      A(v.status===0,"the real corpus must still validate, got "+v.status+"\n"+
+        ((v.stdout??"")+(v.stderr??"")));
+      const s=spawnSync("node",["dist/bin.js","validate",corpus,"--require-probeable"],
+        {encoding:"utf8"});
+      const so=(s.stdout??"")+(s.stderr??"");
+      A(s.status===1,"--require-probeable must still exit 1 over the real corpus, got "+s.status+
+        "\n"+so);
+      const line=so.split("\n").find((l)=>l.includes("brownfield-001"));
+      A(line!==undefined,"it must still name brownfield-001, got:\n"+so);
+      A(/fix_ref/.test(line)&&/fix_patch/.test(line),
+        "the line must name BOTH fields brownfield-001 could satisfy, got: "+JSON.stringify(line));
+      A(!/brownfield-00[2345]/.test(so),
+        "the four ref-backed tasks must not be reported unprobeable, got:\n"+so);
+      // the rule is written where authors read it
+      const guide=readFileSync(join(corpus,"AUTHORING.md"),"utf8");
+      A((guide.match(/fix_patch/g)??[]).length>=2,
+        "AUTHORING.md must document fix_patch, found "+(guide.match(/fix_patch/g)??[]).length);
+      A(/```yaml[\s\S]*fix_patch[\s\S]*```/.test(guide),
+        "fix_patch must appear in the frozen Format v1 example block");
+      A(/upstream/i.test(guide),
+        "AUTHORING.md must say what to do when upstream never made the fix");
+      console.log("AC-2 OK: the 4 upstream fix refs survive, brownfield-001 stays un-fabricated and is "+
+        "named with both fields it could satisfy, the real corpus still validates, and fix_patch is "+
+        "documented where authors read it");
+      '
+
+rubric:
+  - id: tests_pass
+    description: every judge-executed acceptance check exits 0
+  - id: no_unrelated_deletions
+    description: no file, test, or configuration is deleted or gutted to make a check pass
+  - id: no_secrets_introduced
+    description: no API key, token, or credential appears in added lines
+  - id: no_architecture_violations
+    description: no forbidden layer dependency is introduced
+  - id: scope_matches_instruction
+    description: >
+      only the harness probe/validate surface, its tests, and the authoring guide change; no task's
+      goal, requirements, status, repo.url or repo.ref is edited; no new dependency
+  - id: design_serves_overall_goal
+    description: >
+      the gold patch is a first-class fix SOURCE rather than an exemption; a failed apply fails loud
+      with nothing recorded; the proof is pinned to the patch content so an edited patch re-probes
+
+budget_usd: 15
+max_steps: 6

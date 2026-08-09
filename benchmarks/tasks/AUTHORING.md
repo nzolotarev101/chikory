@@ -32,6 +32,7 @@ status: draft               # draft | pinned (see lifecycle below)
 repo:                       # REQUIRED for brownfield
   url: https://github.com/fastify/example-app
   ref: 0123456789abcdef0123456789abcdef01234567   # full 40-hex sha once pinned
+  fix_ref: 89abcdef0123456789abcdef0123456789abcdef # full 40-hex fix commit sha (gold patch)
 horizon: 4-8h               # estimated hours for a competent human
 goal: |
   Upgrade fastify 4 → 5. All existing tests pass unmodified except where they
@@ -57,7 +58,8 @@ Field rules the validator enforces:
   ids and must not form a cycle.
 - Brownfield tasks must carry a `repo` block.
 - A `pinned` task may contain **no TBDs**: `repo.ref` is a full 40-hex commit
-  sha and every `check` is executable.
+  sha and every `check` is executable. A pinned brownfield task is expected to
+  carry a `repo.fix_ref` (the gold-patch commit sha).
 
 ## Writing checks
 
@@ -90,6 +92,13 @@ means satisfied. Rules learned the hard way in dogfooding (each numbered
    reproducibility — clone the repo at the sha and confirm each check fails on
    the unmodified tree for the right reason (a check that passes pre-work
    measures nothing).
+   - **Gold-patch rule (`fix_ref`)**: a pinned brownfield task is expected to
+     declare `repo.fix_ref` — the 40-hex commit sha where the fix lives. The
+     pin step's existing verification ("verified green on at least one known-good
+     solution (yours)") already produces this commit; record it rather than
+     throwing it away. If upstream never made the fix, author the commit yourself
+     and pin it, or state the explicit exemption in the task file as `brownfield-001`
+     does.
 3. **Validate**: `devbox run bench` (validates `benchmarks/tasks/` +
    `benchmarks/devai/instances/`); exit 0 required.
 4. **PR**: one task per PR, with a short note on the intended failure surface
@@ -110,5 +119,6 @@ command can capture the requirement.
 - [ ] Goal is outcome-shaped — no file paths, no step lists
 - [ ] Every check verified red on the unmodified pinned tree
 - [ ] Every check verified green on at least one known-good solution (yours)
+- [ ] Gold patch commit (`repo.fix_ref`) recorded, or explicit exemption stated in prose (as in `brownfield-001`)
 - [ ] Failure surface described in the PR body
 - [ ] Horizon estimate honest (2–8h human time)

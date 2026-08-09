@@ -8,21 +8,22 @@ recover a run, and how to land the result as a normal PR.
 **Status (2026-08-08, bounded — update discipline: REPLACE this block, ≤15 lines;
 displaced prose moves verbatim to [`PLAN-HISTORY.md`](PLAN-HISTORY.md); per-run detail:
 `docs/reports/`; queue + course correction: `plan.md` §6/§7).**
-🟢 **dogfood-127 DELIVERED WP-596 CLEAN — a corpus probe sweep now survives a kill and never re-probes
-proven work** (`run-41fb5957-933b-467e-a16d-36df443f6f41`, SUCCESS **1 step $0.0472/$15.00**, 3m 53s, 2/2
-criteria + 6/6 rubric, harvest byte-IDENTICAL 4/4, `docs/reports/dogfood-127.md`). `probe --tasks <dir>
---record <file>` walks every runnable task in stable order, persists each verdict the moment it lands,
-skips only proof taken at the refs the task declares TODAY (`probedAt` untouched), re-probes a moved ref,
-and names an unprobeable task instead of ending the sweep. All 5 traps rejected. **Six hand-fixes:** 🔴
-**F-277** — a sweep with no `--out` shared ONE output dir: `probe.json` clobbered per task, and one git
-workspace re-pointed across repos left the prior target's untracked `node_modules`/build output for the
-next base verification (**F-258's family — a false base verdict into the ledger the gate trusts**). 🟠
-**F-282** non-atomic ledger write → temp+rename. 🟡 **F-278** `--base-verify-minutes` unreachable from
-either probe mode (F-274's shape) · **F-279** stale entries counted as proof · **F-281** the sweep forked
-`run`'s selection · **F-280** a test name claiming a case its body never ran. +3 tests, harness 196→**199**.
-🔴 **F-283 → WP-597**: NO corpus task carries `fix_ref` and `AUTHORING.md` never mentions it — three
-headlines built for evidence nobody can produce. Progression ⛔ **STALLED** + ⚠️ LADDER-PACE.
-**NEXT = WP-597 (dogfood-128): make the corpus probeable — a documented, validated gold-patch ref.**
+🟢 **dogfood-128 DELIVERED WP-597 — the benchmark corpus can finally produce the evidence the
+scoring gate consumes, for 4 of 5 tasks** (`run-951a565d-73a5-4cc8-a230-9b63d872fba9`, SUCCESS **1 step
+$0.0425/$15.00**, 2m 46s, 2/2 criteria + 6/6 rubric, harvest byte-IDENTICAL 8/8, `docs/reports/dogfood-128.md`).
+`brownfield-002/003/004/005` carry a real `repo.fix_ref` — each fetched and read by hand, each the direct
+child of its pinned base, subjects matching the PRs the tasks already named in prose (#3036 · #5855 ·
+#13613 · #7390). `AUTHORING.md` carries the gold-patch rule; `validate --require-probeable` exits 1 naming
+each runnable task that can never be probed and the field it lacks; `probe --tasks` records `unprobeable`
+as its OWN outcome, never a probe failure. All 5 traps rejected.
+🟡 **F-285 HAND-FIXED** — the flag was undocumented and `parseFlags` swallowed unknown flags, so
+`--require-probable` exited **0**: USAGE + `VALIDATE_FLAGS` allowlist, +2 tests, harness 199→**201**.
+**🟠 F-284 — the rung is STILL blocked:** `brownfield-001` (the ONLY task separating
+the two published arms) is a self-performed migration with no upstream fix, so `--require-probeable` over
+the real corpus exits 1 forever and the sweep can never exit 0 — `runProbe` fetches the fix from the
+task's own `repo.url` (`probe.ts:121-122`), so a self-authored patch is inexpressible. 🟡 F-286 (the rule
+is enforced nowhere `devbox run bench` runs) folds in. Progression ⛔ **STALLED** + ⚠️ LADDER-PACE, `rung=4`.
+**NEXT = WP-598 (dogfood-129): make a gold patch upstream never authored probeable, then arm the $0 guard.**
 
 Related docs: [`docs/spec/task-spec.md`](spec/task-spec.md) (schema
 reference) · [`docs/TASK-PROTOCOL.md`](TASK-PROTOCOL.md) (WP etiquette, §7 is
@@ -795,6 +796,26 @@ broken (a false-green, not a follow-on fix).
 | The raw Claude Code baseline arm finishes in minutes with every task scoring its no-op baseline | **The agent got an empty prompt** (bench-p3-rung-4-2026-08-06 🟠 **F-260 → WP-587**). `claude -p` / `--print` is a BOOLEAN flag, so `--cmd 'claude -p "$(cat {goalFile})" …'` passes the goal as a positional the CLI never consumes. Use `devbox run bench-baseline`, which puts the prompt on stdin. Do not hand-write this arm from notes — that is how it went stale the first time. |
 
 ## 8. Known P1 limitations (so you don't fight them)
+
+- **An AC that greps a file for PROSE is satisfiable by prose that already exists**
+  (🟡 F-287, dogfood-128). AC-2 required `brownfield-001` to "STATE why it carries no
+  fix ref" via `/no upstream|never did this migration|self-performed|exempt/i` over the
+  raw file. The file is **unmodified** in the delivered diff: the regex matched a
+  pre-existing parenthetical on line 27 — `# zod-3 HEAD, before any v4 upgrade attempt
+  (upstream never did this migration)` — which explains the **`ref` pin**, not a
+  `fix_ref` exemption. The assertion was green before the run began, so it measured
+  nothing. **Rule:** a documentation AC must either assert text the delivery had to ADD
+  (grep the file at HEAD first and confirm exit 1), or assert a BEHAVIOR instead. Same
+  family as F-274/F-277/F-283 — an AC must drive the real entry point — at the
+  prose altitude.
+
+- **A CLI flag nobody documents is a flag nobody can use, and an unknown flag that
+  parses is a false green** (🟡 F-285, dogfood-128). `parseFlags` accepts any `--flag`
+  and silently ignores unrecognized ones, so `validate --require-probable` (one letter
+  off) exited **0** — "corpus is fine" from the check built to prove it isn't.
+  `validate`/`list` now refuse an unknown flag by name (`VALIDATE_FLAGS`,
+  `benchmarks/harness/src/main.ts:141`). **Other commands still parse permissively** —
+  when adding a flag elsewhere, document it in `USAGE` and consider the allowlist.
 
 - **A published bundle's raw-evidence pointer is guarded, but only since WP-588
   (2026-08-06).** 🔴 F-261 (dogfood-123): `compareSummaries` derived `rawResultsDir`

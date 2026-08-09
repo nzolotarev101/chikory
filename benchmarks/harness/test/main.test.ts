@@ -37,6 +37,48 @@ describe("chikory-bench CLI", () => {
     expect(bad.lines.err.join("\n")).toContain("bad.yaml");
   });
 
+  // F-285: --require-probeable is the check that catches an unprobeable corpus.
+  // parseFlags accepts any `--flag`, so a misspelling used to be swallowed and
+  // the command exited 0 — the false green is worse than no check at all.
+  it("validate: a misspelled flag is refused, not silently ignored", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "bench-cli-"));
+    writeFileSync(
+      join(dir, "brownfield-901.yaml"),
+      `id: brownfield-901
+class: brownfield
+status: pinned
+repo:
+  url: https://example.invalid/repo
+  ref: ${"a".repeat(40)}
+goal: |
+  fixture
+requirements:
+  - id: R1
+    description: r
+    check: "true"
+`,
+    );
+    // the real flag reports the unprobeable task and exits 1
+    const armed = io();
+    expect(await main(["validate", dir, "--require-probeable"], armed)).toBe(1);
+    expect(armed.lines.err.join("\n")).toContain("UNPROBEABLE brownfield-901: missing repo.fix_ref");
+
+    // a typo must NOT read as "corpus is fine"
+    const typo = io();
+    expect(await main(["validate", dir, "--require-probable"], typo)).toBe(1);
+    expect(typo.lines.err.join("\n")).toContain("unknown flag --require-probable");
+
+    // and plain validate still exits 0 over the same corpus (trap B, WP-597)
+    const plain = io();
+    expect(await main(["validate", dir], plain)).toBe(0);
+  });
+
+  it("usage documents --require-probeable", async () => {
+    const o = io();
+    expect(await main(["--help"], o)).toBe(0);
+    expect(o.lines.out.join("\n")).toContain("--require-probeable");
+  });
+
   it("list marks drafts not runnable", async () => {
     const dir = mkdtempSync(join(tmpdir(), "bench-cli-"));
     writeFileSync(join(dir, "greenfield-002.yaml"), GOOD.replace("status: pinned", "status: draft"));

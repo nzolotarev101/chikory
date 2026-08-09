@@ -71,3 +71,25 @@ write-boundary rubric reads `git diff`, so 2.1 GiB / 95,068 gitignored writes sc
 (`gemini-cli` records `toolCalls: 0`). Progression ✅ PROGRESSING (rung 4). **NEXT = P3-rung-5, the
 phase EXIT gate** — published DevAI-extended ranges + leaderboard, on a corpus that can separate.
 
+
+### 2026-08-08 — displaced from plan.md status block (dogfood-128 review, WP-597)
+
+- **Latest / next:** 🟢 **WP-596 (durable corpus probe sweep) DELIVERED CLEAN — dogfood-127 made a multi-hour corpus probe survivable** (`run-41fb5957-933b-467e-a16d-36df443f6f41`, SUCCESS **1 step, $0.0472/$15.00**, 3m 53s, 2/2 criteria + 6/6 rubric, harvest byte-IDENTICAL 4/4, `docs/reports/dogfood-127.md`). `probe --tasks <dir> --record <file>` walks every runnable task in stable order, persists each verdict **the moment it lands**, skips only proof taken at the refs the task declares TODAY (`probedAt` untouched), re-probes a moved ref, and NAMES an unprobeable task instead of ending the sweep; exit 0 only when every selected task holds a current `discriminating` verdict. All 5 designed traps rejected; AC-2 drives the swept ledger through the REAL `run --discrimination-ledger` CLI end to end. **Six review defects, all HAND-FIXED this sitting:** 🔴 **F-277** — a sweep with no `--out` shared ONE output dir across every task: each `probe.json` clobbered, and a SINGLE git workspace re-pointed across repos left the prior target's untracked `node_modules`/build output in the tree the next task's `base_verification_command` runs in (**F-258's family — a false base verdict into the ledger the WP-595 gate trusts**; both ACs always passed `--out`, so neither could see it). 🟠 **F-282** non-atomic ledger write → `writeLedgerAtomically` temp+rename (`probe.ts:77-91`). 🟡 **F-278** `--base-verify-minutes` unreachable from either probe mode — F-274's shape one WP later (`main.ts:494-503`) · **F-279** stale entries counted as `discriminating` (`probe.ts:389-400`) · **F-281** the sweep forked `run`'s task selection → `LoadReport.sources` (`suite.ts:26-52`) · **F-280** a test name claiming a moved-ref case its body never ran. +3 tests, harness 196 → **199** green; sdk-ts 1,304 green. 🔴 **F-283 → WP-597, and it is the next headline:** three consecutive headlines built probe → gate → sweep for evidence **no task in the corpus can produce** — zero tasks carry `repo.fix_ref` and `AUTHORING.md` never mentions the field; arming the gate today would exclude `brownfield-001`, the ONLY task separating the two published arms (a self-performed migration with no upstream fix commit). Progression ⛔ **STALLED** + ⚠️ LADDER-PACE; ledger `rung=4` — WP-596 is the rung-5 PREREQUISITE, not the rung. **NEXT = WP-597 (dogfood-128): make the corpus probeable — the gold-patch rule in `AUTHORING.md`, probeability reported by `validate`/`list`, and real `fix_ref`s pinned where an upstream fix exists.**
+
+### 2026-08-08 — displaced from DOGFOODING.md status block (dogfood-128 review, WP-597)
+
+🟢 **dogfood-127 DELIVERED WP-596 CLEAN — a corpus probe sweep now survives a kill and never re-probes
+proven work** (`run-41fb5957-933b-467e-a16d-36df443f6f41`, SUCCESS **1 step $0.0472/$15.00**, 3m 53s, 2/2
+criteria + 6/6 rubric, harvest byte-IDENTICAL 4/4, `docs/reports/dogfood-127.md`). `probe --tasks <dir>
+--record <file>` walks every runnable task in stable order, persists each verdict the moment it lands,
+skips only proof taken at the refs the task declares TODAY (`probedAt` untouched), re-probes a moved ref,
+and names an unprobeable task instead of ending the sweep. All 5 traps rejected. **Six hand-fixes:** 🔴
+**F-277** — a sweep with no `--out` shared ONE output dir: `probe.json` clobbered per task, and one git
+workspace re-pointed across repos left the prior target's untracked `node_modules`/build output for the
+next base verification (**F-258's family — a false base verdict into the ledger the gate trusts**). 🟠
+**F-282** non-atomic ledger write → temp+rename. 🟡 **F-278** `--base-verify-minutes` unreachable from
+either probe mode (F-274's shape) · **F-279** stale entries counted as proof · **F-281** the sweep forked
+`run`'s selection · **F-280** a test name claiming a case its body never ran. +3 tests, harness 196→**199**.
+🔴 **F-283 → WP-597**: NO corpus task carries `fix_ref` and `AUTHORING.md` never mentions it — three
+headlines built for evidence nobody can produce. Progression ⛔ **STALLED** + ⚠️ LADDER-PACE.
+**NEXT = WP-597 (dogfood-128): make the corpus probeable — a documented, validated gold-patch ref.**

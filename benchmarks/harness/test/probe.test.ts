@@ -248,7 +248,7 @@ describe("runProbeSweep", () => {
       expect(ledger2["brownfield-900"]!.probedAt).toBe(probedAt900);
       expect(outLogs.some((l) => l.includes("brownfield-900: skipped"))).toBe(true);
       expect(outLogs.some((l) => l.includes("brownfield-901: skipped"))).toBe(true);
-      expect(outLogs.some((l) => l.includes("brownfield-902: failed"))).toBe(true);
+      expect(outLogs.some((l) => l.includes("brownfield-902: unprobeable"))).toBe(true);
 
       // Solo sweep with only clean task: should exit 0
       const soloDir = join(root, "solo");
