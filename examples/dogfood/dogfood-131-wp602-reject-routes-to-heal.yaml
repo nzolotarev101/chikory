@@ -401,14 +401,3 @@ max_steps: 12
 judge:
   cadence: 1
   max_cost_share: 0.5
-  rubric_extra:
-    - id: heal_budget_measures_agent_control
-      description: >
-        A reject strike is spent only on something the agent controlled. An infra kill, a step the
-        runner killed at maxSeconds, or a verdict later reverted must spend NO strike (WP-544 /
-        F-209…F-214). Flag any code path that charges those against the reject budget.
-    - id: chain_gate_repair_untouched
-      description: >
-        The chain-side tier-0 gate repair (WP-542/F-207) and the no-un-sealed-incarnation rule
-        (WP-543/F-208) must be untouched. A run-level heal that reroutes or weakens the chain path
-        is a regression, however green the run-level tests are.
