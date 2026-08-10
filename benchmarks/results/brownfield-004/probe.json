@@ -1,0 +1,48 @@
+{
+  "taskId": "brownfield-004",
+  "baseRef": "d96c5ceef12cb53266ce1ae5e65fba301a31fe57",
+  "fixRef": "69da9545b222aceb5fc8ea15e851cab83b1c84f6",
+  "baseWorkspace": "benchmarks/results/brownfield-004/base-workspace",
+  "fixWorkspace": "benchmarks/results/brownfield-004/fix-workspace",
+  "baseVerification": {
+    "green": true,
+    "reason": "Base suite is green (1208 passed, 0 failed)",
+    "command": "pnpm install --frozen-lockfile && pnpm test"
+  },
+  "fixVerification": {
+    "green": true,
+    "reason": "Base suite is green (1209 passed, 0 failed)",
+    "command": "pnpm install --frozen-lockfile && pnpm test"
+  },
+  "verdict": "not-discriminating",
+  "requirements": [
+    {
+      "id": "R1",
+      "base": "green",
+      "fix": "green",
+      "classification": "non-discriminating",
+      "reason": "Requirement passes on base ref (exit 0) — free for every arm"
+    },
+    {
+      "id": "R2",
+      "base": "green",
+      "fix": "green",
+      "classification": "non-discriminating",
+      "reason": "Requirement passes on base ref (exit 0) — free for every arm"
+    },
+    {
+      "id": "R3",
+      "base": "green",
+      "fix": "green",
+      "classification": "non-discriminating",
+      "reason": "Requirement passes on base ref (exit 0) — free for every arm"
+    },
+    {
+      "id": "R4",
+      "base": "red",
+      "fix": "green",
+      "classification": "discriminating",
+      "reason": "Requirement fails on base ref (exit non-zero) and passes on fix ref (exit 0)"
+    }
+  ]
+}

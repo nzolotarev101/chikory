@@ -1,0 +1,48 @@
+{
+  "taskId": "brownfield-005",
+  "baseRef": "cdbc28049889a9da9ea2abb6bd6519afe2279ead",
+  "fixRef": "dfbafa8ef178a5a3d23ef9461caa9494b3ef7f95",
+  "baseWorkspace": "benchmarks/results/brownfield-005/base-workspace",
+  "fixWorkspace": "benchmarks/results/brownfield-005/fix-workspace",
+  "baseVerification": {
+    "green": true,
+    "reason": "Base suite is green (22 passed, 0 failed)",
+    "command": "pnpm install --frozen-lockfile && pnpm vitest run packages/tests/server/links.test.ts"
+  },
+  "fixVerification": {
+    "green": true,
+    "reason": "Base suite is green (23 passed, 0 failed)",
+    "command": "pnpm install --frozen-lockfile && pnpm vitest run packages/tests/server/links.test.ts"
+  },
+  "verdict": "not-discriminating",
+  "requirements": [
+    {
+      "id": "R1",
+      "base": "green",
+      "fix": "green",
+      "classification": "non-discriminating",
+      "reason": "Requirement passes on base ref (exit 0) — free for every arm"
+    },
+    {
+      "id": "R2",
+      "base": "green",
+      "fix": "green",
+      "classification": "non-discriminating",
+      "reason": "Requirement passes on base ref (exit 0) — free for every arm"
+    },
+    {
+      "id": "R3",
+      "base": "green",
+      "fix": "green",
+      "classification": "non-discriminating",
+      "reason": "Requirement passes on base ref (exit 0) — free for every arm"
+    },
+    {
+      "id": "R4",
+      "base": "red",
+      "fix": "green",
+      "classification": "discriminating",
+      "reason": "Requirement fails on base ref (exit non-zero) and passes on fix ref (exit 0)"
+    }
+  ]
+}

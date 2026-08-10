@@ -456,5 +456,43 @@ describe("runProbeSweep", () => {
       rmSync(root, { recursive: true, force: true });
     }
   }, 60_000);
+
+  describe("the evidence a sweep writes must be COMMITTABLE (F-293)", () => {
+    // dogfood-130 shipped `benchmarks/results/.gitignore` with `*` plus a bare
+    // `!**/probe.json`. Git never descends into an ignored DIRECTORY, so the
+    // negation was inert and `git add` refused every per-task probe.json — the
+    // run's own AC passed only because the executor had force-added them inside
+    // its workspace, where a tracked file bypasses the rules entirely. Evidence a
+    // fresh clone cannot reproduce is not durable evidence.
+    const repoRoot = findRepoRoot(import.meta.dirname);
+
+    /** `git check-ignore` exits 0 when the path is ignored, 1 when it is not. */
+    function ignored(relPath: string): boolean {
+      try {
+        execFileSync("git", ["-C", repoRoot, "check-ignore", "--no-index", "-q", "--", relPath], {
+          stdio: "ignore",
+        });
+        return true;
+      } catch {
+        return false;
+      }
+    }
+
+    it("re-includes the ledger and the per-task probe.json the sweep commits", () => {
+      expect(ignored("benchmarks/results/discrimination.json")).toBe(false);
+      for (const id of ["brownfield-002", "brownfield-003", "brownfield-004", "brownfield-005"]) {
+        expect(ignored(`benchmarks/results/${id}/probe.json`)).toBe(false);
+      }
+    });
+
+    it("still excludes the raw sweep artifacts beside it", () => {
+      // The re-inclusion must stay depth-1. A recursive `!*/` also re-exposes the
+      // nested suite `workspace/` git repos, which `git add -A` then stages as
+      // orphan mode-160000 gitlinks — the defect that killed run-838ae110.
+      expect(ignored("benchmarks/results/brownfield-002/base-workspace/probe.json")).toBe(true);
+      expect(ignored("benchmarks/results/brownfield-002/adapter.log")).toBe(true);
+      expect(ignored("benchmarks/results/p3-rung-4/chikory/20260803-131837-chikory/summary.json")).toBe(true);
+    });
+  });
 });
 

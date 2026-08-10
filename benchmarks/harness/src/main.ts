@@ -2,7 +2,7 @@
  * `chikory-bench` — WP-301 harness CLI (entry: `bin.ts`). Runs inside devbox
  * (`devbox run bench -- <command>`), never against host toolchains.
  */
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, readdirSync, statSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { parse as parseYaml } from "yaml";
 
@@ -17,9 +17,11 @@ import { commandComplete, makeJudgeGrader } from "./judge-grader.js";
 import {
   compareSummaries,
   readDiscriminationLedger,
+  summarize,
   writeSuiteSummary,
   type DiscriminationLedger,
   type SuiteSummary,
+  type TaskResult,
 } from "./results.js";
 import { writeLeaderboard } from "./leaderboard.js";
 import { runProbe, runProbeSweep } from "./probe.js";
@@ -86,6 +88,8 @@ commands:
       [--out <file>]                        output path to save comparison JSON
   leaderboard --bundle <dir> [--bundle <dir> ...] --out <dir>
                            build a ranked summary across published bundles ordered by 95% CI lower bound
+  resummarize --results <dir-or-file> --discrimination-ledger <file> --out <dir>
+                           re-summarize a stored suite from per-task evidence through a discrimination ledger
 
 exit codes: 0 ok · 1 invalid input or failed run
 `;
@@ -605,6 +609,178 @@ export async function main(argv: string[], io = { out: console.log, err: console
       io.err(`chikory-bench leaderboard: ${(err as Error).message}`);
       return 1;
     }
+  }
+
+  if (command === "resummarize" || command === "re-summarize" || command === "summarize") {
+    const resultsPath = values["results"];
+    const ledgerPath = values["discrimination-ledger"];
+    const outDir = values["out"];
+
+    if (!resultsPath || !ledgerPath || !outDir) {
+      io.err("chikory-bench resummarize: --results, --discrimination-ledger, and --out are required");
+      return 1;
+    }
+
+    const resolvedResults = resolve(resultsPath);
+    if (!existsSync(resolvedResults)) {
+      io.err(`chikory-bench resummarize: --results path not found: ${resolvedResults}`);
+      return 1;
+    }
+
+    const resolvedLedger = resolve(ledgerPath);
+    if (!existsSync(resolvedLedger)) {
+      io.err(`chikory-bench resummarize: --discrimination-ledger not found: ${resolvedLedger}`);
+      return 1;
+    }
+
+    let ledger: DiscriminationLedger;
+    try {
+      ledger = readDiscriminationLedger(resolvedLedger);
+    } catch (err) {
+      io.err(`chikory-bench resummarize: ${err instanceof Error ? err.message : String(err)}`);
+      return 1;
+    }
+
+    let suite = "benchmarks/tasks";
+    let adapter = "chikory";
+    let startedAt = new Date().toISOString();
+    let endedAt = new Date().toISOString();
+    const taskResults: TaskResult[] = [];
+
+    const isDirectory = statSync(resolvedResults).isDirectory();
+    if (isDirectory) {
+      const entries = readdirSync(resolvedResults);
+
+      let existingSummary: SuiteSummary | undefined;
+      const summaryFile = entries.find((f) => f === "summary.json" || f.endsWith("-summary.json"));
+      if (summaryFile) {
+        try {
+          existingSummary = JSON.parse(readFileSync(join(resolvedResults, summaryFile), "utf8"));
+          if (existingSummary?.suite) suite = existingSummary.suite;
+          if (existingSummary?.adapter) adapter = existingSummary.adapter;
+          if (existingSummary?.startedAt) startedAt = existingSummary.startedAt;
+          if (existingSummary?.endedAt) endedAt = existingSummary.endedAt;
+        } catch {
+          // Ignore summary read errors
+        }
+      }
+
+      for (const file of entries) {
+        if (!file.endsWith(".json")) continue;
+        if (file === "summary.json" || file.endsWith("-summary.json") || file === "comparison.json" || file === "leaderboard.json") {
+          continue;
+        }
+        const fullPath = join(resolvedResults, file);
+        try {
+          const parsed = JSON.parse(readFileSync(fullPath, "utf8"));
+          if (parsed && typeof parsed === "object" && typeof parsed.taskId === "string" && parsed.grading) {
+            taskResults.push(parsed as TaskResult);
+          }
+        } catch {
+          // Ignore invalid JSON files
+        }
+      }
+
+      if (taskResults.length === 0 && existingSummary && Array.isArray(existingSummary.perTask)) {
+        for (const pt of existingSummary.perTask) {
+          taskResults.push({
+            taskId: pt.taskId,
+            source: `${pt.taskId}.yaml`,
+            class: "brownfield",
+            adapter: existingSummary.adapter ?? adapter,
+            startedAt: existingSummary.startedAt ?? startedAt,
+            endedAt: existingSummary.endedAt ?? endedAt,
+            run: {
+              exitCode: pt.exitCode,
+              wallClockMs: pt.wallClockMs,
+              artifacts: [],
+              notes: pt.sealed ? [] : ["timed out"],
+            },
+            grading: {
+              grades: Array.from({ length: pt.total }, (_, i) => ({
+                requirementId: `R${i + 1}`,
+                satisfied: i < pt.satisfied,
+                detail: i < pt.satisfied ? "Satisfied" : "Unsatisfied",
+              })),
+              total: pt.total,
+              satisfied: pt.satisfied,
+              dependencySatisfied: pt.dependencySatisfied,
+            },
+            baseVerification: pt.baseVerified !== undefined
+              ? {
+                  green: pt.baseVerified,
+                  reason: pt.baseVerified ? "Base suite is green" : "Unverified base ref",
+                  testsPassed: pt.satisfied,
+                  testsFailed: pt.total - pt.satisfied,
+                }
+              : undefined,
+          });
+        }
+      }
+    } else {
+      try {
+        const summaryJson = JSON.parse(readFileSync(resolvedResults, "utf8")) as SuiteSummary;
+        if (summaryJson.suite) suite = summaryJson.suite;
+        if (summaryJson.adapter) adapter = summaryJson.adapter;
+        if (summaryJson.startedAt) startedAt = summaryJson.startedAt;
+        if (summaryJson.endedAt) endedAt = summaryJson.endedAt;
+
+        if (Array.isArray(summaryJson.perTask)) {
+          for (const pt of summaryJson.perTask) {
+            taskResults.push({
+              taskId: pt.taskId,
+              source: `${pt.taskId}.yaml`,
+              class: "brownfield",
+              adapter: summaryJson.adapter ?? adapter,
+              startedAt: summaryJson.startedAt ?? startedAt,
+              endedAt: summaryJson.endedAt ?? endedAt,
+              run: {
+                exitCode: pt.exitCode,
+                wallClockMs: pt.wallClockMs,
+                artifacts: [],
+                notes: pt.sealed ? [] : ["timed out"],
+              },
+              grading: {
+                grades: Array.from({ length: pt.total }, (_, i) => ({
+                  requirementId: `R${i + 1}`,
+                  satisfied: i < pt.satisfied,
+                  detail: i < pt.satisfied ? "Satisfied" : "Unsatisfied",
+                })),
+                total: pt.total,
+                satisfied: pt.satisfied,
+                dependencySatisfied: pt.dependencySatisfied,
+              },
+              baseVerification: pt.baseVerified !== undefined
+                ? {
+                    green: pt.baseVerified,
+                    reason: pt.baseVerified ? "Base suite is green" : "Unverified base ref",
+                    testsPassed: pt.satisfied,
+                    testsFailed: pt.total - pt.satisfied,
+                  }
+                : undefined,
+            });
+          }
+        }
+      } catch (err) {
+        io.err(`chikory-bench resummarize: failed to parse ${resolvedResults}: ${err instanceof Error ? err.message : String(err)}`);
+        return 1;
+      }
+    }
+
+    if (taskResults.length === 0) {
+      io.err(`chikory-bench resummarize: no stored task results found in ${resolvedResults}`);
+      return 1;
+    }
+
+    const summary = summarize(suite, adapter, startedAt, endedAt, taskResults, ledger);
+    const resolvedOutDir = resolve(outDir);
+    const canonical = writeSuiteSummary(resolvedOutDir, summary);
+    io.out(
+      `re-summarized suite ${summary.suite}: ${summary.tasksVerified}/${summary.tasks} verified tasks, ` +
+        `${summary.requirementsVerifiedSatisfied ?? summary.requirementsSatisfied}/${summary.requirementsVerifiedTotal ?? summary.requirementsTotal} verified requirements satisfied ` +
+        `(I-SR ${(summary.iSr * 100).toFixed(1)}%) → ${canonical}`,
+    );
+    return 0;
   }
 
   io.err(`chikory-bench: unknown command '${command}'`);

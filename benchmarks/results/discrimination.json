@@ -1,0 +1,102 @@
+{
+  "brownfield-002": {
+    "taskId": "brownfield-002",
+    "baseRef": "a061eaa112fa18885dd4de0cea6c0e51094cad0c",
+    "fixRef": "8043b106324a5148e7a5ff82e11895f10677abd9",
+    "verdict": "not-discriminating",
+    "probedAt": "2026-08-09T20:22:26.103Z",
+    "requirements": [
+      {
+        "id": "R1",
+        "classification": "non-discriminating"
+      },
+      {
+        "id": "R2",
+        "classification": "non-discriminating"
+      },
+      {
+        "id": "R3",
+        "classification": "non-discriminating"
+      },
+      {
+        "id": "R4",
+        "classification": "discriminating"
+      }
+    ]
+  },
+  "brownfield-003": {
+    "taskId": "brownfield-003",
+    "baseRef": "b6b1288277e6ca87dab0ad1c7251b92612b7445c",
+    "fixRef": "34f601590351e5d3a57fe20c001155940ba65324",
+    "verdict": "not-discriminating",
+    "probedAt": "2026-08-09T20:23:48.331Z",
+    "requirements": [
+      {
+        "id": "R1",
+        "classification": "non-discriminating"
+      },
+      {
+        "id": "R2",
+        "classification": "discriminating"
+      },
+      {
+        "id": "R3",
+        "classification": "non-discriminating"
+      },
+      {
+        "id": "R4",
+        "classification": "discriminating"
+      }
+    ]
+  },
+  "brownfield-004": {
+    "taskId": "brownfield-004",
+    "baseRef": "d96c5ceef12cb53266ce1ae5e65fba301a31fe57",
+    "fixRef": "69da9545b222aceb5fc8ea15e851cab83b1c84f6",
+    "verdict": "not-discriminating",
+    "probedAt": "2026-08-09T20:28:49.650Z",
+    "requirements": [
+      {
+        "id": "R1",
+        "classification": "non-discriminating"
+      },
+      {
+        "id": "R2",
+        "classification": "non-discriminating"
+      },
+      {
+        "id": "R3",
+        "classification": "non-discriminating"
+      },
+      {
+        "id": "R4",
+        "classification": "discriminating"
+      }
+    ]
+  },
+  "brownfield-005": {
+    "taskId": "brownfield-005",
+    "baseRef": "cdbc28049889a9da9ea2abb6bd6519afe2279ead",
+    "fixRef": "dfbafa8ef178a5a3d23ef9461caa9494b3ef7f95",
+    "verdict": "not-discriminating",
+    "probedAt": "2026-08-09T20:30:36.077Z",
+    "requirements": [
+      {
+        "id": "R1",
+        "classification": "non-discriminating"
+      },
+      {
+        "id": "R2",
+        "classification": "non-discriminating"
+      },
+      {
+        "id": "R3",
+        "classification": "non-discriminating"
+      },
+      {
+        "id": "R4",
+        "classification": "discriminating"
+      }
+    ]
+  }
+}

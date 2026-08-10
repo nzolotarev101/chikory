@@ -2,3 +2,10 @@
 # committed summaries are copied out deliberately (benchmarks/README.md).
 *
 !.gitignore
+!discrimination.json
+# git never descends into an ignored DIRECTORY, so a bare `!**/probe.json` is inert
+# (F-293). The per-task dirs must be re-included first — but ONLY at depth 1: a
+# recursive `!*/` would also expose the nested suite `workspace/` git repos and
+# stage them as orphan gitlinks (the defect that killed run-838ae110).
+!/*/
+!/*/probe.json

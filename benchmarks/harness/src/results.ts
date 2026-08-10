@@ -3,7 +3,7 @@
  * published number links to its raw trace. One dir per suite run:
  * `benchmarks/results/<stamp>-<adapter>/` with a per-task JSON + summary.json.
  */
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
 import { dirname, join, relative, resolve, sep } from "node:path";
 
 import type { AdapterResult } from "./adapter.js";
@@ -68,6 +68,10 @@ export interface SuiteSummary {
   iSr: number;
   /** Dependency-adjusted satisfaction rate (DevAI D-SR), 0..1. Base-verified tasks only. */
   dSr: number;
+  iSrCi?: ConfidenceInterval;
+  iSrRange?: { low: number; high: number };
+  dSrCi?: ConfidenceInterval;
+  dSrRange?: { low: number; high: number };
   perTask: {
     taskId: string;
     satisfied: number;
@@ -170,10 +174,16 @@ export function isTaskDiscriminationVerified(
       reason: `Task ${result.taskId} was never probed`,
     };
   }
+  if (result.repoRef === undefined) {
+    return {
+      verified: false,
+      reason: `Stored result recorded no scored ref`,
+    };
+  }
   if (entry.baseRef !== result.repoRef) {
     return {
       verified: false,
-      reason: `Task probed at ref ${entry.baseRef}, but scored at ref ${result.repoRef ?? "undefined"} (stale proof)`,
+      reason: `Task probed at ref ${entry.baseRef}, but scored at ref ${result.repoRef} (stale proof)`,
     };
   }
   if (entry.verdict !== "discriminating") {
@@ -239,6 +249,9 @@ export function summarize(
   const verifiedSatisfied = verifiedResults.reduce((s, r) => s + r.grading.satisfied, 0);
   const verifiedDependencySatisfied = verifiedResults.reduce((s, r) => s + r.grading.dependencySatisfied, 0);
 
+  const iSrCi = wilsonScoreInterval(verifiedSatisfied, verifiedTotal);
+  const dSrCi = wilsonScoreInterval(verifiedDependencySatisfied, verifiedTotal);
+
   return {
     suite,
     adapter,
@@ -254,6 +267,10 @@ export function summarize(
     dependencyVerifiedSatisfied: verifiedDependencySatisfied,
     iSr: verifiedTotal > 0 ? verifiedSatisfied / verifiedTotal : 0,
     dSr: verifiedTotal > 0 ? verifiedDependencySatisfied / verifiedTotal : 0,
+    iSrCi,
+    iSrRange: { low: iSrCi.lower, high: iSrCi.upper },
+    dSrCi,
+    dSrRange: { low: dSrCi.lower, high: dSrCi.upper },
     perTask: perTaskInfo,
   };
 }
@@ -377,30 +394,62 @@ export function publishableRawResultsDir(reference: string): string {
  * directory or from the repo root. That is F-262 again: the acceptance check
  * asserted the field was a non-empty string, never that it RESOLVED.
  */
+function hasRunWorkspaceMarker(segments: string[]): boolean {
+  return segments.some((segment, i) => segment === ".chikory" && segments[i + 1] === "runs");
+}
+
+/** `realpathSync`, falling back to the input for a path that does not exist. */
+function realPath(target: string): string {
+  try {
+    return realpathSync(resolve(target));
+  } catch {
+    return resolve(target);
+  }
+}
+
 export function publishableRepoPath(target: string, what = "published path"): string {
   const absolute = resolve(target);
-  const segments = absolute.split(sep);
-  const runsAt = segments.findIndex(
-    (segment, i) => segment === ".chikory" && segments[i + 1] === "runs",
-  );
-  if (runsAt !== -1) {
+  let repoRoot: string | undefined;
+  for (let dir = absolute; ; dir = dirname(dir)) {
+    if (existsSync(join(dir, ".git"))) {
+      repoRoot = dir;
+      break;
+    }
+    if (dirname(dir) === dir) break;
+  }
+
+  const baseDir = repoRoot ?? "/";
+  const rel = relative(baseDir, absolute);
+  const refuse = (): never => {
     throw new Error(
       `${what} ${absolute} is inside an ephemeral Chikory run workspace; ` +
         `a published comparison must cite durable evidence (re-run compare against the ` +
         `operator's benchmarks/results/… copy, not a run workspace copy of it)`,
     );
+  };
+  if (hasRunWorkspaceMarker(rel.split(sep))) refuse();
+
+  // F-294: a run workspace is ITSELF a git worktree, so anchoring on the target's
+  // OWN repo root hides `.chikory/runs` from the relative path — the F-261/F-267
+  // guard above silently stopped firing for the only shape it exists for (the
+  // dogfood-123 defect). The unit test missed it because its path was fictional:
+  // with no `.git` anywhere on disk the walk finds no repo root and the relative
+  // check still sees the marker. Re-check the ROOT itself, and refuse unless the
+  // caller is running inside that same workspace — the harness probing its own
+  // tree is fine (harvest copies that evidence out), citing someone else's
+  // workspace is the unresolvable pointer F-261 was opened for.
+  if (repoRoot !== undefined && hasRunWorkspaceMarker(repoRoot.split(sep))) {
+    // Compare REAL paths: on macOS `process.cwd()` reports `/private/var/…` for a
+    // `/var/…` tmpdir, which would read as "outside" a workspace we are in fact in.
+    const fromRoot = relative(realPath(repoRoot), realPath(process.cwd()));
+    const cwdIsInside = fromRoot === "" || !fromRoot.split(sep).includes("..");
+    if (!cwdIsInside) refuse();
   }
-  // F-270: start at `absolute`, NOT `dirname(absolute)`. A target that IS a repo
-  // root must publish as ".". Starting a level up walks past it to whatever
-  // ancestor repo happens to exist on the operator's disk (a home-dir dotfiles
-  // repo turned `<repo>` into `repos/chikory`) — F-267 again, from the other end.
-  for (let dir = absolute; ; dir = dirname(dir)) {
-    if (existsSync(join(dir, ".git"))) {
-      const rel = relative(dir, absolute);
-      return rel.length > 0 ? rel : ".";
-    }
-    if (dirname(dir) === dir) return absolute;
+
+  if (repoRoot) {
+    return rel.length > 0 ? rel : ".";
   }
+  return absolute;
 }
 
 function buildArmDetail(

@@ -98,6 +98,7 @@ export interface ProbeRequirementResult {
 export interface ProbeVerificationReport {
   green: boolean;
   reason: string;
+  command?: string;
 }
 
 export interface ProbeResult {
@@ -246,10 +247,12 @@ export async function runProbe(options: RunProbeOptions): Promise<{ result: Prob
   const baseVerificationReport: ProbeVerificationReport = {
     green: baseVerifyRes.green,
     reason: baseVerifyRes.reason,
+    command: baseVerifyCommand,
   };
   const fixVerificationReport: ProbeVerificationReport = {
     green: fixVerifyRes.green,
     reason: fixVerifyRes.reason,
+    command: baseVerifyCommand,
   };
 
   // F-270: anchor on the OUT DIR, not on each workspace. `ensureGitWorkspace`

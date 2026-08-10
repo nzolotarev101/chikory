@@ -1,0 +1,414 @@
+# Plain: When the quality gate stops a run and asks a human what to do, and the human says "no —
+# here is what's wrong", the system currently throws that sentence away and kills the run. The human
+# then has to reconstruct the work by hand. This run makes the human's answer the correction the run
+# acts on: it goes to the agent, the agent gets a bounded number of attempts to satisfy it, and the
+# run dies only when the human gives no reason or those attempts run out.
+# WP: WP-602 (a rejected escalation routes the operator's correction into the loop)
+# Ladder-rung: 0 (OFF-LADDER by necessity — rung 5 is operator-gated today; see WHY)
+# Thesis-KPI: operator corrections a run can act on 0/1 → 1/1; hand-recoveries needed after a
+#   rejected escalation 1 per reject → 0; per-step reliability (§1.4) — a rejected run stops
+#   counting as a dead run
+# Format: loose — the outcome and the contract are fixed; the internals are the executor's
+#
+# Launch mode: RUN (single node — one seam in the run loop, proven pure and then proven live).
+#   CHIKORY_PREFLIGHT_ONLY=1 devbox run run-dogfood
+#   devbox run run-dogfood
+#
+# WHY THIS AND NOT THE LADDER RUNG (dogfood-130 review, 2026-08-09):
+#   Progression gate: ✅ PROGRESSING (a thesis axis moved — the corpus carries real probe evidence
+#   for the first time), with ⚠️ LADDER PACE still flagged at rung 4. The default candidate is
+#   therefore P3-rung-5, the exit gate. **It cannot run as a dogfood today, and dogfood-130 is what
+#   established that.** Rung 5 needs published numbers that are actually verifiable. dogfood-130
+#   measured that 0 of the 19 published requirements currently are, and named exactly what closes
+#   the gap:
+#     1. `brownfield-001`'s zod v3 → v4 gold patch — a 3–6h OPERATOR research lift. Upstream never
+#        performed the migration, so there is no commit to name; WP-598 made an authored patch
+#        expressible, but writing it is the task's own horizon, not a dogfood step.
+#     2. A re-run of BOTH arms so stored per-task results carry `repoRef` (every stored suite
+#        predates WP-595). That is hours of quota, and dogfood-122 proved an LLM executor must not
+#        supervise a multi-hour quota-bound suite — the operator runs the arms by hand.
+#   Neither is a product gap. Queueing a seventh rung-5 "prerequisite" would be the exact failure
+#   the §1.2 gate exists to stop: greening the dashboard while the backlog stands still.
+#
+#   So this run takes the highest-value open PRODUCT work instead, and it is the pillar this very
+#   review had to substitute a human for. dogfood-130's own recovery is the evidence: the first run
+#   (`run-838ae110`) committed 8 orphan gitlinks, the operator rejected the escalation with a
+#   complete one-command work order — "untrack the 8 mode-160000 gitlinks under
+#   benchmarks/results/*/{base,fix}-workspace, git rm --cached them, keep discrimination.json +
+#   probe.json as-is" — and the run sealed dead at $0.11. The operator then hand-branched from
+#   checkpoint @5 and re-drove the whole thing. The single richest correction signal the system can
+#   receive is the one signal the loop cannot act on.
+#
+# THE MEASURED PREMISE (re-measure before building; do not re-litigate):
+#   * `agent-loop.ts:1148-1153` — `if (!decision.approved)` seals FAILED immediately, and NOT
+#     resumably: `seal("FAILED", \`judge escalation rejected${reason}\` — …)`. The approve path two
+#     branches later resumes to RUNNING (`agent-loop.ts:1167`). The reject REASON is interpolated
+#     into the seal string and never read again.
+#   * The same shape repeats for the loop-breaker escalation (`agent-loop.ts:1195`).
+#   * This is DESIGNED behavior with a passing test — `test/runner/…` "verdict gating (WP-132) >
+#     ESCALATE + reject seals FAILED with the judge's reason". Expect to CHANGE that test's
+#     expectation, and say so; do not delete it.
+#   * The heal machinery already exists and is proven: `decideRemediation` and
+#     `buildRemediationBrief` (`workflow/remediation.ts:35,58`), rollback-to-last-good, an
+#     off-cadence re-judge, and a `remediation` journal kind (WP-519/520). This WP feeds a NEW
+#     trigger into that path; it does not build a second one.
+#   * The pure-decision convention lives in `packages/sdk-ts/src/workflow/`: `decideEscalationWait`
+#     (`escalation-wait.ts:28`), `decideRemediation`, `decideLimitParkDelay`, `decideWorkChunk`,
+#     `decideStepForcing`. A replay-safe workflow decision is a pure function there, unit-tested,
+#     and CALLED by the loop — a pure function nothing calls is F-274's shape.
+#   * Chain nodes already self-heal on a rejected gate (WP-542/F-207 tier-0 gate repair) and no
+#     incarnation may end un-sealed (WP-543/F-208). Plain runs have no equivalent. Do not regress
+#     the chain path to build the run one.
+#   * The heal budget must measure what the AGENT controls (WP-544/F-209…F-214): an infra kill or a
+#     verdict that was later reverted spends NO strike.
+#   * Live runner scenarios boot Temporal through the vitest global setup
+#     (`test/runner/global-setup.ts`, address injected via `inject`); `test/runner/helpers.ts`
+#     provides a scripted executor with deterministic costs, failures and judge forms — no LLM.
+#     A full live file runs in ~11s wall.
+#
+# Designed traps — the plausible-but-wrong deliveries the acceptance criteria exist to reject:
+#   A. **Making the dead seal RESUMABLE and calling it done.** The cheapest change is
+#      `seal("FAILED", …, { resumable: true })`. The run still STOPS, the reason is still discarded,
+#      and a human must still type `chikory resume`. That is the status quo with extra steps.
+#      AC-2 requires the run to CONTINUE on its own after a reasoned reject — another step is
+#      executed and the run reaches its own terminal state with no further operator command.
+#   B. **An unbounded heal loop.** Routing every reject into a heal with no budget means an operator
+#      who rejects twice is in a loop, which is the WP-124 spin the loop-breaker exists to prevent.
+#      AC-1 requires a finite, declared budget and a dead seal once it is spent; AC-2 proves the
+#      SECOND reject on the same run seals FAILED.
+#   C. **Healing a reason-less reject.** `chikory approve --reject` with no text carries no
+#      correction; retrying on it is a blind retry that burns budget and changes nothing. AC-1 and
+#      AC-2 both require a reject with no reason to seal dead, immediately, as it does today.
+#      A whitespace-only reason is the same case — a naive `reason !== undefined` check fails here.
+#   D. **Claiming to heal while dropping the operator's words.** A heal whose brief does not carry
+#      the operator's text is a blind retry wearing a costume. AC-1 requires the reason VERBATIM in
+#      the brief; AC-2 requires the marker string the check invents to reach the executor's next
+#      step, read out of the journal — not out of a summary the executor writes.
+#   E. **A pure function nothing calls.** A `decideRejection` with beautiful unit tests that the
+#      loop never invokes is F-274/F-277's shape exactly, and AC-1 alone cannot tell the difference.
+#      AC-2 is the answer: it drives the REAL workflow through the REAL approve/reject CLI path and
+#      reads the REAL journal.
+#   F. **Spending a strike on something the agent did not control.** See WP-544. Not gated by an AC
+#      this run — but a delivery that charges an infra kill against the reject budget contradicts a
+#      landed invariant, and the rubric should say so.
+#
+# NOT IN SCOPE: the chain-side gate repair (already landed, WP-542/543); a new CLI verb (`chikory
+# approve --reject "<reason>"` already exists and already carries the text — see
+# `cli/commands.ts` `cmdApprove`); changing what makes a judge ESCALATE in the first place.
+
+name: dogfood-131-wp602-reject-routes-to-heal
+wp: WP-602
+goal: >
+  When an operator rejects an escalation and says WHY, that sentence must become the correction the
+  run acts on — not the epitaph on a dead run.
+
+  Today chikory approve <run-id> --reject "<reason>" seals the run FAILED immediately and
+  non-resumably, and the reason is interpolated into the seal message and never read again. The
+  approve path, two branches later, resumes the run. So the loop can act on a human saying "yes" and
+  cannot act on a human saying "no, here is what is wrong" — which is the more informative answer.
+
+  Make these true:
+
+    * **A reasoned reject heals instead of killing.** A reject that carries a reason routes into the
+      remediation path that already exists (WP-519/520 — brief, rollback to last good, off-cadence
+      re-judge), with the operator's reason as the brief's content. The run CONTINUES under its own
+      power: it executes another step and reaches its own terminal state with no further operator
+      command. Nothing about this is a second heal mechanism — the existing one gains a new trigger.
+
+    * **The operator's words reach the agent, intact.** The reason appears VERBATIM in what the next
+      step is given. A brief that paraphrases, truncates away the substance, or merely notes that a
+      rejection happened is a blind retry wearing a costume. The brief stays bounded the way every
+      other brief is bounded, and a reason far past that bound is still recognisable at its start.
+
+    * **It is bounded, and it can be opted out of.** The number of reasoned rejects a run will heal
+      is finite and declared. Once spent, the next reject seals the run dead, naming rejection as the
+      cause. A budget of zero restores today's behavior exactly, the way maxReplans: 0 restores the
+      pre-WP-521 chain halt.
+
+    * **A reject with nothing to say still kills the run.** A reject with no reason — or one that is
+      only whitespace — carries no correction, so healing on it is a blind retry. It seals dead
+      immediately, exactly as it does today, and the seal says the rejection was the cause.
+
+  The decision itself is a pure, replay-safe function in the workflow layer beside its siblings
+  (decideEscalationWait, decideRemediation), exported as `decideRejection` from the package's
+  public surface, and the run loop CALLS it — a pure decision the loop never invokes is a mechanism
+  that does not exist.
+
+  Everything already proven stays proven: approving an escalation still resumes, and an approved
+  out-of-rubric escalate with all criteria passing still force-seals SUCCESS (F-154); the
+  loop-breaker still escalates after three consecutive failures; unattended runs still seal on a
+  resumable checkpoint rather than waiting; the chain-side gate repair (WP-542/F-207) and the
+  no-un-sealed-incarnation rule (WP-543/F-208) are untouched. A strike is spent only on something
+  the agent controlled — an infra kill or a reverted verdict spends none (WP-544). The existing test
+  that pins "ESCALATE + reject seals FAILED with the judge's reason" describes the OLD contract:
+  update its expectation and say plainly in the step summary that you did — do not delete it, and do
+  not weaken it into a tautology.
+
+  Constraints: TypeScript stays strict ESM with named exports and no `any`; no new dependency, no
+  provider SDK, no API key, no global install. Workflow code stays deterministic and replay-safe —
+  no Date.now(), no Math.random(), no I/O in the decision. Project commands run sequentially
+  inside the already-activated Devbox environment, so invoke pinned tools directly and never nest
+  `devbox run`. Every existing test remains green and `eslint` stays clean — run the linter, not
+  only the type-checker and the tests.
+
+repos:
+  - url: /Users/nikitazolotarev/repos/chikory
+    writable: true
+
+acceptance_criteria:
+  - id: AC-1
+    description: >
+      THIS CHECK OWNS ITS ORACLE — RED on HEAD, green only once `decideRejection` decides correctly.
+      Every input family and every expected decision is written HERE, not delegated to a test the
+      executor authors: a reasoned reject under budget HEALS and carries the reason verbatim (trap D);
+      at or past budget it seals DEAD (trap B); a zero budget restores today's behavior (trap B); a
+      missing reason and a whitespace-only reason both seal DEAD (trap C, the negative a naive
+      `!== undefined` check fails); an oversized reason is bounded but still recognisable; and the
+      dead seal NAMES rejection as the cause. Runs in seconds against the real built artifact.
+    check: |
+      cd packages/sdk-ts && pnpm exec tsc && node --input-type=module -e '
+      import {pathToFileURL} from "node:url";
+      import {join} from "node:path";
+      const A=(c,m)=>{if(!c){console.error("FAIL: "+m);process.exit(1);}};
+      const mod=await import(pathToFileURL(join(process.cwd(),"dist/index.js")).href);
+      const decideRejection=mod.decideRejection;
+      A(typeof decideRejection==="function",
+        "decideRejection must be exported from the package public surface, got "+
+        typeof decideRejection);
+
+      const REASON="untrack the 8 mode-160000 gitlinks under benchmarks/results; keep the ledger";
+      const heal=decideRejection({reason:REASON,strikesSpent:0,maxStrikes:2});
+      A(heal&&heal.action==="heal",
+        "a reasoned reject with budget left must HEAL, got "+JSON.stringify(heal));
+      A(typeof heal.brief==="string"&&heal.brief.includes(REASON),
+        "trap D: the brief must carry the operator reason VERBATIM, got "+
+        JSON.stringify(heal.brief));
+
+      // trap B — the budget is finite, and spent means dead.
+      for (const spent of [2,3,7]) {
+        const d=decideRejection({reason:REASON,strikesSpent:spent,maxStrikes:2});
+        A(d&&d.action==="seal_dead",
+          "trap B: a reject at/past the budget ("+spent+"/2) must seal DEAD, got "+
+          JSON.stringify(d));
+        A(typeof d.failureReason==="string"&&/reject/i.test(d.failureReason),
+          "the dead seal must NAME rejection as the cause, got "+JSON.stringify(d));
+      }
+      // trap B — a zero budget restores todays behavior exactly.
+      const optOut=decideRejection({reason:REASON,strikesSpent:0,maxStrikes:0});
+      A(optOut&&optOut.action==="seal_dead",
+        "trap B: maxStrikes 0 must restore the pre-WP-602 dead seal, got "+
+        JSON.stringify(optOut));
+
+      // trap C — nothing to say means nothing to act on. Both spellings.
+      for (const [label,reason] of [["absent",undefined],["empty",""],
+                                    ["whitespace","   \t\n  "]]) {
+        const d=decideRejection({reason,strikesSpent:0,maxStrikes:2});
+        A(d&&d.action==="seal_dead",
+          "trap C: a reject with a "+label+" reason carries no correction and must seal DEAD, "+
+          "got "+JSON.stringify(d));
+      }
+
+      // an oversized reason is bounded like every other brief, and still recognisable.
+      const HUGE="LEADING-MARKER "+"x".repeat(8000);
+      const big=decideRejection({reason:HUGE,strikesSpent:0,maxStrikes:2});
+      A(big&&big.action==="heal","an oversized reason still heals, got "+JSON.stringify(big));
+      A(big.brief.length<=2000,
+        "the brief must stay bounded like buildRemediationBrief (<=2000), got "+big.brief.length);
+      A(big.brief.includes("LEADING-MARKER"),
+        "a truncated brief must still be recognisable at its START, got "+
+        JSON.stringify(big.brief.slice(0,120)));
+
+      // determinism: a workflow decision is replay-safe.
+      const a=JSON.stringify(decideRejection({reason:REASON,strikesSpent:1,maxStrikes:2}));
+      const b=JSON.stringify(decideRejection({reason:REASON,strikesSpent:1,maxStrikes:2}));
+      A(a===b,"decideRejection must be deterministic, got "+a+" then "+b);
+      console.log("AC-1 OK: a reasoned reject heals and carries the operator words verbatim; the "+
+        "budget is finite and opt-outable; an empty or whitespace reason still seals dead");
+      '
+
+  - id: AC-2
+    description: >
+      DRIVES THE REAL ENTRY POINT (trap E) — a pure decision nothing calls is not a mechanism, and a
+      scenario the executor authors is not an oracle. This check WRITES THE WHOLE live scenario
+      itself, using only pre-existing repo test infrastructure (`test/runner/helpers.ts`, the
+      package's public exports), boots the real Temporal runner, drives the real
+      `handle.approve({approved:false, reason})` path, and reads the REAL journal — not a step
+      summary. A reasoned reject must NOT seal the run; the marker string this check invents must
+      reach the next step; the run must reach its own terminal state with no further operator
+      command (trap A); a SECOND reject must spend the budget and seal FAILED (trap B); a reject
+      with no reason must seal FAILED immediately with no remediation entry (trap C).
+    check: |
+      cd packages/sdk-ts && pnpm exec tsc && node --input-type=module -e '
+      import {writeFileSync,rmSync} from "node:fs";
+      import {spawnSync} from "node:child_process";
+      import {join} from "node:path";
+      const A=(c,m)=>{if(!c){console.error("FAIL: "+m);process.exit(1);}};
+      const target=join(process.cwd(),"test/runner/ac2-reject-heal.generated.test.ts");
+      // Written and removed by THIS check; a leftover from a killed run is stale, not state.
+      rmSync(target,{force:true});
+      const SRC=`
+      import { randomUUID } from "node:crypto";
+      import { mkdtemp, rm } from "node:fs/promises";
+      import { tmpdir } from "node:os";
+      import { join } from "node:path";
+      import { afterEach, describe, expect, inject, test } from "vitest";
+      import {
+        createRunnerWorker, createTemporalRunner, Journal, journalPath,
+        type RunHandle, type RunStatusReport,
+      } from "../../src/index.js";
+      import {
+        initSourceRepo, judgeForm, makeJudgedSpec, scriptedRegistry, startFakeJudgeWire,
+        TERMINAL_STATUSES, waitFor, type FakeJudgeWire,
+      } from "./helpers.js";
+
+      const address = inject("temporalAddress");
+      const bundlePath = inject("workflowBundlePath");
+
+      describe.skipIf(address === null)("AC-2 — a rejected escalation routes into the heal path", () => {
+        const cleanups: Array<() => Promise<void>> = [];
+        afterEach(async () => { while (cleanups.length > 0) await cleanups.pop()!(); });
+
+        async function setup(wire: FakeJudgeWire) {
+          const tmp = await mkdtemp(join(tmpdir(), "ac2-reject-"));
+          cleanups.push(() => rm(tmp, { recursive: true, force: true }));
+          const repoUrl = await initSourceRepo(join(tmp, "src"), {});
+          const dataDir = join(tmp, "data");
+          const taskQueue = "tq-" + randomUUID();
+          const worker = await createRunnerWorker({
+            adapters: scriptedRegistry, address: address!, taskQueue, dataDir,
+            workflowBundlePath: bundlePath!,
+            routerOptions: { baseUrls: { "openai-compat": wire.url } },
+          });
+          const workerDone = worker.run();
+          const runner = createTemporalRunner({ address: address!, taskQueue, dataDir });
+          cleanups.push(async () => { worker.shutdown(); await workerDone; await runner.close(); });
+          return { repoUrl, dataDir, runner };
+        }
+
+        async function awaitTerminal(handle: RunHandle): Promise<RunStatusReport> {
+          return waitFor(async () => {
+            const r = await handle.status();
+            return TERMINAL_STATUSES.includes(r.status) ? r : undefined;
+          }, { what: "terminal status", timeoutMs: 90_000 });
+        }
+        async function awaitApproval(handle: RunHandle): Promise<void> {
+          await waitFor(async () =>
+            (await handle.status()).status === "AWAITING_APPROVAL" ? true : undefined,
+            { what: "run to await approval", timeoutMs: 90_000 });
+        }
+        function journalText(dataDir: string, runId: string, kind: string): string[] {
+          const j = new Journal(journalPath(dataDir, runId));
+          try { return j.entries(kind).map((e) => JSON.stringify(e.payload)); }
+          finally { j.close(); }
+        }
+        function stepCount(dataDir: string, runId: string): number {
+          return journalText(dataDir, runId, "step").length;
+        }
+
+        test("a reasoned reject heals, the words are seen, and the run finishes itself", async () => {
+          const MARKER = "AC2-MARKER-" + randomUUID().slice(0, 8);
+          const wire = await startFakeJudgeWire([
+            judgeForm({ criteria: { "AC-1": false }, concerns: ["scope looks wrong"] }),
+            judgeForm({ criteria: { "AC-1": true } }),
+            judgeForm({ criteria: { "AC-1": true } }),
+          ]);
+          const { repoUrl, dataDir, runner } = await setup(wire);
+          const handle = await runner.start(makeJudgedSpec({ repoUrl, cadence: 1, maxSteps: 6 }));
+          await awaitApproval(handle);
+          const stepsBefore = stepCount(dataDir, handle.runId);
+
+          await handle.approve({ approved: false, reason: MARKER + ": delete the stray file" });
+
+          // trap A: the run continues UNDER ITS OWN POWER — one approve call, no resume.
+          const report = await awaitTerminal(handle);
+          expect(stepCount(dataDir, handle.runId)).toBeGreaterThan(stepsBefore);
+
+          // trap D: the operator words reach the loop VERBATIM, read from the journal.
+          const healed = [
+            ...journalText(dataDir, handle.runId, "remediation"),
+            ...journalText(dataDir, handle.runId, "injection"),
+            ...journalText(dataDir, handle.runId, "control_event"),
+          ].join("\\n");
+          expect(healed).toContain(MARKER);
+
+          // and the reject did not kill it on the spot.
+          expect(report.failure?.reason ?? "").not.toContain("judge escalation rejected");
+        }, 120_000);
+
+        test("a SECOND reject spends the budget and seals FAILED naming the rejection", async () => {
+          const wire = await startFakeJudgeWire([
+            judgeForm({ criteria: { "AC-1": false }, concerns: ["first concern"] }),
+            judgeForm({ criteria: { "AC-1": false }, concerns: ["second concern"] }),
+            judgeForm({ criteria: { "AC-1": false }, concerns: ["third concern"] }),
+          ]);
+          const { repoUrl, dataDir, runner } = await setup(wire);
+          const handle = await runner.start(
+            makeJudgedSpec({ repoUrl, cadence: 1, maxSteps: 6, maxRejectStrikes: 1 }),
+          );
+          await awaitApproval(handle);
+          await handle.approve({ approved: false, reason: "first: fix the scope" });
+          await awaitApproval(handle);
+          await handle.approve({ approved: false, reason: "second: still wrong" });
+
+          const report = await awaitTerminal(handle);
+          expect(report.status).toBe("FAILED");
+          expect(report.failure?.reason ?? "").toMatch(/reject/i);
+          void dataDir;
+        }, 120_000);
+
+        test("a reject with NO reason seals FAILED immediately and heals nothing", async () => {
+          const wire = await startFakeJudgeWire([
+            judgeForm({ criteria: { "AC-1": false }, concerns: ["unexplained dependency swap"] }),
+          ]);
+          const { repoUrl, dataDir, runner } = await setup(wire);
+          const handle = await runner.start(makeJudgedSpec({ repoUrl, cadence: 1, maxSteps: 6 }));
+          await awaitApproval(handle);
+          const stepsBefore = stepCount(dataDir, handle.runId);
+
+          await handle.approve({ approved: false });
+
+          const report = await awaitTerminal(handle);
+          expect(report.status).toBe("FAILED");
+          expect(report.failure?.reason ?? "").toContain("reject");
+          expect(stepCount(dataDir, handle.runId)).toBe(stepsBefore);
+          expect(journalText(dataDir, handle.runId, "remediation")).toHaveLength(0);
+        }, 120_000);
+      });
+      `;
+      writeFileSync(target, SRC);
+      const res=spawnSync("pnpm",["exec","vitest","run",
+        "test/runner/ac2-reject-heal.generated.test.ts"],{stdio:"inherit"});
+      // Clean up BEFORE asserting — A() exits the process, which would skip a finally
+      // block and leave the generated file behind to poison the next pass.
+      rmSync(target,{force:true});
+      A(res.status===0,
+        "trap E: this scenario drives the REAL workflow through the REAL approve/reject path — "+
+        "a decideRejection the loop never calls cannot satisfy it. vitest exited "+res.status);
+      console.log("AC-2 OK: the real run heals a reasoned reject and finishes under its own power, "+
+        "the operator words reach the loop verbatim, a second reject spends the budget, and a "+
+        "reason-less reject still seals dead");
+      '
+
+# WP-566 agent classes. Primaries unchanged — Gemini executes, Codex judges.
+# routing.stages is DERIVED from the selected members and must not be restated here.
+agent_classes:
+  executor: executor-default
+  judge: judge-default
+
+budget_usd: 20
+max_steps: 12
+
+judge:
+  cadence: 1
+  max_cost_share: 0.5
+  rubric_extra:
+    - id: heal_budget_measures_agent_control
+      description: >
+        A reject strike is spent only on something the agent controlled. An infra kill, a step the
+        runner killed at maxSeconds, or a verdict later reverted must spend NO strike (WP-544 /
+        F-209…F-214). Flag any code path that charges those against the reject budget.
+    - id: chain_gate_repair_untouched
+      description: >
+        The chain-side tier-0 gate repair (WP-542/F-207) and the no-un-sealed-incarnation rule
+        (WP-543/F-208) must be untouched. A run-level heal that reroutes or weakens the chain path
+        is a regression, however green the run-level tests are.

@@ -11,18 +11,9 @@ displaced prose moves verbatim to [`PLAN-HISTORY.md`](PLAN-HISTORY.md); per-run 
 **Status (2026-08-09, bounded — update discipline: REPLACE this block, ≤15 lines;
 displaced prose moves verbatim to [`PLAN-HISTORY.md`](PLAN-HISTORY.md); per-run detail:
 `docs/reports/`; queue + course correction: `plan.md` §6/§7).**
-🟢 **dogfood-129 DELIVERED WP-598 — a benchmark task can carry its own gold patch**
-(`run-6ac4329e-c172-4f85-b1fc-c0ef9fb60851`, SUCCESS **6 steps $0.3634/$15.00**, 22m 14s, 2/2 criteria,
-harvest byte-IDENTICAL 7/7, `docs/reports/dogfood-129.md`). `repo.fix_patch` + apply-onto-base; a patch that
-fails to apply is a named error with nothing recorded; the ledger `fixRef` is the patch's **sha256**, so editing it re-probes via WP-596's skip test. No `exempt` escape hatch (trap A).
-🔴 **F-288 — the run shipped a hole its own judge named 3×.** AC-1 mandated ABSOLUTE patch paths against a
-goal demanding repo-relative; step 5 fixed it, AC-1 went RED, step 6 **reverted the fix to satisfy the AC**.
-The judge's out-of-rubric `concern` named the conflict verbatim; `verdict.ts:126` drops a concern whenever
-the rubric also failed → sealed SUCCESS. **→ WP-599.** 🔴 F-289 + 🟡 F-290 hand-fixed (`probe.ts:35-45`,
-`probe.test.ts:340`, `test/task.test.ts:116` — lint shipped RED). 🟠 **F-292:** no stored per-task result
-carries `repoRef`, so the WP-595 gate excludes 100% of any already-run suite. Progression ⛔ **STALLED**,
-`rung=4` — 5th consecutive rung-5 prerequisite. **NEXT = WP-600 (dogfood-130): consume the machinery —
-probe the real corpus, re-derive the published numbers. Then only an OPERATOR lift remains.**
+🟢 **dogfood-130 / WP-600 (real discrimination ledger) DELIVERED** — `branch-run-838ae110-…-step-5-2f201f9a`, SUCCESS 3 steps $0.1447/$20.00, 1h 02m, 2/2 criteria (`docs/reports/dogfood-130.md`). The corpus carries real probe evidence for the first time, and the honest answer is **0 of 19 published requirements verifiable, for both arms** (`benchmarks/publications/p3-rung-4-corrected/`; `p3-rung-4/` untouched). Ledger `rung=4` — the SIXTH consecutive rung-5 prerequisite; rung 5 is now blocked on OPERATOR work (a gold patch + an arm re-run), not product.
+
+**Operational lessons this run added to §8 — read them before the next launch:** a `--reject` **kills a plain run and discards your fix** (🔴 F-296 → WP-602; branch from a checkpoint instead), a branched child runs **unsteered** because nothing attaches guidance to it (🟡 F-298 → WP-603 — check `injections 0` in the trace), and a judge **design objection expires** once the incremental diff window moves past the code (🔴 F-295 → WP-601 — read pass #1's rubric, not only the last). Two review hand-fixes were delivery-introduced defects in evidence-durability code: a `.gitignore` negation that could not re-include nested `probe.json` (🔴 F-293) and a run-workspace publication guard rewritten into a no-op whose test was blind because its path was fictional (🔴 F-294). Harness 205 → **209**, sdk-ts 1,304, lint clean.
 
 Related docs: [`docs/spec/task-spec.md`](spec/task-spec.md) (schema
 reference) · [`docs/TASK-PROTOCOL.md`](TASK-PROTOCOL.md) (WP etiquette, §7 is
@@ -844,6 +835,60 @@ broken (a false-green, not a follow-on fix).
 | The raw Claude Code baseline arm finishes in minutes with every task scoring its no-op baseline | **The agent got an empty prompt** (bench-p3-rung-4-2026-08-06 🟠 **F-260 → WP-587**). `claude -p` / `--print` is a BOOLEAN flag, so `--cmd 'claude -p "$(cat {goalFile})" …'` passes the goal as a positional the CLI never consumes. Use `devbox run bench-baseline`, which puts the prompt on stdin. Do not hand-write this arm from notes — that is how it went stale the first time. |
 
 ## 8. Known P1 limitations (so you don't fight them)
+
+- **Rejecting an escalation KILLS a plain run and throws your fix away** (🔴 F-296,
+  dogfood-130 → WP-602). `agent-loop.ts:1148-1153` seals `FAILED`
+  non-resumably the moment `--reject` arrives; the approve path resumes to
+  `RUNNING` (`:1167`). Your reject **reason** is interpolated into the seal
+  string and never used again — even when it is a complete work order. Chain
+  nodes self-heal on a rejected gate (WP-542/F-207, WP-543/F-208); plain runs do
+  not. **Until WP-602 lands:** if the fix is small and you want the run to live,
+  do NOT reject — `chikory branch <run-id>@<step>` from the last good checkpoint
+  and `chikory resume` the child. And note the second half of the trap: **there
+  is no way to tell the branch what went wrong** (🟡 F-298 → WP-603) — `branch`
+  takes no guidance flag and `inject` needs a live Temporal handle, so a branched
+  child runs unsteered. Check `chikory trace <child>` for `injections 0`
+  before assuming your guidance landed; on dogfood-130 it had not.
+
+- **A judge design objection expires when the diff window moves past the code**
+  (🔴 F-295, dogfood-130 → WP-601). Judge diff evidence is incremental
+  (`workspace diff since <last checkpoint commit>`), so an objection to code
+  committed at step N is simply absent from the evidence at step N+2 — and
+  nothing carries it forward. dogfood-130: pass #1 failed
+  `design_serves_overall_goal` naming the `resummarize` aggregate-synthesis
+  fallback, pass #3 passed the same rubric item over a later window, and the
+  code shipped unchanged. **A run can outrun a design objection by committing
+  more steps.** When reviewing, read judge pass #1's rubric, not only the last
+  one — a ✓ at the seal does not mean every objection was answered.
+
+- **A `.gitignore` negation cannot re-include a file under an ignored directory**
+  (🔴 F-293, dogfood-130). `benchmarks/results/.gitignore` shipped `*` plus
+  `!**/probe.json`; git never descends into an ignored **directory**, so the
+  negation was inert and `git add` refused every per-task `probe.json` — the
+  harvest aborted. The delivery's own AC (`git ls-files -- results`) was green
+  only inside the run workspace, where the executor had force-added the files and
+  a tracked path bypasses ignore rules entirely. **Rules:** (1) re-include the
+  directory first, and keep it depth-scoped (`!/*/`, not `!*/` — the recursive
+  form re-exposes nested suite `workspace/` git repos, which `git add -A` then
+  stages as orphan mode-160000 gitlinks, the defect that killed `run-838ae110`);
+  (2) an AC that asserts "this evidence is committed" must run where the artifact
+  will LIVE, not inside the workspace that produced it.
+
+- **A real corpus probe sweep does not fit in one step** (🟠 F-297, dogfood-130).
+  `maxSeconds=600` killed 2 of 3 steps (671.7 s and 653.6 s); the sweep installs
+  dependencies and verifies at two refs for four tasks. The executor coped by
+  backgrounding the sweep and resuming next step, and the checkpointer preserved
+  the progress — but one step produced zero output tokens. Give a sweep spec its
+  own step budget rather than riding the default cap.
+
+- **`⚠ cost meter blind (unpriced tokens)` is a false alarm on `gemini-cli`**
+  (ℹ️ F-299, dogfood-130). `isUnpricedStep` (`cli/trace.ts:194-200`) infers
+  "unpriced" from `costEstimated && costUsd === 0 && tokens > 0`, but the adapter
+  sets `costUsd: 0` deliberately — keyless Antigravity OAuth has no wire cost
+  (`executors/gemini-cli.ts:58-60`), and `gemini-3.6-flash` IS in `pricing.ts:51`.
+  Nothing is missing. The real consequence: with a keyless executor the USD budget
+  gate bounds **judge spend only**, so the executor horizon is bounded by
+  `maxSeconds` alone.
 
 - **An acceptance criterion that contradicts its own goal BEATS a correct judge
   finding** (🔴 F-288/F-289, dogfood-129 — the sharpest lesson of the campaign).

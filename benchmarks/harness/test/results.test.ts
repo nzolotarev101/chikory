@@ -324,6 +324,48 @@ describe("compareSummaries", () => {
     }
   });
 
+  it("refuses a run workspace that EXISTS on disk as its own git worktree (F-294)", () => {
+    // The F-261 case below passes a path that exists nowhere, so the repo-root
+    // walk finds nothing and the marker survives in the relative path. A REAL
+    // run workspace is a git worktree, which makes it its own repo root and hides
+    // `.chikory/runs` from that relative path entirely — the guard stopped firing
+    // for the only shape it exists for, and this test is the one that notices.
+    const root = mkdtempSync(join(tmpdir(), "f294-"));
+    try {
+      mkdirSync(join(root, ".git"), { recursive: true });
+      const ws = join(root, ".chikory", "runs", "run-f294", "workspace");
+      mkdirSync(join(ws, ".git"), { recursive: true });
+      const evidence = join(ws, "benchmarks", "results", "p3-rung-4", "chikory");
+      mkdirSync(evidence, { recursive: true });
+
+      // Cited from OUTSIDE the workspace: an unresolvable pointer once
+      // `scripts/prune-runs.sh` deletes the run — still refused.
+      expect(() => publishableRepoPath(evidence)).toThrow(/ephemeral Chikory run workspace/);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it("allows the harness to publish inside the workspace it is RUNNING in (F-294)", () => {
+    // The other half: a dogfood run's own harness probes its own tree, and that
+    // evidence is harvested out. Refusing here would make the probe unrunnable
+    // inside a dogfood — which is why the guard was loosened in the first place.
+    const root = mkdtempSync(join(tmpdir(), "f294-inside-"));
+    const cwd = process.cwd();
+    try {
+      const ws = join(root, ".chikory", "runs", "run-f294", "workspace");
+      mkdirSync(join(ws, ".git"), { recursive: true });
+      const evidence = join(ws, "benchmarks", "results");
+      mkdirSync(evidence, { recursive: true });
+
+      process.chdir(join(ws, "benchmarks"));
+      expect(publishableRepoPath(evidence)).toBe(join("benchmarks", "results"));
+    } finally {
+      process.chdir(cwd);
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
   it("refuses to publish a raw-results pointer into an ephemeral run workspace (F-261)", () => {
     // dogfood-123 published exactly this: the executor ran `compare` inside its
     // own run workspace, so every arm's trace link pointed at a directory

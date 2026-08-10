@@ -1,0 +1,48 @@
+{
+  "taskId": "brownfield-003",
+  "baseRef": "b6b1288277e6ca87dab0ad1c7251b92612b7445c",
+  "fixRef": "34f601590351e5d3a57fe20c001155940ba65324",
+  "baseWorkspace": "benchmarks/results/brownfield-003/base-workspace",
+  "fixWorkspace": "benchmarks/results/brownfield-003/fix-workspace",
+  "baseVerification": {
+    "green": true,
+    "reason": "Base suite is green (3680 passed, 0 failed)",
+    "command": "npx -y pnpm@10.12.1 install --frozen-lockfile && npx -y pnpm@10.12.1 exec vitest run --project zod"
+  },
+  "fixVerification": {
+    "green": true,
+    "reason": "Base suite is green (3688 passed, 0 failed)",
+    "command": "npx -y pnpm@10.12.1 install --frozen-lockfile && npx -y pnpm@10.12.1 exec vitest run --project zod"
+  },
+  "verdict": "not-discriminating",
+  "requirements": [
+    {
+      "id": "R1",
+      "base": "green",
+      "fix": "green",
+      "classification": "non-discriminating",
+      "reason": "Requirement passes on base ref (exit 0) — free for every arm"
+    },
+    {
+      "id": "R2",
+      "base": "red",
+      "fix": "green",
+      "classification": "discriminating",
+      "reason": "Requirement fails on base ref (exit non-zero) and passes on fix ref (exit 0)"
+    },
+    {
+      "id": "R3",
+      "base": "green",
+      "fix": "green",
+      "classification": "non-discriminating",
+      "reason": "Requirement passes on base ref (exit 0) — free for every arm"
+    },
+    {
+      "id": "R4",
+      "base": "red",
+      "fix": "green",
+      "classification": "discriminating",
+      "reason": "Requirement fails on base ref (exit non-zero) and passes on fix ref (exit 0)"
+    }
+  ]
+}
