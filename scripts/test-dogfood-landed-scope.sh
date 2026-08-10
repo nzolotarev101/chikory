@@ -30,6 +30,8 @@ make_run_workspace() {
   host="$1"
   run="$2"
   git clone -q "$host" "$run"
+  git -C "$run" config user.email "dogfood@example.invalid"
+  git -C "$run" config user.name "Dogfood Test"
   base="$(git -C "$host" rev-parse HEAD)"
   git -C "$run" branch chikory-base "$base"
   printf 'run final\n' >"$run/src/a.txt"

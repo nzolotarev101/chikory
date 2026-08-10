@@ -208,7 +208,7 @@ check "CHIKORY_ALLOW_LOW_DISK=1 overrides the disk gate (F-236)" 0 $?
 # the run threshold must NOT clear the chain one.
 DISK_OUT=$(env -u CHIKORY_ALLOW_LOW_DISK CHIKORY_PREFLIGHT_ONLY=1 \
   bash scripts/dogfood.sh --chain "$TMPDIR_FIXTURES/disk.yaml" 2>&1 || true)
-if echo "$DISK_OUT" | grep -qE 'a --chain launch needs at least 40 GiB|disk OK .* --chain needs 40'; then
+if echo "$DISK_OUT" | grep -qE 'a --chain launch needs at least 40 GiB|disk OK .*\(--chain needs 40\)'; then
   echo "PASS: the disk gate holds a --chain to a higher floor than a --run (F-236)"
 else
   echo "FAIL: the disk gate did not apply the --chain floor of 40 GiB"
