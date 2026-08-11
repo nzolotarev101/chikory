@@ -25,7 +25,7 @@ how transcription errors get into the report.
 | phase 4 — bounded status blocks | `… dogfood-docs.mjs block --target dogfooding\|plan-latest --block <file>` | 1 |
 | phase 4 — ledger row | `… dogfood-docs.mjs ledger <nnn> --facts <json> --wp WP-n --catches N --rung N` | 1 |
 | phase 4 — README index row | `… dogfood-docs.mjs index <nnn> --outcome <file>` / `--row <file>` | 1 |
-| phase 5 — arm the ACs | `devbox run -- bash scripts/dogfood-arm.sh <spec> [--green\|--table\|--discard]` | 1 |
+| phase 5 — arm the ACs | `devbox run -- bash scripts/dogfood-arm.sh <spec> [--green\|--table\|--extract AC-n\|--only AC-n]` | 1 |
 | landing — gates + suite + commit + push | `devbox run -- bash scripts/dogfood-close.sh <nnn> --run-id <id>` | 1 |
 
 **Yours, and not scripted:** reading every step transcript and judge pass · the
@@ -34,12 +34,17 @@ friction severity and disposition · the §0–§1.5 gate verdicts · designing 
 spec and its traps · writing the throwaway reference implementation for the GREEN
 arming pass.
 
-**Two environment traps that have cost real time — do not relearn them:**
+**Three traps that have cost real time — do not relearn them:**
 
 - **Never inline multi-line code into `devbox run -- node -e '…'`** — devbox mangles
   the newlines and you get `SyntaxError: Expected unicode escape`. Write a file and
   run it, or use a `node - <<'NODE'` heredoc with values passed through the
   environment (never string-interpolated).
+- **Never rebuild a throwaway script the scripts already cover** — AC extraction,
+  bounded-block surgery, ledger/README rows and check re-runs all have a
+  subcommand (`dogfood-arm.sh --extract/--only`, `dogfood-docs.mjs`). Retiring
+  those throwaways is the entire point of `scripts/dogfood-*`; if you find
+  yourself writing one, the script is missing a flag — add it there instead.
 - **Never `cd` out of the repo root, and remember the harness shell is zsh** — zsh
   does not word-split unquoted `$var`, so `for x in "a b c"; set -- $x` silently
   breaks; and a `cd` into `.chikory/runs/<id>/workspace` makes every later relative
@@ -312,14 +317,43 @@ devbox run -- bash scripts/dogfood-arm.sh "$SPEC"
 # 2. Write a throwaway reference implementation, then prove GREEN.
 devbox run -- bash scripts/dogfood-arm.sh "$SPEC" --green
 
-# 3. Emit the arming table for the report + README, then discard the reference.
+# 3. Emit the arming table for the report + README.
 devbox run -- bash scripts/dogfood-arm.sh "$SPEC" --table
-devbox run -- bash scripts/dogfood-arm.sh "$SPEC" --discard
+
+# 4. Revert the reference BY NAME (restore the files you edited from a copy you
+#    made first). `--discard` runs `git checkout -- .` over the WHOLE tree and
+#    will delete an uncommitted review along with the reference.
 ```
 
   Results accumulate in `.chikory/review/arm-<spec>.json` across passes, and
-  `--table` flags any AC proven in only ONE direction — the failure mode that
-  burns a run. Paste its output into `## NEXT RUN` and the README cell.
+  `--table` flags any AC that is not verified in BOTH directions — the failure
+  mode that burns a run. Paste its output into `## NEXT RUN` and the README cell.
+
+  **Read the RED output, never just the exit code.** A check that DIES exits 1
+  exactly like a genuine RED: in dogfood-133 an over-escaped backtick inside a
+  generated test made AC-2 exit 1 from a `SyntaxError`, and the arming pass
+  reported `🟢 RED-on-HEAD (clean exit 1) — challenge armed` for a check that
+  could never pass in either direction. `dogfood-arm.sh` now scans the output for
+  died-before-judging signatures (`SyntaxError`, `Cannot find module`, `command
+  not found`, `error TS…`, esbuild `Transform failed`) and calls that
+  `⛔ BROKEN CHECK` regardless of exit code — but the signature list is not the
+  oracle, your eyes are. A genuine RED prints the check's OWN assertion text.
+
+  **Never rebuild a YAML extractor in the scratchpad to diagnose a check.** Every
+  check's full output is kept at `.chikory/review/arm-<spec>-<pass>-<AC>.log` and
+  the path is printed under each result; to re-run one check by hand, ask the
+  script for it:
+
+```sh
+devbox run -- bash scripts/dogfood-arm.sh "$SPEC" --extract AC-2  # byte-exact body → a runnable file
+devbox run -- bash scripts/dogfood-arm.sh "$SPEC" --only AC-2     # re-run just that AC, timed
+```
+
+  **Two quoting traps inside an AC `check` that shells into `node -e '…'`:** an
+  apostrophe anywhere in the script — including a prose comment — closes the bash
+  string; and a backtick or `${` destined for a GENERATED file must be escaped
+  once for the outer template literal (`` \` ``, `\${`), not twice. Both produce
+  a check that dies rather than judges.
 
 Then run the launch preflight at $0 and confirm the spec-pick glob resolves to
 the file you just wrote:

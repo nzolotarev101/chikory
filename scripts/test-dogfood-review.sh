@@ -21,7 +21,8 @@ check() { # <name> <expected-exit> <actual-exit>
   fi
 }
 contains() { # <name> <needle> <haystack-file>
-  if grep -qF "$2" "$3"; then
+  # `--` guards a needle that starts with a dash (e.g. a `--flag` in the help text).
+  if grep -qF -- "$2" "$3"; then
     echo "PASS: $1"
   else
     echo "FAIL: $1 — output did not contain: $2"
@@ -234,6 +235,62 @@ check "arm --table renders after both passes" 0 $?
 set -e
 contains "table carries the worst-case cap share" "of the 120s judge cap" "$WORK/table"
 rm -f ".chikory/review/arm-$(basename "$ARM_SPEC" .yaml).json"
+
+# ── 8b. arm: a check that DIED is never reported as armed (dogfood-133) ─────
+# The exit code alone cannot tell a genuine RED from a check that never ran:
+# `node -e '<bad syntax>'` exits 1, and dogfood-133 got "🟢 RED-on-HEAD (clean
+# exit 1) — challenge armed" for an AC that could never pass in either direction.
+BROKEN_SPEC="$WORK/spec-broken.yaml"
+cat > "$BROKEN_SPEC" <<'EOF'
+name: fixture-arm-broken
+goal: fixture
+acceptance_criteria:
+  - id: AC-DIES
+    description: exits 1 from a SyntaxError, not an assertion
+    check: |
+      node --input-type=module -e 'const x = `unterminated'
+EOF
+BROKEN_BASE="$(basename "$BROKEN_SPEC" .yaml)"
+set +e
+bash scripts/dogfood-arm.sh "$BROKEN_SPEC" > "$WORK/out" 2>&1
+check "arm exits non-zero on a check that died" 1 $?
+set -e
+contains "arm calls a SyntaxError-exit-1 a BROKEN CHECK" "BROKEN CHECK" "$WORK/out"
+contains "arm names the offending line" "SyntaxError" "$WORK/out"
+# The banner also says "challenge armed", so assert on the per-AC VERDICT marker.
+if grep -qF "🟢 RED-on-HEAD" "$WORK/out"; then
+  echo "FAIL: arm reported a DIED check as RED-on-HEAD — the dogfood-133 defect"
+  FAILURES=$((FAILURES + 1))
+else
+  echo "PASS: arm never reports a DIED check as RED-on-HEAD"
+fi
+contains "arm points at --extract for the full output" "--extract AC-DIES" "$WORK/out"
+contains "arm prints the kept log path" "full output:" "$WORK/out"
+if [ -s ".chikory/review/arm-$BROKEN_BASE-red-AC-DIES.log" ]; then
+  echo "PASS: arm keeps the full check output on disk"
+else
+  echo "FAIL: arm deleted the check output — diagnosis needs a throwaway extractor again"
+  FAILURES=$((FAILURES + 1))
+fi
+
+set +e
+bash scripts/dogfood-arm.sh "$BROKEN_SPEC" --table > "$WORK/table" 2>&1
+set -e
+contains "table renders a died check as BROKEN, not verified" "⛔ BROKEN" "$WORK/table"
+contains "table refuses to call it verified" "NOT verified in both directions" "$WORK/table"
+
+# ── 8c. arm --extract: the check body comes back byte-exact and runnable ────
+set +e
+bash scripts/dogfood-arm.sh "$ARM_SPEC" --extract AC-RED > "$WORK/out" 2>&1
+check "arm --extract succeeds for a known AC" 0 $?
+bash scripts/dogfood-arm.sh "$ARM_SPEC" --extract AC-NOPE > "$WORK/out2" 2>&1
+check "arm --extract fails for an unknown AC" 1 $?
+set -e
+EXTRACTED=".chikory/review/arm-$(basename "$ARM_SPEC" .yaml)-AC-RED.sh"
+contains "extracted body is the check itself" "exit 1" "$EXTRACTED"
+rm -f ".chikory/review/arm-$BROKEN_BASE".json ".chikory/review/arm-$BROKEN_BASE"-*.log \
+      ".chikory/review/arm-$(basename "$ARM_SPEC" .yaml)".json \
+      ".chikory/review/arm-$(basename "$ARM_SPEC" .yaml)"-*.log "$EXTRACTED"
 
 # ── 9. open: refuses to harvest over a dirty tree ──────────────────────────
 # Exercised against the real script with a fabricated run dir, in the fake repo

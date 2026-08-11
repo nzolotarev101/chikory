@@ -23,9 +23,16 @@
 #   devbox run -- bash scripts/dogfood-arm.sh <spec.yaml> --table      # markdown block
 #   devbox run -- bash scripts/dogfood-arm.sh <spec.yaml> --discard    # revert the reference
 #   devbox run -- bash scripts/dogfood-arm.sh <spec.yaml> --only AC-2  # one AC
+#   devbox run -- bash scripts/dogfood-arm.sh <spec.yaml> --extract AC-2  # body → file
 #
 # Results accumulate in .chikory/review/arm-<spec-basename>.json across passes,
-# so --table can emit the finished block after both directions have run.
+# so --table can emit the finished block after both directions have run. Each
+# check's FULL output is kept at .chikory/review/arm-<spec>-<pass>-<AC>.log and
+# the path is printed — dogfood-133 rebuilt a throwaway YAML extractor in the
+# scratchpad purely because that output had been deleted, which is the exact
+# throwaway this script exists to retire. `--extract` writes the check body to a
+# runnable file for the same reason: diagnose a broken check by re-running it,
+# never by re-deriving it.
 #
 # Runs bare toolchain binaries — invoke THROUGH devbox, never nest `devbox run`.
 
@@ -33,6 +40,14 @@ set -uo pipefail
 cd "$(dirname "$0")/.."
 
 JUDGE_CAP_SECONDS=120   # the per-check cap the judge enforces at run time
+
+# F-119 class, sharpened by dogfood-133: exit code ALONE cannot tell a genuine
+# RED from a check that never ran. `node --input-type=module -e '<bad syntax>'`
+# exits **1**, so an over-escaped backtick inside a generated test reported
+# "🟢 RED-on-HEAD (clean exit 1) — challenge armed" for a check that could never
+# pass in either direction. These signatures mean the check DIED rather than
+# judged; a real failure prints the check's own assertion instead.
+BROKEN_SIGNATURES='SyntaxError|ReferenceError|TypeError: [A-Za-z_$]+ is not a function|command not found|No such file or directory|Cannot find (module|package)|MODULE_NOT_FOUND|Transform failed|Expected [")}]|unexpected token|Unexpected token|error TS[0-9]+'
 
 SPEC=""
 MODE="red"
@@ -43,7 +58,8 @@ while [ $# -gt 0 ]; do
     --table) MODE="table"; shift ;;
     --discard) MODE="discard"; shift ;;
     --only) ONLY="${2:?--only requires an AC id}"; shift 2 ;;
-    -h|--help) sed -n '2,30p' "$0" >&2; exit 0 ;;
+    --extract) MODE="extract"; ONLY="${2:?--extract requires an AC id}"; shift 2 ;;
+    -h|--help) sed -n '2,36p' "$0" >&2; exit 0 ;;
     --*) echo "Error: unknown flag $1" >&2; exit 2 ;;
     *) SPEC="$1"; shift ;;
   esac
@@ -92,6 +108,29 @@ if [ "$MODE" = "discard" ]; then
   exit 0
 fi
 
+if [ "$MODE" = "extract" ]; then
+  AC_TSV="$(extract_acs)"
+  DEST=".chikory/review/arm-$SPEC_BASE-$ONLY.sh"
+  FOUND=0
+  while IFS="$(printf '\t')" read -r AC_ID AC_B64; do
+    [ "${AC_ID:-}" = "$ONLY" ] || continue
+    printf '%s' "$AC_B64" | base64 -d > "$DEST"
+    FOUND=1
+  done <<EOF_X
+$AC_TSV
+EOF_X
+  if [ "$FOUND" -eq 0 ]; then
+    echo "Error: no acceptance criterion '$ONLY' with a check in $SPEC" >&2
+    exit 1
+  fi
+  echo "✅ $ONLY check body → $DEST  ($(wc -l < "$DEST" | tr -d ' ') lines, byte-exact)"
+  echo
+  echo "Re-run it to see the FULL output — this is how you tell a real RED from a"
+  echo "check that died before it judged anything:"
+  echo "   devbox run -- bash $DEST"
+  exit 0
+fi
+
 if [ "$MODE" = "table" ]; then
   if [ ! -f "$STATE" ]; then
     echo "Error: no arming results yet for $SPEC_BASE — run the RED and GREEN passes first." >&2
@@ -101,8 +140,12 @@ if [ "$MODE" = "table" ]; then
 const s = JSON.parse(require("node:fs").readFileSync(process.env.STATE_PATH, "utf8"));
 const cap = Number(process.env.CAP);
 const ids = [...new Set([...Object.keys(s.red ?? {}), ...Object.keys(s.green ?? {})])].sort();
+// dogfood-133: a BROKEN check exits 1 like a genuine RED. It must never render
+// as a verified direction — that is the failure mode that burns a run.
 const cell = (r) =>
-  r ? `${r.exit === 1 ? "✅ exit **1**" : r.exit === 0 ? "✅ exit 0" : `⛔ exit ${r.exit}`}, **${r.seconds}s**` : "—";
+  !r ? "—"
+    : r.brokenCheck ? `⛔ BROKEN (exit ${r.exit}), **${r.seconds}s**`
+    : `${r.exit === 1 ? "✅ exit **1**" : r.exit === 0 ? "✅ exit 0" : `⛔ exit ${r.exit}`}, **${r.seconds}s**`;
 console.log("| AC | RED on HEAD | GREEN vs reference | % of 120 s cap |");
 console.log("|---|---|---|---|");
 let worst = 0;
@@ -114,10 +157,15 @@ for (const id of ids) {
 }
 console.log();
 console.log(`Worst case **${worst}s = ${Math.round((worst / cap) * 100)}% of the ${cap}s judge cap**.`);
-const missing = ids.filter((id) => !s.red?.[id] || !s.green?.[id]);
+const ok = (r) => r !== undefined && r.brokenCheck !== true;
+const missing = ids.filter((id) => !ok(s.red?.[id]) || !ok(s.green?.[id]));
 if (missing.length) {
   console.log();
-  console.log(`⚠️  verified in only ONE direction: ${missing.join(", ")} — an AC proven one way may be unsatisfiable.`);
+  console.log(`⚠️  NOT verified in both directions: ${missing.join(", ")} — an AC proven one way, or whose check DIED instead of judging, may be unsatisfiable. Do not launch on it.`);
+}
+const broken = ids.filter((id) => s.red?.[id]?.brokenCheck || s.green?.[id]?.brokenCheck);
+if (broken.length) {
+  console.log(`⛔ broken check (died before judging): ${broken.join(", ")} — re-run with \`--extract <AC>\` and read the full output.`);
 }
 NODE
   exit 0
@@ -162,14 +210,25 @@ while IFS="$(printf '\t')" read -r AC_ID AC_B64; do
   SUITE=0
   if grep -qE '(vitest|tsc|eslint|pnpm (run|exec|-r)|pytest|ruff)' "$CHECK_FILE"; then SUITE=1; fi
 
-  OUT_FILE="$(mktemp)"
+  # Kept, not deleted: diagnosing a failure must never require re-deriving the
+  # check (dogfood-133 rebuilt a throwaway extractor for exactly this).
+  OUT_FILE=".chikory/review/arm-$SPEC_BASE-$MODE-$AC_ID.log"
   START="$(date +%s)"
   bash "$CHECK_FILE" > "$OUT_FILE" 2>&1
   RC=$?
   SECS=$(( $(date +%s) - START ))
   rm -f "$CHECK_FILE"
 
-  if [ "$MODE" = "red" ]; then
+  # The exit code is NOT sufficient — a check that died can exit 1 too.
+  BROKEN_LINE="$(grep -m1 -E "$BROKEN_SIGNATURES" "$OUT_FILE" 2>/dev/null)"
+
+  if [ -n "$BROKEN_LINE" ]; then
+    MARK="⛔ BROKEN CHECK (exit $RC) — it DIED instead of judging, so NEITHER direction
+   means anything (F-119 class). First offending line:
+     $BROKEN_LINE
+   Re-run it in full: devbox run -- bash scripts/dogfood-arm.sh $SPEC --extract $AC_ID"
+    FAILED_EXPECTATION=1
+  elif [ "$MODE" = "red" ]; then
     case "$RC" in
       1) MARK="🟢 RED-on-HEAD (clean exit 1) — challenge armed" ;;
       0) MARK="⚠️  GREEN-on-HEAD — passes with NO delivery; cannot gate new work"; FAILED_EXPECTATION=1 ;;
@@ -193,10 +252,12 @@ while IFS="$(printf '\t')" read -r AC_ID AC_B64; do
   # The assertion that fired is the useful line; keep the tail short.
   grep -m3 -E '^(FAIL|Error|error|⛔)' "$OUT_FILE" 2>/dev/null || tail -n 3 "$OUT_FILE"
   echo '```'
+  echo "full output: \`$OUT_FILE\`"
   echo
-  rm -f "$OUT_FILE"
 
-  RESULTS="${RESULTS}${AC_ID}	${RC}	${SECS}	${SUITE}
+  BROKEN_FLAG=0
+  [ -n "$BROKEN_LINE" ] && BROKEN_FLAG=1
+  RESULTS="${RESULTS}${AC_ID}	${RC}	${SECS}	${SUITE}	${BROKEN_FLAG}
 "
 done <<EOF_AC
 $AC_TSV
@@ -211,11 +272,14 @@ state.spec = process.env.SPEC_NAME;
 state[process.env.PASS] = state[process.env.PASS] ?? {};
 for (const line of (process.env.ROWS ?? "").split("\n")) {
   if (!line.trim()) continue;
-  const [id, exit, seconds, suite] = line.split("\t");
+  const [id, exit, seconds, suite, broken] = line.split("\t");
   state[process.env.PASS][id] = {
     exit: Number(exit),
     seconds: Number(seconds),
     verifySuite: suite === "1",
+    // dogfood-133: a check that DIED exits 1 too — the table must not render
+    // that as a verified direction.
+    brokenCheck: broken === "1",
     at: new Date().toISOString(),
   };
 }
