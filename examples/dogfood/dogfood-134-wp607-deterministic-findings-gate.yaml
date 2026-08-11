@@ -1,0 +1,476 @@
+# Plain: The reviewer already runs a program that can PROVE some defects — it scans the diff and
+# reports forbidden layer dependencies as fact, not opinion. Today that proof is filed as a note:
+# the run gets one repair attempt, and then ships green whether or not the repair happened. This
+# run makes a proven defect stop the run from claiming success, without throwing away the work.
+# WP: WP-607 (a rubric item whose evidence is DETERMINISTIC must gate the seal, not be recorded and shipped)
+# Ladder-rung: 0 (OFF-LADDER by necessity — rung 5 is operator-gated today; see WHY)
+# Thesis-KPI: judge true-positives pre-land — dogfood-133 produced a true-positive that was
+#   DETECTED and not GATED, so the campaign's headline KPI counted a catch the product shipped
+#   anyway; after this run a machine-settled catch cannot coexist with a SUCCESS seal
+# Format: loose — the outcome and the public data contract are fixed; the wiring is the executor's
+#
+# Launch mode: RUN (single node — one gate, proven pure and then proven on the real loop).
+#   CHIKORY_PREFLIGHT_ONLY=1 devbox run run-dogfood
+#   devbox run run-dogfood
+#
+# WHY THIS AND NOT THE LADDER RUNG (dogfood-133 review, 2026-08-11):
+#   Progression gate: ⛔ STALLED, which BINDS the next headline to the current phase ladder rung —
+#   P3-rung-5, the phase exit gate. Its two blockers were RE-MEASURED again this review (not
+#   re-litigated) and both still stand, both OPERATOR work rather than product gaps:
+#     1. `brownfield-001`'s zod v3 → v4 gold patch. MEASURED: `find benchmarks -path
+#        '*brownfield-001*'` still returns ONLY
+#        `benchmarks/tasks/brownfield-001-dependency-major-upgrade.yaml` — no patch, no gold
+#        artifact anywhere. Upstream never performed the migration, so there is no commit to
+#        name: 3–6 h of operator research.
+#     2. A re-run of BOTH arms so stored per-task results carry `repoRef`. MEASURED: `grep -rl
+#        repoRef benchmarks/results/` still returns NOTHING. Hours of quota, and dogfood-122
+#        proved an LLM executor must not supervise a quota-bound multi-hour suite.
+#
+#   This is the FOURTH consecutive off-ladder headline, and it needs the strongest reason yet.
+#   It has one: dogfood-133 demonstrated the defect LIVE, on the mechanism the entire thesis
+#   rests on. The judge found a real architecture breach in that run's own delivery, proved it
+#   with a deterministic scan, said so at THREE of five passes including the FINAL completion
+#   review — and the run sealed 🟢 SUCCESS with the breach on disk. A control plane whose quality
+#   gate detects and does not gate is the product's core claim failing in its own repo.
+#
+# THE MEASURED PREMISE (re-measure before building; do not re-litigate):
+#   * The scan is real and already runs. `scanDiffForLayeringViolations`
+#     (`src/judge/scan-layering.ts:93`) maps added-diff-line imports onto the declared
+#     `LAYER_ORDER` (`:13-24`, `core` = `src/types.ts|src/schemas.ts|src/util/|src/canonical-json.ts`
+#     at index 0 … `judge` = `src/judge/` at index 5) and returns forbidden lower→higher edges.
+#     MEASURED at HEAD against dogfood-133's harvested diff: `["core→judge"]`.
+#   * The label already reaches the judge as EVIDENCE and stops there.
+#     `collectEvidence` computes `architectureLabels` (`src/judge/evidence.ts:284`) beside
+#     `secretScanLabels` (`:282`), and `runJudgePass` renders them into the prompt
+#     (`src/judge/harness.ts:262`). The MODEL then answers `no_architecture_violations` in its
+#     own words — nothing reconciles its answer against the labels.
+#   * The JD-4 override this needs already exists for one item. `applyCheckOverrides`
+#     (`src/judge/harness.ts:106-181`) rebuilds `rubricResults` from the RUBRIC LIST and replaces
+#     the model's `tests_pass` answer with `exitCode === 0` whenever checks ran (`:146-168`).
+#     Its ONLY call site is `harness.ts:304`, where `collected.architectureLabels` and
+#     `collected.secretScanLabels` are already in scope. This is a wire, not a mechanism.
+#   * The gate is where it ends. `no_architecture_violations` is `destructive: false`
+#     (`src/judge/rubric.ts:42-47`), so it never triggers CONTRACTS.md §4 rule 1, and
+#     `agent-loop.ts:1047-1105` treats EVERY non-destructive failure identically: one bounded
+#     completion-review fix step, then `return seal("SUCCESS", "completion review: design
+#     findings recorded — …")` (`:1099-1105`) **regardless of whether the retry cleared it**.
+#     MEASURED on `run-83bf691d`: passes #2, #3 and #5 failed the item; the run sealed SUCCESS.
+#   * `destructive: true` is NOT the repair, it is trap A. `computeVerdict`
+#     (`src/judge/verdict.ts:77-84`) returns `ROLLBACK` before any other rule for a failing
+#     destructive item, which RESTORES the workspace — destroying the good work along with the
+#     bad import, on a run whose acceptance criteria all pass.
+#   * Live runner scenarios boot Temporal through the vitest global setup
+#     (`test/runner/global-setup.ts`, address injected via `inject`); `test/runner/helpers.ts`
+#     supplies `initSourceRepo`, `makeJudgedSpec`, `startFakeJudgeWire` (per-step forms and a
+#     SEPARATE `reviewForms` list), `TERMINAL_STATUSES` and `waitFor`. `scriptedRegistry`'s
+#     adapter writes only `step-<n>.txt` at the workspace root, which maps to NO layer — so AC-2
+#     writes its own ~25-line adapter to add a `src/`-pathed file. The evidence pipeline diffs the
+#     real workspace, so that file makes the real scan emit a real label. A full live file
+#     runs ~11 s.
+#   * `judge.rubric_extra` shipped last run (WP-604, dogfood-133): spec-authored items are
+#     `destructive: false` by construction and are MODEL judgments. They must never join the
+#     deterministic set — a spec cannot promote its own prose to a machine-settled fact.
+#
+# Designed traps — the plausible-but-wrong deliveries the acceptance criteria exist to reject:
+#   A. **Flipping `no_architecture_violations` to `destructive: true`.** The one-line "fix" that
+#      makes the seal stop. It fires CONTRACTS.md §4 rule 1, ROLLS BACK the workspace and throws
+#      away every good change the run made alongside the bad import — the exact harm WP-605
+#      (a heal must not throw away work nobody condemned) was built to prevent. AC-1 requires the
+#      item to STAY non-destructive and `computeVerdict` to keep returning non-ROLLBACK for it;
+#      AC-2 requires that NO verdict in the gated run is `ROLLBACK` and that the run's own file
+#      is still on disk when it ends.
+#   B. **Parking the run for a human.** Blocking the seal by escalating and awaiting an operator
+#      violates the F-107 discipline (never park a run whose acceptance criteria all pass) and
+#      makes an unattended run hang forever. AC-2 requires a TERMINAL status with no operator
+#      input, reached inside the wait budget.
+#   C. **Gating every non-destructive item.** Promoting `design_serves_overall_goal` /
+#      `cumulative_design_coherent` — a model's taste — to a seal blocker would make any review
+#      opinion able to fail a run whose criteria pass. AC-1 requires those ids to be EXCLUDED
+#      from the deterministic set and AC-2's third scenario requires a run failing only those to
+#      still seal SUCCESS with the finding recorded, exactly as today.
+#   D. **Trusting the model's answer on a machine-settled item.** Leaving the label as prompt
+#      decoration means a judge that scores `no_architecture_violations` ✓ on a violating diff
+#      still ships it — the same run, one model-mood away. AC-2's first scenario scripts the
+#      judge to answer the item ✓ on a genuinely violating workspace: only a delivery that lets
+#      the SCAN settle the item can pass it.
+#   E. **A classifier nothing consults.** Exporting `DETERMINISTIC_RUBRIC_IDS` and never reading
+#      it in the seal path is the F-283 shape. AC-2 drives the REAL Temporal workflow to a REAL
+#      terminal state and reads the REAL journal.
+#   F. **Removing the bounded heal.** Blocking the seal on the FIRST deterministic failure, with
+#      no repair attempt, wastes the loop's whole self-correction premise (WP-519/DX-9). AC-2
+#      requires the gated run to still execute its bounded completion-review repair step before
+#      it reaches its terminal state.
+#
+# NOT IN SCOPE: the `LAYER_ORDER` table itself (`scan-layering.ts:13-24` is unchanged — this run
+# does not relitigate which layers exist); `no_secrets_introduced`'s destructive flag (it is
+# already hard-gated by §4 rule 1 and stays exactly as it is); the chain-side plan gate and node
+# heal tiers (WP-542/543/544, untouched); the executor-asks-permission defect (F-311 → WP-608,
+# a separate run); `judge.rubric_extra`'s semantics (WP-604 shipped, do not change them).
+
+name: dogfood-134-wp607-deterministic-findings-gate
+wp: WP-607
+goal: >
+  A quality finding a machine can SETTLE must stop the run from reporting success, and it must
+  do so without destroying the work or handing the run to a human.
+
+  The judge already runs deterministic programs over the diff: `scanDiffForLayeringViolations`
+  reports forbidden layer dependencies, scanDiffForSecrets reports credentials. Their output
+  is rendered into the judge prompt as evidence and the MODEL is then asked to answer the
+  matching rubric item in its own words. Nothing reconciles the two, and a failing
+  non-destructive rubric item is advisory: the run gets ONE bounded completion-review fix step
+  and then seals SUCCESS whether or not the fix happened. dogfood-133 paid the bill in this
+  repo — its own delivery introduced a forbidden `core→judge` import, the scan proved it, the
+  judge failed the item at three of five passes including the final review, and the run sealed
+  🟢 SUCCESS with the breach on disk.
+
+  Make these true:
+
+    * **The rubric declares which items a machine settles.** A `DETERMINISTIC_RUBRIC_IDS` value
+      is on the SDK's public surface and names exactly the standing items whose answer comes
+      from a deterministic scan: `no_architecture_violations` and `no_secrets_introduced`. The
+      model-judgment items — `no_unrelated_deletions`, `scope_matches_instruction`,
+      `design_serves_overall_goal`, `cumulative_design_coherent` — are NOT in it, and neither is
+      any spec-authored `judge.rubric_extra` item.
+
+    * **The scan wins over the model's opinion, both ways.** For a machine-settled item the
+      recorded answer is derived from the scan output, not from what the model wrote, and the
+      justification names the offending label. This is the JD-4 discipline `tests_pass` already
+      follows, applied to the evidence the judge already computes.
+
+    * **A live machine-settled failure blocks the SUCCESS seal.** A run whose acceptance criteria
+      all pass but whose cumulative diff still carries a proven violation at the final completion
+      review must NOT report SUCCESS. Its terminal state names the failing item.
+
+    * **The work survives and no human is required.** Blocking is not rolling back: the item
+      stays NON-destructive, no `ROLLBACK` verdict is opened for it, the run's files stay on
+      disk, and the run reaches its terminal state unattended — a passing-criteria run is never
+      parked for an operator (the F-107 discipline).
+
+    * **The bounded repair still runs first.** The run still gets its one completion-review fix
+      step before anything blocks; only a violation that is still live after that repair stops
+      the seal.
+
+    * **A model's design opinion still only advises.** A run failing solely
+      `design_serves_overall_goal` or `cumulative_design_coherent` at the final review continues
+      to seal SUCCESS with the finding recorded, exactly as it does today.
+
+  The seams already exist and should be used rather than rebuilt: applyCheckOverrides
+  (src/judge/harness.ts:106) already rebuilds `rubricResults` from the rubric list and already
+  overrides one item from executed evidence, and its single call site (:304) already holds
+  collected.architectureLabels and collected.secretScanLabels. The completion-review gate
+  (src/workflow/agent-loop.ts:1047-1105) already grants and re-reviews one bounded fix step.
+
+  Everything already proven stays proven: LAYER_ORDER and both scan primitives are unchanged;
+  a destructive STANDING failure still returns ROLLBACK (CONTRACTS.md §4 rule 1); the
+  judge-executed-check override of `tests_pass` still wins over the model (JD-4); a form missing
+  a declared item is still an error, not a pass; `judge.rubric_extra` keeps exactly the semantics
+  WP-604 landed; and the chain-side gate repair and node heal tiers (WP-542/543/544) are
+  untouched. If an existing test pins the old shape, update its expectation and say plainly in
+  the step summary that you did — do not delete it, and do not weaken it into a tautology.
+
+  Constraints: TypeScript stays strict ESM with named exports and no `any`; no new dependency, no
+  provider SDK, no API key, no global install. Workflow code stays deterministic and replay-safe.
+  A contract that crosses into the workflow must survive its schema round-trip (src/schemas.ts),
+  not only src/taskspec.ts, and `src/types.ts` is the CORE layer — it must not import from
+  src/judge/, src/workflow/ or src/runner/ (this run's own subject matter: run the scan on
+  your own diff before you finish). Project commands run sequentially inside the already-activated
+  Devbox environment, so invoke pinned tools directly and never nest `devbox run`. Every existing
+  test remains green, `eslint` stays clean, and the repo's own typecheck gate — `pnpm run
+  typecheck`, which compiles the TEST project too, not just `src` — stays clean; run all three,
+  not only the type-checker and the tests.
+
+repos:
+  - url: /Users/nikitazolotarev/repos/chikory
+    writable: true
+
+acceptance_criteria:
+  - id: AC-1
+    description: >
+      THIS CHECK OWNS ITS ORACLE — RED on HEAD, green only once the rubric declares what a
+      machine settles and the non-destructive guarantee is kept. Every input family and every
+      expected answer is written HERE, not delegated to a test the executor authors:
+      `DETERMINISTIC_RUBRIC_IDS` is on the public surface and classifies all six standing items
+      plus the completion-review item correctly (trap C); `no_architecture_violations` is still
+      `destructive: false` and `computeVerdict` still returns a NON-ROLLBACK verdict naming it
+      (trap A); a spec-authored `judge.rubric_extra` item is non-destructive AND outside the
+      deterministic set; and `scanDiffForLayeringViolations` still reports `core→judge` for a
+      real violating diff and nothing for a clean one. Runs in seconds against the real built
+      artifact.
+    check: |
+      cd packages/sdk-ts && pnpm run typecheck && pnpm exec tsc && \
+      OPENAI_COMPAT_BASE_URL=http://127.0.0.1:9 node --input-type=module -e '
+      import {pathToFileURL} from "node:url";
+      import {join} from "node:path";
+      const A=(c,m)=>{if(!c){console.error("FAIL: "+m);process.exit(1);}};
+      const mod=await import(pathToFileURL(join(process.cwd(),"dist/index.js")).href);
+      const {parseTaskSpec,computeVerdict,STANDING_RUBRIC,COMPLETION_REVIEW_RUBRIC,
+             DETERMINISTIC_RUBRIC_IDS,scanDiffForLayeringViolations}=mod;
+      A(typeof parseTaskSpec==="function"&&typeof computeVerdict==="function"&&
+        Array.isArray(STANDING_RUBRIC)&&Array.isArray(COMPLETION_REVIEW_RUBRIC)&&
+        typeof scanDiffForLayeringViolations==="function",
+        "the pre-existing public surface must be intact");
+      A(DETERMINISTIC_RUBRIC_IDS!==undefined,
+        "DETERMINISTIC_RUBRIC_IDS must be on the public surface — the rubric has to declare "+
+        "which items a machine settles");
+      const det=new Set(Array.from(DETERMINISTIC_RUBRIC_IDS));
+      A(det.size>0,"DETERMINISTIC_RUBRIC_IDS must be a non-empty iterable of ids, got "+
+        JSON.stringify(DETERMINISTIC_RUBRIC_IDS));
+
+      // 1. classification — exactly the scan-backed items, and nothing else (trap C).
+      for(const id of ["no_architecture_violations","no_secrets_introduced"])
+        A(det.has(id),"a scan-backed item must be machine-settled: "+id+" missing from "+
+          JSON.stringify([...det]));
+      for(const id of ["no_unrelated_deletions","scope_matches_instruction",
+                       "design_serves_overall_goal","cumulative_design_coherent","tests_pass"])
+        A(!det.has(id),"trap C: "+id+" is a model judgment (or already overridden by JD-4) and "+
+          "must NOT be machine-settled — a review opinion cannot become a seal blocker. Got "+
+          JSON.stringify([...det]));
+      const allIds=new Set([...STANDING_RUBRIC,...COMPLETION_REVIEW_RUBRIC].map((r)=>r.id));
+      for(const id of det) A(allIds.has(id),
+        "DETERMINISTIC_RUBRIC_IDS names an id that is in no rubric: "+id);
+
+      // 2. trap A — the item must STAY non-destructive; flipping it rolls back the workspace.
+      const arch=STANDING_RUBRIC.find((r)=>r.id==="no_architecture_violations");
+      A(arch!==undefined,"no_architecture_violations must remain a standing rubric item");
+      A(arch.destructive===false,
+        "trap A: no_architecture_violations must stay NON-destructive — destructive:true fires "+
+        "CONTRACTS.md §4 rule 1 and RESTORES the workspace, destroying the good work with the "+
+        "bad import. Got "+JSON.stringify(arch));
+      const form=(failIds)=>({criterionResults:[{id:"AC-1",pass:true,justification:"ok"}],
+        rubricResults:STANDING_RUBRIC.map((r)=>({id:r.id,pass:!failIds.includes(r.id),
+          justification:"scripted"})),concerns:[]});
+      const v=computeVerdict(form(["no_architecture_violations"]),{},STANDING_RUBRIC);
+      A(v.kind!=="ROLLBACK",
+        "trap A: a failing no_architecture_violations must NEVER produce ROLLBACK, got "+
+        JSON.stringify(v));
+      A(String(v.rationale).includes("no_architecture_violations"),
+        "the verdict rationale must NAME the failing item, got "+JSON.stringify(v));
+      // the destructive items are untouched — a real §4 rule-1 trigger still rolls back.
+      A(computeVerdict(form(["no_secrets_introduced"]),{},STANDING_RUBRIC).kind==="ROLLBACK",
+        "a failing DESTRUCTIVE standing item must still return ROLLBACK (CONTRACTS.md §4 rule 1)");
+
+      // 3. a spec-authored rule is a MODEL judgment and can never be machine-settled.
+      const HEAD=["name: probe","goal: do a thing","repos:","  - url: /tmp/probe-repo",
+        "    writable: true","acceptance_criteria:","  - id: AC-1","    description: d",
+        "    check: \"true\"","budget_usd: 1","max_steps: 1","agent_classes:",
+        "  executor: executor-default","  judge: judge-default","judge:","  cadence: 1",
+        "  rubric_extra:","    - id: spec_rule","      description: a run-scoped rule"].join("\n");
+      const spec=parseTaskSpec(HEAD);
+      const extra=spec.judge.rubricExtra;
+      A(Array.isArray(extra)&&extra.length===1&&extra[0].destructive===false,
+        "WP-604 regression: a spec-authored item must still parse non-destructive, got "+
+        JSON.stringify(extra));
+      A(!det.has("spec_rule"),
+        "a spec cannot promote its own prose to a machine-settled fact; spec_rule is in "+
+        JSON.stringify([...det]));
+
+      // 4. the scan primitive itself is untouched — both directions.
+      const violating=["diff --git a/src/types.ts b/src/types.ts",
+        "--- a/src/types.ts","+++ b/src/types.ts","@@ -1 +1,2 @@",
+        "+import type { RubricItem } from \"./judge/rubric.js\";"].join("\n");
+      A(JSON.stringify(scanDiffForLayeringViolations(violating))===
+        JSON.stringify(["core→judge"]),
+        "the layering scan must still report core→judge for a real violation, got "+
+        JSON.stringify(scanDiffForLayeringViolations(violating)));
+      const clean=violating.replace("./judge/rubric.js","./util/deep-equal.js");
+      A(scanDiffForLayeringViolations(clean).length===0,
+        "the layering scan must still report nothing for a clean diff, got "+
+        JSON.stringify(scanDiffForLayeringViolations(clean)));
+
+      console.log("AC-1 OK: the rubric declares exactly the machine-settled items, the "+
+        "architecture item stays non-destructive and non-rollback, a spec-authored rule can "+
+        "never be machine-settled, and both scan directions are intact");
+      '
+
+  - id: AC-2
+    description: >
+      THE REAL LOOP, THE REAL SCAN, THE REAL JOURNAL — this check writes its own live Temporal
+      scenarios from the repo's existing test infrastructure, so a classifier the seal path never
+      consults cannot satisfy it (trap E). Scenario 1: a step adds a genuinely violating
+      `src/types.ts` import while the scripted judge answers `no_architecture_violations` ✓ and
+      every criterion ✓ — the run must NOT seal SUCCESS (traps D+E), must open NO `ROLLBACK`
+      verdict and must leave its file on disk (trap A), must reach a terminal state unattended
+      (trap B), and must have taken its bounded completion-review repair step first (trap F).
+      Scenario 2: the identical run with a CLEAN import seals SUCCESS. Scenario 3: a clean run
+      whose completion review fails only `design_serves_overall_goal` and
+      `cumulative_design_coherent` still seals SUCCESS with the finding recorded (trap C). The
+      generated file is removed by the check.
+    check: |
+      cd packages/sdk-ts && pnpm run typecheck && node --input-type=module -e '
+      import {writeFileSync,rmSync} from "node:fs";
+      import {spawnSync} from "node:child_process";
+      import {join} from "node:path";
+      const A=(c,m)=>{if(!c){console.error("FAIL: "+m);process.exit(1);}};
+      const target=join(process.cwd(),"test/runner/ac2-deterministic-gate.generated.test.ts");
+      // Written and removed by THIS check; a leftover from a killed run is stale, not state.
+      rmSync(target,{force:true});
+      const SRC=`
+      import { randomUUID } from "node:crypto";
+      import { existsSync } from "node:fs";
+      import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+      import { tmpdir } from "node:os";
+      import { dirname, join } from "node:path";
+      import { afterEach, describe, expect, inject, test } from "vitest";
+      import {
+        createRunnerWorker, createTemporalRunner, Journal, journalPath, STANDING_RUBRIC,
+        COMPLETION_REVIEW_RUBRIC,
+        type AdapterRegistry, type JudgeForm, type RunStatusReport,
+      } from "../../src/index.js";
+      import {
+        initSourceRepo, makeJudgedSpec, startFakeJudgeWire, TERMINAL_STATUSES, waitFor,
+      } from "./helpers.js";
+
+      const address = inject("temporalAddress");
+      const bundlePath = inject("workflowBundlePath");
+      const ARCH = "no_architecture_violations";
+
+      // scriptedRegistry writes step-<n>.txt at the workspace ROOT, which maps to no layer.
+      // This adapter adds a src/-pathed file so the REAL evidence scan sees a REAL import edge.
+      function importingRegistry(specifier: string): AdapterRegistry {
+        return {
+          scripted: (ctx) => ({
+            name: "scripted",
+            modelFamily: "anthropic" as const,
+            async runStep(input) {
+              const file = join(input.workspaceDir, "src/types.ts");
+              await mkdir(dirname(file), { recursive: true });
+              // Plain concatenation on purpose: a backtick or \${} inside this generated
+              // source has to survive an outer template literal, and over-escaping it is
+              // how the first arming pass produced a BROKEN check instead of a RED one.
+              await writeFile(file,
+                "import type { X } from \\"" + specifier + "\\";\\nexport type Y = X;\\n");
+              const [diffRef, transcriptRef] = await Promise.all([
+                ctx.store.put("adapter diff", { kind: "diff", summary: "adapter diff" }),
+                ctx.store.put("adapter transcript", { kind: "transcript", summary: "t" }),
+              ]);
+              return {
+                status: "SUCCESS" as const, diffRef, transcriptRef,
+                summary: "added src/types.ts importing " + specifier,
+                toolCalls: 1, tokens: { input: 100, output: 50 },
+                costUsd: 0.01, costEstimated: false, durationMs: 0,
+              };
+            },
+          }),
+        };
+      }
+
+      // helpers.judgeForm() answers exactly STANDING_RUBRIC; these forms answer it ALL-PASS on
+      // purpose — including the architecture item — so only a delivery that lets the SCAN
+      // settle that item can fail the run (trap D).
+      const allPass = (criteria: Record<string, boolean>): JudgeForm => ({
+        criterionResults: Object.entries(criteria).map(([id, pass]) => ({
+          id, pass, justification: "scripted judge",
+        })),
+        rubricResults: STANDING_RUBRIC.map((r) => ({
+          id: r.id, pass: true, justification: "scripted — the model says this is fine",
+        })),
+        concerns: [],
+      });
+      const reviewForm = (failIds: string[]): JudgeForm => ({
+        criterionResults: [],
+        rubricResults: COMPLETION_REVIEW_RUBRIC.map((r) => ({
+          id: r.id, pass: !failIds.includes(r.id), justification: "scripted review",
+        })),
+        concerns: [],
+      });
+
+      describe.skipIf(address === null)("AC-2 — a machine-settled finding gates the seal", () => {
+        const cleanups: Array<() => Promise<void>> = [];
+        afterEach(async () => { while (cleanups.length > 0) await cleanups.pop()!(); });
+
+        async function runOne(specifier: string, reviewFails: string[]) {
+          const wire = await startFakeJudgeWire(
+            [allPass({ "AC-1": true }), allPass({ "AC-1": true }), allPass({ "AC-1": true })],
+            { reviewForms: [reviewForm(reviewFails), reviewForm(reviewFails)] },
+          );
+          const tmp = await mkdtemp(join(tmpdir(), "ac2-detgate-"));
+          cleanups.push(() => rm(tmp, { recursive: true, force: true }));
+          const repoUrl = await initSourceRepo(join(tmp, "src"), {});
+          const dataDir = join(tmp, "data");
+          const taskQueue = "tq-" + randomUUID();
+          const worker = await createRunnerWorker({
+            adapters: importingRegistry(specifier), address: address!, taskQueue, dataDir,
+            workflowBundlePath: bundlePath!,
+            routerOptions: { baseUrls: { "openai-compat": wire.url } },
+          });
+          const workerDone = worker.run();
+          const runner = createTemporalRunner({ address: address!, taskQueue, dataDir });
+          cleanups.push(async () => { worker.shutdown(); await workerDone; await runner.close(); });
+          const handle = await runner.start(makeJudgedSpec({ repoUrl, cadence: 1, maxSteps: 4 }));
+          const report = await waitFor(async () => {
+            const r: RunStatusReport = await handle.status();
+            return TERMINAL_STATUSES.includes(r.status) ? r : undefined;
+          }, { what: "terminal status", timeoutMs: 90_000, intervalMs: 1000 });
+          const j = new Journal(journalPath(dataDir, handle.runId));
+          let entries: { verdicts: string[]; steps: number };
+          try {
+            entries = {
+              verdicts: j.entries("verdict").map((e) => JSON.stringify(e.payload)),
+              steps: j.entries("step").length,
+            };
+          } finally { j.close(); }
+          return { report, ...entries, runId: handle.runId, dataDir };
+        }
+
+        test("scenario 1 — a PROVEN violation blocks SUCCESS, keeps the work, needs no human", async () => {
+          const r = await runOne("./judge/rubric.js", []);
+          // traps D+E: the model scored the item PASS and the scan says otherwise.
+          expect(r.report.status).not.toBe("SUCCESS");
+          expect(TERMINAL_STATUSES).toContain(r.report.status); // trap B: no park
+          expect(JSON.stringify(r.report)).toContain(ARCH);     // the state NAMES the item
+          // trap A: blocking is not rolling back.
+          expect(r.verdicts.some((v) => v.includes("\\"ROLLBACK\\""))).toBe(false);
+          // trap F: the bounded completion-review repair still ran FIRST — the run
+          // is blocked only after it has been given its one chance to fix the diff,
+          // so the gate never short-circuits the self-correction the loop exists for.
+          expect(r.steps).toBeGreaterThan(1);
+        }, 180_000);
+
+        test("scenario 2 — the identical run with a CLEAN import seals SUCCESS", async () => {
+          const r = await runOne("./util/deep-equal.js", []);
+          expect(r.report.status).toBe("SUCCESS");
+        }, 180_000);
+
+        test("scenario 3 — a model design opinion still only advises (trap C)", async () => {
+          const r = await runOne("./util/deep-equal.js",
+            ["design_serves_overall_goal", "cumulative_design_coherent"]);
+          expect(r.report.status).toBe("SUCCESS");
+        }, 180_000);
+      });
+      `;
+      writeFileSync(target, SRC);
+      const res=spawnSync("pnpm",["exec","vitest","run",
+        "test/runner/ac2-deterministic-gate.generated.test.ts"],{stdio:"inherit"});
+      // Clean up BEFORE asserting — A() exits the process, which would skip a finally
+      // block and leave the generated file behind to poison the next pass.
+      rmSync(target,{force:true});
+      A(res.status===0,
+        "trap E: these scenarios drive the REAL workflow, the REAL layering scan and the REAL "+
+        "journal — a DETERMINISTIC_RUBRIC_IDS the seal path never consults cannot satisfy "+
+        "them. vitest exited "+res.status);
+      console.log("AC-2 OK: a proven violation blocked the SUCCESS seal with the work kept and "+
+        "no operator involved, a clean run still seals SUCCESS, and a design opinion still "+
+        "only advises");
+      '
+
+# WP-566 agent classes. Primaries unchanged — Gemini executes, Codex judges.
+# routing.stages is DERIVED from the selected members and must not be restated here.
+agent_classes:
+  executor: executor-default
+  judge: judge-default
+
+budget_usd: 20
+max_steps: 12
+
+judge:
+  cadence: 1
+  max_cost_share: 0.5
+  # WP-604's channel, used for the first time: this run's own subject matter is a layering
+  # breach, and dogfood-133 shipped one. The rule below is asked of the judge on every pass.
+  rubric_extra:
+    - id: core_layer_stays_clean
+      description: >
+        No added line in the diff makes packages/sdk-ts/src/types.ts, src/schemas.ts,
+        src/util/ or src/canonical-json.ts import from src/judge/, src/workflow/, src/runner/,
+        src/chain/, src/planner/, src/executors/ or src/cli/. The deterministic architecture
+        scan evidence in this pass is authoritative for this item.

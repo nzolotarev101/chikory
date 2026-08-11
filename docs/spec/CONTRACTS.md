@@ -100,7 +100,17 @@ export interface JudgePolicy {
   allowSameFamily?: boolean;    // explicit opt-in, loud warning (WP-133)
   scoringMethod?: "pointwise" | "pairwise"; // default pointwise (ADR-002)
   maxCostShare?: number;        // warn when judge spend > this fraction (JD-7)
-  rubricPacks?: string[];       // P2 (WP-215): "security", "architecture"
+  rubricExtra?: RubricItem[];   // WP-604: run-scoped rules appended to the standing
+                                // rubric for every PER-STEP pass. Parsed from
+                                // `judge.rubric_extra` as {id, description} only —
+                                // `destructive` is forced false by construction, and a
+                                // colliding/duplicate id is a validation error.
+}
+
+export interface RubricItem {
+  id: string;                   // referenced by judge forms and verdict rationales
+  description: string;
+  destructive: boolean;         // §4 rule 1: pass=false on a destructive item → ROLLBACK
 }
 ```
 

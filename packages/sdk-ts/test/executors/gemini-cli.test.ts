@@ -87,6 +87,48 @@ describe("parseAgyOutput", () => {
     expect(parsed.ok).toBe(false);
     expect(parsed.failure?.reason).toContain("no response");
   });
+
+  // F-309: the same telemetry also ships as <gmsg name="task_notification">,
+  // which the <notification> strip never matched. Measured on run-83bf691d:
+  // 48.0% of a 6,917-byte step summary, including a full vitest listing.
+  it("strips <gmsg name=\"task_notification\"> envelopes, including a captured log", () => {
+    const stdout =
+      '<gmsg name="task_notification" id="f4cb/task-170">\nTask "task-170" has completed ' +
+      "execution.\nState: SUCCEEDED\nExit Code: 0\n\nTask Log Output:\n" +
+      " Test Files  46 passed (46)\n      Tests  558 passed (558)\n</gmsg>" +
+      "### Summary of Work\nthreaded rubric_extra to the per-step pass\n";
+    const parsed = parseAgyOutput("prompt")(stdout);
+    expect(parsed.ok).toBe(true);
+    expect(parsed.summary).toBe(
+      "### Summary of Work\nthreaded rubric_extra to the per-step pass",
+    );
+    expect(parsed.summary).not.toContain("task-170");
+    expect(parsed.summary).not.toContain("558 passed");
+  });
+
+  it("strips several gmsg envelopes, keeping the agent text between them", () => {
+    const gmsg = (id: string) =>
+      `<gmsg name="task_notification" id="${id}">\nExit Code: 0\n</gmsg>\n`;
+    const parsed = parseAgyOutput("prompt")(
+      `${gmsg("a/task-1")}typecheck clean\n${gmsg("a/task-2")}suite green\n`,
+    );
+    expect(parsed.summary).toBe("typecheck clean\nsuite green");
+  });
+
+  it("fails when the output is nothing BUT a gmsg envelope", () => {
+    const parsed = parseAgyOutput("prompt")(
+      '<gmsg name="task_notification" id="a/task-3">\nExit Code: 0\n</gmsg>\n',
+    );
+    expect(parsed.ok).toBe(false);
+    expect(parsed.failure?.reason).toContain("no response");
+  });
+
+  // A gmsg that is NOT a task notification is not known to be harness noise.
+  it("leaves a non-notification gmsg alone", () => {
+    const stdout = '<gmsg name="thought">reasoning the agent chose to emit</gmsg>\n';
+    const parsed = parseAgyOutput("prompt")(stdout);
+    expect(parsed.summary).toContain("reasoning the agent chose to emit");
+  });
 });
 
 describe("agy invocation flags", () => {

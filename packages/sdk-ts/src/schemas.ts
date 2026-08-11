@@ -149,6 +149,14 @@ export const AcceptanceCriterionSchema = z
   })
   .strict();
 
+export const RubricItemSchema = z
+  .object({
+    id: z.string().min(1),
+    description: z.string().min(1),
+    destructive: z.boolean(),
+  })
+  .strict();
+
 export const JudgePolicySchema = z
   .object({
     family: LLMProviderSchema,
@@ -157,7 +165,7 @@ export const JudgePolicySchema = z
     allowSameFamily: z.boolean().optional(),
     scoringMethod: z.enum(["pointwise", "pairwise"]).optional(),
     maxCostShare: z.number().gt(0).lte(1).optional(),
-    rubricPacks: z.array(z.string()).optional(),
+    rubricExtra: z.array(RubricItemSchema).optional(),
   })
   .strict();
 

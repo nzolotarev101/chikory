@@ -15,8 +15,16 @@ import type {
 import { inferBackendFromModel } from "./agents/classes.js";
 import { loadAgentClassRegistry, resolveAgentClass } from "./agents/registry.js";
 import { endpointCapabilityFamily, resolveEndpointCapabilities } from "./endpoint-capability.js";
+import { STANDING_RUBRIC } from "./judge/rubric.js";
 import { TaskSpecSchema } from "./schemas.js";
-import type { LLMProvider, ModelChoice, RoutingPolicy, Stage, TaskSpec } from "./types.js";
+import type {
+  LLMProvider,
+  ModelChoice,
+  RoutingPolicy,
+  RubricItem,
+  Stage,
+  TaskSpec,
+} from "./types.js";
 
 export const DEFAULT_CADENCE = 3;
 export const DEFAULT_SCORING_METHOD = "pointwise" as const;
@@ -226,7 +234,16 @@ const RawTaskSpecYaml = z
         allow_same_family: z.boolean().optional(),
         scoring_method: z.enum(["pointwise", "pairwise"]).optional(),
         max_cost_share: z.number().gt(0).lte(1).optional(),
-        rubric_packs: z.array(z.string()).optional(),
+        rubric_extra: z
+          .array(
+            z
+              .object({
+                id: z.string().min(1),
+                description: z.string().min(1),
+              })
+              .strict(),
+          )
+          .optional(),
       })
       .strict(),
     routing: z
@@ -410,6 +427,29 @@ export function parseTaskSpec(yamlText: string, opts: ParseTaskSpecOptions = {})
       ? policyFromMembers(executorPrimary, judgePrimary)
       : undefined;
 
+  const standingIds = new Set(STANDING_RUBRIC.map((r) => r.id));
+  const extraRubricIds = new Set<string>();
+  const rubricExtra: RubricItem[] = [];
+  const rubricExtraIssues: string[] = [];
+  if (raw.judge.rubric_extra) {
+    for (const item of raw.judge.rubric_extra) {
+      if (standingIds.has(item.id)) {
+        rubricExtraIssues.push(
+          `judge.rubric_extra: id "${item.id}" collides with standing rubric item "${item.id}"`,
+        );
+      }
+      if (extraRubricIds.has(item.id)) {
+        rubricExtraIssues.push(`judge.rubric_extra: duplicate item id "${item.id}"`);
+      }
+      extraRubricIds.add(item.id);
+      rubricExtra.push({
+        id: item.id,
+        description: item.description,
+        destructive: false,
+      });
+    }
+  }
+
   const spec: TaskSpec = {
     name: raw.name,
     goal: raw.goal,
@@ -472,7 +512,7 @@ export function parseTaskSpec(yamlText: string, opts: ParseTaskSpecOptions = {})
       allowSameFamily: raw.judge.allow_same_family,
       scoringMethod: raw.judge.scoring_method ?? DEFAULT_SCORING_METHOD,
       maxCostShare: raw.judge.max_cost_share,
-      rubricPacks: raw.judge.rubric_packs,
+      ...(rubricExtra.length > 0 ? { rubricExtra } : {}),
     },
     routing:
       raw.routing ?? derivedRouting ?? defaultPolicy(executorDecl.family, declaredJudgeFamily),
@@ -517,7 +557,7 @@ export function parseTaskSpec(yamlText: string, opts: ParseTaskSpecOptions = {})
       : {}),
   };
 
-  const issues: string[] = [];
+  const issues: string[] = [...rubricExtraIssues];
   const capabilities = resolveEndpointCapabilities({ routing: spec.routing, executor: spec.executor });
   const executorFamily = endpointCapabilityFamily(capabilities.code[0]) ?? spec.executor.family;
   const judgeSameFamilyCapability = capabilities.judge.find(

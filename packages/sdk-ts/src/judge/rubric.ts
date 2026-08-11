@@ -5,12 +5,9 @@
  * forces ROLLBACK regardless of everything else.
  */
 
-export interface RubricItem {
-  id: string;
-  description: string;
-  /** CONTRACTS.md §4 rule 1: a `pass=false` on a destructive item → ROLLBACK. */
-  destructive: boolean;
-}
+import type { RubricItem } from "../types.js";
+
+export type { RubricItem };
 
 /** Rubric id whose answer is overridden by judge-executed checks (JD-4). */
 export const RUBRIC_TESTS_PASS = "tests_pass";

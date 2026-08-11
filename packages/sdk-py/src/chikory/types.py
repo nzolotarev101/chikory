@@ -139,6 +139,12 @@ class AcceptanceCriterion(ContractModel):
     check: str | None = None
 
 
+class RubricItem(ContractModel):
+    id: str
+    description: str
+    destructive: bool
+
+
 class JudgePolicy(ContractModel):
     family: LLMProvider
     model: str | None = None
@@ -146,7 +152,7 @@ class JudgePolicy(ContractModel):
     allow_same_family: bool | None = None
     scoring_method: Literal["pointwise", "pairwise"] | None = None
     max_cost_share: float | None = None
-    rubric_packs: list[str] | None = None
+    rubric_extra: list[RubricItem] | None = None
 
 
 class PacingPolicy(ContractModel):

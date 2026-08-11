@@ -31,6 +31,7 @@ import {
   renderOverallGoalContext,
   runCriteriaChecks,
   runJudgePass,
+  STANDING_RUBRIC,
 } from "../judge/index.js";
 import { EndpointLedger } from "../journal/endpoint-ledger.js";
 import { Journal, reportFromJournal, runTotals } from "../journal/journal.js";
@@ -1683,6 +1684,12 @@ export function createRunnerActivities(deps: RunnerActivityDeps) {
           reader.close();
         }
 
+        const effectiveRubric = input.completionReview
+          ? COMPLETION_REVIEW_RUBRIC
+          : spec.judge.rubricExtra && spec.judge.rubricExtra.length > 0
+            ? [...STANDING_RUBRIC, ...spec.judge.rubricExtra]
+            : STANDING_RUBRIC;
+
         let verdict: JudgeVerdict;
         let artifactRefs: ArtifactRef[] = [];
         let judgePayload: JudgePayload | undefined;
@@ -1695,7 +1702,7 @@ export function createRunnerActivities(deps: RunnerActivityDeps) {
             costUsd: journaledForm.costUsd,
             tokens: journaledForm.tokens,
             lastGoodCheckpointId: input.lastGoodCheckpointId,
-            ...(input.completionReview ? { rubric: COMPLETION_REVIEW_RUBRIC } : {}),
+            rubric: effectiveRubric,
           });
         } else {
           const judgeModel: ModelChoice = {
@@ -1770,9 +1777,8 @@ export function createRunnerActivities(deps: RunnerActivityDeps) {
               : {}),
             workChunkInProgress: input.workChunkInProgress ?? false,
             stepInfraFailed,
-            ...(input.completionReview
-              ? { rubric: COMPLETION_REVIEW_RUBRIC, reviewScope: "cumulative" as const }
-              : {}),
+            rubric: effectiveRubric,
+            ...(input.completionReview ? { reviewScope: "cumulative" as const } : {}),
             lastGoodCheckpointId: input.lastGoodCheckpointId,
           });
           verdict = pass.verdict;

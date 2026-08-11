@@ -229,6 +229,19 @@ export interface AcceptanceCriterion {
   repo?: string;
 }
 
+/**
+ * One always-on binary item a judge pass answers alongside the acceptance
+ * criteria. Lives in the core contract layer because `JudgePolicy` carries
+ * spec-authored items (`rubricExtra`); `src/judge/rubric.ts` re-exports it.
+ */
+export interface RubricItem {
+  /** Stable, referenced by judge forms and verdict rationales ("tests_pass"). */
+  id: string;
+  description: string;
+  /** CONTRACTS.md §4 rule 1: a `pass=false` on a destructive item → ROLLBACK. */
+  destructive: boolean;
+}
+
 export interface JudgePolicy {
   /** Must differ from `executor.family` (invariant #2). */
   family: LLMProvider;
@@ -242,8 +255,8 @@ export interface JudgePolicy {
   scoringMethod?: "pointwise" | "pairwise";
   /** Warn when judge spend > this fraction of run cost (JD-7). */
   maxCostShare?: number;
-  /** P2 (WP-215): "security", "architecture". */
-  rubricPacks?: string[];
+  /** Run-scoped quality rules appended to the standing rubric for every per-step judge pass. */
+  rubricExtra?: RubricItem[];
 }
 
 /** P2 (WP-207) — reserved; shape finalized after dogfood-001 data. */

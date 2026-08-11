@@ -50,10 +50,23 @@ function estimateTokens(text: string): number {
  */
 const NOTIFICATION_BLOCK = /<notification>[\s\S]*?<\/notification>\n?/g;
 
+/**
+ * F-309 (dogfood-133): the same telemetry ships under a SECOND envelope tag the
+ * `<notification>` strip never matched — `<gmsg name="task_notification" id=…>`,
+ * which carries the task's whole captured log. Measured on `run-83bf691d`:
+ * 3,320 of the step-2 summary's 6,917 bytes (48.0%) were two of these, one of
+ * them the entire 46-file vitest listing. Strip the notification-named form
+ * only; other `gmsg` names are not known to be harness noise.
+ */
+const GMSG_NOTIFICATION_BLOCK = /<gmsg\s+name="task_notification"[\s\S]*?<\/gmsg>\n?/g;
+
 /** Parse `agy --print` output: plain text, no structured usage. */
 export function parseAgyOutput(prompt: string): (stdout: string) => ParsedCliResult {
   return (stdout) => {
-    const summary = stdout.replace(NOTIFICATION_BLOCK, "").trim();
+    const summary = stdout
+      .replace(NOTIFICATION_BLOCK, "")
+      .replace(GMSG_NOTIFICATION_BLOCK, "")
+      .trim();
     const ok = summary.length > 0;
     const tokens: TokenUsage = {
       input: estimateTokens(prompt),

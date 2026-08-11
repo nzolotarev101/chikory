@@ -7,6 +7,7 @@ import { join } from "node:path";
 
 import { describe, expect, it, vi } from "vitest";
 
+import { STANDING_RUBRIC } from "../src/judge/rubric.js";
 import { TaskSpecSchema } from "../src/schemas.js";
 import { DEFAULT_CADENCE, DEFAULT_MAX_STEPS, parseTaskSpec, TaskSpecValidationError } from "../src/taskspec.js";
 
@@ -315,6 +316,77 @@ ${stages}${extra}
       - { provider: gemini, model: gemini-2.5-pro }`;
       expect(() => parseTaskSpec(spec(geminiCodeStages, failover), { env: keylessEnv })).toThrow(
         /missing env var GEMINI_API_KEY/,
+      );
+    });
+  });
+
+  // WP-604: a spec states a run-scoped judge rubric item. dogfood-133 landed the
+  // channel with its correctness carried only by the spec's own acceptance checks,
+  // which are deleted after the run — this pins it in the repo (F-310).
+  describe("judge.rubric_extra (WP-604)", () => {
+    const spec = (judgeBlock: string) => `name: rubric-extra
+goal: State a run-scoped quality rule the judge applies.
+repos:
+  - url: .
+    writable: true
+acceptance_criteria:
+  - id: AC-1
+    description: Something checkable
+budget_usd: 5
+executor:
+  adapter: claude-code
+  family: anthropic
+judge:
+  family: gemini
+${judgeBlock}`;
+    const item = (extra = "") => `  rubric_extra:
+    - id: spec_rule
+      description: the run must not touch the chain gate-repair path
+${extra}`;
+
+    it("carries the declared item and forces it non-destructive by construction", () => {
+      const parsed = parseTaskSpec(spec(item()), { env });
+      expect(parsed.judge.rubricExtra).toEqual([
+        {
+          id: "spec_rule",
+          description: "the run must not touch the chain gate-repair path",
+          destructive: false,
+        },
+      ]);
+      expect(TaskSpecSchema.safeParse(parsed).success).toBe(true);
+    });
+
+    it("omits the key entirely when no item is declared", () => {
+      expect(parseTaskSpec(spec(""), { env }).judge.rubricExtra).toBeUndefined();
+    });
+
+    it("refuses a destructive item by naming the key", () => {
+      expect(() => parseTaskSpec(spec(item("      destructive: true\n")), { env })).toThrow(
+        /destructive/,
+      );
+    });
+
+    it("refuses an id colliding with a standing rubric item by name", () => {
+      const collide = `  rubric_extra:
+    - id: ${STANDING_RUBRIC[0]!.id}
+      description: shadow a standing item
+`;
+      expect(() => parseTaskSpec(spec(collide), { env })).toThrow(
+        new RegExp(`collides.*${STANDING_RUBRIC[0]!.id}`),
+      );
+    });
+
+    it("refuses a duplicate id within the list by name", () => {
+      const dup = `${item()}    - id: spec_rule
+      description: the second one
+`;
+      expect(() => parseTaskSpec(spec(dup), { env })).toThrow(/duplicate item id "spec_rule"/);
+    });
+
+    // The channel this replaced parsed cleanly and had zero consumers (F-300).
+    it("refuses the retired rubric_packs key by name", () => {
+      expect(() => parseTaskSpec(spec(`  rubric_packs: ["security"]\n`), { env })).toThrow(
+        /rubric_packs/,
       );
     });
   });
