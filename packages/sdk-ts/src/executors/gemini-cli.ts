@@ -40,10 +40,20 @@ function estimateTokens(text: string): number {
   return Math.ceil(text.length / 4);
 }
 
+/**
+ * F-306: `agy` interleaves its own background-task telemetry into print output —
+ * a `<notification>` envelope carrying a task id, an `agy`-local log path and an
+ * exit code. It is CLI harness noise, never agent content, and the summary it
+ * lands in is pushed into `recentSummaries` (the next step's prompt), fed to the
+ * pacing token estimate and used as the `chikory trace` step title. Strip it, so
+ * a step's first line is what the agent said rather than `<notification>`.
+ */
+const NOTIFICATION_BLOCK = /<notification>[\s\S]*?<\/notification>\n?/g;
+
 /** Parse `agy --print` output: plain text, no structured usage. */
 export function parseAgyOutput(prompt: string): (stdout: string) => ParsedCliResult {
   return (stdout) => {
-    const summary = stdout.trim();
+    const summary = stdout.replace(NOTIFICATION_BLOCK, "").trim();
     const ok = summary.length > 0;
     const tokens: TokenUsage = {
       input: estimateTokens(prompt),

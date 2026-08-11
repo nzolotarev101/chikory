@@ -58,6 +58,35 @@ describe("parseAgyOutput", () => {
     expect(parsed.ok).toBe(false);
     expect(parsed.failure?.reason).toContain("no response");
   });
+
+  // F-306: the summary is carried into the next step's prompt, so `agy`'s own
+  // background-task envelope must not ride along as if the agent had said it.
+  it("strips agy background-task <notification> envelopes from the summary", () => {
+    const stdout =
+      "<notification>\n<task_id>abc/task-42</task_id>\n<task_summary>pnpm exec vitest run" +
+      "</task_summary>\n<status>SUCCESS</status>\n<exit_code>0</exit_code>\n</notification>\n\n" +
+      "wrote foo.txt\n";
+    const parsed = parseAgyOutput("do the thing")(stdout);
+    expect(parsed.ok).toBe(true);
+    expect(parsed.summary).toBe("wrote foo.txt");
+    expect(parsed.summary).not.toContain("task_id");
+  });
+
+  it("strips a notification interleaved mid-output, keeping the agent text around it", () => {
+    const stdout =
+      "starting the suite\n<notification>\n<task_id>abc/task-7</task_id>\n<exit_code>0</exit_code>\n" +
+      "</notification>\nsuite green\n";
+    const parsed = parseAgyOutput("prompt")(stdout);
+    expect(parsed.summary).toBe("starting the suite\nsuite green");
+  });
+
+  it("fails when the output is nothing BUT a notification envelope", () => {
+    const stdout =
+      "<notification>\n<task_id>abc/task-9</task_id>\n<exit_code>0</exit_code>\n</notification>\n";
+    const parsed = parseAgyOutput("prompt")(stdout);
+    expect(parsed.ok).toBe(false);
+    expect(parsed.failure?.reason).toContain("no response");
+  });
 });
 
 describe("agy invocation flags", () => {

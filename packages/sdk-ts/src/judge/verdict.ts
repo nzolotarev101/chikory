@@ -45,6 +45,21 @@ function describe(items: Array<{ id: string; justification: string }>): string {
 }
 
 /**
+ * Checks whether a judge verdict includes any failing destructive rubric item.
+ */
+export function hasDestructiveRubricFailure(
+  verdict: { form: JudgeForm } | undefined,
+  rubric: RubricItem[] = STANDING_RUBRIC,
+): boolean {
+  if (verdict === undefined) return false;
+  const destructiveIds = new Set(rubric.filter((r) => r.destructive).map((r) => r.id));
+  return verdict.form.rubricResults.some(
+    (r: { id: string; pass: boolean }) => !r.pass && destructiveIds.has(r.id),
+  );
+}
+
+
+/**
  * `criteriaHistory` holds per-criterion pass booleans from PREVIOUS verdicts
  * (oldest first); the current form's results are appended internally before
  * the consecutive-failure and flip-flop rules are evaluated.

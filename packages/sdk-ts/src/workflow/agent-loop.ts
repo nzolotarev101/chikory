@@ -74,6 +74,9 @@ import {
   decideRemediation,
 } from "./remediation.js";
 import { decideRejection, DEFAULT_MAX_REJECTION_STRIKES } from "./rejection.js";
+import { decideHealRollback } from "./heal-rollback.js";
+import { hasDestructiveRubricFailure } from "../judge/verdict.js";
+
 import {
   buildCompletionReviewBrief,
   decideCompletionReview,
@@ -321,20 +324,38 @@ export async function agentLoop(spec: TaskSpec): Promise<RunStatus> {
     return status;
   }
 
-  async function applyRemediation(trigger: string, brief: string): Promise<void> {
+  async function applyRemediation(
+    trigger: string,
+    brief: string,
+    verdictFacts?: {
+      trigger?: string;
+      criteriaAllPass: boolean;
+      destructiveRubricFailed?: boolean;
+    },
+  ): Promise<void> {
     remediationIndexBase += 1;
     lastRemediationBrief = brief;
+
+    const rollbackDecision = decideHealRollback({
+      trigger: verdictFacts?.trigger ?? trigger,
+      criteriaAllPass: verdictFacts?.criteriaAllPass ?? false,
+      destructiveRubricFailed: verdictFacts?.destructiveRubricFailed ?? false,
+      lastGoodCheckpointId,
+    });
+    const rollbackTo =
+      rollbackDecision.action === "rollback" ? rollbackDecision.checkpointId : undefined;
+
     await activities.recordRemediation({
       runId,
       remediationIndex: remediationIndexBase - 1,
       atStep: stepIndex - 1,
       trigger,
       brief,
-      ...(lastGoodCheckpointId !== undefined ? { rollbackTo: lastGoodCheckpointId } : {}),
+      ...(rollbackTo !== undefined ? { rollbackTo } : {}),
     });
-    if (lastGoodCheckpointId !== undefined) {
-      await activities.restoreCheckpoint({ runId, checkpointId: lastGoodCheckpointId });
-      const restoredCheckpoint = checkpoints.find((c) => c.id === lastGoodCheckpointId);
+    if (rollbackTo !== undefined) {
+      await activities.restoreCheckpoint({ runId, checkpointId: rollbackTo });
+      const restoredCheckpoint = checkpoints.find((c) => c.id === rollbackTo);
       const restoredCommit = restoredCheckpoint
         ? Object.values(restoredCheckpoint.gitCommits)[0]
         : undefined;
@@ -347,6 +368,7 @@ export async function agentLoop(spec: TaskSpec): Promise<RunStatus> {
   async function handleOperatorRejection(
     decision: ApproveDecision,
     escalationReason: string,
+    verdict?: JudgeVerdict,
   ): Promise<RunStatus | "REMEDIATED"> {
     const maxStrikes = spec.maxRejectStrikes ?? DEFAULT_MAX_REJECTION_STRIKES;
     const rejectionDecision = decideRejection({
@@ -362,6 +384,11 @@ export async function agentLoop(spec: TaskSpec): Promise<RunStatus> {
     await applyRemediation(
       decision.reason?.trim() ?? "operator rejection",
       rejectionDecision.brief,
+      {
+        trigger: "operator_reject",
+        criteriaAllPass: allCriteriaPass(verdict),
+        destructiveRubricFailed: hasDestructiveRubricFailure(verdict),
+      },
     );
     status = "RUNNING";
     return "REMEDIATED";
@@ -1098,7 +1125,11 @@ export async function agentLoop(spec: TaskSpec): Promise<RunStatus> {
         if (remediation.action === "remediate") {
           remediationAttempts = remediation.attempt;
           const brief = buildRemediationBrief(verdict.form, verdict.rationale);
-          await applyRemediation(verdict.rationale, brief);
+          await applyRemediation(verdict.rationale, brief, {
+            trigger: "halt",
+            criteriaAllPass: allCriteriaPass(verdict),
+            destructiveRubricFailed: hasDestructiveRubricFailure(verdict),
+          });
           continue;
         }
         return seal(
@@ -1176,6 +1207,7 @@ export async function agentLoop(spec: TaskSpec): Promise<RunStatus> {
           const outcome = await handleOperatorRejection(
             decision,
             verdict.escalateReason ?? verdict.rationale,
+            verdict,
           );
           if (outcome !== "REMEDIATED") return outcome;
           continue;
@@ -1219,7 +1251,7 @@ export async function agentLoop(spec: TaskSpec): Promise<RunStatus> {
       if (cancelRequested) return seal("CANCELLED", "cancelled while awaiting approval");
       const decision = pendingApprovals.splice(0).pop()!;
       if (!decision.approved) {
-        const outcome = await handleOperatorRejection(decision, reason);
+        const outcome = await handleOperatorRejection(decision, reason, verdict);
         if (outcome !== "REMEDIATED") return outcome;
         consecutiveFailures = 0;
         continue;

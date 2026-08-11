@@ -397,6 +397,12 @@ export {
   type RejectionState,
 } from "./workflow/rejection.js";
 export {
+  decideHealRollback,
+  type HealRollbackDecision,
+  type HealRollbackInput,
+} from "./workflow/heal-rollback.js";
+
+export {
   decideLimitParkDelay,
   type LimitParkDelayDecision,
   type LimitParkDelayState,

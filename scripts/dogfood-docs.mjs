@@ -179,7 +179,23 @@ function cmdIndex() {
     const prev = String(Number(nnn) - 1).padStart(3, "0");
     const prevIdx = lines.findIndex((l) => l.startsWith(`| [\`dogfood-${prev}-`));
     if (prevIdx < 0) die(`cannot find the dogfood-${prev} row to insert after`);
-    lines.splice(prevIdx + 1, 0, readFileSync(resolve(flags.row), "utf8").trim());
+    const row = readFileSync(resolve(flags.row), "utf8").trim();
+    // F-308: a --row file holding only the description cell is inserted verbatim
+    // and is NOT a table row — the campaign index silently loses the entry AND the
+    // next review's --outcome lookup cannot find it (dogfood-132 landed this way).
+    if (!row.startsWith(`| [\`dogfood-${nnn}-`)) {
+      die(
+        `--row content is not a dogfood-${nnn} table row: it must start with ` +
+          "'| [`dogfood-" +
+          nnn +
+          "-<slug>.yaml`](<slug>.yaml) | ' — got: " +
+          row.slice(0, 60),
+      );
+    }
+    if (row.split(" | ").length < 4) {
+      die(`--row content has ${row.split(" | ").length} columns; the index table needs 4`);
+    }
+    lines.splice(prevIdx + 1, 0, row);
     writeFileSync(file, lines.join("\n"));
     console.log(`✅ README: inserted the dogfood-${nnn} row after dogfood-${prev}`);
     return;

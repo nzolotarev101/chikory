@@ -1,0 +1,417 @@
+# Plain: A spec can state acceptance criteria, but it cannot state a quality RULE the judge must
+# apply to this one run. The field that looks like that channel parses fine and does nothing at
+# all. This run makes the channel real — a rule written in the spec is asked of the judge on every
+# pass and counted in the verdict — and makes the fake channel stop pretending.
+# WP: WP-604 (a spec must be able to state a run-scoped judge rubric item, and losing one must be loud)
+# Ladder-rung: 0 (OFF-LADDER by necessity — rung 5 is operator-gated today; see WHY)
+# Thesis-KPI: judge true-positives pre-land — a run-scoped invariant becomes gateable at all, so
+#   WP-542/543/544-style landed rules can be asserted per run instead of retyped into prose no
+#   gate reads; secondarily, specs shipped-ungated per campaign 1 → 0
+# Format: loose — the outcome and the public contract are fixed; the internals are the executor's
+#
+# Launch mode: RUN (single node — one channel, proven at the parse layer and then proven live).
+#   CHIKORY_PREFLIGHT_ONLY=1 devbox run run-dogfood
+#   devbox run run-dogfood
+#
+# WHY THIS AND NOT THE LADDER RUNG (dogfood-132 review, 2026-08-11):
+#   Progression gate: ✅ PROGRESSING with ⚠️ LADDER PACE flagged. The default candidate is
+#   P3-rung-5, the phase exit gate. Its two blockers were RE-MEASURED this review (not
+#   re-litigated) and both still stand:
+#     1. `brownfield-001`'s zod v3 → v4 gold patch. MEASURED: no patch or gold artifact exists
+#        anywhere under `benchmarks/` for that task (`find benchmarks -path '*brownfield-001*'`
+#        returns only `benchmarks/tasks/brownfield-001-dependency-major-upgrade.yaml`). Upstream
+#        never performed the migration, so there is no commit to name — 3–6 h of OPERATOR
+#        research, not agent work.
+#     2. A re-run of BOTH arms so stored per-task results carry `repoRef`. MEASURED: `grep -rl
+#        repoRef benchmarks/results/` returns NOTHING; the only stored per-task artifacts are
+#        `benchmarks/results/brownfield-00{2,3,4,5}/probe.json`. Hours of quota, and dogfood-122
+#        proved an LLM executor must not supervise a quota-bound multi-hour suite.
+#
+#   This is the SECOND consecutive off-ladder headline, which the dogfood-132 report flagged as
+#   needing a stronger reason than the last one. It has one: WP-604 is the only open 🔴 finding,
+#   and it is the THIRD instance of a single defect class the campaign has now paid for three
+#   times — F-296 → WP-602 (a reject's text was discarded), F-298 → WP-603 (a branch's guidance
+#   had nowhere to go), F-300 → WP-604 (a run-scoped rubric item cannot be expressed). A channel
+#   accepts human intent and drops it without a word. dogfood-131 paid the bill directly: its
+#   rubric block would not parse, the only available repair was to DELETE it, and trap F ("a
+#   strike is spent only on what the agent controlled") shipped UNGATED while the launch preflight
+#   printed all 🟢.
+#
+# THE MEASURED PREMISE (re-measure before building; do not re-litigate):
+#   * `judge:` is a `.strict()` zod object with no rubric-item key (`src/taskspec.ts:221-231`).
+#     MEASURED at HEAD: a spec carrying `judge.rubric_extra` dies with
+#     `Invalid task spec:\n  - judge: Unrecognized key(s) in object: 'rubric_extra'`.
+#   * `judge.rubric_packs` parses and has ZERO consumers. It is declared at
+#     `src/taskspec.ts:228`, mapped to `rubricPacks` at `src/taskspec.ts:475`, typed at
+#     `src/types.ts:246` and re-validated at `src/schemas.ts:160` — and `grep -rn rubricPacks
+#     packages/sdk-ts/src packages/sdk-ts/test` returns EXACTLY those four sites and nothing that
+#     READS it. It is worse than absent, because it reads as the documented path.
+#   * The consumption seam is already clean — `rubric` is an optional parameter defaulting to
+#     `STANDING_RUBRIC` at every level: `runJudgePass` (`src/judge/harness.ts:223,237`),
+#     `buildVerdict` (`harness.ts:66-70`) and `computeVerdict` (`src/judge/verdict.ts:67-73`).
+#     The only site that passes a non-default rubric today is the completion review
+#     (`src/runner/activities.ts:1698,1774` → `COMPLETION_REVIEW_RUBRIC`). Threading a
+#     spec-declared list to the PER-STEP pass is the missing wire, not a new mechanism.
+#   * A rubric item's `destructive` flag is the CONTRACTS.md §4 rule-1 trigger: a `pass=false` on
+#     a destructive item returns `kind: "ROLLBACK"` before any other rule
+#     (`src/judge/verdict.ts:77-84`). `COMPLETION_REVIEW_RUBRIC` is non-destructive BY
+#     CONSTRUCTION for exactly this reason (`src/judge/rubric.ts:72-90`) — a spec-authored item
+#     must inherit that rule, or a spec typo becomes a workspace rollback.
+#   * A failing NON-destructive rubric item is already gated, not merely recorded (F-180/WP-537):
+#     it sets `sealingVerdictHasRubricFailures` and forces a completion review with ONE bounded
+#     fix step before the run seals SUCCESS with the finding recorded
+#     (`src/workflow/agent-loop.ts:1054-1104`). So a spec-authored item lands on a real gate.
+#   * `applyCheckOverrides` rebuilds `rubricResults` from the RUBRIC LIST, not from the model's
+#     answer, and errors `judge form missing required items: <id>` for any declared item the
+#     model did not answer (`src/judge/harness.ts:144-181`). This is why a spec item that truly
+#     reached the judge is observable in the journaled verdict and an inert one is not.
+#   * Live runner scenarios boot Temporal through the vitest global setup
+#     (`test/runner/global-setup.ts`, address injected via `inject`); `test/runner/helpers.ts`
+#     gives a scripted executor and `judgeForm()`, whose `rubricResults` are exactly the
+#     `STANDING_RUBRIC` ids (`helpers.ts:337-355`) — so a form that also answers a spec-authored
+#     id has to be built explicitly, which is what AC-2 does. A full live file runs ~11 s.
+#   * `parseTaskSpec` validates routed-provider ENV before returning
+#     (`src/taskspec.ts:601`), so a parse-layer check must set a dummy
+#     `OPENAI_COMPAT_BASE_URL`. It is never dialed.
+#
+# Designed traps — the plausible-but-wrong deliveries the acceptance criteria exist to reject:
+#   A. **Parse it and drop it — the F-300 defect wearing the fix as a costume.** Adding
+#      `rubric_extra` to the `.strict()` object and mapping it onto `spec.judge.rubricExtra` makes
+#      the block parse and changes NOTHING about what the judge is asked. AC-2 is the answer: it
+#      reads the JOURNALED verdict form for the spec-authored id. A field that never reaches the
+#      judge cannot appear there, no matter how cleanly it parses.
+#   B. **A spec typo that rolls back the workspace.** Letting a spec-authored item carry
+#      `destructive: true` (or defaulting it to true) makes a one-line YAML mistake fire
+#      CONTRACTS.md §4 rule 1 and restore the workspace. AC-1 requires a `destructive` key to be
+#      REFUSED at parse time and AC-2 requires that a FAILING spec item produce no ROLLBACK
+#      verdict anywhere in the run.
+#   C. **Silently merging a colliding id.** A spec item named `tests_pass` or
+#      `scope_matches_instruction` would shadow or duplicate a standing item and quietly change
+#      what a landed gate means. AC-1 requires a validation error that NAMES the colliding id,
+#      and the same for a duplicate inside the list.
+#   D. **Leaving `rubric_packs` inert while fixing its neighbour.** The whole point is that a
+#      channel must not accept human intent and drop it. Shipping `rubric_extra` while
+#      `rubric_packs: ["totally-made-up-pack"]` still parses into a no-op reproduces the exact
+#      defect one key to the left. AC-1 accepts EITHER repair — resolve packs (an unknown name is
+#      a validation error) or remove the key (an unknown-key error) — and rejects only the
+#      status quo of parsing into a spec that carries the packs with no effect.
+#   E. **An item the judge is asked but the verdict ignores.** Scoring a spec item in the form
+#      while excluding it from `computeVerdict`'s rubric list makes it decorative. AC-1 drives
+#      `computeVerdict` directly with a failing spec-authored item and requires the returned
+#      rationale to NAME it.
+#   F. **Making the run park on a spec-authored finding.** A design finding must never park a run
+#      whose acceptance criteria all pass (the F-107 discipline, and why `COMPLETION_REVIEW_RUBRIC`
+#      is advisory-with-one-heal). AC-2 requires the run to reach SUCCESS.
+#
+# NOT IN SCOPE: the completion-review rubric (`COMPLETION_REVIEW_RUBRIC` stays exactly what it is —
+# a spec item rides the PER-STEP standing rubric); the preflight/launch-script warning for a spec
+# that DELETES a gate block relative to HEAD (harness-meta, track-B); changing the standing rubric
+# items themselves; the chain-side gate repair and node heal tiers (WP-542/543/544, untouched);
+# `judge.rubric_packs`' eventual pack CONTENT (this run only forbids it from lying).
+
+name: dogfood-133-wp604-rubric-channel
+wp: WP-604
+goal: >
+  A spec must be able to state a run-scoped quality rule the judge applies, and a channel that
+  cannot honour what a human wrote must say so instead of dropping it.
+
+  Today a spec can state acceptance criteria and nothing else. The standing rubric — the always-on
+  binary items every judge pass answers — is fixed in code, so a run-specific invariant ("this run
+  must not touch the chain gate-repair path", "a strike is spent only on something the agent
+  controlled") has nowhere to live. The one field that looks like the channel, `judge.rubric_packs`,
+  parses cleanly and has zero consumers. dogfood-131 paid for this: its rubric block would not
+  parse, the only repair was to delete it, and a gate shipped ungated while the preflight printed
+  all green.
+
+  Make these true:
+
+    * **A spec can state a rubric item, and the judge is actually asked it.** A `judge.rubric_extra`
+      list of `{id, description}` items is appended to the standing rubric for every PER-STEP judge
+      pass of that run. The item reaches the judge form, is answered, and is carried on the
+      journaled verdict — a reviewer can see in `chikory trace` that the rule was asked.
+
+    * **The verdict counts it.** A failing spec-authored item is a rubric failure like any other
+      non-destructive standing item: it names itself in the verdict rationale and it rides the
+      existing completion-review gate (WP-537/F-180). A rule that is scored but cannot change any
+      outcome is decoration.
+
+    * **Non-destructive by construction.** A spec-authored item can NEVER open a ROLLBACK path,
+      whatever the YAML says — the same rule COMPLETION_REVIEW_RUBRIC already follows and for the
+      same reason. A one-line spec typo must not be able to restore the workspace. A run whose
+      acceptance criteria all pass still seals SUCCESS with the finding recorded; a spec-authored
+      finding never parks it (the F-107 discipline).
+
+    * **A rule that cannot be honoured is refused out loud.** An id colliding with a standing
+      rubric id, a duplicate id within the list, and an attempt to declare an item destructive are
+      each a validation error that NAMES the offending id or key — not a silent merge, not a
+      silent drop.
+
+    * **`judge.rubric_packs` stops pretending.** It is either implemented — named packs resolve to
+      rubric items, and an unknown pack name is a validation error — or it is removed from the
+      schema so declaring it is an unknown-key error. What it must no longer do is parse into a
+      spec that carries it and ignores it.
+
+  The consumption seam already exists and should be used rather than rebuilt: `rubric` is an
+  optional parameter defaulting to the standing rubric at runJudgePass, buildVerdict and
+  `computeVerdict`, and the completion review is already the one caller that passes its own list.
+  This work threads a spec-declared list to the per-step pass through that same parameter.
+
+  Everything already proven stays proven: the standing rubric's own items and their `destructive`
+  flags are unchanged; the completion-review rubric is untouched; a destructive STANDING failure
+  still returns ROLLBACK (CONTRACTS.md §4 rule 1); the judge-executed-check override of
+  tests_pass still wins over the model's opinion (JD-4); a form missing a declared item is still
+  an error, not a pass; and the chain-side heal tiers (WP-542/543/544) are untouched. If an
+  existing test pins the old shape, update its expectation and say plainly in the step summary
+  that you did — do not delete it, and do not weaken it into a tautology.
+
+  Constraints: TypeScript stays strict ESM with named exports and no `any`; no new dependency, no
+  provider SDK, no API key, no global install. Workflow code stays deterministic and replay-safe.
+  A spec field that crosses into the workflow must survive its schema round-trip (src/schemas.ts),
+  not only src/taskspec.ts. Project commands run sequentially inside the already-activated Devbox
+  environment, so invoke pinned tools directly and never nest `devbox run`. Every existing test
+  remains green, `eslint` stays clean, and the repo's own typecheck gate — which compiles the TEST
+  project too, not just `src` — stays clean; run all three, not only the type-checker and the tests.
+
+repos:
+  - url: /Users/nikitazolotarev/repos/chikory
+    writable: true
+
+acceptance_criteria:
+  - id: AC-1
+    description: >
+      THIS CHECK OWNS ITS ORACLE — RED on HEAD, green only once the channel exists and refuses
+      what it cannot honour. Every input family and every expected answer is written HERE, not
+      delegated to a test the executor authors: a well-formed `judge.rubric_extra` parses and
+      surfaces on the spec; a colliding id, a duplicate id and a `destructive` key are each
+      REFUSED with the offending name in the message (traps B, C); `computeVerdict` given a
+      failing spec-authored item returns a verdict that is NOT ROLLBACK and NAMES the item
+      (traps B, E); and `judge.rubric_packs` no longer parses into a spec that carries it and
+      ignores it (trap D — either repair accepted). Runs in seconds against the real built
+      artifact.
+    check: |
+      cd packages/sdk-ts && pnpm exec tsc && OPENAI_COMPAT_BASE_URL=http://127.0.0.1:9 \
+      node --input-type=module -e '
+      import {pathToFileURL} from "node:url";
+      import {join} from "node:path";
+      const A=(c,m)=>{if(!c){console.error("FAIL: "+m);process.exit(1);}};
+      const mod=await import(pathToFileURL(join(process.cwd(),"dist/index.js")).href);
+      const {parseTaskSpec,computeVerdict,STANDING_RUBRIC}=mod;
+      A(typeof parseTaskSpec==="function"&&typeof computeVerdict==="function"&&
+        Array.isArray(STANDING_RUBRIC),
+        "parseTaskSpec, computeVerdict and STANDING_RUBRIC must all be on the public surface");
+
+      const HEAD=["name: probe","goal: do a thing","repos:","  - url: /tmp/probe-repo",
+        "    writable: true","acceptance_criteria:","  - id: AC-1","    description: d",
+        "    check: \"true\"","budget_usd: 1","max_steps: 1","agent_classes:",
+        "  executor: executor-default","  judge: judge-default"].join("\n");
+      const spec=(judgeBlock)=>HEAD+"\njudge:\n  cadence: 1\n"+judgeBlock+"\n";
+      const parse=(y)=>{try{return {ok:true,spec:parseTaskSpec(y)};}
+                        catch(e){return {ok:false,msg:String(e&&e.message||e)};}};
+
+      // 1. a well-formed run-scoped rule parses and reaches the spec.
+      const good=parse(spec("  rubric_extra:\n    - id: spec_rule\n"+
+        "      description: the run must not touch the chain gate-repair path\n"));
+      A(good.ok,"a well-formed judge.rubric_extra must parse; got: "+good.msg);
+      const extra=good.spec.judge.rubricExtra;
+      A(Array.isArray(extra)&&extra.length===1,
+        "spec.judge.rubricExtra must carry the declared item, got "+JSON.stringify(extra));
+      A(extra[0].id==="spec_rule"&&typeof extra[0].description==="string"&&
+        extra[0].description.length>0,
+        "the item keeps its id and description, got "+JSON.stringify(extra[0]));
+      // trap B: non-destructive BY CONSTRUCTION, whatever the YAML said.
+      A(extra[0].destructive===false,
+        "a spec-authored rubric item must be non-destructive by construction, got "+
+        JSON.stringify(extra[0]));
+
+      // 2. trap B — declaring an item destructive is REFUSED, and says so.
+      const dest=parse(spec("  rubric_extra:\n    - id: spec_rule\n      description: d\n"+
+        "      destructive: true\n"));
+      A(!dest.ok,"trap B: a spec must not be able to declare a rubric item destructive");
+      A(/destructive/.test(dest.msg),
+        "the refusal must name the destructive key, got: "+dest.msg);
+
+      // 3. trap C — a collision with a standing id is refused BY NAME.
+      const collideId=STANDING_RUBRIC[0].id;
+      const collide=parse(spec("  rubric_extra:\n    - id: "+collideId+
+        "\n      description: d\n"));
+      A(!collide.ok,"trap C: an id colliding with a standing rubric item must be refused");
+      A(collide.msg.includes(collideId),
+        "the refusal must name the colliding id "+collideId+", got: "+collide.msg);
+
+      // 4. trap C — a duplicate inside the list is refused BY NAME.
+      const dup=parse(spec("  rubric_extra:\n    - id: spec_rule\n      description: one\n"+
+        "    - id: spec_rule\n      description: two\n"));
+      A(!dup.ok,"trap C: a duplicate id inside rubric_extra must be refused");
+      A(dup.msg.includes("spec_rule"),
+        "the duplicate refusal must name the id, got: "+dup.msg);
+
+      // 5. trap E — the verdict COUNTS a failing spec item, and never rolls back for it.
+      const item={id:"spec_rule",description:"d",destructive:false};
+      const form={criterionResults:[{id:"AC-1",pass:true,justification:"ok"}],
+        rubricResults:[...STANDING_RUBRIC.map((r)=>({id:r.id,pass:true,justification:"ok"})),
+          {id:"spec_rule",pass:false,justification:"the run touched the gate-repair path"}],
+        concerns:[]};
+      const v=computeVerdict(form,{},[...STANDING_RUBRIC,item]);
+      A(v.kind!=="ROLLBACK",
+        "trap B: a failing spec-authored item must NEVER produce ROLLBACK, got "+
+        JSON.stringify(v));
+      A(String(v.rationale).includes("spec_rule"),
+        "trap E: the verdict rationale must NAME the failing spec-authored item, got "+
+        JSON.stringify(v));
+
+      // 6. trap D — rubric_packs must stop parsing into a spec that ignores it.
+      const packs=parse(spec("  rubric_packs: [\"totally-made-up-pack\"]\n"));
+      const stillInert=packs.ok&&
+        JSON.stringify(packs.spec.judge.rubricPacks??[]).includes("totally-made-up-pack")&&
+        (packs.spec.judge.rubricExtra===undefined||packs.spec.judge.rubricExtra.length===0);
+      A(!stillInert,
+        "trap D: judge.rubric_packs must not parse into a spec that carries the pack and "+
+        "ignores it — either resolve named packs (unknown name = validation error) or remove "+
+        "the key (unknown-key error). Got a spec carrying "+
+        JSON.stringify(packs.ok?packs.spec.judge:packs.msg));
+      if(!packs.ok) A(/totally-made-up-pack|rubric_packs/.test(packs.msg),
+        "if rubric_packs is refused, the message must name the pack or the key, got: "+packs.msg);
+
+      console.log("AC-1 OK: a run-scoped rubric item parses non-destructive and is counted by "+
+        "the verdict; collisions, duplicates and a destructive key are refused by name; and "+
+        "rubric_packs no longer parses into a no-op");
+      '
+
+  - id: AC-2
+    description: >
+      THE REAL LOOP, THE REAL JUDGE, THE REAL JOURNAL — this check writes its own live Temporal
+      scenario from the repo's existing test infrastructure, so a `rubric_extra` that parses but
+      never reaches the judge cannot satisfy it (trap A). One run declares a spec-authored rubric
+      item; the scripted judge answers it FALSE at the sealing pass. The journaled verdict form
+      must CARRY the spec-authored id (proof the judge was asked it — a stored-and-ignored field
+      cannot appear there), no verdict anywhere in the run may be ROLLBACK (trap B), and the run
+      must still reach SUCCESS because a design finding never parks a run whose criteria pass
+      (trap F). The generated file is removed by the check.
+    check: |
+      cd packages/sdk-ts && pnpm exec tsc && node --input-type=module -e '
+      import {writeFileSync,rmSync} from "node:fs";
+      import {spawnSync} from "node:child_process";
+      import {join} from "node:path";
+      const A=(c,m)=>{if(!c){console.error("FAIL: "+m);process.exit(1);}};
+      const target=join(process.cwd(),"test/runner/ac2-rubric-extra.generated.test.ts");
+      // Written and removed by THIS check; a leftover from a killed run is stale, not state.
+      rmSync(target,{force:true});
+      const SRC=`
+      import { randomUUID } from "node:crypto";
+      import { mkdtemp, rm } from "node:fs/promises";
+      import { tmpdir } from "node:os";
+      import { join } from "node:path";
+      import { afterEach, describe, expect, inject, test } from "vitest";
+      import {
+        createRunnerWorker, createTemporalRunner, Journal, journalPath, STANDING_RUBRIC,
+        type JudgeForm, type RunStatusReport,
+      } from "../../src/index.js";
+      import {
+        initSourceRepo, makeJudgedSpec, scriptedRegistry, startFakeJudgeWire,
+        TERMINAL_STATUSES, waitFor,
+      } from "./helpers.js";
+
+      const address = inject("temporalAddress");
+      const bundlePath = inject("workflowBundlePath");
+      const SPEC_RULE = "spec_rule";
+
+      // helpers.judgeForm() answers exactly the STANDING_RUBRIC ids, so a form that also
+      // answers a spec-authored id has to be built here — which is the point.
+      function formWith(criteria: Record<string, boolean>, specRulePass: boolean): JudgeForm {
+        return {
+          criterionResults: Object.entries(criteria).map(([id, pass]) => ({
+            id, pass, justification: "scripted judge",
+          })),
+          rubricResults: [
+            ...STANDING_RUBRIC.map((r) => ({ id: r.id, pass: true, justification: "scripted" })),
+            { id: SPEC_RULE, pass: specRulePass, justification: "scripted spec-authored rule" },
+          ],
+          concerns: [],
+        };
+      }
+
+      describe.skipIf(address === null)("AC-2 — a spec-authored rubric item reaches the judge", () => {
+        const cleanups: Array<() => Promise<void>> = [];
+        afterEach(async () => { while (cleanups.length > 0) await cleanups.pop()!(); });
+
+        test("the run asks the spec rule, never rolls back for it, and still seals SUCCESS", async () => {
+          // Per-step forms only: the seal-time completion review draws from the wires
+          // SEPARATE reviewForms list (default all-pass), never from this one.
+          //   pass 1 — criteria not met yet, the spec rule passes
+          //   pass 2 — criteria met, the spec rule FAILS -> the sealing verdict carries a
+          //            rubric failure, which buys one bounded completion-review fix step
+          //   pass 3 — the fix step: criteria met and the spec rule passes -> seal SUCCESS
+          const wire = await startFakeJudgeWire([
+            formWith({ "AC-1": false }, true),
+            formWith({ "AC-1": true }, false),
+            formWith({ "AC-1": true }, true),
+          ]);
+          const tmp = await mkdtemp(join(tmpdir(), "ac2-rubric-"));
+          cleanups.push(() => rm(tmp, { recursive: true, force: true }));
+          const repoUrl = await initSourceRepo(join(tmp, "src"), {});
+          const dataDir = join(tmp, "data");
+          const taskQueue = "tq-" + randomUUID();
+          const worker = await createRunnerWorker({
+            adapters: scriptedRegistry, address: address!, taskQueue, dataDir,
+            workflowBundlePath: bundlePath!,
+            routerOptions: { baseUrls: { "openai-compat": wire.url } },
+          });
+          const workerDone = worker.run();
+          const runner = createTemporalRunner({ address: address!, taskQueue, dataDir });
+          cleanups.push(async () => { worker.shutdown(); await workerDone; await runner.close(); });
+
+          const base = makeJudgedSpec({ repoUrl, cadence: 1, maxSteps: 4 });
+          const handle = await runner.start({
+            ...base,
+            judge: {
+              ...base.judge,
+              rubricExtra: [
+                { id: SPEC_RULE, description: "the run must not touch the gate-repair path" },
+              ],
+            },
+          } as typeof base);
+          const report = await waitFor(async () => {
+            const r: RunStatusReport = await handle.status();
+            return TERMINAL_STATUSES.includes(r.status) ? r : undefined;
+          }, { what: "terminal status", timeoutMs: 75_000, intervalMs: 1000 });
+
+          const j = new Journal(journalPath(dataDir, handle.runId));
+          let verdicts: string[];
+          try { verdicts = j.entries("verdict").map((e) => JSON.stringify(e.payload)); }
+          finally { j.close(); }
+          expect(verdicts.length).toBeGreaterThan(0);
+          // trap A: a field that parses but never reaches the judge cannot appear here.
+          expect(verdicts.some((v) => v.includes(SPEC_RULE))).toBe(true);
+          // trap B: a spec-authored item can never open a ROLLBACK path.
+          expect(verdicts.some((v) => v.includes("\\"ROLLBACK\\""))).toBe(false);
+          // trap F: a design finding never parks a run whose acceptance criteria pass.
+          expect(report.status).toBe("SUCCESS");
+        }, 180_000);
+      });
+      `;
+      writeFileSync(target, SRC);
+      const res=spawnSync("pnpm",["exec","vitest","run",
+        "test/runner/ac2-rubric-extra.generated.test.ts"],{stdio:"inherit"});
+      // Clean up BEFORE asserting — A() exits the process, which would skip a finally
+      // block and leave the generated file behind to poison the next pass.
+      rmSync(target,{force:true});
+      A(res.status===0,
+        "trap A: this scenario drives the REAL workflow and reads the REAL journaled verdict — "+
+        "a judge.rubric_extra the judge is never asked cannot satisfy it. vitest exited "+
+        res.status);
+      console.log("AC-2 OK: the spec-authored rule reached the judge and rides the journaled "+
+        "verdict, no ROLLBACK was opened by it, and the run still sealed SUCCESS");
+      '
+
+# WP-566 agent classes. Primaries unchanged — Gemini executes, Codex judges.
+# routing.stages is DERIVED from the selected members and must not be restated here.
+agent_classes:
+  executor: executor-default
+  judge: judge-default
+
+budget_usd: 20
+max_steps: 12
+
+judge:
+  cadence: 1
+  max_cost_share: 0.5
