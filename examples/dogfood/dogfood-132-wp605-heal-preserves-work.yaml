@@ -1,0 +1,382 @@
+# Plain: When a run gets corrected and tries again, it currently throws away the last thing it
+# built — even when nobody said that work was wrong. This run makes the throwing-away a decision
+# instead of a reflex: work the quality gate condemned is undone, work it never condemned is kept,
+# and the correction is applied on top of it.
+# WP: WP-605 (a heal must not throw away work the human never asked to throw away)
+# Ladder-rung: 0 (OFF-LADDER by necessity — rung 5 is operator-gated today; see WHY)
+# Thesis-KPI: work destroyed per heal 1 step → 0 steps when the verdict condemned nothing;
+#   per-step reliability (§1.4) — a heal stops costing a step of progress
+# Format: loose — the outcome and the decision contract are fixed; the internals are the executor's
+#
+# Launch mode: RUN (single node — one seam in the heal path, proven pure and then proven live).
+#   CHIKORY_PREFLIGHT_ONLY=1 devbox run run-dogfood
+#   devbox run run-dogfood
+#
+# WHY THIS AND NOT THE LADDER RUNG (dogfood-131 review, 2026-08-10):
+#   Progression gate: ✅ PROGRESSING with ⚠️ LADDER PACE still flagged. The default candidate is
+#   P3-rung-5, the phase exit gate, and its blockers are UNCHANGED from dogfood-130 and are still
+#   not product gaps:
+#     1. `brownfield-001`'s zod v3 → v4 gold patch — a 3–6h OPERATOR research lift. Upstream never
+#        performed the migration, so there is no commit to name.
+#     2. A re-run of BOTH arms so stored per-task results carry `repoRef`. Hours of quota, and
+#        dogfood-122 proved an LLM executor must not supervise a quota-bound multi-hour suite.
+#   Re-measured this review, not re-litigated: nothing about either blocker changed.
+#
+#   This run beats the rung for a second, stronger reason: it is a LIVE CORRECTNESS DEFECT in code
+#   that landed hours ago. dogfood-131 shipped WP-602 (a rejected escalation routes the operator's
+#   correction into the loop) — and the very run that built it would have been the first casualty.
+#   Step 3 delivered the 9,908-byte design consolidation the judge had just demanded, drew ESCALATE,
+#   and `lastGoodCheckpointId` stayed on step 2's checkpoint `@10`. Had the operator rejected rather
+#   than approved, the heal would have rolled the workspace back past step 3 and destroyed exactly
+#   the work the judge asked for. A heal that eats the delivery is worse than no heal.
+#
+# THE MEASURED PREMISE (re-measure before building; do not re-litigate):
+#   * `workflow/agent-loop.ts:335-341` — `applyRemediation` calls `restoreCheckpoint` whenever
+#     `lastGoodCheckpointId !== undefined`. There is no condition on WHAT the verdict said. The
+#     activity is real destruction, not bookkeeping: `runner/activities.ts:1906-1918` →
+#     `restoreWorkspaceReposToCheckpoint` resets the workspace repos to the checkpoint.
+#   * `workflow/agent-loop.ts:990` — `if (stepDelivered) lastGoodCheckpointId = checkpoint.id;`
+#     runs ONLY inside the `verdict.kind === "PROCEED"` branch (the F-211 rule). So a step that
+#     delivered work and drew ESCALATE never becomes the anchor, and rolling back to the anchor
+#     rolls back PAST it.
+#   * All three heal triggers now share that one helper (`agent-loop.ts:324-342`, landed by WP-602):
+#     the rule-3 HALT, the judge-escalate reject (`:1173-1181`) and the loop-breaker reject
+#     (`:1219-1225`). Fixing the helper fixes all three; forking a second helper for one of them
+#     un-does the consolidation the dogfood-131 judge demanded at completion review.
+#   * The HALT rollback exists for a reason and must survive — WP-519/520: a run that HALTed on
+#     repeated criterion failures must not compound bad work. This WP narrows that rollback, it
+#     does not remove it.
+#   * The pure-decision convention lives in `packages/sdk-ts/src/workflow/`: `decideRemediation`
+#     (`remediation.ts:35`), `decideRejection` (`rejection.ts:52`), `decideEscalationWait`
+#     (`escalation-wait.ts:28`), `decideLimitParkDelay`, `decideWorkChunk`, `decideStepForcing`.
+#     A replay-safe workflow decision is a pure function there, unit-tested, and CALLED by the loop.
+#   * ROLLBACK (Rule 1, destructive rubric) is a SEPARATE existing path that restores on its own and
+#     is not in scope — but a destructive rubric failure reaching the heal path is condemned work
+#     and must still roll back.
+#   * Live runner scenarios boot Temporal through the vitest global setup
+#     (`test/runner/global-setup.ts`, address injected via `inject`); `test/runner/helpers.ts`
+#     gives a scripted executor that writes `step-<n>.txt` per step with deterministic costs and
+#     judge forms — no LLM. `workspaceDir(dataDir, runId)` is the live workspace root, which is how
+#     `verdict-gating.test.ts:606` already reads a file the run wrote. A full live file runs ~11s.
+#
+# Designed traps — the plausible-but-wrong deliveries the acceptance criteria exist to reject:
+#   A. **Never rolling back at all.** Deleting the `restoreCheckpoint` call makes AC-2's first
+#      scenario pass instantly and guts WP-519: a run that HALTed on repeated criterion failures
+#      would now heal ON TOP of the work that failed, compounding it. AC-1 requires a rollback
+#      whenever the criteria did not all pass, and AC-2's SECOND scenario proves it live — the
+#      condemned step's file must be GONE.
+#   B. **Keying the decision on the TRIGGER instead of the VERDICT.** "Rejects keep, HALTs roll
+#      back" is the intuitive rule and it is wrong in both directions: an operator can reject an
+#      escalation raised precisely BECAUSE criteria failed (condemned work — must roll back), and a
+#      HALT is only ever reached through failing criteria anyway. AC-1 asserts both triggers produce
+#      the SAME answer for the same verdict facts.
+#   C. **Keeping the work but lying about it in the journal.** A heal that skips the restore while
+#      still journaling `rollbackTo` leaves `chikory trace` claiming a rollback that never happened,
+#      and the next reviewer cannot tell the two heals apart. AC-2 reads the `remediation` journal
+#      entry and requires `rollbackTo` to be ABSENT on a preserving heal and PRESENT on a
+#      condemning one.
+#   D. **Dropping the correction to save the work.** A heal that preserves the diff but loses the
+#      operator's words is a different bug wearing this fix as a costume. AC-2 requires the
+#      operator's marker string to reach the loop through the journal in BOTH scenarios.
+#   E. **A pure function nothing calls.** A beautifully unit-tested decision the loop never invokes
+#      is F-274/F-277's shape exactly, and AC-1 alone cannot tell the difference. AC-2 is the
+#      answer: it drives the REAL workflow through the REAL approve/reject path and reads the REAL
+#      journal and the REAL workspace.
+#   F. **Forking a second heal helper for the reject path.** The dogfood-131 judge failed
+#      `design_serves_overall_goal` AND `cumulative_design_coherent` on exactly this duplication and
+#      the run's last step exists to undo it. Not gated by an AC — but a delivery that re-splits
+#      `applyRemediation` regresses a judged design finding from the previous run.
+#
+# NOT IN SCOPE: the Rule-1 ROLLBACK verdict path (it restores on its own, WP-132); the chain-side
+# gate repair and node heal tiers (WP-542/543/544 — untouched); changing what makes a judge
+# ESCALATE, HALT, or a criterion fail; the reject strike budget itself (WP-602, landed).
+
+name: dogfood-132-wp605-heal-preserves-work
+wp: WP-605
+goal: >
+  A heal must not throw away work the human never asked to throw away.
+
+  Every self-heal in a run — the rule-3 HALT, a rejected judge escalation, a rejected loop-breaker
+  escalation — currently rolls the workspace back to the last checkpoint that both PROCEEDed and
+  delivered work, unconditionally. That anchor never advances for a step that delivered work and
+  drew ESCALATE, so healing after such a step rolls back PAST it and destroys it. dogfood-131 is
+  the measured proof: its step 3 delivered the design consolidation the judge had just demanded,
+  drew ESCALATE, and a reject would have erased it.
+
+  Make these true:
+
+    * **The rollback is a decision, not a reflex.** Whether a heal restores a checkpoint is decided
+      by what the triggering VERDICT said about the work, not by which trigger fired and not by
+      habit. Work the verdict condemned is undone. Work the verdict never condemned is kept, and
+      the correction brief is applied on top of it.
+
+    * **Condemned means the verdict said so.** A verdict whose acceptance criteria did not all pass
+      condemned the work — the heal rolls back, exactly as it does today, and WP-519's guarantee
+      that a HALT never compounds bad work is preserved intact. A destructive rubric failure is
+      condemnation too, however the criteria scored.
+
+    * **The trigger does not decide.** The same verdict facts produce the same rollback answer
+      whether the heal came from a HALT or from an operator's reject. An operator who rejects an
+      escalation raised because criteria FAILED still gets the rollback; a HALT is only ever
+      reached through failing criteria and still gets it.
+
+    * **The journal tells the truth about which happened.** A heal that preserved the work does not
+      record a rollback it did not perform, and a heal that rolled back does record it. A reviewer
+      reading `chikory trace` can tell the two apart without re-deriving the verdict.
+
+    * **The correction survives either way.** Preserving the work must not cost the operator's
+      words: the brief reaches the next step verbatim in both cases, as WP-602 already requires.
+
+  The decision itself is a pure, replay-safe function in the workflow layer beside its siblings
+  (decideRemediation, decideRejection, decideEscalationWait), exported as `decideHealRollback` from
+  the package's public surface, and the run loop CALLS it — a pure decision the loop never invokes
+  is a mechanism that does not exist. It takes the trigger, whether every acceptance criterion
+  passed, whether a destructive rubric item failed, and the last-good checkpoint id if there is one;
+  it answers either that the heal keeps the work or that it restores a named checkpoint. With no
+  last-good checkpoint there is nothing to restore and the work is kept.
+
+  All three heal triggers keep sharing ONE remediation helper. The dogfood-131 judge failed both
+  design rubric items on duplicated rejection handling and that run's final step exists to
+  consolidate them; re-splitting the helper to special-case one trigger regresses a judged finding.
+
+  Everything already proven stays proven: a rejected escalation still heals under its declared
+  reject-strike budget with the operator's reason verbatim (WP-602); a reason-less reject still
+  seals dead; the rule-3 HALT still yields one bounded remediation attempt before sealing (WP-519);
+  an approved out-of-rubric escalate with all criteria passing still force-seals SUCCESS (F-154);
+  the Rule-1 ROLLBACK verdict path is untouched; the chain-side heal tiers (WP-542/543/544) are
+  untouched. If an existing test pins the unconditional restore, update its expectation and say
+  plainly in the step summary that you did — do not delete it, and do not weaken it into a tautology.
+
+  Constraints: TypeScript stays strict ESM with named exports and no `any`; no new dependency, no
+  provider SDK, no API key, no global install. Workflow code stays deterministic and replay-safe —
+  no Date.now(), no Math.random(), no I/O in the decision. Project commands run sequentially inside
+  the already-activated Devbox environment, so invoke pinned tools directly and never nest
+  `devbox run`. Every existing test remains green, `eslint` stays clean, and the repo's own
+  typecheck gate — which compiles the TEST project too, not just `src` — stays clean; run all
+  three, not only the type-checker and the tests.
+
+repos:
+  - url: /Users/nikitazolotarev/repos/chikory
+    writable: true
+
+acceptance_criteria:
+  - id: AC-1
+    description: >
+      THIS CHECK OWNS ITS ORACLE — RED on HEAD, green only once `decideHealRollback` decides
+      correctly. Every input family and every expected decision is written HERE, not delegated to a
+      test the executor authors: an uncondemned verdict KEEPS the work under BOTH triggers (trap B);
+      a verdict with any failing criterion ROLLS BACK to the named checkpoint under BOTH triggers
+      (trap A); a destructive rubric failure ROLLS BACK even when every criterion passed; a heal
+      with no last-good checkpoint KEEPS, because there is nothing to restore; and the decision is
+      deterministic. Runs in seconds against the real built artifact.
+    check: |
+      cd packages/sdk-ts && pnpm exec tsc && node --input-type=module -e '
+      import {pathToFileURL} from "node:url";
+      import {join} from "node:path";
+      const A=(c,m)=>{if(!c){console.error("FAIL: "+m);process.exit(1);}};
+      const mod=await import(pathToFileURL(join(process.cwd(),"dist/index.js")).href);
+      const decideHealRollback=mod.decideHealRollback;
+      A(typeof decideHealRollback==="function",
+        "decideHealRollback must be exported from the package public surface, got "+
+        typeof decideHealRollback);
+
+      const CP="run-x@7";
+      const TRIGGERS=["operator_reject","halt"];
+
+      // The verdict condemned nothing — the work is KEPT, whichever trigger fired (trap B).
+      for (const trigger of TRIGGERS) {
+        const d=decideHealRollback({trigger,criteriaAllPass:true,destructiveRubricFailed:false,
+                                    lastGoodCheckpointId:CP});
+        A(d&&d.action==="keep",
+          "an uncondemned verdict must KEEP the work under trigger "+trigger+", got "+
+          JSON.stringify(d));
+        A(d.checkpointId===undefined,
+          "a keep decision names no checkpoint to restore, got "+JSON.stringify(d));
+      }
+
+      // trap A — a failing criterion is condemnation: WP-519s rollback survives, both triggers.
+      for (const trigger of TRIGGERS) {
+        const d=decideHealRollback({trigger,criteriaAllPass:false,destructiveRubricFailed:false,
+                                    lastGoodCheckpointId:CP});
+        A(d&&d.action==="rollback",
+          "trap A: a failing criterion must still ROLL BACK under trigger "+trigger+", got "+
+          JSON.stringify(d));
+        A(d.checkpointId===CP,
+          "the rollback must name the last-good checkpoint, got "+JSON.stringify(d));
+      }
+
+      // a destructive rubric failure is condemnation even with every criterion passing.
+      for (const trigger of TRIGGERS) {
+        const d=decideHealRollback({trigger,criteriaAllPass:true,destructiveRubricFailed:true,
+                                    lastGoodCheckpointId:CP});
+        A(d&&d.action==="rollback"&&d.checkpointId===CP,
+          "a destructive rubric failure must ROLL BACK under trigger "+trigger+", got "+
+          JSON.stringify(d));
+      }
+
+      // nothing to restore — the negative a naive "always rollback" delivery gets wrong.
+      for (const condemned of [true,false]) {
+        const d=decideHealRollback({trigger:"halt",criteriaAllPass:!condemned,
+                                    destructiveRubricFailed:false});
+        A(d&&d.action==="keep",
+          "with no lastGoodCheckpointId there is nothing to restore and the heal must KEEP "+
+          "(criteriaAllPass="+(!condemned)+"), got "+JSON.stringify(d));
+      }
+
+      // determinism: a workflow decision is replay-safe.
+      const a=JSON.stringify(decideHealRollback({trigger:"operator_reject",criteriaAllPass:true,
+                                                 destructiveRubricFailed:false,
+                                                 lastGoodCheckpointId:CP}));
+      const b=JSON.stringify(decideHealRollback({trigger:"operator_reject",criteriaAllPass:true,
+                                                 destructiveRubricFailed:false,
+                                                 lastGoodCheckpointId:CP}));
+      A(a===b,"decideHealRollback must be deterministic, got "+a+" then "+b);
+      console.log("AC-1 OK: an uncondemned verdict keeps the work under either trigger, a failing "+
+        "criterion or a destructive rubric failure still rolls back, and an absent anchor keeps");
+      '
+
+  - id: AC-2
+    description: >
+      THE REAL LOOP, THE REAL WORKSPACE, THE REAL JOURNAL — this check writes its own live Temporal
+      scenario from the repo's existing test infrastructure and drives the actual approve/reject
+      path, so a `decideHealRollback` the loop never calls cannot satisfy it (trap E). Two scenarios
+      differing ONLY in whether the escalating verdict's criteria passed: the uncondemned one must
+      leave the delivered file ON DISK and journal NO `rollbackTo` (traps A-inverse, C); the
+      condemned one must DELETE it and journal a `rollbackTo` (trap A). Both must carry the
+      operator's words verbatim into the loop (trap D). The generated file is removed by the check.
+    check: |
+      cd packages/sdk-ts && pnpm exec tsc && node --input-type=module -e '
+      import {writeFileSync,rmSync} from "node:fs";
+      import {spawnSync} from "node:child_process";
+      import {join} from "node:path";
+      const A=(c,m)=>{if(!c){console.error("FAIL: "+m);process.exit(1);}};
+      const target=join(process.cwd(),"test/runner/ac2-heal-preserves.generated.test.ts");
+      // Written and removed by THIS check; a leftover from a killed run is stale, not state.
+      rmSync(target,{force:true});
+      const SRC=`
+      import { randomUUID } from "node:crypto";
+      import { existsSync } from "node:fs";
+      import { mkdtemp, rm } from "node:fs/promises";
+      import { tmpdir } from "node:os";
+      import { join } from "node:path";
+      import { afterEach, describe, expect, inject, test } from "vitest";
+      import {
+        createRunnerWorker, createTemporalRunner, Journal, journalPath, workspaceDir,
+        type RunHandle, type RunStatusReport,
+      } from "../../src/index.js";
+      import {
+        initSourceRepo, judgeForm, makeJudgedSpec, scriptedRegistry, startFakeJudgeWire,
+        TERMINAL_STATUSES, waitFor, type FakeJudgeWire,
+      } from "./helpers.js";
+
+      const address = inject("temporalAddress");
+      const bundlePath = inject("workflowBundlePath");
+
+      describe.skipIf(address === null)("AC-2 — a heal preserves work the verdict never condemned", () => {
+        const cleanups: Array<() => Promise<void>> = [];
+        afterEach(async () => { while (cleanups.length > 0) await cleanups.pop()!(); });
+
+        async function setup(wire: FakeJudgeWire) {
+          const tmp = await mkdtemp(join(tmpdir(), "ac2-heal-"));
+          cleanups.push(() => rm(tmp, { recursive: true, force: true }));
+          const repoUrl = await initSourceRepo(join(tmp, "src"), {});
+          const dataDir = join(tmp, "data");
+          const taskQueue = "tq-" + randomUUID();
+          const worker = await createRunnerWorker({
+            adapters: scriptedRegistry, address: address!, taskQueue, dataDir,
+            workflowBundlePath: bundlePath!,
+            routerOptions: { baseUrls: { "openai-compat": wire.url } },
+          });
+          const workerDone = worker.run();
+          const runner = createTemporalRunner({ address: address!, taskQueue, dataDir });
+          cleanups.push(async () => { worker.shutdown(); await workerDone; await runner.close(); });
+          return { repoUrl, dataDir, runner };
+        }
+
+        async function awaitApproval(handle: RunHandle): Promise<void> {
+          await waitFor(async () =>
+            (await handle.status()).status === "AWAITING_APPROVAL" ? true : undefined,
+            { what: "run to await approval", timeoutMs: 90_000 });
+        }
+        async function awaitTerminal(handle: RunHandle): Promise<RunStatusReport> {
+          return waitFor(async () => {
+            const r = await handle.status();
+            return TERMINAL_STATUSES.includes(r.status) ? r : undefined;
+          }, { what: "terminal status", timeoutMs: 90_000 });
+        }
+        function entries(dataDir: string, runId: string, kind: string): string[] {
+          const j = new Journal(journalPath(dataDir, runId));
+          try { return j.entries(kind).map((e) => JSON.stringify(e.payload)); }
+          finally { j.close(); }
+        }
+        // Step 1 PROCEEDs and becomes the rollback anchor; step 2 delivers step-2.txt and draws
+        // the ESCALATE. The two scenarios differ ONLY in step 2s criteria.
+        async function driveToReject(step2CriteriaPass: boolean, marker: string) {
+          const wire = await startFakeJudgeWire([
+            judgeForm({ criteria: { "AC-1": false } }),
+            judgeForm({ criteria: { "AC-1": step2CriteriaPass }, concerns: ["needs a human"] }),
+            judgeForm({ criteria: { "AC-1": true } }),
+            judgeForm({ criteria: { "AC-1": true } }),
+          ]);
+          const { repoUrl, dataDir, runner } = await setup(wire);
+          const handle = await runner.start(makeJudgedSpec({ repoUrl, cadence: 1, maxSteps: 6 }));
+          await awaitApproval(handle);
+          expect(existsSync(join(workspaceDir(dataDir, handle.runId), "step-2.txt"))).toBe(true);
+          await handle.approve({ approved: false, reason: marker + ": narrow the change" });
+          return { dataDir, handle };
+        }
+
+        test("an UNCONDEMNED verdict: the delivered file survives the heal and no rollback is journaled", async () => {
+          const MARKER = "KEEP-" + randomUUID().slice(0, 8);
+          const { dataDir, handle } = await driveToReject(true, MARKER);
+          await awaitTerminal(handle);
+
+          // the work the verdict never condemned is STILL THERE.
+          expect(existsSync(join(workspaceDir(dataDir, handle.runId), "step-2.txt"))).toBe(true);
+          const remediations = entries(dataDir, handle.runId, "remediation");
+          expect(remediations.length).toBeGreaterThan(0);
+          // trap C: the journal must not claim a rollback that never happened.
+          expect(remediations.join("\\n")).not.toContain("rollbackTo");
+          // trap D: the correction still rides.
+          expect(remediations.join("\\n")).toContain(MARKER);
+        }, 120_000);
+
+        test("a CONDEMNED verdict: the rollback still happens and is journaled", async () => {
+          const MARKER = "ROLL-" + randomUUID().slice(0, 8);
+          const { dataDir, handle } = await driveToReject(false, MARKER);
+          await awaitTerminal(handle);
+
+          const remediations = entries(dataDir, handle.runId, "remediation");
+          expect(remediations.length).toBeGreaterThan(0);
+          // trap A: WP-519s rollback is narrowed, not removed.
+          expect(remediations.join("\\n")).toContain("rollbackTo");
+          expect(remediations.join("\\n")).toContain(MARKER);
+        }, 120_000);
+      });
+      `;
+      writeFileSync(target, SRC);
+      const res=spawnSync("pnpm",["exec","vitest","run",
+        "test/runner/ac2-heal-preserves.generated.test.ts"],{stdio:"inherit"});
+      // Clean up BEFORE asserting — A() exits the process, which would skip a finally
+      // block and leave the generated file behind to poison the next pass.
+      rmSync(target,{force:true});
+      A(res.status===0,
+        "trap E: this scenario drives the REAL workflow through the REAL approve/reject path and "+
+        "reads the REAL workspace — a decideHealRollback the loop never calls cannot satisfy it. "+
+        "vitest exited "+res.status);
+      console.log("AC-2 OK: an uncondemned verdict keeps the delivered file and journals no "+
+        "rollback, a condemned one still rolls back and says so, and the operator words ride both");
+      '
+
+# WP-566 agent classes. Primaries unchanged — Gemini executes, Codex judges.
+# routing.stages is DERIVED from the selected members and must not be restated here.
+agent_classes:
+  executor: executor-default
+  judge: judge-default
+
+budget_usd: 20
+max_steps: 12
+
+judge:
+  cadence: 1
+  max_cost_share: 0.5

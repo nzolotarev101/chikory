@@ -5,15 +5,14 @@ This is the complete operating manual for executing Phase 2+ work packages
 task spec for a WP (every field explained), how to launch, supervise, and
 recover a run, and how to land the result as a normal PR.
 
-**Status (2026-08-08, bounded — update discipline: REPLACE this block, ≤15 lines;
+**Status (2026-08-10, bounded — update discipline: REPLACE this block, ≤15 lines;
 displaced prose moves verbatim to [`PLAN-HISTORY.md`](PLAN-HISTORY.md); per-run detail:
 `docs/reports/`; queue + course correction: `plan.md` §6/§7).**
-**Status (2026-08-09, bounded — update discipline: REPLACE this block, ≤15 lines;
-displaced prose moves verbatim to [`PLAN-HISTORY.md`](PLAN-HISTORY.md); per-run detail:
-`docs/reports/`; queue + course correction: `plan.md` §6/§7).**
-🟢 **dogfood-130 / WP-600 (real discrimination ledger) DELIVERED** — `branch-run-838ae110-…-step-5-2f201f9a`, SUCCESS 3 steps $0.1447/$20.00, 1h 02m, 2/2 criteria (`docs/reports/dogfood-130.md`). The corpus carries real probe evidence for the first time, and the honest answer is **0 of 19 published requirements verifiable, for both arms** (`benchmarks/publications/p3-rung-4-corrected/`; `p3-rung-4/` untouched). Ledger `rung=4` — the SIXTH consecutive rung-5 prerequisite; rung 5 is now blocked on OPERATOR work (a gold patch + an arm re-run), not product.
+🟢 **dogfood-131 / WP-602 (a rejected escalation routes the operator's correction into the loop) DELIVERED** — `run-6b50d3f9-ef17-4ce4-9d45-dbb34422db54`, SUCCESS 3 steps $0.1899/$20.00, 40m 15s active, 2/2 criteria, landed `d499128` (`docs/reports/dogfood-131.md`)
 
-**Operational lessons this run added to §8 — read them before the next launch:** a `--reject` **kills a plain run and discards your fix** (🔴 F-296 → WP-602; branch from a checkpoint instead), a branched child runs **unsteered** because nothing attaches guidance to it (🟡 F-298 → WP-603 — check `injections 0` in the trace), and a judge **design objection expires** once the incremental diff window moves past the code (🔴 F-295 → WP-601 — read pass #1's rubric, not only the last). Two review hand-fixes were delivery-introduced defects in evidence-durability code: a `.gitignore` negation that could not re-include nested `probe.json` (🔴 F-293) and a run-workspace publication guard rewritten into a no-op whose test was blind because its path was fictional (🔴 F-294). Harness 205 → **209**, sdk-ts 1,304, lint clean.
+**`--reject "<reason>"` no longer kills a run — it heals it.** The reason becomes the remediation brief verbatim, the run rolls back to its last good checkpoint and continues under its own power. Budget: `max_reject_strikes` (default 1; set `0` to restore the old dead seal). A reject with **no reason** — or only whitespace — still seals dead immediately, so say why. Two live cautions: the heal restores the last **PROCEED-with-work** checkpoint, so a reject after a step that delivered but drew ESCALATE discards that step (🟠 F-302 → WP-605); and the previous §8 advice to "branch from a checkpoint instead" now applies only to a dead-sealed run.
+
+**Operational lessons this run added to §7/§8 — read them before the next launch:** a spec **cannot** state its own judge rubric item (`judge:` is `.strict()`, `rubric_extra` is not a field and `rubric_packs` is inert) and deleting the block to launch is silent (🔴 F-300 → WP-604) · an acceptance check that typechecks must run the **repo's** typecheck gate, not a bare `pnpm exec tsc`, which skips `tsconfig.test.json` entirely (🔴 F-301) · a step killed at `maxSeconds` leaks an orphaned Temporal dev server (🟠 F-304).
 
 Related docs: [`docs/spec/task-spec.md`](spec/task-spec.md) (schema
 reference) · [`docs/TASK-PROTOCOL.md`](TASK-PROTOCOL.md) (WP etiquette, §7 is
@@ -836,19 +835,52 @@ broken (a false-green, not a follow-on fix).
 
 ## 8. Known P1 limitations (so you don't fight them)
 
-- **Rejecting an escalation KILLS a plain run and throws your fix away** (🔴 F-296,
-  dogfood-130 → WP-602). `agent-loop.ts:1148-1153` seals `FAILED`
-  non-resumably the moment `--reject` arrives; the approve path resumes to
-  `RUNNING` (`:1167`). Your reject **reason** is interpolated into the seal
-  string and never used again — even when it is a complete work order. Chain
-  nodes self-heal on a rejected gate (WP-542/F-207, WP-543/F-208); plain runs do
-  not. **Until WP-602 lands:** if the fix is small and you want the run to live,
-  do NOT reject — `chikory branch <run-id>@<step>` from the last good checkpoint
-  and `chikory resume` the child. And note the second half of the trap: **there
-  is no way to tell the branch what went wrong** (🟡 F-298 → WP-603) — `branch`
-  takes no guidance flag and `inject` needs a live Temporal handle, so a branched
-  child runs unsteered. Check `chikory trace <child>` for `injections 0`
-  before assuming your guidance landed; on dogfood-130 it had not.
+- **✅ FIXED — rejecting an escalation now HEALS a plain run** (🔴 F-296 →
+  WP-602, dogfood-131, landed `d499128`). `chikory approve <run-id> --reject
+  "<reason>"` routes your reason into the existing WP-519/520 remediation path:
+  it becomes the next step's brief **verbatim**, the run rolls back to its last
+  good checkpoint and continues to its own terminal state with no further
+  operator command. Budget: `max_reject_strikes` in the spec (default 1; `0`
+  restores the old dead seal). **Say why** — a reject with no reason, or only
+  whitespace, still seals dead immediately and heals nothing, by design.
+  **Live caveat (🟠 F-302 → WP-605): the heal rolls back to the last
+  PROCEED-with-work checkpoint**, so if the escalation followed a step that
+  delivered good work but drew ESCALATE rather than PROCEED, rejecting discards
+  that step. Read `chikory trace <run-id>` for the last ✓ PROCEED before you
+  reject. The branch-instead advice below now applies only to a **dead-sealed**
+  run: **there is no way to tell a branch what went wrong** (🟡 F-298 →
+  WP-603) — `branch` takes no guidance flag and `inject` needs a live Temporal
+  handle, so a branched child runs unsteered. Check `chikory trace <child>` for
+  `injections 0` before assuming your guidance landed; on dogfood-130 it had not.
+
+- **A spec cannot state its own judge rubric item, and losing one is silent**
+  (🔴 F-300, dogfood-131 → WP-604). The `judge:` block is a `.strict()` zod
+  object (`packages/sdk-ts/src/taskspec.ts:219-229`) — `rubric_extra` is not a
+  field, so a spec that declares one **will not parse and the run will not
+  start**. The field that looks like the channel, `judge.rubric_packs`, parses
+  and has **zero consumers**: it does nothing. Your only repair today is to
+  delete the block, and nothing warns you that you did — the preflight lint
+  prints all 🟢 afterwards. dogfood-131 shipped with its trap-F guard missing
+  this way, and `bb6025b` did the same to dogfood-129. **If you must delete a
+  rubric block to launch, paste it verbatim into the run's report** so the lost
+  gate is recoverable. An invariant you cannot express as a rubric item has to
+  become an executable acceptance criterion instead.
+
+- **An acceptance check that runs `pnpm exec tsc` does NOT typecheck the tests**
+  (🔴 F-301, dogfood-131). Tests are a separate TypeScript project; the repo's
+  gate is `tsc --noEmit && tsc --noEmit -p tsconfig.test.json` (the
+  `typecheck` script). Vitest transpiles without typechecking, so a delivery
+  whose new tests carry type errors passes both the judge-executed check and its
+  own test run — dogfood-131 did, with three `TS2353` errors, and only the
+  harvest gate caught it. **Write acceptance checks against the repo's gate
+  command, never a bare compiler invocation.**
+
+- **A step killed at `maxSeconds` leaks an orphaned Temporal dev server**
+  (🟠 F-304, dogfood-131). Vitest's global setup boots one; the runner's kill
+  never reaches vitest's teardown, so the server survives with `PPID 1`.
+  dogfood-131 left `temporal server start-dev --headless --port 52252` running
+  for hours. After any kill-recovered step, check
+  `lsof -nP -iTCP -sTCP:LISTEN | grep temporal` and kill the strays.
 
 - **A judge design objection expires when the diff window moves past the code**
   (🔴 F-295, dogfood-130 → WP-601). Judge diff evidence is incremental

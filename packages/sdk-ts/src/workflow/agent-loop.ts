@@ -73,7 +73,7 @@ import {
   buildRemediationBrief,
   decideRemediation,
 } from "./remediation.js";
-import { decideRejection } from "./rejection.js";
+import { decideRejection, DEFAULT_MAX_REJECTION_STRIKES } from "./rejection.js";
 import {
   buildCompletionReviewBrief,
   decideCompletionReview,
@@ -348,7 +348,7 @@ export async function agentLoop(spec: TaskSpec): Promise<RunStatus> {
     decision: ApproveDecision,
     escalationReason: string,
   ): Promise<RunStatus | "REMEDIATED"> {
-    const maxStrikes = spec.maxRejectStrikes ?? 1;
+    const maxStrikes = spec.maxRejectStrikes ?? DEFAULT_MAX_REJECTION_STRIKES;
     const rejectionDecision = decideRejection({
       reason: decision.reason,
       strikesSpent: rejectionStrikesSpent,
