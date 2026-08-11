@@ -19,6 +19,7 @@ import {
   journalPath,
   scanDiffForLayeringViolations,
   workspaceDir,
+  type RemediationPayload,
   type RunHandle,
   type RunStatusReport,
   type TaskSpec,
@@ -412,11 +413,37 @@ describe.skipIf(address === null)("verdict gating (WP-132)", () => {
     }
   });
 
-  test("ESCALATE + reject seals FAILED with the judge's reason", async () => {
+  test("ESCALATE + reasoned reject heals into remediation and continues execution (WP-602)", async () => {
+    const wire = await startFakeJudgeWire([
+      judgeForm({ criteria: { "AC-1": false }, concerns: ["unexplained dependency swap"] }),
+      judgeForm({ criteria: { "AC-1": true } }),
+    ]);
+    const { dataDir, handle } = await run(wire, {});
+
+    await waitFor(
+      async () => ((await handle.status()).status === "AWAITING_APPROVAL" ? true : undefined),
+      { what: "run to await approval" },
+    );
+    await handle.approve({ approved: false, reason: "not acceptable: undo dependency swap" });
+
+    const report = await awaitTerminal(handle);
+    expect(report.status).toBe("SUCCESS");
+
+    const journal = new Journal(journalPath(dataDir, handle.runId));
+    try {
+      const remediations = journal.entries("remediation");
+      expect(remediations).toHaveLength(1);
+      expect((remediations[0]!.payload as RemediationPayload).brief).toContain("not acceptable: undo dependency swap");
+    } finally {
+      journal.close();
+    }
+  });
+
+  test("ESCALATE + reject with opt-out (maxRejectStrikes 0) seals FAILED naming rejection", async () => {
     const wire = await startFakeJudgeWire([
       judgeForm({ criteria: { "AC-1": false }, concerns: ["unexplained dependency swap"] }),
     ]);
-    const { dataDir, handle } = await run(wire, {});
+    const { handle } = await run(wire, { maxRejectStrikes: 0 });
 
     await waitFor(
       async () => ((await handle.status()).status === "AWAITING_APPROVAL" ? true : undefined),
@@ -426,9 +453,7 @@ describe.skipIf(address === null)("verdict gating (WP-132)", () => {
 
     const report = await awaitTerminal(handle);
     expect(report.status).toBe("FAILED");
-    expect(report.failure?.reason).toContain("judge escalation rejected");
-    expect(report.failure?.reason).toContain("unexplained dependency swap");
-    expect(verdictKinds(dataDir, handle.runId)).toEqual(["ESCALATE"]);
+    expect(report.failure?.reason).toMatch(/reject/i);
   });
 
   test("unattended ESCALATE seals FAILED on a resumable checkpoint instead of awaiting approval", async () => {

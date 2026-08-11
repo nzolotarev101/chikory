@@ -42,10 +42,10 @@ export function decideRemediation(
   return { action: "seal_resumable_failed" };
 }
 
-function clampBrief(text: string): string {
-  return text.length <= REMEDIATION_BRIEF_MAX_CHARS
+export function clampBrief(text: string, maxChars: number = REMEDIATION_BRIEF_MAX_CHARS): string {
+  return text.length <= maxChars
     ? text
-    : `${text.slice(0, REMEDIATION_BRIEF_MAX_CHARS - 1)}…`;
+    : `${text.slice(0, maxChars - 1)}…`;
 }
 
 /**

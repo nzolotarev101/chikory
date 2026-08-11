@@ -248,6 +248,7 @@ export const TaskSpecSchema = z
     budgetTokens: z.number().int().positive().optional(),
     maxSteps: z.number().int().positive().optional(),
     minNodes: z.number().int().positive().optional(),
+    maxRejectStrikes: z.number().int().nonnegative().optional(),
     chain: z
       .object({
         maxReplansPerNode: z.number().int().nonnegative().optional(),

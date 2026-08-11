@@ -73,6 +73,7 @@ import {
   buildRemediationBrief,
   decideRemediation,
 } from "./remediation.js";
+import { decideRejection } from "./rejection.js";
 import {
   buildCompletionReviewBrief,
   decideCompletionReview,
@@ -251,6 +252,7 @@ export async function agentLoop(spec: TaskSpec): Promise<RunStatus> {
   let remediationIndexBase = 0;
   let remediationPending = false;
   let lastRemediationBrief: string | undefined;
+  let rejectionStrikesSpent = 0;
   // Run-completion holistic review: cumulative-diff design passes already
   // taken (bounded — initial review + one re-review after the design fix).
   let completionReviewAttempts = 0;
@@ -317,6 +319,52 @@ export async function agentLoop(spec: TaskSpec): Promise<RunStatus> {
     });
     status = terminal;
     return status;
+  }
+
+  async function applyRemediation(trigger: string, brief: string): Promise<void> {
+    remediationIndexBase += 1;
+    lastRemediationBrief = brief;
+    await activities.recordRemediation({
+      runId,
+      remediationIndex: remediationIndexBase - 1,
+      atStep: stepIndex - 1,
+      trigger,
+      brief,
+      ...(lastGoodCheckpointId !== undefined ? { rollbackTo: lastGoodCheckpointId } : {}),
+    });
+    if (lastGoodCheckpointId !== undefined) {
+      await activities.restoreCheckpoint({ runId, checkpointId: lastGoodCheckpointId });
+      const restoredCheckpoint = checkpoints.find((c) => c.id === lastGoodCheckpointId);
+      const restoredCommit = restoredCheckpoint
+        ? Object.values(restoredCheckpoint.gitCommits)[0]
+        : undefined;
+      if (restoredCommit !== undefined) sinceCommit = restoredCommit;
+    }
+    judgeFeedback = brief;
+    remediationPending = true;
+  }
+
+  async function handleOperatorRejection(
+    decision: ApproveDecision,
+    escalationReason: string,
+  ): Promise<RunStatus | "REMEDIATED"> {
+    const maxStrikes = spec.maxRejectStrikes ?? 1;
+    const rejectionDecision = decideRejection({
+      reason: decision.reason,
+      strikesSpent: rejectionStrikesSpent,
+      maxStrikes,
+      escalationReason,
+    });
+    if (rejectionDecision.action === "seal_dead") {
+      return seal("FAILED", rejectionDecision.failureReason);
+    }
+    rejectionStrikesSpent += 1;
+    await applyRemediation(
+      decision.reason?.trim() ?? "operator rejection",
+      rejectionDecision.brief,
+    );
+    status = "RUNNING";
+    return "REMEDIATED";
   }
 
   async function parkIfOperatorSuspended(): Promise<RunStatus | undefined> {
@@ -1049,29 +1097,8 @@ export async function agentLoop(spec: TaskSpec): Promise<RunStatus> {
         const remediation = decideRemediation({ attemptsUsed: remediationAttempts });
         if (remediation.action === "remediate") {
           remediationAttempts = remediation.attempt;
-          remediationIndexBase += 1;
           const brief = buildRemediationBrief(verdict.form, verdict.rationale);
-          lastRemediationBrief = brief;
-          await activities.recordRemediation({
-            runId,
-            remediationIndex: remediationIndexBase - 1,
-            atStep: stepIndex - 1,
-            trigger: verdict.rationale,
-            brief,
-            ...(lastGoodCheckpointId !== undefined ? { rollbackTo: lastGoodCheckpointId } : {}),
-          });
-          if (lastGoodCheckpointId !== undefined) {
-            await activities.restoreCheckpoint({ runId, checkpointId: lastGoodCheckpointId });
-            // The next judge diff must cover the remediation attempt's own
-            // work from the restored state, not the undo of the halted work.
-            const restoredCheckpoint = checkpoints.find((c) => c.id === lastGoodCheckpointId);
-            const restoredCommit = restoredCheckpoint
-              ? Object.values(restoredCheckpoint.gitCommits)[0]
-              : undefined;
-            if (restoredCommit !== undefined) sinceCommit = restoredCommit;
-          }
-          judgeFeedback = brief;
-          remediationPending = true;
+          await applyRemediation(verdict.rationale, brief);
           continue;
         }
         return seal(
@@ -1146,10 +1173,12 @@ export async function agentLoop(spec: TaskSpec): Promise<RunStatus> {
         if (cancelRequested) return seal("CANCELLED", "cancelled while awaiting approval");
         const decision = pendingApprovals.splice(0).pop()!;
         if (!decision.approved) {
-          return seal(
-            "FAILED",
-            `judge escalation rejected${decision.reason ? `: ${decision.reason}` : ""} — ${verdict.escalateReason ?? verdict.rationale}`,
+          const outcome = await handleOperatorRejection(
+            decision,
+            verdict.escalateReason ?? verdict.rationale,
           );
+          if (outcome !== "REMEDIATED") return outcome;
+          continue;
         }
         // F-154: approving an OUT-OF-RUBRIC escalate (advisory concern, rubric
         // fully passing) whose acceptance criteria all pass force-seals SUCCESS —
@@ -1190,10 +1219,10 @@ export async function agentLoop(spec: TaskSpec): Promise<RunStatus> {
       if (cancelRequested) return seal("CANCELLED", "cancelled while awaiting approval");
       const decision = pendingApprovals.splice(0).pop()!;
       if (!decision.approved) {
-        return seal(
-          "FAILED",
-          `escalation rejected${decision.reason ? `: ${decision.reason}` : ""} — ${reason}`,
-        );
+        const outcome = await handleOperatorRejection(decision, reason);
+        if (outcome !== "REMEDIATED") return outcome;
+        consecutiveFailures = 0;
+        continue;
       }
       consecutiveFailures = 0;
       status = "RUNNING";

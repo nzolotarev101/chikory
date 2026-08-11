@@ -125,6 +125,8 @@ export interface TaskSpec {
   pacing?: PacingPolicy;
   /** Opt-in unattended behavior; absent = HITL approval waits unchanged. */
   unattended?: UnattendedPolicy;
+  /** Maximum number of reasoned rejection heals allowed (WP-602); absent/undefined = default (1 strike). */
+  maxRejectStrikes?: number;
   /** Opt-in durable time-paced re-entry; absent = no soak delay. */
   soak?: SoakPolicy;
   /** Opt-in intra-run durable checkpoint floor; absent = default one-shot behavior. */

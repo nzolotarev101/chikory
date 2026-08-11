@@ -70,9 +70,9 @@ describe.skipIf(address === null)("chikory CLI (WP-141/142)", () => {
 
   function taskYaml(
     repoUrl: string,
-    opts: { cadence?: number; budget?: number; maxSteps?: number } = {},
+    opts: { cadence?: number; budget?: number; maxSteps?: number; maxRejectStrikes?: number } = {},
   ): string {
-    return [
+    const lines = [
       "name: cli-test",
       "goal: exercise the CLI against the scripted executor",
       "repos:",
@@ -83,6 +83,11 @@ describe.skipIf(address === null)("chikory CLI (WP-141/142)", () => {
       "    description: scripted steps executed",
       `budget_usd: ${opts.budget ?? 5}`,
       `max_steps: ${opts.maxSteps ?? 4}`,
+    ];
+    if (opts.maxRejectStrikes !== undefined) {
+      lines.push(`max_reject_strikes: ${opts.maxRejectStrikes}`);
+    }
+    lines.push(
       "executor:",
       "  adapter: scripted",
       "  family: anthropic",
@@ -95,7 +100,8 @@ describe.skipIf(address === null)("chikory CLI (WP-141/142)", () => {
       "    code: { provider: anthropic, model: claude-fable-5 }",
       "    review: { provider: anthropic, model: claude-fable-5 }",
       "    judge: { provider: openai-compat, model: fake-judge }",
-    ].join("\n");
+    );
+    return lines.join("\n");
   }
 
   async function setup(
@@ -197,7 +203,10 @@ describe.skipIf(address === null)("chikory CLI (WP-141/142)", () => {
   });
 
   test("loop-breaker escalation → approve --reject seals FAILED (exit 1)", async () => {
-    const { dataDir, specFile } = await setup({ failAll: true }, { cadence: 10, maxSteps: 6 });
+    const { dataDir, specFile } = await setup(
+      { failAll: true },
+      { cadence: 10, maxSteps: 6, maxRejectStrikes: 0 },
+    );
 
     const run = cli();
     const runPromise = main(["run", specFile, ...common(dataDir)], run.deps);

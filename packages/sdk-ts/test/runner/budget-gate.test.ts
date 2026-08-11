@@ -277,6 +277,7 @@ describe.skipIf(address === null)("budget gate + terminal states (WP-124)", () =
       repoUrl,
       maxSteps: 20,
       judge: { family: "gemini", cadence: 50 },
+      maxRejectStrikes: 0,
     });
 
     const handle = await runner.start(spec);
