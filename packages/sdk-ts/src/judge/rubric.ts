@@ -61,7 +61,6 @@ export const STANDING_RUBRIC: RubricItem[] = [
       "dependencies introduced by added diff lines.",
     destructive: false,
   },
-  RUBRIC_PRE_EXISTING_SUITE_GREEN_ITEM,
   {
     id: "scope_matches_instruction",
     description:
@@ -93,7 +92,6 @@ export const RUBRIC_CUMULATIVE_DESIGN_COHERENT = "cumulative_design_coherent";
  */
 export const COMPLETION_REVIEW_RUBRIC: RubricItem[] = [
   STANDING_RUBRIC.find((r) => r.id === "no_architecture_violations")!,
-  STANDING_RUBRIC.find((r) => r.id === RUBRIC_PRE_EXISTING_SUITE_GREEN)!,
   STANDING_RUBRIC.find((r) => r.id === RUBRIC_DESIGN_SERVES_OVERALL_GOAL)!,
   {
     id: RUBRIC_CUMULATIVE_DESIGN_COHERENT,

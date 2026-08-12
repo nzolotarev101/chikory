@@ -9,6 +9,7 @@
  * and zero passes when the sealing verdict already covered the cumulative
  * diff (a first-verdict seal).
  */
+import { RUBRIC_PRE_EXISTING_SUITE_GREEN } from "../judge/rubric.js";
 import type { JudgeForm } from "../types.js";
 
 /** Initial review + one re-review after the bounded design-fix retry. */
@@ -105,20 +106,28 @@ export function mergeDesignFindings(
 }
 
 /**
- * The design-fix brief: the completion review's failing rubric items, fed to
+ * The design-fix or suite-repair brief: the completion review's failing rubric items, fed to
  * the executor as the next step's instruction — composed deterministically
  * from the form the judge already filled (the `buildRemediationBrief`
  * discipline: no extra LLM call, no paraphrase drift).
  */
 export function buildCompletionReviewBrief(form: JudgeForm): string {
   const rubricFails = form.rubricResults.filter((r) => !r.pass);
-  const lines: string[] = [
-    "DESIGN REVIEW BRIEF — every acceptance criterion passes; a completion review",
-    "of the run's CUMULATIVE changes found design findings. One bounded fix",
-    "attempt is granted; do NOT change behavior, only design.",
-  ];
+  const hasSuiteFail = rubricFails.some((r) => r.id === RUBRIC_PRE_EXISTING_SUITE_GREEN);
+
+  const lines: string[] = hasSuiteFail
+    ? [
+        "REPAIR BRIEF — every acceptance criterion passes; a completion review",
+        "of the run's CUMULATIVE changes found regression test failures. One bounded repair",
+        "attempt is granted; fix the broken behavior and restore the test suite to green.",
+      ]
+    : [
+        "DESIGN REVIEW BRIEF — every acceptance criterion passes; a completion review",
+        "of the run's CUMULATIVE changes found design findings. One bounded fix",
+        "attempt is granted; do NOT change behavior, only design.",
+      ];
   if (rubricFails.length > 0) {
-    lines.push("design findings (judge evidence):");
+    lines.push(hasSuiteFail ? "failing items (judge evidence):" : "design findings (judge evidence):");
     for (const fail of rubricFails) lines.push(`- ${fail.id}: ${fail.justification}`);
   }
   lines.push(

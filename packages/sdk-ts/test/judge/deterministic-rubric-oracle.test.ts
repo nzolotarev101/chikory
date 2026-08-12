@@ -28,7 +28,7 @@ describe("AC-1: Deterministic rubric classification & non-destructive oracle", (
     // Completion-review items not in DETERMINISTIC_RUBRIC_IDS
     expect(DETERMINISTIC_RUBRIC_IDS.has("cumulative_design_coherent")).toBe(false);
 
-    // Verify all 7 standing items classification
+    // Verify all 6 standing items classification
     const standingMap = STANDING_RUBRIC.map((item) => ({
       id: item.id,
       deterministic: DETERMINISTIC_RUBRIC_IDS.has(item.id),
@@ -38,7 +38,6 @@ describe("AC-1: Deterministic rubric classification & non-destructive oracle", (
       { id: "no_unrelated_deletions", deterministic: false },
       { id: "no_secrets_introduced", deterministic: true },
       { id: "no_architecture_violations", deterministic: true },
-      { id: "pre_existing_suite_still_green", deterministic: true },
       { id: "scope_matches_instruction", deterministic: false },
       { id: "design_serves_overall_goal", deterministic: false },
     ]);
@@ -50,7 +49,6 @@ describe("AC-1: Deterministic rubric classification & non-destructive oracle", (
     }));
     expect(completionMap).toEqual([
       { id: "no_architecture_violations", deterministic: true },
-      { id: "pre_existing_suite_still_green", deterministic: true },
       { id: "design_serves_overall_goal", deterministic: false },
       { id: "cumulative_design_coherent", deterministic: false },
     ]);
@@ -58,6 +56,107 @@ describe("AC-1: Deterministic rubric classification & non-destructive oracle", (
     // Verify RUBRIC_PRE_EXISTING_SUITE_GREEN_ITEM properties
     expect(RUBRIC_PRE_EXISTING_SUITE_GREEN_ITEM.id).toBe("pre_existing_suite_still_green");
     expect(RUBRIC_PRE_EXISTING_SUITE_GREEN_ITEM.destructive).toBe(false);
+  });
+
+  it("applyCheckOverrides returns an error when pre_existing_suite_still_green is in rubric without evidence (trap C)", () => {
+    const form: JudgeForm = {
+      criterionResults: [],
+      rubricResults: [{ id: RUBRIC_PRE_EXISTING_SUITE_GREEN, pass: true, justification: "model claim" }],
+      concerns: [],
+    };
+    const overridden = applyCheckOverrides(
+      form,
+      [],
+      [RUBRIC_PRE_EXISTING_SUITE_GREEN_ITEM],
+      [],
+      [],
+      [],
+      undefined, // no evidence
+    );
+    expect("error" in overridden).toBe(true);
+    if ("error" in overridden) {
+      expect(overridden.error).toContain("pre_existing_suite_still_green");
+    }
+  });
+
+  it("applyCheckOverrides settles pre_existing_suite_still_green RED with output excerpt, GREEN, and cap-killed", () => {
+    const form: JudgeForm = {
+      criterionResults: [],
+      rubricResults: [{ id: RUBRIC_PRE_EXISTING_SUITE_GREEN, pass: true, justification: "model claim" }],
+      concerns: [],
+    };
+
+    // RED with output
+    const redResult = applyCheckOverrides(
+      form,
+      [],
+      [RUBRIC_PRE_EXISTING_SUITE_GREEN_ITEM],
+      [],
+      [],
+      [],
+      {
+        criterionId: "pre_existing_suite_still_green",
+        command: "pnpm test",
+        exitCode: 1,
+        output: "FAIL src/foo.test.ts > broken feature\n1 test failed",
+        durationMs: 100,
+        infraFailed: false,
+      },
+    );
+    expect("form" in redResult).toBe(true);
+    if ("form" in redResult) {
+      const item = redResult.form.rubricResults[0]!;
+      expect(item.pass).toBe(false);
+      expect(item.justification).toContain("exited 1");
+      expect(item.justification).toContain("FAIL src/foo.test.ts > broken feature");
+    }
+
+    // GREEN
+    const greenResult = applyCheckOverrides(
+      form,
+      [],
+      [RUBRIC_PRE_EXISTING_SUITE_GREEN_ITEM],
+      [],
+      [],
+      [],
+      {
+        criterionId: "pre_existing_suite_still_green",
+        command: "pnpm test",
+        exitCode: 0,
+        output: "all passed",
+        durationMs: 100,
+        infraFailed: false,
+      },
+    );
+    expect("form" in greenResult).toBe(true);
+    if ("form" in greenResult) {
+      expect(greenResult.form.rubricResults[0]!.pass).toBe(true);
+    }
+
+    // Cap-killed
+    const killedResult = applyCheckOverrides(
+      form,
+      [],
+      [RUBRIC_PRE_EXISTING_SUITE_GREEN_ITEM],
+      [],
+      [],
+      [],
+      {
+        criterionId: "pre_existing_suite_still_green",
+        command: "pnpm test",
+        exitCode: -1,
+        output: "",
+        durationMs: 120000,
+        infraFailed: true,
+      },
+    );
+    expect("form" in killedResult).toBe(true);
+    if ("form" in killedResult) {
+      const item = killedResult.form.rubricResults[0]!;
+      expect(item.pass).toBe(false);
+      expect(item.infraFailed).toBe(true);
+      expect(item.justification).toContain("killed at the per-check cap");
+    }
   });
 
   it("pre_existing_suite_still_green is destructive: false and computeVerdict returns a NON-ROLLBACK verdict naming it", () => {

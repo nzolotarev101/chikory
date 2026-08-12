@@ -16,10 +16,9 @@ import { buildJudgeMessages, type JudgePromptInput } from "../../src/judge/promp
 import type { JudgeForm } from "../../src/types.js";
 
 describe("COMPLETION_REVIEW_RUBRIC", () => {
-  it("contains the architecture scan, the pre-existing suite item, the design item, and the cumulative item — all non-destructive", () => {
+  it("contains the architecture scan, the design item, and the cumulative item — all non-destructive", () => {
     expect(COMPLETION_REVIEW_RUBRIC.map((r) => r.id)).toEqual([
       "no_architecture_violations",
-      "pre_existing_suite_still_green",
       RUBRIC_DESIGN_SERVES_OVERALL_GOAL,
       RUBRIC_CUMULATIVE_DESIGN_COHERENT,
     ]);

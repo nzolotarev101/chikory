@@ -14,7 +14,12 @@ import { promisify } from "node:util";
 
 import { DefaultLogger, Runtime } from "@temporalio/worker";
 
-import { COMPLETION_REVIEW_RUBRIC, STANDING_RUBRIC } from "../../src/index.js";
+import {
+  COMPLETION_REVIEW_RUBRIC,
+  RUBRIC_PRE_EXISTING_SUITE_GREEN,
+  RUBRIC_PRE_EXISTING_SUITE_GREEN_ITEM,
+  STANDING_RUBRIC,
+} from "../../src/index.js";
 import type {
   AdapterRegistry,
   ArtifactStore,
@@ -354,11 +359,19 @@ export function judgeForm(opts: {
   };
 }
 
-/** Scripted completion-review `JudgeForm` (COMPLETION_REVIEW_RUBRIC ids). */
-export function completionReviewForm(opts: { rubricFails?: string[] } = {}): JudgeForm {
+/** Scripted completion-review `JudgeForm` (COMPLETION_REVIEW_RUBRIC ids + optional regression suite). */
+export function completionReviewForm(
+  opts: { rubricFails?: string[]; hasRegressionSuite?: boolean } = {},
+): JudgeForm {
+  const includeSuite =
+    opts.hasRegressionSuite === true ||
+    (opts.rubricFails ?? []).includes(RUBRIC_PRE_EXISTING_SUITE_GREEN);
+  const rubric = includeSuite
+    ? [...COMPLETION_REVIEW_RUBRIC, RUBRIC_PRE_EXISTING_SUITE_GREEN_ITEM]
+    : COMPLETION_REVIEW_RUBRIC;
   return {
     criterionResults: [],
-    rubricResults: COMPLETION_REVIEW_RUBRIC.map((r) => ({
+    rubricResults: rubric.map((r) => ({
       id: r.id,
       pass: !(opts.rubricFails ?? []).includes(r.id),
       justification: "scripted completion review",

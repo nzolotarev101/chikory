@@ -200,20 +200,24 @@ export function applyCheckOverrides(
     if (item.id === RUBRIC_PRE_EXISTING_SUITE_GREEN) {
       if (regressionSuiteRun) {
         const pass = regressionSuiteRun.exitCode === 0 && !regressionSuiteRun.infraFailed;
+        let justification = regressionSuiteRun.infraFailed
+          ? `regression suite command \`${regressionSuiteRun.command}\` DID NOT COMPLETE (killed at the per-check cap) — infra failure, not a code red`
+          : `regression suite command \`${regressionSuiteRun.command}\` exited ${regressionSuiteRun.exitCode}`;
+        if (!pass && regressionSuiteRun.output && regressionSuiteRun.output.trim().length > 0) {
+          const rawOutput = regressionSuiteRun.output.trim();
+          const boundedOutput = rawOutput.length > 1000 ? `…\n${rawOutput.slice(-1000)}` : rawOutput;
+          justification += `:\n${boundedOutput}`;
+        }
         rubricResults.push({
           id: item.id,
           pass,
-          justification: regressionSuiteRun.infraFailed
-            ? `regression suite command \`${regressionSuiteRun.command}\` DID NOT COMPLETE (killed at the per-check cap) — infra failure, not a code red`
-            : `regression suite command \`${regressionSuiteRun.command}\` exited ${regressionSuiteRun.exitCode}`,
+          justification,
           ...(regressionSuiteRun.infraFailed ? { infraFailed: true } : {}),
         });
       } else {
-        rubricResults.push({
-          id: item.id,
-          pass: true,
-          justification: "no regression suite command executed for this pass",
-        });
+        return {
+          error: `missing regression-suite CheckRun evidence for item ${RUBRIC_PRE_EXISTING_SUITE_GREEN}`,
+        };
       }
       continue;
     }

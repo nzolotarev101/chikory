@@ -29,6 +29,7 @@ import {
   COMPLETION_REVIEW_RUBRIC,
   enforceFamilyDiversity,
   renderOverallGoalContext,
+  RUBRIC_PRE_EXISTING_SUITE_GREEN_ITEM,
   runCriteriaChecks,
   runJudgePass,
   STANDING_RUBRIC,
@@ -1685,7 +1686,9 @@ export function createRunnerActivities(deps: RunnerActivityDeps) {
         }
 
         const effectiveRubric = input.completionReview
-          ? COMPLETION_REVIEW_RUBRIC
+          ? spec.regressionSuite
+            ? [...COMPLETION_REVIEW_RUBRIC, RUBRIC_PRE_EXISTING_SUITE_GREEN_ITEM]
+            : COMPLETION_REVIEW_RUBRIC
           : spec.judge.rubricExtra && spec.judge.rubricExtra.length > 0
             ? [...STANDING_RUBRIC, ...spec.judge.rubricExtra]
             : STANDING_RUBRIC;

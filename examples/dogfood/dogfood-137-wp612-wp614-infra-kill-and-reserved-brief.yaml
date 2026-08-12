@@ -1,0 +1,581 @@
+# Plain: the last two runs built a gate that runs the repository's own tests before a delivery is
+# allowed to succeed. Two things about it are still wrong. If the test command is KILLED for taking
+# too long, the run is sealed FAILED exactly as if the code were broken — and the 120-second limit
+# it is killed at cannot be changed by the spec, so a project with a slow suite can never use the
+# gate at all. And when the gate does block, the failing-test text it hands the repair step gets cut
+# off the end of the brief as soon as two design complaints share the page. This run fixes both.
+# WP: WP-612 (an infra kill is not a code red at the seal) + WP-614 (a repair brief RESERVES room
+#     for the failing tests)
+# Ladder-rung: 0 (OFF-LADDER by necessity — rung 5 is operator-gated today; see WHY)
+# Thesis-KPI: judge true-positives pre-land, and the SECOND live proof of the WP-609 gate — this
+#   spec declares `regression_suite:`, so its own journal must again show the row settled from a real
+#   exit code, AND (WP-613, live for the first time) NO per-step judge pass may carry that row at all.
+# Format: loose — the outcomes are fixed, the wiring is the executor's
+#
+# Launch mode: RUN (single node — two defects in one gate, the shape dogfood-136 proved in 1 step).
+#   CHIKORY_PREFLIGHT_ONLY=1 devbox run run-dogfood
+#   devbox run run-dogfood
+#
+# WHY THIS AND NOT THE LADDER RUNG (dogfood-136 review, 2026-08-12):
+#   Progression gate: ✅ PROGRESSING. The default headline is P3-rung-5, the phase exit gate. Its two
+#   blockers were RE-MEASURED AGAIN this review (not re-litigated) and both still stand, both
+#   OPERATOR work rather than product gaps:
+#     1. `brownfield-001`'s zod v3 → v4 gold patch. MEASURED 2026-08-12: `find benchmarks/tasks -name
+#        '*brownfield-001*'` returns ONLY
+#        `benchmarks/tasks/brownfield-001-dependency-major-upgrade.yaml`, whose only status line is
+#        `status: pinned` (:24) with no `fix_ref` and no gold artifact. 3–6 h of operator research.
+#     2. A re-run of BOTH arms so stored per-task results carry `repoRef`. MEASURED 2026-08-12:
+#        `grep -rl repoRef benchmarks/results/ | wc -l` = **0**. Hours of quota, and dogfood-122
+#        proved an LLM executor must not supervise a quota-bound multi-hour suite.
+#
+#   SEVENTH consecutive off-ladder headline, and the last one owed to this detour. Rung 5 exists to
+#   publish a reliability number. The gate that decides whether a run is allowed to call itself
+#   reliable currently (a) fails a run because its own test command was slow, and (b) throws away the
+#   evidence it just collected. Both are MEASURED below; both are the last two open defects opened by
+#   dogfood-135/136 against WP-609.
+#
+# THE MEASURED PREMISE (re-measure before building; do not re-litigate):
+#   * **F-320 — a cap kill seals FAILED as a code red.** `deterministicFails` filters ONLY on
+#     `DETERMINISTIC_RUBRIC_IDS.has(f.id)` (`src/workflow/agent-loop.ts:1102-1104` and the sealing
+#     path `:1121-1123`); the row's `infraFailed` flag is never consulted, so a killed suite returns
+#     `seal("FAILED", "completion review: deterministic rubric failure — …")`. The WP-263(b)
+#     infra-skip that already encodes the right rule reads `form.criterionResults` ONLY
+#     (`src/judge/verdict.ts:99-103`) — RUBRIC rows have no equivalent.
+#   * **The record is already correct; only the SEAL is wrong.** `applyCheckOverrides` sets
+#     `infraFailed: true` and a justification saying `DID NOT COMPLETE (killed at the per-check cap)
+#     — infra failure, not a code red` (`src/judge/harness.ts:203-216`). The information exists. The
+#     seal ignores it.
+#   * **The cap cannot be chosen by a spec.** MEASURED 2026-08-12:
+#     `grep -rn 'checkTimeoutMs|check_timeout' src/taskspec.ts src/types.ts src/schemas.ts
+#     src/chain/node-spec.ts` returns **nothing**. `checkTimeoutMs` exists on `RunJudgePassInput`
+#     (`src/judge/harness.ts:275`) and threads to `collectEvidence` (`:297`), which falls back to
+#     `DEFAULT_CHECK_TIMEOUT_MS = 120_000` (`src/judge/evidence.ts:37,326,339`) — but NOTHING in
+#     `src/runner/activities.ts` ever sets it. The parameter is a wire with no source: the classic
+#     F-283 unfed pipeline, already half-built.
+#   * **F-323 — the excerpt is bounded, not reserved.** `COMPLETION_BRIEF_MAX_CHARS` is 2000
+#     (`src/workflow/completion-review.ts:19`) and the clamp truncates the TAIL (`:137-139`); the
+#     excerpt is bounded at 1000 (`src/judge/harness.ts:208`) and `effectiveRubric` appends the suite
+#     row LAST (`src/runner/activities.ts:1690`), so the excerpt is FIRST against the cut. MEASURED
+#     against the built `dist/` with realistic ~353-char design justifications: 0 co-occurring design
+#     findings → 1491 chars, intact · 1 → 1844, intact · **2 → clamped at exactly 2000, losing the
+#     `Test Files 2 failed` summary line, half of a failing test name, and the closing instruction.**
+#   * **F-324 — both oracles that looked at F-323 were blind, and the same blindness must not
+#     repeat.** `test/runner/completion-review.test.ts:282-292` asserts only `brief.length <= 2000` —
+#     it proves the clamp FIRES, never that a finding SURVIVES it. dogfood-136's AC-2 scenario 1 drove
+#     `reviewForm(designPass = true)`, so a red suite and a design finding never co-occurred. AC-1
+#     below therefore drives the CO-OCCURRENCE family explicitly, at 0/1/2/3 design findings.
+#   * **Raising a cap is not a fix.** Both caps here are context-discipline budgets (CM-3). The brief
+#     must RESERVE room within 2000; the per-check cap must become SPEC-CHOSEN, not larger by default.
+#     A delivery that changes `COMPLETION_BRIEF_MAX_CHARS` or `DEFAULT_CHECK_TIMEOUT_MS` fails AC-1.
+#   * **The `unattended:` block below is not decoration** (F-322): without it a converged
+#     out-of-rubric escalation parks for a human instead of auto-sealing
+#     (`src/workflow/agent-loop.ts:1213-1224`). dogfood-135 parked 11h 59m 31s for want of it.
+#
+# Designed traps — the plausible-but-wrong deliveries the acceptance criteria exist to reject:
+#   A. **Making an infra-killed row PASS.** The cheapest way to stop it sealing FAILED is to score it
+#      green — which resurrects the unmeasured green WP-613 just abolished. AC-1 requires the row to
+#      stay `pass: false` WITH `infraFailed: true` in the record, and only the SEAL to change.
+#   B. **Skipping every failing deterministic row at the seal.** A genuine code red (`exitCode 1`,
+#      `infraFailed` absent) must STILL seal FAILED. AC-1 and AC-2 both re-assert it.
+#   C. **A spec-settable cap that never reaches the check** — declared in `src/taskspec.ts` and never
+#      plumbed to `collectEvidence`, so the 120 s default still governs (the F-283 shape, and the
+#      exact half-built state the field is in today). AC-2 drives a REAL run whose suite would take
+#      far longer than the cap it declares and requires the kill to happen at the DECLARED cap.
+#   D. **Raising a cap instead of reserving/plumbing.** AC-1 pins `COMPLETION_BRIEF_MAX_CHARS === 2000`
+#      and `DEFAULT_CHECK_TIMEOUT_MS === 120_000` as unchanged constants.
+#   E. **Reserving room by dropping the design findings.** The inverse squeeze. AC-1 requires EVERY
+#      failing item id, the suite output TAIL, and the closing instruction to all survive together.
+#   F. **Reserving room by shortening the excerpt to nothing.** A 20-character excerpt always fits and
+#      names no test. AC-1 requires the failing test NAMES from the tail of a 4 KB output to survive
+#      at 3 co-occurring design findings.
+#   G. **Proving it with `length <= 2000` again** (the F-324 defect wearing the fix as a costume), or
+#      with a test the executor authors. AC-1 owns its oracle against the real built artifact and
+#      asserts SURVIVAL, not size; AC-2 reads the REAL journal of a REAL Temporal run.
+#
+# NOT IN SCOPE: making `regression_suite` required (track-B); the WP-606/F-306 executor-summary
+# telemetry (a separate run); a launcher precheck for a missing `unattended:` block (track-B, F-322);
+# `tests_pass` and its JD-4 override (`src/judge/harness.ts:148-171` unchanged); the WP-607 items;
+# the WP-611 framing branch, which must keep exactly today's behavior.
+
+name: dogfood-137-wp612-wp614-infra-kill-and-reserved-brief
+wp: WP-612
+goal: >
+  A gate must not fail a run for being slow, and must not throw away the evidence it just collected.
+
+  dogfood-135 built the regression-suite gate and dogfood-136 taught it to brief its own repair. Two
+  defects in it remain, both measured. First, when the declared command is KILLED at the per-check
+  cap, the run seals FAILED with the reason "deterministic rubric failure" — the same seal a genuinely
+  broken build gets — even though the rubric row already records `infraFailed: true` and says in words
+  that this is "an infra failure, not a code red". And the cap itself is a fixed 120 seconds that no
+  spec can change, so any project whose suite runs longer simply cannot use the gate. Second, the
+  failing-test excerpt the repair step is handed is bounded at 1000 characters against a 2000-character
+  brief that is truncated from the END, and the suite row is rendered LAST — so two ordinary design
+  findings on the same page push the failing tests off the bottom.
+
+  Make these true:
+
+    * **A killed check is inconclusive at the seal, not a verdict.** A failing deterministic rubric
+      row that is marked `infraFailed` must not produce the `FAILED` seal that a code-red row
+      produces. The run's outcome must say the check DID NOT COMPLETE rather than that the code is
+      broken, and the row must still appear in the record as a non-pass carrying `infraFailed: true` —
+      the evidence is preserved, only its authority to condemn the code is withdrawn. This is the
+      WP-263(b) rule that already governs criterion rows (src/judge/verdict.ts:99-103), extended to
+      the rubric rows that now carry machine-settled evidence.
+
+    * **A genuine red still seals FAILED.** A deterministic rubric row failing on a real nonzero exit
+      code, with no infra kill, keeps exactly today's behavior on both seal paths.
+
+    * **A spec chooses the cap its own checks are measured against.** The per-check timeout becomes a
+      declarable spec field that reaches the check that actually runs — parsing on the public surface,
+      surviving the workflow schema round-trip and chain-node templating the way `regression_suite`
+      does, and arriving at the evidence collector so both the acceptance checks and the regression suite
+      are measured against it. Absent, today's 120 s default is unchanged.
+
+    * **The repair brief RESERVES room for the failing tests.** The suite excerpt's budget is computed
+      from the room actually left after the header, the other failing findings and the closing line —
+      so that with several design findings on the page the brief still names the failing item, still
+      carries the TAIL of the command's own output (where the test names are), still lists every other
+      failing finding, and still ends with its closing instruction. Neither cap may be raised:
+      `COMPLETION_BRIEF_MAX_CHARS` stays 2000 and `DEFAULT_CHECK_TIMEOUT_MS` stays 120000.
+
+  Everything WP-609/WP-611/WP-613 proved stays proven, and the acceptance criteria re-assert it: the
+  command runs at the seal and never on a per-step pass, exactly once on a clean run and at most twice
+  with the repair; `pre_existing_suite_still_green` belongs to NEITHER default rubric and joins the
+  effective rubric only on the completion review of a run that declares a suite; the override still
+  ERRORS when the item is declared with no evidence; a red suite still blocks SUCCESS non-destructively
+  with no ROLLBACK verdict and the files left on disk; the REPAIR BRIEF still omits the design-only
+  instruction while an ordinary design finding keeps today's wording exactly; a failing DESTRUCTIVE
+  standing item still returns ROLLBACK (CONTRACTS.md §4 rule 1).
+
+  If an existing test pins a shape this change must alter, update its expectation and say plainly in
+  the step summary that you did — do not delete it, and do not weaken it into a tautology.
+
+  Constraints: TypeScript stays strict ESM with named exports and no `any`; no new dependency, no
+  provider SDK, no API key, no global install. Workflow code stays deterministic and replay-safe.
+  src/types.ts is the CORE layer — it must not import from src/judge/, src/workflow/ or src/runner/.
+  Project commands run sequentially inside the already-activated Devbox environment, so invoke pinned
+  tools directly and never nest `devbox run`.
+
+  VERIFY YOUR OWN WORK: before you finish, run `pnpm run build`, `pnpm run lint`, `pnpm run typecheck`
+  (which compiles the TEST project too) and the FULL test suite, and report the ACTUAL command you ran
+  and the ACTUAL counts it printed. The full sdk-ts suite takes ~50 s. Do not write that the suite
+  passed unless you invoked it and read its total line. Run each of those FOUR commands once and read
+  its own output — do not re-run one command four times under four different names (F-325). This run
+  also declares its own `regression_suite`, so a red judge/workflow test will block the seal whatever
+  your summary says.
+
+repos:
+  - url: /Users/nikitazolotarev/repos/chikory
+    writable: true
+
+# WP-609, live, for the second time. The pre-existing judge + workflow tests are the suite this run
+# must not break, and the exact surface it edits. Timed at HEAD 2026-08-12:
+# `20 passed | 1 skipped (21 files) · 138 passed | 12 skipped (150 tests)` in **4.32 s** against the
+# fixed 120 s cap — 27x margin, and F-320 (a cap kill seals FAILED) is exactly what this run removes.
+#
+# DELIBERATELY ABSENT: `check_timeout_ms:`. `parseTaskSpec` is `.strict()`, so a spec that BUILDS a
+# new input field cannot also DECLARE it in the YAML that launches the run — the launch would be a
+# parse error at HEAD before a single step ran. The field is proven where a not-yet-existing field
+# can be proven: AC-1 §6 (parse + workflow round-trip + absent-stays-absent) and AC-2 scenario 1,
+# which sets it on a live run and times the kill against it.
+regression_suite: pnpm --filter @chikory/sdk exec vitest run test/judge test/workflow
+
+acceptance_criteria:
+  - id: AC-1
+    description: >
+      THIS CHECK OWNS ITS ORACLE — RED on HEAD, green only once an infra-killed deterministic row
+      stops condemning the code and the brief reserves room for its evidence. Every input family and
+      every expected answer is written HERE. The brief is driven at 0, 1, 2 and 3 co-occurring design
+      findings against a 4 KB suite output (the F-324 fix: dogfood-136 drove only the 0 case), and at
+      every count the brief must name the failing item, carry the TAIL of the output where the test
+      names live, list EVERY other failing finding, keep the closing instruction, and stay within an
+      UNCHANGED 2000-char cap. Both caps are pinned as constants so trap D cannot pass. The infra/red
+      distinction is asserted on the settled row and on the seal decision; the WP-609/611/613
+      guarantees are re-asserted whole. Runs in seconds against the real built artifact.
+    check: |
+      cd packages/sdk-ts && pnpm run typecheck && pnpm exec tsc && \
+      OPENAI_COMPAT_BASE_URL=http://127.0.0.1:9 node --input-type=module -e '
+      import {pathToFileURL} from "node:url";
+      import {join} from "node:path";
+      const A=(c,m)=>{if(!c){console.error("FAIL: "+m);process.exit(1);}};
+      const here=process.cwd();
+      const load=(p)=>import(pathToFileURL(join(here,p)).href);
+      const mod=await load("dist/index.js");
+      const cr=await load("dist/workflow/completion-review.js");
+      const ev=await load("dist/judge/evidence.js");
+      const {parseTaskSpec,computeVerdict,STANDING_RUBRIC,COMPLETION_REVIEW_RUBRIC,
+             DETERMINISTIC_RUBRIC_IDS,TaskSpecSchema,applyCheckOverrides,
+             RUBRIC_PRE_EXISTING_SUITE_GREEN,RUBRIC_PRE_EXISTING_SUITE_GREEN_ITEM}=mod;
+      const {buildCompletionReviewBrief}=cr;
+      const NEW=RUBRIC_PRE_EXISTING_SUITE_GREEN;
+      A(typeof buildCompletionReviewBrief==="function"&&typeof applyCheckOverrides==="function"&&
+        typeof computeVerdict==="function"&&NEW==="pre_existing_suite_still_green",
+        "the WP-609/611/613 public surface must stay intact");
+
+      // 0. trap D — neither budget may be raised. Both are CM-3 context discipline.
+      A(ev.DEFAULT_CHECK_TIMEOUT_MS===120000,
+        "trap D: the per-check DEFAULT must stay 120000 — the fix is a SPEC-CHOSEN cap, not a "+
+        "bigger one. Got "+JSON.stringify(ev.DEFAULT_CHECK_TIMEOUT_MS));
+      const CAP=2000;
+
+      // 1. WP-613 regression — the item belongs to NEITHER default rubric.
+      A(!STANDING_RUBRIC.some((r)=>r.id===NEW)&&!COMPLETION_REVIEW_RUBRIC.some((r)=>r.id===NEW),
+        "WP-613 regression: no default rubric may carry "+NEW+". Got "+
+        JSON.stringify([STANDING_RUBRIC.map((r)=>r.id),COMPLETION_REVIEW_RUBRIC.map((r)=>r.id)]));
+      const rubric=[...COMPLETION_REVIEW_RUBRIC,RUBRIC_PRE_EXISTING_SUITE_GREEN_ITEM];
+      const crit=[{id:"AC-1",description:"d",check:"true"}];
+      const modelForm=()=>({criterionResults:[{id:"AC-1",pass:true,justification:"m"}],
+        rubricResults:rubric.map((r)=>({id:r.id,pass:true,justification:"model says fine"})),
+        concerns:[]});
+      A("error" in applyCheckOverrides(modelForm(),crit,rubric,[],[],[],undefined),
+        "WP-613 regression: the item declared with NO evidence must still be a wiring ERROR");
+
+      // 2. the settled row: a cap kill is a NON-pass that is flagged infra (trap A).
+      const settle=(run)=>{
+        const out=applyCheckOverrides(modelForm(),crit,rubric,[],[],[],run);
+        A(!("error" in out),"applyCheckOverrides must accept the run, got "+JSON.stringify(out));
+        return out.form.rubricResults.find((r)=>r.id===NEW);
+      };
+      const CMD="pnpm --filter @chikory/sdk exec vitest run test/judge test/workflow";
+      const TAIL="FAILED test/judge/harness.test.ts > settles the row\n"+
+        "FAILED test/workflow/completion-review.test.ts > reserves room\n"+
+        " Test Files  2 failed | 173 passed (177)";
+      const BIG="noise line\n".repeat(380)+TAIL;
+      A(BIG.length>4000,"the probe output must exceed 4 KB, got "+BIG.length);
+      const red=settle({criterionId:NEW,command:CMD,exitCode:1,output:BIG,durationMs:4000,
+        infraFailed:false});
+      A(red!==undefined&&red.pass===false,"WP-609 regression: a nonzero suite must settle FAILED");
+      const killed=settle({criterionId:NEW,command:CMD,exitCode:1,
+        output:"[check timed out after 90000ms]",durationMs:90000,infraFailed:true});
+      A(killed!==undefined&&killed.pass!==true&&killed.infraFailed===true,
+        "trap A: a cap-killed row must stay a NON-pass carrying `infraFailed: true` — scoring it "+
+        "green resurrects the unmeasured green WP-613 abolished. Got "+JSON.stringify(killed));
+
+      // 3. THE F-323 FIX — the excerpt must SURVIVE, not merely fit, at every finding count.
+      const DESIGN="The cumulative diff introduces a second composition seam for rubric items that "+
+        "duplicates the responsibility of the existing per-run rubric builder, leaving two places a "+
+        "future item can be registered and no single owner of the ordering. The repair-brief branch "+
+        "additionally couples workflow code to a judge-layer constant.";
+      A(DESIGN.length>300,"the probe design justification must be realistic, got "+DESIGN.length);
+      const DESIGN_IDS=["design_serves_overall_goal","cumulative_design_coherent",
+        "no_architecture_violations"];
+      for(const n of [0,1,2,3]){
+        const failing=DESIGN_IDS.slice(0,n);
+        const form=applyCheckOverrides(
+          {criterionResults:[{id:"AC-1",pass:true,justification:"m"}],
+           rubricResults:rubric.map((r)=>({id:r.id,pass:!failing.includes(r.id),
+             justification:failing.includes(r.id)?DESIGN:"fine"})),concerns:[]},
+          crit,rubric,[],[],failing.includes("no_architecture_violations")?["seeded"]:[],
+          {criterionId:NEW,command:CMD,exitCode:1,output:BIG,durationMs:4000,infraFailed:false});
+        A(!("error" in form),"n="+n+": overrides must settle, got "+JSON.stringify(form));
+        const brief=buildCompletionReviewBrief(form.form);
+        const w=(c,m)=>A(c,"n="+n+" co-occurring design findings: "+m+"\n--- brief ---\n"+brief);
+        w(brief.length<=CAP,"trap D: COMPLETION_BRIEF_MAX_CHARS must stay "+CAP+" — the brief must "+
+          "RESERVE room, not raise its budget. Got "+brief.length);
+        w(brief.includes(NEW),"the brief must NAME the failing suite item");
+        w(brief.includes("FAILED test/judge/harness.test.ts"),
+          "trap F: the failing TEST NAMES from the tail of a "+BIG.length+"-byte output must "+
+          "survive — an excerpt short enough to always fit names nothing");
+        w(brief.includes("Test Files  2 failed"),
+          "F-323: the SUMMARY LINE at the very tail of the output is the first casualty of a "+
+          "tail-truncating clamp and must survive");
+        w(!/only design/i.test(brief),
+          "WP-611 regression: a suite failure must not be briefed as a design review");
+        for(const id of failing){
+          w(brief.includes(id),"trap E: reserving room for the excerpt must not squeeze out the "+
+            "OTHER failing finding "+id);
+        }
+        w(brief.includes("a fix must resolve these findings"),
+          "the closing instruction must survive — it is what keeps the repair from breaking an AC");
+      }
+
+      // 4. WP-611 regression — a pure DESIGN finding keeps today wording and shape.
+      const designOnly=buildCompletionReviewBrief({criterionResults:[],
+        rubricResults:[{id:"design_serves_overall_goal",pass:false,justification:DESIGN}],
+        concerns:[]});
+      A(/only design/i.test(designOnly)&&designOnly.includes("DESIGN REVIEW BRIEF"),
+        "trap B lineage: the WP-537/F-196 design path must keep exactly its instruction, got "+
+        JSON.stringify(designOnly));
+
+      // 5. the SEAL decision — infra is inconclusive, a real red still condemns (traps A + B).
+      const sealForm=(infra)=>({criterionResults:[{id:"AC-1",pass:true,justification:"ok"}],
+        rubricResults:rubric.map((r)=>({id:r.id,pass:r.id!==NEW,justification:"scripted",
+          ...(r.id===NEW&&infra?{infraFailed:true}:{})})),concerns:[]});
+      for(const infra of [false,true]){
+        const v=computeVerdict(sealForm(infra),{},rubric);
+        A(v.kind!=="ROLLBACK","a failing "+NEW+" must NEVER roll back (infra="+infra+"), got "+
+          JSON.stringify(v));
+      }
+      A(computeVerdict({criterionResults:[{id:"AC-1",pass:true,justification:"ok"}],
+        rubricResults:STANDING_RUBRIC.map((r)=>({id:r.id,
+          pass:r.id!=="no_secrets_introduced",justification:"scripted"})),concerns:[]},
+        {},STANDING_RUBRIC).kind==="ROLLBACK",
+        "a failing DESTRUCTIVE standing item must still return ROLLBACK (CONTRACTS.md §4 rule 1)");
+
+      // 6. the spec field parses, round-trips, and is NOT the default (trap C, half of it).
+      const base=["name: probe","goal: do a thing","repos:","  - url: /tmp/probe-repo",
+        "    writable: true","acceptance_criteria:","  - id: AC-1","    description: d",
+        "    check: \"true\"","budget_usd: 1","max_steps: 1","agent_classes:",
+        "  executor: executor-default","  judge: judge-default","judge:","  cadence: 1"];
+      const spec=parseTaskSpec([...base,"regression_suite: echo probe",
+        "check_timeout_ms: 7000"].join("\n"));
+      const asJson=JSON.stringify(spec);
+      A(asJson.includes("7000"),
+        "the per-check cap must be declarable in the spec — parseTaskSpec dropped it. Got "+asJson);
+      A(JSON.stringify(TaskSpecSchema.parse(JSON.parse(asJson))).includes("7000"),
+        "it must survive the src/schemas.ts WORKFLOW round-trip, or a Temporal run never sees it");
+      A(!JSON.stringify(parseTaskSpec(base.join("\n"))).includes("120000"),
+        "an ABSENT field must stay absent, not be materialised as an explicit 120000 default");
+      const det=new Set(Array.from(DETERMINISTIC_RUBRIC_IDS));
+      A(det.has(NEW)&&det.has("no_architecture_violations")&&det.has("no_secrets_introduced")&&
+        !det.has("tests_pass"),
+        "WP-607/609 regression: the machine-settled set is unchanged. Got "+
+        JSON.stringify([...det]));
+
+      console.log("AC-1 OK: a cap-killed row stays a flagged non-pass and never rolls back, the "+
+        "repair brief keeps the failing test names AND every other finding AND its closing line "+
+        "at 0/1/2/3 co-occurring design findings inside an unchanged 2000-char budget, and the "+
+        "per-check cap is spec-declarable without moving the 120 s default");
+      '
+
+  - id: AC-2
+    description: >
+      THE REAL LOOP, THE REAL SEAL, THE REAL JOURNAL — three live Temporal scenarios written from the
+      repo test infrastructure. Scenario 1: a run declaring `check_timeout_ms: 3000` and a suite that
+      sleeps far past it — the check must be killed AT THE DECLARED CAP (trap C: a field the runner
+      never plumbs leaves the 120 s default in force, and the scenario's own wall-clock proves which
+      one governed), the journaled row must carry `infraFailed`, and the run must NOT seal with the
+      code-red reason; it must reach terminal unattended with no ROLLBACK and its files on disk.
+      Scenario 2: the identical run whose suite exits nonzero after printing a unique marker still
+      seals non-SUCCESS with the code-red reason, and the repair brief the EXECUTOR is handed still
+      carries that marker — trap B, plus WP-611 unregressed. Scenario 3: the suite exits 0 and the run
+      seals SUCCESS having executed the command exactly once, with the suite row on the completion
+      review only. The generated file is removed by the check.
+    check: |
+      cd packages/sdk-ts && pnpm run typecheck && node --input-type=module -e '
+      import {writeFileSync,rmSync} from "node:fs";
+      import {spawnSync} from "node:child_process";
+      import {join} from "node:path";
+      const A=(c,m)=>{if(!c){console.error("FAIL: "+m);process.exit(1);}};
+      const target=join(process.cwd(),"test/runner/ac2-infra-kill.generated.test.ts");
+      // Written and removed by THIS check; a leftover from a killed run is stale, not state.
+      rmSync(target,{force:true});
+      const SRC=`
+      import { randomUUID } from "node:crypto";
+      import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+      import { tmpdir } from "node:os";
+      import { dirname, join } from "node:path";
+      import { afterEach, describe, expect, inject, test } from "vitest";
+      import {
+        createRunnerWorker, createTemporalRunner, Journal, journalPath, STANDING_RUBRIC,
+        COMPLETION_REVIEW_RUBRIC, RUBRIC_PRE_EXISTING_SUITE_GREEN,
+        type AdapterRegistry, type JudgeForm, type RunStatusReport,
+      } from "../../src/index.js";
+      import {
+        initSourceRepo, makeJudgedSpec, startFakeJudgeWire, TERMINAL_STATUSES, waitFor,
+      } from "./helpers.js";
+
+      const address = inject("temporalAddress");
+      const bundlePath = inject("workflowBundlePath");
+      const DECLARED_CAP_MS = 3000;
+
+      // The command APPENDS to a marker file, so executions are counted from outside the run.
+      // The failing text is CATted from a file: the justification already quotes the command
+      // verbatim, so a token spelled inside the command would ride into the brief without a
+      // single byte of OUTPUT having been carried (measured on dogfood-136 while arming).
+      function countingCommand(
+        markerPath: string, printPath: string | undefined, tail: string,
+      ): string {
+        const print = printPath === undefined ? "" : "cat " + printPath + "; ";
+        return "echo x >> " + markerPath + "; " + print + tail;
+      }
+
+      function writingRegistry(seen: string[]): AdapterRegistry {
+        return {
+          scripted: (ctx) => ({
+            name: "scripted",
+            modelFamily: "anthropic" as const,
+            async runStep(input) {
+              seen.push(input.context.judgeFeedback ?? "");
+              const file = join(input.workspaceDir, "src/feature.ts");
+              await mkdir(dirname(file), { recursive: true });
+              await writeFile(file, "export const feature = 1;\\n");
+              const [diffRef, transcriptRef] = await Promise.all([
+                ctx.store.put("adapter diff", { kind: "diff", summary: "adapter diff" }),
+                ctx.store.put("adapter transcript", { kind: "transcript", summary: "t" }),
+              ]);
+              return {
+                status: "SUCCESS" as const, diffRef, transcriptRef, claimsComplete: true,
+                summary: "wrote src/feature.ts", toolCalls: 1,
+                tokens: { input: 100, output: 50 },
+                costUsd: 0.01, costEstimated: false, durationMs: 0,
+              };
+            },
+          }),
+        };
+      }
+
+      // Every item answered PASS on purpose — the suite row included — so only a delivery that
+      // lets the COMMAND settle it, and the SEAL read its infra flag, can change the outcome.
+      const stepForm = (): JudgeForm => ({
+        criterionResults: [{ id: "AC-1", pass: true, justification: "scripted judge" }],
+        rubricResults: [
+          ...STANDING_RUBRIC.map((r) => ({
+            id: r.id, pass: true, justification: "scripted — the model says this is fine",
+          })),
+          { id: RUBRIC_PRE_EXISTING_SUITE_GREEN, pass: true, justification: "model says fine" },
+        ],
+        concerns: [],
+      });
+      const reviewForm = (): JudgeForm => ({
+        criterionResults: [],
+        rubricResults: [
+          ...COMPLETION_REVIEW_RUBRIC.map((r) => ({
+            id: r.id, pass: true, justification: "scripted review",
+          })),
+          { id: RUBRIC_PRE_EXISTING_SUITE_GREEN, pass: true, justification: "model says fine" },
+        ],
+        concerns: [],
+      });
+
+      describe.skipIf(address === null)("AC-2 — the infra kill and the reserved brief", () => {
+        const cleanups: Array<() => Promise<void>> = [];
+        afterEach(async () => { while (cleanups.length > 0) await cleanups.pop()!(); });
+
+        async function runOne(command: string) {
+          const seen: string[] = [];
+          const wire = await startFakeJudgeWire(
+            [stepForm(), stepForm(), stepForm(), stepForm()],
+            { reviewForms: [reviewForm(), reviewForm()] },
+          );
+          cleanups.push(() => wire.close());
+          const tmp = await mkdtemp(join(tmpdir(), "ac2-infra-"));
+          cleanups.push(() => rm(tmp, { recursive: true, force: true }));
+          const repoUrl = await initSourceRepo(join(tmp, "src"), {});
+          const dataDir = join(tmp, "data");
+          const taskQueue = "tq-" + randomUUID();
+          const worker = await createRunnerWorker({
+            adapters: writingRegistry(seen), address: address!, taskQueue, dataDir,
+            workflowBundlePath: bundlePath!,
+            routerOptions: { baseUrls: { "openai-compat": wire.url } },
+          });
+          const workerDone = worker.run();
+          const runner = createTemporalRunner({ address: address!, taskQueue, dataDir });
+          cleanups.push(async () => {
+            worker.shutdown(); await workerDone; await runner.close();
+          });
+          const spec = {
+            ...makeJudgedSpec({ repoUrl, cadence: 1, maxSteps: 4 }),
+            regressionSuite: command,
+            checkTimeoutMs: DECLARED_CAP_MS,
+          } as unknown as Parameters<typeof runner.start>[0];
+          const startedAt = Date.now();
+          const handle = await runner.start(spec);
+          const report = await waitFor(async () => {
+            const r: RunStatusReport = await handle.status();
+            return TERMINAL_STATUSES.includes(r.status) ? r : undefined;
+          }, { what: "terminal status", timeoutMs: 180_000, intervalMs: 1000 });
+          const elapsedMs = Date.now() - startedAt;
+          const j = new Journal(journalPath(dataDir, handle.runId));
+          let entries: { verdicts: string[]; steps: number };
+          try {
+            entries = {
+              verdicts: j.entries("verdict").map((e) => JSON.stringify(e.payload)),
+              steps: j.entries("step").length,
+            };
+          } finally { j.close(); }
+          return { report, ...entries, seen, elapsedMs, runId: handle.runId, dataDir };
+        }
+
+        test("scenario 1 — a cap-killed suite is killed at the DECLARED cap and does not condemn the code", async () => {
+          const tmp = await mkdtemp(join(tmpdir(), "ac2-marker-"));
+          cleanups.push(() => rm(tmp, { recursive: true, force: true }));
+          const marker = join(tmp, "runs.txt");
+          const r = await runOne(countingCommand(marker, undefined, "sleep 90; exit 0"));
+
+          // trap C: if the declared cap never reached the check, the 120 s default governed and
+          // the whole run cannot have finished this fast. Wall-clock is the oracle.
+          expect(r.elapsedMs).toBeLessThan(110_000);
+          // the record keeps the evidence: a non-pass, flagged infra.
+          const infra = r.verdicts.filter((v) => v.includes("infraFailed"));
+          expect(infra.length).toBeGreaterThan(0);
+          // trap A: the row is NOT scored green.
+          for (const v of infra) {
+            expect(v).not.toMatch(
+              new RegExp('"id":"' + RUBRIC_PRE_EXISTING_SUITE_GREEN + '","pass":true'));
+          }
+          // the seal must not read as a code red.
+          expect(JSON.stringify(r.report)).not.toContain("deterministic rubric failure");
+          expect(TERMINAL_STATUSES).toContain(r.report.status);
+          expect(r.verdicts.some((v) => v.includes("\\"ROLLBACK\\""))).toBe(false);
+          const kept = await readFile(
+            join(r.dataDir, "runs", r.runId, "workspace", "src", "feature.ts"), "utf8");
+          expect(kept).toContain("feature");
+        }, 300_000);
+
+        test("scenario 2 — a genuine red still condemns, and the repair still sees the output", async () => {
+          const tmp = await mkdtemp(join(tmpdir(), "ac2-marker-"));
+          cleanups.push(() => rm(tmp, { recursive: true, force: true }));
+          const marker = join(tmp, "runs.txt");
+          const token = "SUITEFAIL" + randomUUID().replace(/-/g, "");
+          const failFile = join(tmp, "suite-output.txt");
+          await writeFile(
+            failFile, "FAILED test/widget.test.ts > it does the thing\\n" + token + "\\n");
+          const r = await runOne(countingCommand(marker, failFile, "exit 1"));
+
+          // trap B: an ordinary nonzero exit is still a code red and still blocks.
+          expect(r.report.status).not.toBe("SUCCESS");
+          expect(JSON.stringify(r.report)).toContain("deterministic rubric failure");
+          // WP-611 unregressed: the repair sees the OUTPUT, not just the exit code.
+          const carrying = r.seen.filter((b) => b.includes(token));
+          expect(carrying.length).toBeGreaterThan(0);
+          for (const brief of carrying) expect(/only design/i.test(brief)).toBe(false);
+          expect(r.verdicts.some((v) => v.includes("\\"ROLLBACK\\""))).toBe(false);
+          const runs = (await readFile(marker, "utf8")).trim().split("\\n").filter(Boolean);
+          expect(runs.length).toBeLessThanOrEqual(2);
+        }, 300_000);
+
+        test("scenario 3 — a green suite still seals SUCCESS, once, scored only at the review", async () => {
+          const tmp = await mkdtemp(join(tmpdir(), "ac2-marker-"));
+          cleanups.push(() => rm(tmp, { recursive: true, force: true }));
+          const marker = join(tmp, "runs.txt");
+          const r = await runOne(countingCommand(marker, undefined, "exit 0"));
+          expect(r.report.status).toBe("SUCCESS");
+          const runs = (await readFile(marker, "utf8")).trim().split("\\n").filter(Boolean);
+          expect(runs).toHaveLength(1);
+          const scored = r.verdicts.filter((v) => v.includes(RUBRIC_PRE_EXISTING_SUITE_GREEN));
+          expect(scored).toHaveLength(1);
+        }, 300_000);
+
+      });
+      `;
+      writeFileSync(target, SRC);
+      const res=spawnSync("pnpm",["exec","vitest","run",
+        "test/runner/ac2-infra-kill.generated.test.ts"],{stdio:"inherit"});
+      // Clean up BEFORE asserting — A() exits the process, which would skip a finally block
+      // and leave the generated file behind to poison the next pass.
+      rmSync(target,{force:true});
+      A(res.status===0,
+        "trap C: scenario 1 times the REAL run against the cap it DECLARED — a spec field the "+
+        "runner never plumbs leaves the 120 s default in force and blows the wall-clock "+
+        "assertion. Scenarios 2-3 read the seal reason and the brief off the REAL journal of a "+
+        "REAL Temporal run. vitest exited "+res.status);
+      console.log("AC-2 OK: a killed suite is killed at the spec cap and does not condemn the "+
+        "code, a real red still condemns and still briefs the repair with its output, and a "+
+        "green one still seals SUCCESS with exactly one execution and one scored row");
+      '
+
+budget_usd: 20
+max_steps: 6
+
+agent_classes:
+  executor: executor-default
+  judge: judge-default
+
+judge:
+  cadence: 1
+
+# F-322 (dogfood-135): a converged out-of-rubric escalation — every criterion and every rubric item
+# passing — auto-seals SUCCESS with this policy present, instead of parking overnight for a human.
+unattended:
+  escalation: seal_resumable_failed

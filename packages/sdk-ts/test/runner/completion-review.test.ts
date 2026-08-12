@@ -257,6 +257,28 @@ describe("buildCompletionReviewBrief", () => {
     expect(brief.length).toBeLessThanOrEqual(2000);
   });
 
+  it("builds a REPAIR BRIEF directing a behavior fix when pre_existing_suite_still_green fails", () => {
+    const form: JudgeForm = {
+      criterionResults: [],
+      rubricResults: [
+        {
+          id: "pre_existing_suite_still_green",
+          pass: false,
+          justification: "regression suite command `pnpm test` exited 1:\nFAIL test/foo.test.ts > unique_marker_123",
+        },
+      ],
+      concerns: [],
+    };
+
+    const brief = buildCompletionReviewBrief(form);
+
+    expect(brief).toContain("REPAIR BRIEF");
+    expect(brief).toContain("pre_existing_suite_still_green");
+    expect(brief).toContain("unique_marker_123");
+    expect(brief).not.toContain("do NOT change behavior, only design");
+    expect(brief.length).toBeLessThanOrEqual(2000);
+  });
+
   it("clamps an oversized brief", () => {
     const form: JudgeForm = {
       criterionResults: [],
