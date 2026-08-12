@@ -37,6 +37,12 @@ export interface CompletionReviewState {
    * which wins when both are given.
    */
   rubricResults?: ReadonlyArray<{ pass: boolean }>;
+  /**
+   * Whether the spec has a declared `regression_suite` command.
+   * When true on a first-verdict seal, the completion review MUST run to execute
+   * the command, since the command never runs on per-step passes.
+   */
+  hasRegressionSuite?: boolean;
 }
 
 export type CompletionReviewDecision =
@@ -65,7 +71,7 @@ export function decideCompletionReview(
   const isFirstVerdictSeal = state.sealingDiffBase === state.baseCommit;
   const failingRubric = extractHasRubricFailures(state);
 
-  if (isFirstVerdictSeal && !failingRubric) {
+  if (isFirstVerdictSeal && !failingRubric && !state.hasRegressionSuite) {
     return {
       action: "skip",
       reason: "sealing verdict already judged the cumulative diff (first-verdict seal)",

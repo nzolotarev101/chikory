@@ -69,6 +69,7 @@ export interface CollectedEvidence {
   /** Deterministic architecture-layer violation labels the judge sees alongside the diff. */
   architectureLabels: string[];
   checkRuns: CheckRun[];
+  regressionSuiteRun?: CheckRun;
   /** Raw evidence size (diff + check output bytes) — span attribute (WP-134). */
   evidenceBytes: number;
 }
@@ -270,6 +271,7 @@ export interface CollectEvidenceInput {
   /** Compacted summaries of the steps since the last verdict. */
   stepSummaries: string[];
   checkTimeoutMs?: number;
+  regressionSuite?: string;
 }
 
 export async function collectEvidence(input: CollectEvidenceInput): Promise<CollectedEvidence> {
@@ -299,6 +301,7 @@ export async function collectEvidence(input: CollectEvidenceInput): Promise<Coll
   // Judge-executed acceptance checks (JD-4) — sequential: checks may share
   // workspace state (build artifacts, ports).
   const checkRuns: CheckRun[] = [];
+  let regressionSuiteRun: CheckRun | undefined;
 
   const writableRepos = input.workspaceRepos?.filter((repo) => repo.writable) ?? [];
   const reposToSnapshot =
@@ -323,6 +326,18 @@ export async function collectEvidence(input: CollectEvidenceInput): Promise<Coll
           input.checkTimeoutMs ?? DEFAULT_CHECK_TIMEOUT_MS,
           input.workspaceRepos ?? [],
         ),
+      );
+    }
+    if (input.regressionSuite) {
+      regressionSuiteRun = await runCheck(
+        input.workspaceDir,
+        {
+          id: "pre_existing_suite_still_green",
+          description: "regression suite",
+          check: input.regressionSuite,
+        },
+        input.checkTimeoutMs ?? DEFAULT_CHECK_TIMEOUT_MS,
+        input.workspaceRepos ?? [],
       );
     }
   } finally {
@@ -375,6 +390,10 @@ export async function collectEvidence(input: CollectEvidenceInput): Promise<Coll
     newDependencyLabels,
     architectureLabels,
     checkRuns,
-    evidenceBytes: diff.length + checkRuns.reduce((a, r) => a + r.output.length, 0),
+    ...(regressionSuiteRun ? { regressionSuiteRun } : {}),
+    evidenceBytes:
+      diff.length +
+      checkRuns.reduce((a, r) => a + r.output.length, 0) +
+      (regressionSuiteRun ? regressionSuiteRun.output.length : 0),
   };
 }

@@ -87,6 +87,11 @@ export interface TaskSpec {
   budgetTokens?: number;
   maxSteps?: number;
   /**
+   * Optional shell command to run the repository's verification suite.
+   * Evaluated at the run-completion review; a non-zero exit code gates SUCCESS.
+   */
+  regressionSuite?: string;
+  /**
    * WP-509/F-88 — chain-only decomposition floor. When set, `chikory chain`
    * rejects a plan with fewer nodes (the planner collapsed a decomposable goal
    * too coarsely). Absent = no floor. Ignored by single `chikory run`.

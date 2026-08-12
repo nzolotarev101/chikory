@@ -178,6 +178,44 @@ guard (3 consecutive failing verdicts) will usually fire first.
 
 ---
 
+### `regression_suite` (optional, non-empty string — WP-609)
+
+The repository's OWN verification command, named by the spec and executed by the
+run so that "the tests that already passed still pass" stops being a sentence in
+the goal and becomes a program.
+
+```yaml
+regression_suite: pnpm --filter @chikory/sdk exec vitest run
+```
+
+- **Where it runs:** at the run-completion review only — never on a per-step
+  judge pass (`src/runner/activities.ts:1782`). Exactly ONCE on a clean run; a
+  second time only for the post-repair re-review, bounded by
+  `MAX_COMPLETION_REVIEWS = 2`. A spec that omits the field spends nothing.
+- **What it settles:** the standing rubric item `pre_existing_suite_still_green`,
+  which is in `DETERMINISTIC_RUBRIC_IDS` (`src/judge/rubric.ts:19-32`) — its
+  answer comes from the command's exit code, never from the model, and the
+  justification names the command (`src/judge/harness.ts:200-217`).
+- **What a red suite does:** blocks the SUCCESS seal after the ONE bounded repair
+  step, and seals `FAILED — completion review: deterministic rubric failure`. It
+  is **non-destructive**: no `ROLLBACK` verdict opens, the work stays on disk,
+  and the run still reaches its terminal state unattended (F-107).
+- **Declaring it forces the completion review** that a first-verdict (1-step)
+  seal would otherwise skip (`src/workflow/completion-review.ts:74`).
+- **Cap:** the command shares the judge's per-check bound,
+  `DEFAULT_CHECK_TIMEOUT_MS = 120_000` (`src/judge/evidence.ts:37`), and that cap
+  is NOT spec-settable today. A kill is recorded `infraFailed` and reads *"DID
+  NOT COMPLETE"* — but it still seals the run FAILED (🟡 F-320 → WP-612), so
+  declare a suite with real headroom.
+- **Chain nodes inherit it** (`CHAIN_TEMPLATE_FIELDS.templateForwarded`,
+  `src/chain/node-spec.ts:118`); `regressionSuite` is accepted as a camelCase
+  alias.
+- **Caveat:** on a spec that does NOT declare the field, the item is still
+  present and records `pass: true, "no regression suite command executed for this
+  pass"` (🟡 F-321 → WP-613) — a ✓ that measures nothing. Read the justification.
+
+---
+
 ### `step_limits` (optional block — per-step executor bounds)
 
 ```yaml

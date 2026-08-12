@@ -4,6 +4,8 @@ import {
   computeVerdict,
   DETERMINISTIC_RUBRIC_IDS,
   parseTaskSpec,
+  RUBRIC_PRE_EXISTING_SUITE_GREEN,
+  RUBRIC_PRE_EXISTING_SUITE_GREEN_ITEM,
   scanDiffForLayeringViolations,
   STANDING_RUBRIC,
 } from "../../src/index.js";
@@ -15,6 +17,7 @@ describe("AC-1: Deterministic rubric classification & non-destructive oracle", (
     expect(DETERMINISTIC_RUBRIC_IDS).toBeDefined();
     expect(DETERMINISTIC_RUBRIC_IDS.has("no_architecture_violations")).toBe(true);
     expect(DETERMINISTIC_RUBRIC_IDS.has("no_secrets_introduced")).toBe(true);
+    expect(DETERMINISTIC_RUBRIC_IDS.has(RUBRIC_PRE_EXISTING_SUITE_GREEN)).toBe(true);
 
     // Standing items not in DETERMINISTIC_RUBRIC_IDS
     expect(DETERMINISTIC_RUBRIC_IDS.has("tests_pass")).toBe(false);
@@ -25,7 +28,7 @@ describe("AC-1: Deterministic rubric classification & non-destructive oracle", (
     // Completion-review items not in DETERMINISTIC_RUBRIC_IDS
     expect(DETERMINISTIC_RUBRIC_IDS.has("cumulative_design_coherent")).toBe(false);
 
-    // Verify all 6 standing items classification
+    // Verify all 7 standing items classification
     const standingMap = STANDING_RUBRIC.map((item) => ({
       id: item.id,
       deterministic: DETERMINISTIC_RUBRIC_IDS.has(item.id),
@@ -35,20 +38,44 @@ describe("AC-1: Deterministic rubric classification & non-destructive oracle", (
       { id: "no_unrelated_deletions", deterministic: false },
       { id: "no_secrets_introduced", deterministic: true },
       { id: "no_architecture_violations", deterministic: true },
+      { id: "pre_existing_suite_still_green", deterministic: true },
       { id: "scope_matches_instruction", deterministic: false },
       { id: "design_serves_overall_goal", deterministic: false },
     ]);
 
-    // Verify all completion-review items classification
+    // Verify base completion-review items classification
     const completionMap = COMPLETION_REVIEW_RUBRIC.map((item) => ({
       id: item.id,
       deterministic: DETERMINISTIC_RUBRIC_IDS.has(item.id),
     }));
     expect(completionMap).toEqual([
       { id: "no_architecture_violations", deterministic: true },
+      { id: "pre_existing_suite_still_green", deterministic: true },
       { id: "design_serves_overall_goal", deterministic: false },
       { id: "cumulative_design_coherent", deterministic: false },
     ]);
+
+    // Verify RUBRIC_PRE_EXISTING_SUITE_GREEN_ITEM properties
+    expect(RUBRIC_PRE_EXISTING_SUITE_GREEN_ITEM.id).toBe("pre_existing_suite_still_green");
+    expect(RUBRIC_PRE_EXISTING_SUITE_GREEN_ITEM.destructive).toBe(false);
+  });
+
+  it("pre_existing_suite_still_green is destructive: false and computeVerdict returns a NON-ROLLBACK verdict naming it", () => {
+    expect(RUBRIC_PRE_EXISTING_SUITE_GREEN_ITEM.destructive).toBe(false);
+
+    const formWithSuiteFail: JudgeForm = {
+      criterionResults: [{ id: "AC-1", pass: true, justification: "done" }],
+      rubricResults: [
+        ...STANDING_RUBRIC.map((r) => ({ id: r.id, pass: true, justification: "ok" })),
+        { id: RUBRIC_PRE_EXISTING_SUITE_GREEN, pass: false, justification: "regression suite exited 1" },
+      ],
+      concerns: [],
+    };
+
+    const verdict = computeVerdict(formWithSuiteFail, {}, [...STANDING_RUBRIC, RUBRIC_PRE_EXISTING_SUITE_GREEN_ITEM]);
+    expect(verdict.kind).not.toBe("ROLLBACK");
+    expect(verdict.kind).toBe("PROCEED");
+    expect(verdict.rationale).toContain("pre_existing_suite_still_green");
   });
 
   it("no_architecture_violations is destructive: false and computeVerdict returns a NON-ROLLBACK verdict naming it", () => {

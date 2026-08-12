@@ -1,0 +1,556 @@
+# Plain: last run made the repository's own test suite a gate — a delivery that breaks an existing
+# test can no longer report success. Two things about that gate are still wrong. When it blocks, the
+# single repair step it grants is told "do NOT change behavior, only design" and is handed no failing
+# test names, so the repair is set up to fail. And on every run that declares no suite, the gate still
+# writes down "the pre-existing suite is still green" — a green nothing measured. This run fixes both.
+# WP: WP-611 (a gate that blocks on a red suite must brief its one repair with the failing tests) +
+#     WP-613 (a gate must not record a green it never measured)
+# Ladder-rung: 0 (OFF-LADDER by necessity — rung 5 is operator-gated today; see WHY)
+# Thesis-KPI: judge true-positives pre-land, and the FIRST LIVE PROOF of the WP-609 gate — this spec
+#   declares `regression_suite:` itself, so the run must show `pre_existing_suite_still_green`
+#   settled from a real exit code in its OWN journal (dogfood-135 could not: F-197)
+# Format: loose — the outcomes are fixed, the wiring is the executor's
+#
+# Launch mode: RUN (single node — two halves of one gate, proven pure and then on the real loop).
+#   CHIKORY_PREFLIGHT_ONLY=1 devbox run run-dogfood
+#   devbox run run-dogfood
+#
+# WHY THIS AND NOT THE LADDER RUNG (dogfood-135 review, 2026-08-12):
+#   Progression gate: ✅ PROGRESSING — dogfood-135's 4-step horizon moved the trailing-3 max steps
+#   from 3 to 4, so the STALLED bind that governed the last five specs is LIFTED and the default
+#   headline (the phase ladder rung) is now a judgment call rather than a rule. The default is still
+#   P3-rung-5, the phase exit gate. Its two blockers were RE-MEASURED AGAIN this review (not
+#   re-litigated) and both still stand, both OPERATOR work rather than product gaps:
+#     1. `brownfield-001`'s zod v3 → v4 gold patch. MEASURED 2026-08-12: `find benchmarks/tasks -name
+#        '*brownfield-001*'` returns ONLY
+#        `benchmarks/tasks/brownfield-001-dependency-major-upgrade.yaml`, whose only status line is
+#        `status: pinned` (:24) with no `fix_ref` and no gold artifact. 3–6 h of operator research.
+#     2. A re-run of BOTH arms so stored per-task results carry `repoRef`. MEASURED 2026-08-12:
+#        `grep -rl repoRef benchmarks/results/ | wc -l` = **0**. Hours of quota, and dogfood-122
+#        proved an LLM executor must not supervise a quota-bound multi-hour suite.
+#
+#   This is the SIXTH consecutive off-ladder headline, and it is not a new detour — it finishes the
+#   one the loop is already standing in. A control plane cannot publish a reliability number (which
+#   is what rung 5 exists to do) while its own freshly-built regression gate (a) cannot brief the
+#   repair it demands and (b) records a green it never measured. Both defects are MEASURED below.
+#
+# THE MEASURED PREMISE (re-measure before building; do not re-litigate):
+#   * **F-319 — the repair is misinstructed AND blind.** `buildCompletionReviewBrief`
+#     (`src/workflow/completion-review.ts:113-126`) opens with the fixed line *"do NOT change
+#     behavior, only design"* and renders each failing item as `id: justification`. For a red suite
+#     the justification is the whole payload: ``regression suite command `X` exited 1`` — no failing
+#     test names, no output, no file. So the ONE bounded repair WP-609 grants
+#     (`src/workflow/agent-loop.ts:1087-1097`) is told not to do the only thing that would help.
+#   * **The evidence already exists and is thrown away.** `collectEvidence` keeps the full `CheckRun`
+#     on `regressionSuiteRun` (`src/judge/evidence.ts:331-341`), `output` included and already
+#     bounded to 64 KiB by `runCheck`. Nothing carries it to the executor.
+#   * **F-321 — a green nobody measured.** With no `regressionSuite`, `applyCheckOverrides` records
+#     `pass: true, "no regression suite command executed for this pass"`
+#     (`src/judge/harness.ts:211-216`), and the item sits unconditionally in `STANDING_RUBRIC`
+#     (`src/judge/rubric.ts:64`) and `COMPLETION_REVIEW_RUBRIC` (`:96`). MEASURED on dogfood-135
+#     itself, which declared no suite: every one of its judge passes carries the row. A self-reported
+#     green is the exact shape WP-609 abolished for the executor; the gate must not commit it.
+#   * **The membership fix has a HARD constraint the obvious version violates.** A form missing a
+#     declared item is an error (`src/judge/harness.ts:174-177`), and the deterministic branches run
+#     AFTER that lookup. So the item may only be in the rubric of a pass where the command actually
+#     ran — the RUN-COMPLETION REVIEW of a run that declared one. Put it on per-step passes and every
+#     per-step judge call errors. The composition seam already exists: `effectiveRubric`
+#     (`src/runner/activities.ts:1687-1691`) already builds a per-run rubric for `judge.rubric_extra`.
+#   * **dogfood-135 measured the wrong-shape attempt LIVE, and it cost a step.** Its step 3 built
+#     conditional inclusion and turned BOTH acceptance criteria red, because that spec's AC-1
+#     asserted STATIC rubric-array membership. Step 4 reverted to the unconditional shape. The design
+#     was right and the oracle was wrong — which is why THIS spec asserts the inverse.
+#   * **`COMPLETION_REVIEW_RUBRIC` is built by lookup into `STANDING_RUBRIC`**
+#     (`src/judge/rubric.ts:94-97` uses `STANDING_RUBRIC.find(...)!`). Removing the item from
+#     `STANDING_RUBRIC` without fixing that line yields `undefined!` in an exported array — a crash
+#     the type-checker will not catch. Decide it deliberately.
+#   * **The brief has a budget.** `COMPLETION_BRIEF_MAX_CHARS` clamps the whole brief
+#     (`src/workflow/completion-review.ts:127-130`); a 64 KiB suite log pasted in whole would push
+#     the findings out of the string entirely. The excerpt must be bounded BEFORE the clamp.
+#   * **The `unattended:` block below is not decoration.** dogfood-135 omitted it and parked
+#     11h 59m 31s in `AWAITING_APPROVAL` on a converged out-of-rubric escalation that
+#     `src/workflow/agent-loop.ts:1213-1224` auto-seals SUCCESS when the policy is present (F-322).
+#
+# Designed traps — the plausible-but-wrong deliveries the acceptance criteria exist to reject:
+#   A. **Appending the suite output and keeping the design-only framing.** The brief gains the
+#      failing tests and still commands *"do NOT change behavior, only design"*. The repair remains
+#      forbidden from making the change that would fix it. AC-2 scenario 1 requires the brief the
+#      executor actually receives to carry the output AND to be free of that instruction.
+#   B. **Rewriting the framing for EVERY brief.** A design finding must keep today's wording — the
+#      WP-537/F-196 completion-review semantics are proven and must not regress. AC-2 scenario 3
+#      drives a design-only finding and requires the design instruction to still be there.
+#   C. **Conditional membership at the runner only, leaving the override permissive.** If
+#      `applyCheckOverrides` still answers the item without evidence, the F-321 green survives for
+#      every other caller and every future call site. AC-1 requires an ERROR naming the id.
+#   D. **Dropping the item.** Deleting it from the rubrics without conditionally re-adding it makes
+#      WP-609 inert — the cheapest way to pass a membership assertion. AC-2 scenarios 1–2 require the
+#      full WP-609 behavior to survive: a red suite still blocks the seal, a green one still seals.
+#   E. **Blowing the brief bound, or starving the findings to fit the log.** AC-2 scenario 1 requires
+#      the brief to name the failing item AND stay within the existing clamp.
+#   F. **Putting the suite output in the JUDGE prompt instead of the executor brief** (the F-283 /
+#      dogfood-135 trap-F shape: the fix worn as a costume by the wrong consumer). AC-2 reads the
+#      brief off the CONTEXT THE EXECUTOR IS HANDED, not off the judge messages.
+#   G. **Proving membership with a unit test the executor writes.** AC-1 owns the oracle against the
+#      real built artifact; AC-2 reads the REAL journal of a REAL Temporal run.
+#
+# NOT IN SCOPE: making `regression_suite` required (track-B); a launcher precheck for a missing
+# `unattended:` block (track-B, F-322); the per-check cap or the infra-kill SEAL semantics
+# (🟡 F-320 → WP-612, a separate run — this spec must not change what a cap kill does); `tests_pass`
+# and its JD-4 override (`src/judge/harness.ts:148-171` unchanged); the WP-607 items.
+
+name: dogfood-136-wp611-wp613-repair-brief-and-honest-rubric
+wp: WP-611
+goal: >
+  A gate that blocks a run must tell the repair step what to fix, and must never record a result it
+  did not measure.
+
+  dogfood-135 built the regression-suite gate: a spec names the repository verification command, the
+  run executes it once before sealing, and a red result blocks SUCCESS. Reviewing it measured two
+  defects in the gate itself. First, when it blocks, the single bounded repair step it grants is
+  briefed *"do NOT change behavior, only design"* and is handed the string
+  ``regression suite command `X` exited 1`` — no failing test names, no output — so the repair is
+  instructed away from the fix and blinded to the problem. Second, on a run that declares no suite,
+  the gate still writes a passing row that reads "the pre-existing suite is still green" when
+  nothing ran at all.
+
+  Make these true:
+
+    * **A blocked run is told what broke, in the words of the command that broke.** When the
+      run-completion review blocks on the machine-settled regression-suite item, the brief the
+      EXECUTOR receives for its one bounded repair step carries a bounded excerpt of that command's
+      OWN output — enough to name the failing tests — and names the failing item. The excerpt is
+      bounded before the existing whole-brief clamp, so the findings can never be squeezed out.
+
+    * **A repair for broken tests is not briefed as a design review.** For that failure the brief
+      must not carry the standing design-only instruction; it must direct a behavior fix. A brief
+      raised for an ordinary DESIGN finding keeps exactly today's wording and shape — that path is
+      WP-537/F-196 behavior and must not regress.
+
+    * **A rubric row exists only where the command ran.** `pre_existing_suite_still_green` appears
+      on the run-completion review pass of a run whose spec declares `regression_suite`, and NOWHERE
+      else: not on a per-step judge pass, and on no pass of a run that declares no suite. Neither
+      `STANDING_RUBRIC` nor `COMPLETION_REVIEW_RUBRIC` carries it by default; the per-run
+      composition seam that already exists for judge.rubric_extra is the place to add it.
+
+    * **The override refuses to answer without evidence.** If the item ever reaches
+      `applyCheckOverrides` with no regression-suite CheckRun, that is a wiring error and must be
+      returned as an error naming the item — never a passing row, never the model's answer.
+
+  Everything WP-609 proved stays proven, and the acceptance criteria re-assert it: the command runs
+  at the seal and never on a per-step pass, exactly ONCE on a clean run and at most twice with the
+  repair; its exit code settles the row and the justification names the command; a red suite blocks
+  SUCCESS while staying NON-destructive (no `ROLLBACK` verdict, files left on disk, terminal state
+  reached unattended); a cap kill still records `infraFailed` and is never a pass; `regression_suite`
+  still parses and survives the `src/schemas.ts` round-trip. `tests_pass` keeps its JD-4 meaning and
+  its override unchanged; `no_architecture_violations` and `no_secrets_introduced` keep the WP-607
+  behavior; a destructive standing failure still returns ROLLBACK (CONTRACTS.md §4 rule 1).
+
+  Note that `COMPLETION_REVIEW_RUBRIC` is currently built by looking items up in `STANDING_RUBRIC`
+  with a non-null assertion — removing an item from one array silently affects the other. If an
+  existing test pins the old shape, update its expectation and say plainly in the step summary that
+  you did — do not delete it, and do not weaken it into a tautology.
+
+  Constraints: TypeScript stays strict ESM with named exports and no `any`; no new dependency, no
+  provider SDK, no API key, no global install. Workflow code stays deterministic and replay-safe.
+  src/types.ts is the CORE layer — it must not import from src/judge/, src/workflow/ or
+  src/runner/. Project commands run sequentially inside the already-activated Devbox environment, so
+  invoke pinned tools directly and never nest `devbox run`.
+
+  VERIFY YOUR OWN WORK: before you finish, run `pnpm run build`, `pnpm run lint`,
+  `pnpm run typecheck` (which compiles the TEST project too) and the FULL test suite, and report the
+  ACTUAL command you ran and the ACTUAL counts it printed. The full sdk-ts suite takes ~51 s. Do not
+  write that the suite passed unless you invoked it and read its total line. This run also declares
+  its own `regression_suite`, so a red judge/workflow test will block the seal whatever your summary
+  says.
+
+repos:
+  - url: /Users/nikitazolotarev/repos/chikory
+    writable: true
+
+# WP-609, live. The pre-existing judge+workflow tests are the suite this run must not break — the
+# exact surface it edits. Timed at HEAD 2026-08-12: 20 files / 136 tests in 3.97 s against the
+# fixed 120 s per-check cap (F-320: a cap kill would seal this run FAILED, so the margin is the
+# point). This is the first spec to declare the field, and its journal is WP-609's live proof.
+regression_suite: pnpm --filter @chikory/sdk exec vitest run test/judge test/workflow
+
+acceptance_criteria:
+  - id: AC-1
+    description: >
+      THIS CHECK OWNS ITS ORACLE — RED on HEAD, green only once the rubric stops carrying the item
+      by default and the override refuses to answer without evidence. Every input family and every
+      expected answer is written HERE: the id stays machine-settled and non-destructive; NEITHER
+      exported rubric array carries it (trap D is answered by AC-2, not by this one); the two WP-607
+      ids are untouched and still in the standing rubric; the override ERRORS when the item is
+      declared with no evidence (trap C) and still settles RED / GREEN / cap-killed exactly as
+      WP-609 proved; a failing item still yields a NON-ROLLBACK verdict naming it while a failing
+      destructive item still rolls back; and `regression_suite` still parses and round-trips. Runs
+      in seconds against the real built artifact.
+    check: |
+      cd packages/sdk-ts && pnpm run typecheck && pnpm exec tsc && \
+      OPENAI_COMPAT_BASE_URL=http://127.0.0.1:9 node --input-type=module -e '
+      import {pathToFileURL} from "node:url";
+      import {join} from "node:path";
+      const A=(c,m)=>{if(!c){console.error("FAIL: "+m);process.exit(1);}};
+      const mod=await import(pathToFileURL(join(process.cwd(),"dist/index.js")).href);
+      const {parseTaskSpec,computeVerdict,STANDING_RUBRIC,COMPLETION_REVIEW_RUBRIC,
+             DETERMINISTIC_RUBRIC_IDS,TaskSpecSchema,applyCheckOverrides,
+             RUBRIC_PRE_EXISTING_SUITE_GREEN,RUBRIC_PRE_EXISTING_SUITE_GREEN_ITEM}=mod;
+      A(typeof parseTaskSpec==="function"&&typeof computeVerdict==="function"&&
+        Array.isArray(STANDING_RUBRIC)&&Array.isArray(COMPLETION_REVIEW_RUBRIC)&&
+        DETERMINISTIC_RUBRIC_IDS!==undefined&&TaskSpecSchema!==undefined&&
+        typeof applyCheckOverrides==="function"&&
+        typeof RUBRIC_PRE_EXISTING_SUITE_GREEN==="string"&&
+        RUBRIC_PRE_EXISTING_SUITE_GREEN_ITEM!==undefined,
+        "the WP-609 public surface must stay intact, item export included");
+      const NEW=RUBRIC_PRE_EXISTING_SUITE_GREEN;
+      A(NEW==="pre_existing_suite_still_green",
+        "the rubric id is a public contract read by DOGFOODING and every run record; it must "+
+        "stay pre_existing_suite_still_green, got "+JSON.stringify(NEW));
+
+      // 1. WP-609 regression guard — the spec field still parses and round-trips.
+      const CMD="echo regression-suite-probe";
+      const base=["name: probe","goal: do a thing","repos:","  - url: /tmp/probe-repo",
+        "    writable: true","acceptance_criteria:","  - id: AC-1","    description: d",
+        "    check: \"true\"","budget_usd: 1","max_steps: 1","agent_classes:",
+        "  executor: executor-default","  judge: judge-default","judge:","  cadence: 1"];
+      const withSuite=parseTaskSpec([...base,"regression_suite: "+CMD].join("\n"));
+      A(JSON.stringify(withSuite).includes(CMD),
+        "WP-609 regression: regression_suite must still survive parseTaskSpec");
+      A(JSON.stringify(TaskSpecSchema.parse(JSON.parse(JSON.stringify(withSuite)))).includes(CMD),
+        "WP-609 regression: it must still survive the src/schemas.ts round-trip");
+
+      // 2. the id stays machine-settled and non-destructive, and WP-607 is untouched.
+      const det=new Set(Array.from(DETERMINISTIC_RUBRIC_IDS));
+      A(det.has(NEW),"the suite item must STAY machine-settled: "+JSON.stringify([...det]));
+      for(const id of ["no_architecture_violations","no_secrets_introduced"]){
+        A(det.has(id),"WP-607 regression: "+id+" must stay machine-settled");
+        A(STANDING_RUBRIC.some((r)=>r.id===id),
+          "WP-607 regression: "+id+" must stay in STANDING_RUBRIC");
+      }
+      A(!det.has("tests_pass")&&STANDING_RUBRIC.some((r)=>r.id==="tests_pass"),
+        "tests_pass keeps its JD-4 meaning: a standing item overridden from the judge-executed "+
+        "checks, NOT a member of the machine-settled set. Got "+JSON.stringify([...det]));
+      A(RUBRIC_PRE_EXISTING_SUITE_GREEN_ITEM.destructive===false,
+        "trap E lineage: the suite item must stay NON-destructive, got "+
+        JSON.stringify(RUBRIC_PRE_EXISTING_SUITE_GREEN_ITEM));
+
+      // 3. THE F-321 FIX — no default rubric may carry an item nothing ran.
+      A(!STANDING_RUBRIC.some((r)=>r.id===NEW),
+        "F-321: STANDING_RUBRIC must NOT carry "+NEW+" — it is scored on every per-step pass of "+
+        "every run, including runs that declare no suite, where nothing measured it. Got "+
+        JSON.stringify(STANDING_RUBRIC.map((r)=>r.id)));
+      A(!COMPLETION_REVIEW_RUBRIC.some((r)=>r.id===NEW),
+        "F-321: COMPLETION_REVIEW_RUBRIC must NOT carry "+NEW+" by default — a run that declares "+
+        "no regression_suite still runs this review. Got "+
+        JSON.stringify(COMPLETION_REVIEW_RUBRIC.map((r)=>r.id)));
+      A(COMPLETION_REVIEW_RUBRIC.every((r)=>r!==undefined&&typeof r.id==="string"),
+        "COMPLETION_REVIEW_RUBRIC is built by lookup into STANDING_RUBRIC — removing an item "+
+        "without fixing that lookup leaves an undefined hole. Got "+
+        JSON.stringify(COMPLETION_REVIEW_RUBRIC));
+
+      // 4. trap C — the override must REFUSE to answer the item without evidence.
+      const rubric=[...COMPLETION_REVIEW_RUBRIC,RUBRIC_PRE_EXISTING_SUITE_GREEN_ITEM];
+      const crit=[{id:"AC-1",description:"d",check:"true"}];
+      const modelForm=()=>({criterionResults:[{id:"AC-1",pass:true,justification:"m"}],
+        rubricResults:rubric.map((r)=>({id:r.id,pass:true,justification:"model says fine"})),
+        concerns:[]});
+      const noEvidence=applyCheckOverrides(modelForm(),crit,rubric,[],[],[],undefined);
+      A("error" in noEvidence,
+        "trap C: the item declared with NO regression-suite evidence is a WIRING ERROR and must "+
+        "be returned as one — never a passing row (F-321) and never the model answer. Got "+
+        JSON.stringify(noEvidence));
+      A(String(noEvidence.error).includes(NEW),
+        "the error must NAME the item, got "+JSON.stringify(noEvidence.error));
+
+      // 5. WP-609 semantics survive, all three evidence families.
+      const settle=(run)=>{
+        const out=applyCheckOverrides(modelForm(),crit,rubric,[],[],[],run);
+        A(!("error" in out),"applyCheckOverrides must accept the regression-suite run, got "+
+          JSON.stringify(out));
+        return out.form.rubricResults.find((r)=>r.id===NEW);
+      };
+      const red=settle({criterionId:NEW,command:"exit 1",exitCode:1,output:"boom",durationMs:5,
+        infraFailed:false});
+      A(red!==undefined&&red.pass===false,
+        "WP-609 regression: a NONZERO suite must settle "+NEW+" as FAILED over a model PASS, got "+
+        JSON.stringify(red));
+      const green=settle({criterionId:NEW,command:"exit 0",exitCode:0,output:"ok",durationMs:5,
+        infraFailed:false});
+      A(green!==undefined&&green.pass===true,
+        "WP-609 regression: a ZERO-exit suite must settle "+NEW+" as PASS, got "+
+        JSON.stringify(green));
+      const killed=settle({criterionId:NEW,command:"sleep 600",exitCode:1,
+        output:"[check timed out after 120000ms]",durationMs:120000,infraFailed:true});
+      A(killed!==undefined&&killed.pass!==true&&killed.infraFailed===true,
+        "WP-609 regression: a cap-killed suite is neither green nor a plain code red, got "+
+        JSON.stringify(killed));
+
+      // 6. blocking is still not rolling back, and the destructive lever still works.
+      const form=(failIds)=>({criterionResults:[{id:"AC-1",pass:true,justification:"ok"}],
+        rubricResults:rubric.map((r)=>({id:r.id,pass:!failIds.includes(r.id),
+          justification:"scripted"})),concerns:[]});
+      const v=computeVerdict(form([NEW]),{},rubric);
+      A(v.kind!=="ROLLBACK","a failing "+NEW+" must NEVER produce ROLLBACK, got "+
+        JSON.stringify(v));
+      A(String(v.rationale).includes(NEW),"the verdict rationale must NAME the failing item, got "+
+        JSON.stringify(v));
+      A(computeVerdict({criterionResults:[{id:"AC-1",pass:true,justification:"ok"}],
+        rubricResults:STANDING_RUBRIC.map((r)=>({id:r.id,
+          pass:r.id!=="no_secrets_introduced",justification:"scripted"})),concerns:[]},
+        {},STANDING_RUBRIC).kind==="ROLLBACK",
+        "a failing DESTRUCTIVE standing item must still return ROLLBACK (CONTRACTS.md §4 rule 1)");
+
+      console.log("AC-1 OK: the suite item is machine-settled and non-destructive but belongs to "+
+        "no default rubric, the override refuses to answer it without evidence, and every WP-609 "+
+        "and WP-607 guarantee still holds");
+      '
+
+  - id: AC-2
+    description: >
+      THE REAL LOOP, THE REAL BRIEF, THE REAL JOURNAL — three live Temporal scenarios written from
+      the repo test infrastructure, reading the brief off the CONTEXT THE EXECUTOR IS HANDED (trap
+      F: a fix delivered to the judge prompt cannot satisfy this). Scenario 1: a run whose declared
+      `regression_suite` exits nonzero after printing a unique marker, with the scripted judge
+      answering every item ✓ — the repair step the loop grants must receive a brief that CONTAINS
+      that marker (F-319 evidence), does NOT carry the design-only instruction (trap A), and names
+      the failing item (trap E); the run must not seal SUCCESS, must open no ROLLBACK, must keep its
+      files, must reach terminal unattended, and the command must run no more than twice (WP-609).
+      Scenario 2: the identical run with a command that exits 0 seals SUCCESS having run it EXACTLY
+      once, and NO per-step verdict carries the suite row — only the completion review does (trap D
+      plus the F-321 fix at the pass level). Scenario 3: a run that declares NO suite, driven to a
+      DESIGN finding — its repair brief must still carry the design-only instruction (trap B) and no
+      journaled verdict anywhere may carry the suite row (F-321). The generated file is removed by
+      the check.
+    check: |
+      cd packages/sdk-ts && pnpm run typecheck && node --input-type=module -e '
+      import {writeFileSync,rmSync} from "node:fs";
+      import {spawnSync} from "node:child_process";
+      import {join} from "node:path";
+      const A=(c,m)=>{if(!c){console.error("FAIL: "+m);process.exit(1);}};
+      const target=join(process.cwd(),"test/runner/ac2-repair-brief.generated.test.ts");
+      // Written and removed by THIS check; a leftover from a killed run is stale, not state.
+      rmSync(target,{force:true});
+      const SRC=`
+      import { randomUUID } from "node:crypto";
+      import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+      import { tmpdir } from "node:os";
+      import { dirname, join } from "node:path";
+      import { afterEach, describe, expect, inject, test } from "vitest";
+      import {
+        createRunnerWorker, createTemporalRunner, Journal, journalPath, STANDING_RUBRIC,
+        COMPLETION_REVIEW_RUBRIC, RUBRIC_PRE_EXISTING_SUITE_GREEN,
+        type AdapterRegistry, type JudgeForm, type RunStatusReport,
+      } from "../../src/index.js";
+      import {
+        initSourceRepo, makeJudgedSpec, startFakeJudgeWire, TERMINAL_STATUSES, waitFor,
+      } from "./helpers.js";
+
+      const address = inject("temporalAddress");
+      const bundlePath = inject("workflowBundlePath");
+      const DESIGN_ONLY = /only design/i;
+
+      // A marker file the declared command appends to, so executions are COUNTED from
+      // outside the run — WP-609 trap B answered by evidence, not by a mock. The failing
+      // text is CATted from a file rather than echoed: the justification already quotes the
+      // command verbatim, so a token spelled inside the command would appear in the brief
+      // without a single byte of OUTPUT having been carried (measured while arming).
+      function countingCommand(
+        markerPath: string, printPath: string | undefined, exitCode: number,
+      ): string {
+        const print = printPath === undefined ? "" : "cat " + printPath + "; ";
+        return "echo x >> " + markerPath + "; " + print + "exit " + exitCode;
+      }
+
+      // The adapter records the brief it was HANDED — the real consumer of the repair
+      // instruction, and the only place a fix delivered to the judge prompt would not show up.
+      function writingRegistry(seen: string[]): AdapterRegistry {
+        return {
+          scripted: (ctx) => ({
+            name: "scripted",
+            modelFamily: "anthropic" as const,
+            async runStep(input) {
+              seen.push(input.context.judgeFeedback ?? "");
+              const file = join(input.workspaceDir, "src/feature.ts");
+              await mkdir(dirname(file), { recursive: true });
+              await writeFile(file, "export const feature = 1;\\n");
+              const [diffRef, transcriptRef] = await Promise.all([
+                ctx.store.put("adapter diff", { kind: "diff", summary: "adapter diff" }),
+                ctx.store.put("adapter transcript", { kind: "transcript", summary: "t" }),
+              ]);
+              return {
+                status: "SUCCESS" as const, diffRef, transcriptRef,
+                claimsComplete: true,
+                summary: "wrote src/feature.ts",
+                toolCalls: 1, tokens: { input: 100, output: 50 },
+                costUsd: 0.01, costEstimated: false, durationMs: 0,
+              };
+            },
+          }),
+        };
+      }
+
+      // Every item answered PASS on purpose — including the suite row — so only a delivery
+      // that lets the COMMAND settle it can fail the run.
+      const stepForm = (acPass: boolean): JudgeForm => ({
+        criterionResults: [{ id: "AC-1", pass: acPass, justification: "scripted judge" }],
+        rubricResults: [
+          ...STANDING_RUBRIC.map((r) => ({
+            id: r.id, pass: true, justification: "scripted — the model says this is fine",
+          })),
+          { id: RUBRIC_PRE_EXISTING_SUITE_GREEN, pass: true, justification: "model says fine" },
+        ],
+        concerns: [],
+      });
+      const reviewForm = (designPass: boolean): JudgeForm => ({
+        criterionResults: [],
+        rubricResults: [
+          ...COMPLETION_REVIEW_RUBRIC.map((r) => ({
+            id: r.id,
+            pass: r.id === "design_serves_overall_goal" ? designPass : true,
+            justification: "scripted review",
+          })),
+          { id: RUBRIC_PRE_EXISTING_SUITE_GREEN, pass: true, justification: "model says fine" },
+        ],
+        concerns: [],
+      });
+
+      describe.skipIf(address === null)("AC-2 — the repair brief and the honest rubric", () => {
+        const cleanups: Array<() => Promise<void>> = [];
+        afterEach(async () => { while (cleanups.length > 0) await cleanups.pop()!(); });
+
+        async function runOne(
+          command: string | undefined, designPass: boolean,
+        ) {
+          const seen: string[] = [];
+          const wire = await startFakeJudgeWire(
+            [stepForm(false), stepForm(true), stepForm(true), stepForm(true)],
+            { reviewForms: [reviewForm(designPass), reviewForm(designPass)] },
+          );
+          cleanups.push(() => wire.close());
+          const tmp = await mkdtemp(join(tmpdir(), "ac2-brief-"));
+          cleanups.push(() => rm(tmp, { recursive: true, force: true }));
+          const repoUrl = await initSourceRepo(join(tmp, "src"), {});
+          const dataDir = join(tmp, "data");
+          const taskQueue = "tq-" + randomUUID();
+          const worker = await createRunnerWorker({
+            adapters: writingRegistry(seen), address: address!, taskQueue, dataDir,
+            workflowBundlePath: bundlePath!,
+            routerOptions: { baseUrls: { "openai-compat": wire.url } },
+          });
+          const workerDone = worker.run();
+          const runner = createTemporalRunner({ address: address!, taskQueue, dataDir });
+          cleanups.push(async () => {
+            worker.shutdown(); await workerDone; await runner.close();
+          });
+          const spec = {
+            ...makeJudgedSpec({ repoUrl, cadence: 1, maxSteps: 4 }),
+            ...(command === undefined ? {} : { regressionSuite: command }),
+          } as unknown as Parameters<typeof runner.start>[0];
+          const handle = await runner.start(spec);
+          const report = await waitFor(async () => {
+            const r: RunStatusReport = await handle.status();
+            return TERMINAL_STATUSES.includes(r.status) ? r : undefined;
+          }, { what: "terminal status", timeoutMs: 120_000, intervalMs: 1000 });
+          const j = new Journal(journalPath(dataDir, handle.runId));
+          let entries: { verdicts: string[]; steps: number };
+          try {
+            entries = {
+              verdicts: j.entries("verdict").map((e) => JSON.stringify(e.payload)),
+              steps: j.entries("step").length,
+            };
+          } finally { j.close(); }
+          return { report, ...entries, seen, runId: handle.runId, dataDir };
+        }
+
+        test("scenario 1 — a RED suite briefs the repair with the failing output, not a design note", async () => {
+          const tmp = await mkdtemp(join(tmpdir(), "ac2-marker-"));
+          cleanups.push(() => rm(tmp, { recursive: true, force: true }));
+          const marker = join(tmp, "runs.txt");
+          const token = "SUITEFAIL" + randomUUID().replace(/-/g, "");
+          // The token lives ONLY in the command OUTPUT — never in the command string,
+          // which the justification already quotes.
+          const failFile = join(tmp, "suite-output.txt");
+          await writeFile(
+            failFile, "FAILED test/widget.test.ts > it does the thing\\n" + token + "\\n");
+          const r = await runOne(countingCommand(marker, failFile, 1), true);
+
+          const briefs = r.seen.filter((b) => b.length > 0);
+          const carrying = briefs.filter((b) => b.includes(token));
+          // F-319: the repair must SEE what broke — the command output, not just its exit code.
+          expect(carrying.length).toBeGreaterThan(0);
+          // trap A: a repair for broken tests must not be told to change only the design.
+          for (const brief of carrying) expect(DESIGN_ONLY.test(brief)).toBe(false);
+          // trap E: the finding itself survives alongside the excerpt.
+          for (const brief of carrying) {
+            expect(brief).toContain(RUBRIC_PRE_EXISTING_SUITE_GREEN);
+          }
+          // WP-609 must still hold, in full.
+          expect(r.report.status).not.toBe("SUCCESS");
+          expect(TERMINAL_STATUSES).toContain(r.report.status);
+          expect(r.verdicts.some((v) => v.includes("\\"ROLLBACK\\""))).toBe(false);
+          expect(r.steps).toBeGreaterThan(1);
+          const kept = await readFile(
+            join(r.dataDir, "runs", r.runId, "workspace", "src", "feature.ts"), "utf8");
+          expect(kept).toContain("feature");
+          const runs = (await readFile(marker, "utf8")).trim().split("\\n").filter(Boolean);
+          expect(runs.length).toBeGreaterThanOrEqual(1);
+          expect(runs.length).toBeLessThanOrEqual(2);
+        }, 240_000);
+
+        test("scenario 2 — a GREEN suite seals SUCCESS, runs once, and scores the row only at the review", async () => {
+          const tmp = await mkdtemp(join(tmpdir(), "ac2-marker-"));
+          cleanups.push(() => rm(tmp, { recursive: true, force: true }));
+          const marker = join(tmp, "runs.txt");
+          const r = await runOne(countingCommand(marker, undefined, 0), true);
+          expect(r.report.status).toBe("SUCCESS");
+          expect(r.steps).toBeGreaterThan(1);
+          const runs = (await readFile(marker, "utf8")).trim().split("\\n").filter(Boolean);
+          expect(runs).toHaveLength(1);
+          // The row is scored exactly where the command ran: once, at the completion review.
+          const scored = r.verdicts.filter((v) => v.includes(RUBRIC_PRE_EXISTING_SUITE_GREEN));
+          expect(scored).toHaveLength(1);
+        }, 240_000);
+
+        test("scenario 3 — no declared suite: a design brief keeps its wording and no row is recorded", async () => {
+          const r = await runOne(undefined, false);
+          expect(r.report.status).toBe("SUCCESS");
+          const briefs = r.seen.filter((b) => b.length > 0);
+          // trap B: the WP-537/F-196 design path must keep exactly its instruction.
+          expect(briefs.some((b) => DESIGN_ONLY.test(b))).toBe(true);
+          // F-321: nothing measured the suite, so nothing may claim it is green.
+          for (const v of r.verdicts) {
+            expect(v).not.toContain(RUBRIC_PRE_EXISTING_SUITE_GREEN);
+          }
+        }, 240_000);
+
+      });
+      `;
+      writeFileSync(target, SRC);
+      const res=spawnSync("pnpm",["exec","vitest","run",
+        "test/runner/ac2-repair-brief.generated.test.ts"],{stdio:"inherit"});
+      // Clean up BEFORE asserting — A() exits the process, which would skip a finally
+      // block and leave the generated file behind to poison the next pass.
+      rmSync(target,{force:true});
+      A(res.status===0,
+        "trap F: these scenarios read the brief off the CONTEXT THE EXECUTOR IS HANDED and the "+
+        "rows off the REAL journal of a REAL Temporal run — a fix delivered to the judge prompt, "+
+        "or a rubric row nothing measured, cannot satisfy them. vitest exited "+res.status);
+      console.log("AC-2 OK: a red suite briefs the repair with its own failing output and without "+
+        "the design-only instruction, a green one still seals SUCCESS with exactly one execution "+
+        "and one scored row, and a run with no declared suite records no row at all");
+      '
+
+budget_usd: 20
+max_steps: 6
+
+agent_classes:
+  executor: executor-default
+  judge: judge-default
+
+judge:
+  cadence: 1
+
+# F-322 (dogfood-135): a converged out-of-rubric escalation — every criterion and every rubric item
+# passing — auto-seals SUCCESS with this policy present, instead of parking overnight for a human.
+unattended:
+  escalation: seal_resumable_failed

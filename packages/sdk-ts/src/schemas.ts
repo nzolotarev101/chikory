@@ -255,6 +255,7 @@ export const TaskSpecSchema = z
     budgetUsd: z.number().gt(0),
     budgetTokens: z.number().int().positive().optional(),
     maxSteps: z.number().int().positive().optional(),
+    regressionSuite: z.string().min(1).optional(),
     minNodes: z.number().int().positive().optional(),
     maxRejectStrikes: z.number().int().nonnegative().optional(),
     chain: z

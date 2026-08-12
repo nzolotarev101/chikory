@@ -26,7 +26,7 @@ import {
   type EvidenceWorkspaceRepo,
 } from "./evidence.js";
 import { buildJudgeMessages, JUDGE_FORM_RESPONSE_SCHEMA } from "./prompt.js";
-import { RUBRIC_TESTS_PASS, STANDING_RUBRIC, type RubricItem } from "./rubric.js";
+import { RUBRIC_PRE_EXISTING_SUITE_GREEN, RUBRIC_TESTS_PASS, STANDING_RUBRIC, type RubricItem } from "./rubric.js";
 import { computeVerdict } from "./verdict.js";
 
 const ZERO_TOKENS: TokenUsage = { input: 0, output: 0 };
@@ -110,6 +110,7 @@ export function applyCheckOverrides(
   checkRuns: CheckRun[],
   architectureLabels: string[] = [],
   secretScanLabels: string[] = [],
+  regressionSuiteRun?: CheckRun | null,
 ): { form: JudgeForm } | { error: string } {
   const llmCriteria = new Map(form.criterionResults.map((r) => [r.id, r]));
   const llmRubric = new Map(form.rubricResults.map((r) => [r.id, r]));
@@ -196,6 +197,26 @@ export function applyCheckOverrides(
       });
       continue;
     }
+    if (item.id === RUBRIC_PRE_EXISTING_SUITE_GREEN) {
+      if (regressionSuiteRun) {
+        const pass = regressionSuiteRun.exitCode === 0 && !regressionSuiteRun.infraFailed;
+        rubricResults.push({
+          id: item.id,
+          pass,
+          justification: regressionSuiteRun.infraFailed
+            ? `regression suite command \`${regressionSuiteRun.command}\` DID NOT COMPLETE (killed at the per-check cap) — infra failure, not a code red`
+            : `regression suite command \`${regressionSuiteRun.command}\` exited ${regressionSuiteRun.exitCode}`,
+          ...(regressionSuiteRun.infraFailed ? { infraFailed: true } : {}),
+        });
+      } else {
+        rubricResults.push({
+          id: item.id,
+          pass: true,
+          justification: "no regression suite command executed for this pass",
+        });
+      }
+      continue;
+    }
     rubricResults.push(llm);
   }
 
@@ -248,6 +269,7 @@ export interface RunJudgePassInput {
   /** "cumulative" marks the run-completion review over the whole-run diff. */
   reviewScope?: "incremental" | "cumulative";
   checkTimeoutMs?: number;
+  regressionSuite?: string;
 }
 
 export interface JudgePassResult {
@@ -269,6 +291,7 @@ export async function runJudgePass(input: RunJudgePassInput): Promise<JudgePassR
     criteriaHistory: input.criteriaHistory,
     stepSummaries: input.stepSummaries,
     checkTimeoutMs: input.checkTimeoutMs,
+    ...(input.regressionSuite ? { regressionSuite: input.regressionSuite } : {}),
   });
 
   const result = await input.router.complete({
@@ -332,6 +355,7 @@ export async function runJudgePass(input: RunJudgePassInput): Promise<JudgePassR
     collected.checkRuns,
     collected.architectureLabels,
     collected.secretScanLabels,
+    collected.regressionSuiteRun,
   );
   if ("error" in overridden) {
     return {

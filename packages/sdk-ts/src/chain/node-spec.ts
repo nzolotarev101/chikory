@@ -115,6 +115,7 @@ export const CHAIN_TEMPLATE_FIELDS = {
     "soak",
     "notifications",
     "horizon",
+    "regressionSuite",
   ],
   /**
    * Deliberately not forwarded, each for a stated reason:
@@ -166,6 +167,7 @@ const OPTIONAL_TEMPLATE_FIELDS = [
   "horizon",
   "budgetTokens",
   "maxSteps",
+  "regressionSuite",
 ] as const;
 
 /**

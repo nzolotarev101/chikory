@@ -15,10 +15,20 @@ export const RUBRIC_TESTS_PASS = "tests_pass";
 /** Rubric id for the big-picture design-quality judgment. */
 export const RUBRIC_DESIGN_SERVES_OVERALL_GOAL = "design_serves_overall_goal";
 
+/** Rubric id for the machine-settled pre-existing test suite status. */
+export const RUBRIC_PRE_EXISTING_SUITE_GREEN = "pre_existing_suite_still_green";
+
+export const RUBRIC_PRE_EXISTING_SUITE_GREEN_ITEM: RubricItem = {
+  id: RUBRIC_PRE_EXISTING_SUITE_GREEN,
+  description: "The pre-existing suite is still green.",
+  destructive: false,
+};
+
 /** Rubric ids whose answer is settled deterministically by scan code, not model opinion. */
 export const DETERMINISTIC_RUBRIC_IDS: ReadonlySet<string> = new Set([
   "no_architecture_violations",
   "no_secrets_introduced",
+  RUBRIC_PRE_EXISTING_SUITE_GREEN,
 ]);
 
 export const STANDING_RUBRIC: RubricItem[] = [
@@ -51,6 +61,7 @@ export const STANDING_RUBRIC: RubricItem[] = [
       "dependencies introduced by added diff lines.",
     destructive: false,
   },
+  RUBRIC_PRE_EXISTING_SUITE_GREEN_ITEM,
   {
     id: "scope_matches_instruction",
     description:
@@ -82,6 +93,7 @@ export const RUBRIC_CUMULATIVE_DESIGN_COHERENT = "cumulative_design_coherent";
  */
 export const COMPLETION_REVIEW_RUBRIC: RubricItem[] = [
   STANDING_RUBRIC.find((r) => r.id === "no_architecture_violations")!,
+  STANDING_RUBRIC.find((r) => r.id === RUBRIC_PRE_EXISTING_SUITE_GREEN)!,
   STANDING_RUBRIC.find((r) => r.id === RUBRIC_DESIGN_SERVES_OVERALL_GOAL)!,
   {
     id: RUBRIC_CUMULATIVE_DESIGN_COHERENT,

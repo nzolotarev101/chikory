@@ -1059,6 +1059,7 @@ export async function agentLoop(spec: TaskSpec): Promise<RunStatus> {
             baseCommit,
             reviewAttemptsUsed: completionReviewAttempts,
             sealingVerdictHasRubricFailures,
+            hasRegressionSuite: Boolean(spec.regressionSuite),
           });
           if (review.action === "review") {
             completionReviewAttempts += 1;
@@ -1086,6 +1087,7 @@ export async function agentLoop(spec: TaskSpec): Promise<RunStatus> {
                   baseCommit,
                   reviewAttemptsUsed: completionReviewAttempts,
                   sealingVerdictHasRubricFailures: true,
+                  hasRegressionSuite: Boolean(spec.regressionSuite),
                 }).action === "review" && stepIndex < maxSteps;
               if (canRetry) {
                 judgeFeedback = buildCompletionReviewBrief({

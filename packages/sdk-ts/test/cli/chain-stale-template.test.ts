@@ -67,6 +67,7 @@ const COMPLETE_TEMPLATE = {
   soak: { minWallClockHours: 1 },
   notifications: { onEscalation: [] },
   horizon: { targetSteps: 30 },
+  regressionSuite: "pnpm run test",
 };
 
 describe("templateGaps (F-220)", () => {
@@ -80,6 +81,7 @@ describe("templateGaps (F-220)", () => {
       "notifications",
       "horizon",
       "budgetTokens",
+      "regressionSuite",
     ]);
   });
 

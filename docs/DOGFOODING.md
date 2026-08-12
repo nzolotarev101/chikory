@@ -5,17 +5,16 @@ This is the complete operating manual for executing Phase 2+ work packages
 task spec for a WP (every field explained), how to launch, supervise, and
 recover a run, and how to land the result as a normal PR.
 
-**Status (2026-08-10, bounded — update discipline: REPLACE this block, ≤15 lines;
+**Status (2026-08-12, bounded — update discipline: REPLACE this block, ≤15 lines;
 displaced prose moves verbatim to [`PLAN-HISTORY.md`](PLAN-HISTORY.md); per-run detail:
 `docs/reports/`; queue + course correction: `plan.md` §6/§7).**
-**Status (2026-08-11, bounded — update discipline: REPLACE this block, ≤15 lines;
-displaced prose moves verbatim to [`PLAN-HISTORY.md`](PLAN-HISTORY.md); per-run detail:
-`docs/reports/`; queue + course correction: `plan.md` §6/§7).**
-🟢 **dogfood-134 / WP-607 (a rubric item whose evidence is DETERMINISTIC must gate the seal) DELIVERED** — `run-74602888-a3eb-4da5-8ba3-b04b8e9a98a3`, SUCCESS 1 step, $0.0499/$20.00, 4m 25s, 2/2 criteria (`docs/reports/dogfood-134.md`).
+🟢 **dogfood-135 / WP-609 (the suite is an oracle, not a sentence) DELIVERED** — `run-908510d8-d90d-4711-a88f-39ea7bf6482e`, SUCCESS 4 steps, $0.2512/$20.00, 18m 47s active, 2/2 criteria (`docs/reports/dogfood-135.md`).
 
-**A defect the machine can PROVE now stops the run from claiming success.** `DETERMINISTIC_RUBRIC_IDS` names the two scan-backed rubric items; their answer is derived from the scan output, not the model's opinion; and one still live after the single bounded repair seals **FAILED**. It blocks WITHOUT rolling back — the item stays non-destructive, no ROLLBACK opens, the files stay on disk and the run terminates unattended. Closes dogfood-133's F-310, where the judge proved a `core→judge` breach at 3 of 5 passes and the run shipped it green.
+**A spec can now name the command that runs the repository's existing tests, and a red result stops the run from claiming success.** Add `regression_suite: <command>` to a spec: it runs ONCE at the run-completion review (never per-step, at most twice with the bounded repair), and `pre_existing_suite_still_green` is settled from its EXIT CODE, never the model's answer. A red suite blocks the SUCCESS seal WITHOUT rolling back — the work stays on disk and the run still terminates unattended. This closes dogfood-134's F-316, where a step summary claimed a green suite over a repository that was red in 6 tests.
 
-**Read this before the next launch — `tests_pass` does NOT mean the suite is green (🔴 F-316 → WP-609).** This run's step summary claimed *"The full test suite, type-checker and linter have passed cleanly"*; its own evidence block listed only typecheck, lint, build and 5 tests in one new file. The suite was RED in 6 tests across 3 files, including the executor's own new file (3/3 failing, 2 of them structurally impossible). Nothing caught it: `tests_pass` is JD-4-overridden from the judge-executed ACs and means *"the acceptance checks exited 0"*; a diff-only judge cannot see a test broken in a file the delivery never touched; and no AC owned the constraint. **Run `devbox run test` yourself before believing any summary that claims a green suite** — `dogfood-close.sh` will refuse the commit regardless, but the review is where you find out why.
+**Read this before the next launch — three live caveats.** ① The row means the repository is green **only on a run whose spec declares `regression_suite:`**; everywhere else it records a placeholder ✓ reading *"no regression suite command executed for this pass"* (🟡 F-321 → WP-613). Read the justification, not the checkmark. ② A suite killed at the fixed 120 s per-check cap seals the run **FAILED**, not "infra died" (🟡 F-320 → WP-612) — time your suite before declaring it (`devbox run test` ≈ 68 s at HEAD, sdk-ts alone 50.7 s). ③ The one bounded repair a red suite grants is briefed *"do NOT change behavior, only design"* and names no failing test (🟡 F-319 → WP-611), so expect it to be wasted until that lands.
+
+**Put `unattended: escalation: seal_resumable_failed` in every headline spec (🟡 F-322).** dogfood-135 omitted it and parked **11h 59m** in `AWAITING_APPROVAL` on an escalation where every criterion and every rubric item passed — a state the loop auto-seals SUCCESS when the block is present. `chikory approve <run-id>` seals it at $0 if you find one parked.
 
 Related docs: [`docs/spec/task-spec.md`](spec/task-spec.md) (schema
 reference) · [`docs/TASK-PROTOCOL.md`](TASK-PROTOCOL.md) (WP etiquette, §7 is
@@ -529,6 +528,22 @@ backend: a Gemini model id for the `gemini` backend, etc.).
 
 `pacing` (WP-207) and `notifications` (WP-208) parse but do nothing yet.
 
+### 3.10 `regression_suite` (optional — WP-609, landed dogfood-135)
+
+```yaml
+regression_suite: pnpm --filter @chikory/sdk exec vitest run
+```
+
+The repository's own verification command. It runs ONCE at the run-completion
+review (never per-step; at most twice with the bounded repair), and settles the
+machine-settled rubric item `pre_existing_suite_still_green` from its EXIT CODE —
+so a delivery that breaks a test the repo already had cannot seal SUCCESS. Red
+blocks the seal **without** rolling back (the work stays on disk, terminal state
+still reached unattended). Full field reference, caps and caveats:
+[`docs/spec/task-spec.md`](spec/task-spec.md) § `regression_suite`. Time your
+command first — the per-check cap is a fixed 120 s and a kill still fails the run
+(🟡 F-320).
+
 ## 4. Launch checklist
 
 ```sh
@@ -844,6 +859,8 @@ broken (a false-green, not a follow-on fix).
 | A run sealed 🟢 `SUCCESS` but the seal rationale reads `completion review: design findings recorded — no_architecture_violations, …` | **That is not a clean run — the judge proved a defect and the gate shipped it anyway** (🔴 **F-310** → **WP-607**, dogfood-133). `no_architecture_violations` is scored from a DETERMINISTIC scan (`src/judge/scan-layering.ts:93`), but it is a non-destructive rubric item, so `agent-loop.ts:1099-1105` grants ONE bounded fix step and then seals SUCCESS **whether or not the retry cleared it**. On `run-83bf691d` a real forbidden `core→judge` import failed the item at 3 of 5 passes including the FINAL review and landed on disk. **Always read the seal rationale, and re-run the scan yourself** over `git diff HEAD` before believing a green. |
 | A step is journaled `SUCCESS` with a **0-byte diff** and a summary ending *"Please review this plan. Would you like me to proceed?"* | **The executor is asking an approver who does not exist** (🔴 **F-311** → **WP-608**, dogfood-133). The loop has no notion of a step that ends in a question: it journals the summary, the judge sees an empty diff, scores the rubric clean and PROCEEDs. On `run-83bf691d` this burned 2 of 3 steps and — worse — consumed the single bounded remediation step the WP-537/F-180 gate had granted, on a plan that named the correct fix and never applied it. **Check `diff · 0 bytes` on every step before trusting a step count.** |
 | A step summary pastes a `vitest`/typecheck log that green-lights files you do not recognise, or the executor's verification table cites a suite size you cannot reproduce | **The CLI replayed a task log from a DIFFERENT session, and the executor transcribed it as this run's evidence** (🔴 **F-312**, envelope hand-fixed dogfood-133). On `run-83bf691d` the summary carried two `<gmsg name="task_notification">` blocks (48.0% of 6,917 bytes) whose "558/558 tests across 46 test files" named **17 files that do not exist** — the workspace holds 174. Only JD-4 (judge-executed checks override the model's `tests_pass`) kept it out of the acceptance path. Both envelope forms are now stripped (`src/executors/gemini-cli.ts:51,61`), but the transcription into prose is not. **Never let a gate rest on what the executor says it ran — re-run the suite yourself.** |
+| A run you expected to finish is sitting in `AWAITING_APPROVAL`, its last verdict `⚠ ESCALATE`, and the judge form shows every criterion AND every rubric item ✓ | **A converged out-of-rubric escalation with no unattended policy** (🟡 F-322, dogfood-135 — parked **11h 59m 31s** overnight). `agent-loop.ts:1213-1224` auto-seals SUCCESS for exactly this state, but only when the spec carries `unattended:` / `escalation: seal_resumable_failed`; dogfood-135's spec omitted it. **Fix now:** `devbox run -- pnpm chikory approve <run-id>` — with all criteria passing, the approve path force-seals SUCCESS at $0 without re-judging (`agent-loop.ts:1252-1258`). Do NOT `--reject`: that routes to heal and spends a strike on a delivery the judge already scored green. **Fix forever:** put the two-line `unattended:` block in every headline spec (dogfood-126/128 have it). Before approving, verify the concern yourself — dogfood-135's escalation ("the full-suite/build/lint claim appears only in the executor's untrusted step summary") was formally right and factually wrong; the hand re-run was 174 files / 1342 tests green. |
+| A run seals `FAILED — completion review: deterministic rubric failure — pre_existing_suite_still_green`, but the same suite passes when you run it by hand | **Your declared `regression_suite` was KILLED at the per-check cap, not red** (🟡 F-320 → WP-612, dogfood-135). The rubric justification distinguishes them — a kill reads *"DID NOT COMPLETE (killed at the per-check cap) — infra failure, not a code red"* — but the seal does not: the WP-263(b) infra-skip covers CRITERION rows only (`src/judge/verdict.ts:101`), so an `infraFailed` rubric row still reaches `deterministicFails` (`src/workflow/agent-loop.ts:1108,1127`). The cap is fixed at `DEFAULT_CHECK_TIMEOUT_MS = 120_000` (`src/judge/evidence.ts:37`) and **is not spec-settable**. Declare the narrowest suite that still proves the repository green (sdk-ts alone ≈ 50.7 s; the full `devbox run test` ≈ 68 s, leaving little headroom on a loaded machine). |
 
 ## 8. Known P1 limitations (so you don't fight them)
 
