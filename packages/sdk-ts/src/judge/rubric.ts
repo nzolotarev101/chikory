@@ -15,6 +15,12 @@ export const RUBRIC_TESTS_PASS = "tests_pass";
 /** Rubric id for the big-picture design-quality judgment. */
 export const RUBRIC_DESIGN_SERVES_OVERALL_GOAL = "design_serves_overall_goal";
 
+/** Rubric ids whose answer is settled deterministically by scan code, not model opinion. */
+export const DETERMINISTIC_RUBRIC_IDS: ReadonlySet<string> = new Set([
+  "no_architecture_violations",
+  "no_secrets_introduced",
+]);
+
 export const STANDING_RUBRIC: RubricItem[] = [
   {
     id: RUBRIC_TESTS_PASS,

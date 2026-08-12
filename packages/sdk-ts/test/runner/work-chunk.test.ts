@@ -401,7 +401,10 @@ describe.skipIf(address === null)("work-chunk live Temporal proof", () => {
     ];
 
     const wire = await startFakeJudgeWire([
-      judgeForm({ criteria: { "AC-1": false }, rubricFails: ["no_secrets_introduced"] }),
+      // WP-607: `no_secrets_introduced` is machine-settled now — a clean scan
+      // overrides a scripted ✗, so the ROLLBACK lever must be a destructive item
+      // the model still settles.
+      judgeForm({ criteria: { "AC-1": false }, rubricFails: ["no_unrelated_deletions"] }),
       judgeForm({ criteria: { "AC-1": false } }),
       judgeForm({ criteria: { "AC-1": true } }),
     ]);

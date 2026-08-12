@@ -141,7 +141,10 @@ describe.skipIf(address === null)("verdict gating (WP-132)", () => {
   test("ROLLBACK with no PROCEED yet restores the run base; loop continues to SUCCESS", async () => {
     const wire = await startFakeJudgeWire([
       // pass 1: destructive rubric fail → ROLLBACK to <runId>@base.
-      judgeForm({ criteria: { "AC-1": false }, rubricFails: ["no_secrets_introduced"] }),
+      // WP-607: the lever must be a destructive item the MODEL still settles.
+      // `no_secrets_introduced` is now in DETERMINISTIC_RUBRIC_IDS, so the scan
+      // (clean here) overrides the scripted ✗ and no ROLLBACK would ever open.
+      judgeForm({ criteria: { "AC-1": false }, rubricFails: ["no_unrelated_deletions"] }),
       // pass 2: clean, criteria confirmed → PROCEED → SUCCESS.
       judgeForm({ criteria: { "AC-1": true } }),
     ]);
@@ -512,7 +515,7 @@ describe.skipIf(address === null)("verdict gating (WP-132)", () => {
     expect(architectureLabels).toEqual(["judge→runner"]);
 
     const violatingWire = await startFakeJudgeWire([judgeForm({ criteria: { "AC-1": true } })]);
-    const { handle: violatingHandle } = await run(violatingWire, {
+    const { dataDir: violatingDataDir, handle: violatingHandle } = await run(violatingWire, {
       maxSteps: 1,
       debug: {
         seedBadDiff: {
@@ -524,8 +527,20 @@ describe.skipIf(address === null)("verdict gating (WP-132)", () => {
     });
     const violatingReport = await awaitTerminal(violatingHandle);
 
-    expect(violatingReport.status).toBe("SUCCESS");
-    expect(violatingWire.requests).toHaveLength(1);
+    // WP-607: the label no longer only DECORATES the prompt — a machine-settled
+    // architecture failure that survives the bounded repair now blocks the seal.
+    // Before WP-607 this same run sealed SUCCESS with the breach on disk.
+    expect(violatingReport.status).toBe("FAILED");
+    const violatingJournal = new Journal(journalPath(violatingDataDir, violatingHandle.runId));
+    try {
+      const terminal = violatingJournal.entries("terminal").at(-1)!.payload as { reason?: string };
+      expect(terminal.reason).toContain("no_architecture_violations");
+    } finally {
+      violatingJournal.close();
+    }
+    // Two passes now: the step judge pass, then the completion review the
+    // machine-settled failure triggers before the gate seals FAILED.
+    expect(violatingWire.requests).toHaveLength(2);
     expect(architectureSection(judgeUserContent(violatingWire.requests[0]!))).toBe(
       "- judge→runner",
     );

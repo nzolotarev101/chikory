@@ -76,6 +76,7 @@ import {
 import { decideRejection, DEFAULT_MAX_REJECTION_STRIKES } from "./rejection.js";
 import { decideHealRollback } from "./heal-rollback.js";
 import { hasDestructiveRubricFailure } from "../judge/verdict.js";
+import { DETERMINISTIC_RUBRIC_IDS } from "../judge/rubric.js";
 
 import {
   buildCompletionReviewBrief,
@@ -1096,6 +1097,17 @@ export async function agentLoop(spec: TaskSpec): Promise<RunStatus> {
                 if (soakTerminal !== undefined) return soakTerminal;
                 continue;
               }
+              const deterministicFails = designFails.filter((f) =>
+                DETERMINISTIC_RUBRIC_IDS.has(f.id),
+              );
+              if (deterministicFails.length > 0) {
+                return seal(
+                  "FAILED",
+                  `completion review: deterministic rubric failure — ${deterministicFails
+                    .map((fail) => fail.id)
+                    .join(", ")}`,
+                );
+              }
               return seal(
                 "SUCCESS",
                 `completion review: design findings recorded — ${designFails
@@ -1103,6 +1115,24 @@ export async function agentLoop(spec: TaskSpec): Promise<RunStatus> {
                   .join(", ")}`,
               );
             }
+          } else if (sealingRubricFails.length > 0) {
+            const deterministicFails = sealingRubricFails.filter((f) =>
+              DETERMINISTIC_RUBRIC_IDS.has(f.id),
+            );
+            if (deterministicFails.length > 0) {
+              return seal(
+                "FAILED",
+                `completion review: deterministic rubric failure — ${deterministicFails
+                  .map((fail) => fail.id)
+                  .join(", ")}`,
+              );
+            }
+            return seal(
+              "SUCCESS",
+              `completion review: design findings recorded — ${sealingRubricFails
+                .map((fail) => fail.id)
+                .join(", ")}`,
+            );
           }
           return seal("SUCCESS");
         }

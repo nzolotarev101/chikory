@@ -303,8 +303,8 @@ describe("runJudgePass (WP-131)", () => {
       ...allPassForm,
       rubricResults: STANDING_RUBRIC.map((r) => ({
         id: r.id,
-        pass: r.id !== "no_secrets_introduced",
-        justification: r.id === "no_secrets_introduced" ? "API key in diff" : "clean",
+        pass: r.id !== "no_unrelated_deletions",
+        justification: r.id === "no_unrelated_deletions" ? "gutted tests" : "clean",
       })),
     };
     fake.setHandler((_req, res) => {

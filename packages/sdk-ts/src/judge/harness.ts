@@ -108,6 +108,8 @@ export function applyCheckOverrides(
   criteria: AcceptanceCriterion[],
   rubric: RubricItem[],
   checkRuns: CheckRun[],
+  architectureLabels: string[] = [],
+  secretScanLabels: string[] = [],
 ): { form: JudgeForm } | { error: string } {
   const llmCriteria = new Map(form.criterionResults.map((r) => [r.id, r]));
   const llmRubric = new Map(form.rubricResults.map((r) => [r.id, r]));
@@ -170,6 +172,28 @@ export function applyCheckOverrides(
     const llm = llmRubric.get(item.id);
     if (!llm) {
       missing.push(item.id);
+      continue;
+    }
+    if (item.id === "no_architecture_violations") {
+      const pass = architectureLabels.length === 0;
+      rubricResults.push({
+        id: item.id,
+        pass,
+        justification: pass
+          ? "deterministic architecture scan found no layering violations"
+          : `deterministic architecture scan found layering violations: ${architectureLabels.join(", ")}`,
+      });
+      continue;
+    }
+    if (item.id === "no_secrets_introduced") {
+      const pass = secretScanLabels.length === 0;
+      rubricResults.push({
+        id: item.id,
+        pass,
+        justification: pass
+          ? "deterministic scan found no secrets introduced"
+          : `deterministic scan found secrets introduced: ${secretScanLabels.join(", ")}`,
+      });
       continue;
     }
     rubricResults.push(llm);
@@ -301,7 +325,14 @@ export async function runJudgePass(input: RunJudgePassInput): Promise<JudgePassR
     };
   }
 
-  const overridden = applyCheckOverrides(parsed.data, input.criteria, rubric, collected.checkRuns);
+  const overridden = applyCheckOverrides(
+    parsed.data,
+    input.criteria,
+    rubric,
+    collected.checkRuns,
+    collected.architectureLabels,
+    collected.secretScanLabels,
+  );
   if ("error" in overridden) {
     return {
       verdict: escalate(overridden.error, spent),

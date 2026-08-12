@@ -1,0 +1,481 @@
+# Plain: A run can currently break tests the repo already had and still report success, because
+# "don't break the existing tests" is written as a sentence in the goal and nothing runs it. This
+# run makes that obligation a program: the spec names the repo's own test command, the run executes
+# it once before sealing, and a red result stops the run from claiming success.
+# WP: WP-609 (the suite is an oracle, not a sentence — a delivery that breaks a pre-existing test must not report success)
+# Ladder-rung: 0 (OFF-LADDER by necessity — rung 5 is operator-gated today; see WHY)
+# Thesis-KPI: judge true-positives pre-land — dogfood-134 shipped a delivery that broke 6 tests in
+#   3 files while its own step summary claimed the full suite passed, and every gate in the loop
+#   said green; after this run a red pre-existing suite cannot coexist with a SUCCESS seal
+# Format: loose — the outcome and the public data contract are fixed; the wiring is the executor's
+#
+# Launch mode: RUN (single node — one gate, proven pure and then proven on the real loop).
+#   CHIKORY_PREFLIGHT_ONLY=1 devbox run run-dogfood
+#   devbox run run-dogfood
+#
+# WHY THIS AND NOT THE LADDER RUNG (dogfood-134 review, 2026-08-11):
+#   Progression gate: ⛔ STALLED, which BINDS the next headline to the current phase ladder rung —
+#   P3-rung-5, the phase exit gate. Its two blockers were RE-MEASURED AGAIN this review (not
+#   re-litigated) and both still stand, both OPERATOR work rather than product gaps:
+#     1. `brownfield-001`'s zod v3 → v4 gold patch. MEASURED: `find benchmarks/tasks -name
+#        '*brownfield-001*'` returns ONLY
+#        `benchmarks/tasks/brownfield-001-dependency-major-upgrade.yaml`, and that file declares no
+#        `fix_ref` and no gold artifact (its only status line is `status: pinned`, :24). Upstream
+#        never performed the migration, so there is no commit to name: 3–6 h of operator research.
+#     2. A re-run of BOTH arms so stored per-task results carry `repoRef`. MEASURED:
+#        `grep -rl repoRef benchmarks/results/ | wc -l` = **0**. Hours of quota, and dogfood-122
+#        proved an LLM executor must not supervise a quota-bound multi-hour suite.
+#
+#   This is the FIFTH consecutive off-ladder headline. Its justification is the strongest available:
+#   dogfood-134 is the run that BUILT the deterministic seal gate, and it shipped a red repository
+#   through every gate in the loop while stating in writing that the suite was green. A control
+#   plane that cannot notice its own broken tests cannot publish a reliability number, which is
+#   precisely what rung 5 exists to do. Fixing this is upstream of the ladder, not a detour from it.
+#
+# THE MEASURED PREMISE (re-measure before building; do not re-litigate):
+#   * The defect is real and was measured this review. dogfood-134's delivery
+#     (`run-74602888-a3eb-4da5-8ba3-b04b8e9a98a3`) left `deterministic-rubric-live.test.ts` 3/3
+#     failing plus `verdict-gating.test.ts` and `work-chunk.test.ts` red — 6 tests, 3 files — and
+#     sealed 🟢 SUCCESS, 2/2 criteria, 7/7 rubric.
+#   * `tests_pass` does NOT mean the suite is green, and its name is the trap. `applyCheckOverrides`
+#     (`src/judge/harness.ts:148-171`) rebuilds that row from the JUDGE-EXECUTED acceptance checks;
+#     on dogfood-134 it recorded "all 2 judge-executed checks exited 0", which was TRUE while the
+#     repository was red.
+#   * The judge cannot close this by reading better. It scores the ADDED DIFF; both collateral
+#     failures were in files the delivery never touched. No amount of model quality sees them.
+#   * **The 120 s cap is NOT the blocker — measured, and this corrects the standing assumption.**
+#     `DEFAULT_CHECK_TIMEOUT_MS = 120_000` (`src/judge/evidence.ts:37`), and a full
+#     `devbox run test` (sdk-ts 1341 + harness 209 + py 84) completes in **68 s**, timed at HEAD on
+#     2026-08-11. It FITS, with 43% headroom. The old F-141 note (a full-suite AC dying at the cap)
+#     does not describe this repo today. So the gap is not capacity — it is that nothing OBLIGES the
+#     suite to run.
+#   * The obligation is prose. dogfood-134's goal said, in words, "Every existing test remains
+#     green … run all three, not only the type-checker and the tests." The executor asserted it had
+#     done so and had not. A sentence in a goal is a model judgment; only a program is evidence.
+#   * The gate this needs SHIPPED LAST RUN and should be reused, not rebuilt. `DETERMINISTIC_RUBRIC_IDS`
+#     (`src/judge/rubric.ts:19`) declares the machine-settled ids; `applyCheckOverrides`
+#     (`src/judge/harness.ts:177,188`) derives those rows from evidence instead of the model's
+#     answer; `agent-loop.ts:1100,1119` seals FAILED when one survives the ONE bounded
+#     completion-review repair, WITHOUT rolling back. A new machine-settled item joins that set.
+#   * A spec-declared, schema-round-tripped field has a worked precedent from WP-604:
+#     `judge.rubric_extra` (`src/taskspec.ts:237`, `src/schemas.ts:168`). A contract that crosses
+#     into the workflow must survive `src/schemas.ts`, not only `src/taskspec.ts`.
+#   * The infra-kill discipline already exists and must be honored: `CheckRun.infraFailed` +
+#     WP-263(b) — a check killed at its cap proves the check infrastructure died, not that the code
+#     is red (`src/judge/harness.ts:123-135`).
+#
+# Designed traps — the plausible-but-wrong deliveries the acceptance criteria exist to reject:
+#   A. **Making it an ordinary acceptance criterion.** The one-line "fix": tell spec authors to add
+#      an AC that runs the suite. It fails for the reason the defect exists — an AC is PER-SPEC
+#      OPT-IN, and dogfood-134's author DID state the obligation and nothing ran it. It is also
+#      judged on EVERY per-step pass, multiplying a 68 s suite by the step count, and a failing AC
+#      reads as "not finished yet" (the loop spends more steps) rather than "a regression must block
+#      the seal". AC-1 requires a rubric id in `DETERMINISTIC_RUBRIC_IDS`, not a criterion.
+#   B. **Running it on every judge pass.** The most expensive thing in the loop belongs at the seal.
+#      AC-2 requires the declared command to execute exactly ONCE across a multi-step run.
+#   C. **Laundering an infra kill into green.** A suite killed at its own cap has proven nothing; if
+#      that records `pass: true` the gate is decorative and the F-316 defect survives in a new
+#      costume. AC-2's third scenario runs a command that cannot finish and requires the run NOT to
+#      seal SUCCESS claiming a green suite.
+#   D. **Treating an infra kill as a code red.** The mirror error, and it breaks WP-263(b): a killed
+#      check must be marked `infraFailed` so the stuck-criterion history skips it. AC-2 requires the
+#      journaled evidence to carry the infra flag rather than a plain failure.
+#   E. **Rolling back on a red suite.** `destructive: true` would fire CONTRACTS.md §4 rule 1 and
+#      restore the workspace, destroying good work over a regression that a repair step could fix —
+#      the WP-605 harm and dogfood-134's trap A. AC-1 requires the item to stay non-destructive and
+#      `computeVerdict` to keep returning a NON-ROLLBACK verdict naming it.
+#   F. **A field nothing consults** (the F-283 shape). Parsing `regression_suite` and never running
+#      it is the defect wearing the fix as a costume. AC-2 drives the REAL Temporal workflow to a
+#      REAL terminal state and reads the REAL journal.
+#   G. **Blocking with no repair attempt.** The loop's self-correction premise (WP-519/DX-9) and
+#      dogfood-134's trap F: the run still gets its one bounded completion-review fix step before
+#      anything blocks. AC-2 requires the gated run to have taken it.
+#
+# NOT IN SCOPE: making the field REQUIRED on every spec, or a launcher precheck that refuses a spec
+# without one (track-B, after the mechanism exists); changing `tests_pass` semantics or its JD-4
+# override (`src/judge/harness.ts:148-171` is unchanged — this run ADDS an item, it does not
+# redefine one); `DEFAULT_CHECK_TIMEOUT_MS` itself; `no_secrets_introduced`'s defaulted-label
+# hazard (F-317 → WP-610, a separate run); the executor-asks-permission defect (F-311 → WP-608).
+
+name: dogfood-135-wp609-regression-suite-gate
+wp: WP-609
+goal: >
+  A delivery that breaks a test the repository already had must not be able to report success.
+
+  Today that obligation is a sentence. dogfood-134's goal said "Every existing test remains green";
+  its executor said it had verified exactly that; and the delivery left six tests red across three
+  files — two of them files it never touched — while the run sealed 🟢 SUCCESS with 2/2 criteria
+  and 7/7 rubric items. Nothing in the loop was wrong: `tests_pass` is derived from the
+  judge-executed acceptance checks and truthfully recorded that both of them exited 0, and the
+  judge scores the added diff, where collateral breakage is invisible. The repository's health was
+  simply never measured.
+
+  Make these true:
+
+    * **A spec can name the repository's own verification command.** A `regression_suite` field
+      carries a shell command, is parsed on the SDK's public surface, and SURVIVES THE SCHEMA
+      ROUND-TRIP into the workflow (`src/schemas.ts`, not only `src/taskspec.ts`). It is optional;
+      a spec that omits it behaves exactly as today.
+
+    * **The rubric declares that a machine settles it.** A standing rubric item answers "the
+      pre-existing suite is still green", and its id is in `DETERMINISTIC_RUBRIC_IDS` alongside
+      `no_architecture_violations` and `no_secrets_introduced`. Its recorded answer comes from the
+      command's exit code, never from what the model wrote, and the justification names the command.
+
+    * **It runs once, at the seal — not on every step.** Across a multi-step run the declared
+      command executes exactly ONCE, at the run-completion review. The per-step judge passes are
+      unchanged, and a spec without the field spends nothing.
+
+    * **A red suite blocks the SUCCESS seal, and does not roll back.** A run whose acceptance
+      criteria all pass but whose declared command exits nonzero at the final review must NOT
+      report SUCCESS; its terminal state names the failing item. The item stays NON-destructive: no
+      `ROLLBACK` verdict is opened for it, the run's files stay on disk, and the run reaches its
+      terminal state unattended (the F-107 discipline).
+
+    * **The bounded repair still runs first.** The run still gets its one completion-review fix step
+      before anything blocks; only a suite still red after that repair stops the seal.
+
+    * **A suite that could not finish is not a green suite, and is not a code red either.** A
+      command killed at its cap is recorded with the existing `infraFailed` discipline (WP-263(b))
+      — it must never be recorded as passing, and it must be distinguishable from a genuine failure.
+
+  The seams already exist and should be used rather than rebuilt: `DETERMINISTIC_RUBRIC_IDS`
+  (src/judge/rubric.ts:19) already declares machine-settled ids; applyCheckOverrides
+  (src/judge/harness.ts:106) already rebuilds `rubricResults` from evidence and already overrides
+  three items that way; the completion-review gate (src/workflow/agent-loop.ts:1048-1137) already
+  grants one bounded fix step and already seals FAILED for a surviving deterministic failure;
+  `runCheck` (src/judge/evidence.ts:170) already executes a bounded shell command and already
+  reports `infraFailed` on a cap kill; and `judge.rubric_extra` (src/taskspec.ts:237,
+  src/schemas.ts:168) is the worked precedent for a spec field that crosses into the workflow.
+
+  Everything already proven stays proven: `tests_pass` keeps its JD-4 meaning and its override
+  (src/judge/harness.ts:148-171) unchanged; `no_architecture_violations` and `no_secrets_introduced`
+  keep the WP-607 behavior dogfood-134 landed; a destructive STANDING failure still returns ROLLBACK
+  (CONTRACTS.md §4 rule 1); a form missing a declared item is still an error, not a pass;
+  `judge.rubric_extra` keeps exactly the semantics WP-604 landed; and the chain-side gate repair and
+  node heal tiers (WP-542/543/544) are untouched. If an existing test pins the old shape, update its
+  expectation and say plainly in the step summary that you did — do not delete it, and do not weaken
+  it into a tautology.
+
+  Constraints: TypeScript stays strict ESM with named exports and no `any`; no new dependency, no
+  provider SDK, no API key, no global install. Workflow code stays deterministic and replay-safe.
+  `src/types.ts` is the CORE layer — it must not import from src/judge/, src/workflow/ or
+  src/runner/. Project commands run sequentially inside the already-activated Devbox environment, so
+  invoke pinned tools directly and never nest `devbox run`.
+
+  VERIFY YOUR OWN WORK THE WAY THIS RUN IS ABOUT: before you finish, run the repository's own gates
+  — `pnpm run build`, `pnpm run lint`, `pnpm run typecheck` (which compiles the TEST project too)
+  and the FULL test suite — and report the ACTUAL command you ran and the ACTUAL counts it printed.
+  The full suite takes ~70 s; there is no excuse for reporting it without running it. Do not write
+  that the suite passed unless you invoked it and read its total line. dogfood-134 failed exactly
+  here, and this run exists because of it.
+
+repos:
+  - url: /Users/nikitazolotarev/repos/chikory
+    writable: true
+
+# NOTE — this spec deliberately does NOT declare `regression_suite:` itself. The field does not
+# exist at HEAD, and `parseTaskSpec` rejects unknown keys, so a launch YAML using the field this
+# run BUILDS would be refused by the preflight at $0. Both ACs prove the field in-test instead:
+# AC-1 parses a probe spec that declares it, AC-2 puts it on the spec object the live run starts.
+
+acceptance_criteria:
+  - id: AC-1
+    description: >
+      THIS CHECK OWNS ITS ORACLE — RED on HEAD, green only once the field parses, round-trips
+      through the workflow schema, and the new item is machine-settled AND non-destructive. Every
+      input family and every expected answer is written HERE, not delegated to a test the executor
+      authors: `regression_suite` parses off a spec and survives `TaskSpecSchema` (trap F's parse
+      half); a spec OMITTING it still parses (the field is optional); the new rubric id is in
+      `DETERMINISTIC_RUBRIC_IDS` and in a rubric (trap A — a criterion cannot satisfy this); the
+      item is `destructive: false` and `computeVerdict` returns a NON-ROLLBACK verdict naming it
+      (trap E); and the three pre-existing machine-settled guarantees WP-607 landed are unchanged.
+      Runs in seconds against the real built artifact.
+    check: |
+      cd packages/sdk-ts && pnpm run typecheck && pnpm exec tsc && \
+      OPENAI_COMPAT_BASE_URL=http://127.0.0.1:9 node --input-type=module -e '
+      import {pathToFileURL} from "node:url";
+      import {join} from "node:path";
+      const A=(c,m)=>{if(!c){console.error("FAIL: "+m);process.exit(1);}};
+      const mod=await import(pathToFileURL(join(process.cwd(),"dist/index.js")).href);
+      const {parseTaskSpec,computeVerdict,STANDING_RUBRIC,COMPLETION_REVIEW_RUBRIC,
+             DETERMINISTIC_RUBRIC_IDS,TaskSpecSchema}=mod;
+      A(typeof parseTaskSpec==="function"&&typeof computeVerdict==="function"&&
+        Array.isArray(STANDING_RUBRIC)&&Array.isArray(COMPLETION_REVIEW_RUBRIC)&&
+        DETERMINISTIC_RUBRIC_IDS!==undefined&&TaskSpecSchema!==undefined,
+        "the pre-existing public surface must be intact");
+
+      const CMD="echo regression-suite-probe";
+      const base=["name: probe","goal: do a thing","repos:","  - url: /tmp/probe-repo",
+        "    writable: true","acceptance_criteria:","  - id: AC-1","    description: d",
+        "    check: \"true\"","budget_usd: 1","max_steps: 1","agent_classes:",
+        "  executor: executor-default","  judge: judge-default","judge:","  cadence: 1"];
+      const withSuite=parseTaskSpec([...base,"regression_suite: "+CMD].join("\n"));
+
+      // 1. the field reaches the parsed spec under SOME name, and carries the command verbatim.
+      const flat=JSON.stringify(withSuite);
+      A(flat.includes(CMD),
+        "the regression_suite command must survive parseTaskSpec — a spec can name the "+
+        "repository verification command and the run must carry it. Got "+flat);
+
+      // 2. trap F (parse half): it must survive the WORKFLOW schema round-trip, not just YAML.
+      const parsedBack=TaskSpecSchema.parse(JSON.parse(JSON.stringify(withSuite)));
+      A(JSON.stringify(parsedBack).includes(CMD),
+        "the command must survive the src/schemas.ts round-trip into the workflow, not only "+
+        "src/taskspec.ts. Got "+JSON.stringify(parsedBack));
+
+      // 3. the field is OPTIONAL — a spec omitting it still parses and round-trips.
+      const without=parseTaskSpec(base.join("\n"));
+      A(!JSON.stringify(without).includes(CMD),"a spec without the field must not invent one");
+      TaskSpecSchema.parse(JSON.parse(JSON.stringify(without)));
+
+      // 4. trap A — a machine-settled RUBRIC item, not an acceptance criterion.
+      const det=new Set(Array.from(DETERMINISTIC_RUBRIC_IDS));
+      for(const id of ["no_architecture_violations","no_secrets_introduced"])
+        A(det.has(id),"WP-607 regression: "+id+" must stay machine-settled, got "+
+          JSON.stringify([...det]));
+      const allItems=[...STANDING_RUBRIC,...COMPLETION_REVIEW_RUBRIC];
+      const allIds=new Set(allItems.map((r)=>r.id));
+      for(const id of det) A(allIds.has(id),
+        "DETERMINISTIC_RUBRIC_IDS names an id that is in no rubric: "+id);
+      const added=[...det].filter((id)=>
+        id!=="no_architecture_violations"&&id!=="no_secrets_introduced");
+      A(added.length===1,
+        "trap A: exactly ONE new machine-settled rubric item must answer the regression suite — "+
+        "an acceptance criterion cannot satisfy this (it is per-spec opt-in and judged every "+
+        "step). Got the new ids "+JSON.stringify(added));
+      const NEW=added[0];
+      A(!det.has("tests_pass")&&!det.has("design_serves_overall_goal")&&
+        !det.has("cumulative_design_coherent")&&!det.has("scope_matches_instruction")&&
+        !det.has("no_unrelated_deletions"),
+        "a model judgment (or the JD-4-overridden tests_pass) must NOT become machine-settled, "+
+        "got "+JSON.stringify([...det]));
+
+      // 5. trap E — the new item must be NON-destructive and must never ROLLBACK.
+      const item=allItems.find((r)=>r.id===NEW);
+      A(item!==undefined&&item.destructive===false,
+        "trap E: "+NEW+" must be NON-destructive — destructive:true fires CONTRACTS.md §4 rule 1 "+
+        "and RESTORES the workspace, destroying good work over a regression a repair step could "+
+        "fix. Got "+JSON.stringify(item));
+      const inStanding=STANDING_RUBRIC.some((r)=>r.id===NEW);
+      const rubric=inStanding?STANDING_RUBRIC:COMPLETION_REVIEW_RUBRIC;
+      const form=(failIds)=>({criterionResults:[{id:"AC-1",pass:true,justification:"ok"}],
+        rubricResults:rubric.map((r)=>({id:r.id,pass:!failIds.includes(r.id),
+          justification:"scripted"})),concerns:[]});
+      const v=computeVerdict(form([NEW]),{},rubric);
+      A(v.kind!=="ROLLBACK",
+        "trap E: a failing "+NEW+" must NEVER produce ROLLBACK, got "+JSON.stringify(v));
+      A(String(v.rationale).includes(NEW),
+        "the verdict rationale must NAME the failing item, got "+JSON.stringify(v));
+      // the destructive items are untouched — a real §4 rule-1 trigger still rolls back.
+      A(computeVerdict({criterionResults:[{id:"AC-1",pass:true,justification:"ok"}],
+        rubricResults:STANDING_RUBRIC.map((r)=>({id:r.id,
+          pass:r.id!=="no_secrets_introduced",justification:"scripted"})),concerns:[]},
+        {},STANDING_RUBRIC).kind==="ROLLBACK",
+        "a failing DESTRUCTIVE standing item must still return ROLLBACK (CONTRACTS.md §4 rule 1)");
+
+      console.log("AC-1 OK: regression_suite parses and survives the workflow schema round-trip, "+
+        "is optional, and exactly one NEW non-destructive machine-settled rubric item ("+NEW+
+        ") answers it without ever rolling back");
+      '
+
+  - id: AC-2
+    description: >
+      THE REAL LOOP, THE REAL COMMAND, THE REAL JOURNAL — this check writes its own live Temporal
+      scenarios from the repo's existing test infrastructure, so a field the seal path never
+      consults cannot satisfy it (trap F). Scenario 1: a multi-step run whose `regression_suite`
+      command EXITS NONZERO while the scripted judge answers every rubric item ✓ and every
+      criterion ✓ — the run must NOT seal SUCCESS, must open NO `ROLLBACK` verdict, must leave its
+      files on disk, must reach a terminal state unattended (F-107), must have taken its bounded
+      completion-review repair step first (trap G), and the command must have run exactly ONCE
+      across the whole run (trap B). Scenario 2: the identical run with a command that exits 0
+      seals SUCCESS. Scenario 3: a command that cannot finish inside its cap must NOT seal SUCCESS
+      claiming a green suite (trap C) and must be recorded with the infra discipline rather than as
+      a plain code failure (trap D). The generated file is removed by the check.
+    check: |
+      cd packages/sdk-ts && pnpm run typecheck && node --input-type=module -e '
+      import {writeFileSync,rmSync} from "node:fs";
+      import {spawnSync} from "node:child_process";
+      import {join} from "node:path";
+      const A=(c,m)=>{if(!c){console.error("FAIL: "+m);process.exit(1);}};
+      const target=join(process.cwd(),"test/runner/ac2-regression-gate.generated.test.ts");
+      // Written and removed by THIS check; a leftover from a killed run is stale, not state.
+      rmSync(target,{force:true});
+      const SRC=`
+      import { randomUUID } from "node:crypto";
+      import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+      import { tmpdir } from "node:os";
+      import { dirname, join } from "node:path";
+      import { afterEach, describe, expect, inject, test } from "vitest";
+      import {
+        createRunnerWorker, createTemporalRunner, Journal, journalPath, STANDING_RUBRIC,
+        COMPLETION_REVIEW_RUBRIC,
+        type AdapterRegistry, type JudgeForm, type RunStatusReport,
+      } from "../../src/index.js";
+      import {
+        initSourceRepo, makeJudgedSpec, startFakeJudgeWire, TERMINAL_STATUSES, waitFor,
+      } from "./helpers.js";
+
+      const address = inject("temporalAddress");
+      const bundlePath = inject("workflowBundlePath");
+
+      // A marker file the declared command appends to, so the test can COUNT executions
+      // from outside the run — trap B is answered by evidence, not by a mock.
+      function countingCommand(markerPath: string, exitCode: number): string {
+        return "echo x >> " + markerPath + "; exit " + exitCode;
+      }
+
+      function writingRegistry(): AdapterRegistry {
+        return {
+          scripted: (ctx) => ({
+            name: "scripted",
+            modelFamily: "anthropic" as const,
+            async runStep(input) {
+              const file = join(input.workspaceDir, "src/feature.ts");
+              await mkdir(dirname(file), { recursive: true });
+              await writeFile(file, "export const feature = 1;\n");
+              const [diffRef, transcriptRef] = await Promise.all([
+                ctx.store.put("adapter diff", { kind: "diff", summary: "adapter diff" }),
+                ctx.store.put("adapter transcript", { kind: "transcript", summary: "t" }),
+              ]);
+              return {
+                status: "SUCCESS" as const, diffRef, transcriptRef,
+                claimsComplete: true,
+                summary: "wrote src/feature.ts",
+                toolCalls: 1, tokens: { input: 100, output: 50 },
+                costUsd: 0.01, costEstimated: false, durationMs: 0,
+              };
+            },
+          }),
+        };
+      }
+
+      // Every rubric item answered PASS on purpose — including the new one — so only a
+      // delivery that lets the COMMAND settle it can fail the run.
+      const allPass = (acPass: boolean): JudgeForm => ({
+        criterionResults: [{ id: "AC-1", pass: acPass, justification: "scripted judge" }],
+        rubricResults: STANDING_RUBRIC.map((r) => ({
+          id: r.id, pass: true, justification: "scripted — the model says this is fine",
+        })),
+        concerns: [],
+      });
+      const reviewForm = (): JudgeForm => ({
+        criterionResults: [],
+        rubricResults: COMPLETION_REVIEW_RUBRIC.map((r) => ({
+          id: r.id, pass: true, justification: "scripted review",
+        })),
+        concerns: [],
+      });
+
+      describe.skipIf(address === null)("AC-2 — a red pre-existing suite gates the seal", () => {
+        const cleanups: Array<() => Promise<void>> = [];
+        afterEach(async () => { while (cleanups.length > 0) await cleanups.pop()!(); });
+
+        async function runOne(command: string) {
+          const wire = await startFakeJudgeWire(
+            [allPass(false), allPass(true), allPass(true)],
+            { reviewForms: [reviewForm(), reviewForm()] },
+          );
+          cleanups.push(() => wire.close());
+          const tmp = await mkdtemp(join(tmpdir(), "ac2-regsuite-"));
+          cleanups.push(() => rm(tmp, { recursive: true, force: true }));
+          const repoUrl = await initSourceRepo(join(tmp, "src"), {});
+          const dataDir = join(tmp, "data");
+          const taskQueue = "tq-" + randomUUID();
+          const worker = await createRunnerWorker({
+            adapters: writingRegistry(), address: address!, taskQueue, dataDir,
+            workflowBundlePath: bundlePath!,
+            routerOptions: { baseUrls: { "openai-compat": wire.url } },
+          });
+          const workerDone = worker.run();
+          const runner = createTemporalRunner({ address: address!, taskQueue, dataDir });
+          cleanups.push(async () => {
+            worker.shutdown(); await workerDone; await runner.close();
+          });
+          const spec = {
+            ...makeJudgedSpec({ repoUrl, cadence: 1, maxSteps: 4 }),
+            regressionSuite: command,
+          } as unknown as Parameters<typeof runner.start>[0];
+          const handle = await runner.start(spec);
+          const report = await waitFor(async () => {
+            const r: RunStatusReport = await handle.status();
+            return TERMINAL_STATUSES.includes(r.status) ? r : undefined;
+          }, { what: "terminal status", timeoutMs: 120_000, intervalMs: 1000 });
+          const j = new Journal(journalPath(dataDir, handle.runId));
+          let entries: { verdicts: string[]; steps: number; all: string };
+          try {
+            entries = {
+              verdicts: j.entries("verdict").map((e) => JSON.stringify(e.payload)),
+              steps: j.entries("step").length,
+              all: JSON.stringify(j.entries()),
+            };
+          } finally { j.close(); }
+          return { report, ...entries, runId: handle.runId, dataDir, tmp };
+        }
+
+        test("scenario 1 — a RED declared suite blocks SUCCESS, keeps the work, runs ONCE", async () => {
+          const tmp = await mkdtemp(join(tmpdir(), "ac2-marker-"));
+          cleanups.push(() => rm(tmp, { recursive: true, force: true }));
+          const marker = join(tmp, "runs.txt");
+          const r = await runOne(countingCommand(marker, 1));
+
+          // traps C+F: the model scored everything PASS and the command says otherwise.
+          expect(r.report.status).not.toBe("SUCCESS");
+          expect(TERMINAL_STATUSES).toContain(r.report.status);   // F-107: no park
+          // trap E: blocking is not rolling back.
+          expect(r.verdicts.some((v) => v.includes("\\"ROLLBACK\\""))).toBe(false);
+          // trap G: the bounded completion-review repair still ran first.
+          expect(r.steps).toBeGreaterThan(1);
+          // the run's own file survives.
+          const kept = await readFile(
+            join(r.dataDir, "runs", r.runId, "workspace", "src", "feature.ts"), "utf8");
+          expect(kept).toContain("feature");
+          // trap B: the declared command ran EXACTLY ONCE across the whole run.
+          const runs = (await readFile(marker, "utf8")).trim().split("\\n").filter(Boolean);
+          expect(runs).toHaveLength(1);
+        }, 240_000);
+
+        test("scenario 2 — the identical run with a GREEN declared suite seals SUCCESS", async () => {
+          const tmp = await mkdtemp(join(tmpdir(), "ac2-marker-"));
+          cleanups.push(() => rm(tmp, { recursive: true, force: true }));
+          const marker = join(tmp, "runs.txt");
+          const r = await runOne(countingCommand(marker, 0));
+          expect(r.report.status).toBe("SUCCESS");
+          const runs = (await readFile(marker, "utf8")).trim().split("\\n").filter(Boolean);
+          expect(runs).toHaveLength(1);
+        }, 240_000);
+
+        test("scenario 3 — a suite that cannot finish is not a green suite (traps C+D)", async () => {
+          const r = await runOne("sleep 600");
+          // trap C: an unfinished suite has proven nothing — it must not seal SUCCESS.
+          expect(r.report.status).not.toBe("SUCCESS");
+          expect(TERMINAL_STATUSES).toContain(r.report.status);
+          // trap D: WP-263(b) — a cap kill is INFRA, distinguishable from a code red.
+          expect(r.all).toContain("infraFailed");
+        }, 300_000);
+      });
+      `;
+      writeFileSync(target, SRC);
+      const res=spawnSync("pnpm",["exec","vitest","run",
+        "test/runner/ac2-regression-gate.generated.test.ts"],{stdio:"inherit"});
+      // Clean up BEFORE asserting — A() exits the process, which would skip a finally
+      // block and leave the generated file behind to poison the next pass.
+      rmSync(target,{force:true});
+      A(res.status===0,
+        "trap F: these scenarios drive the REAL workflow, the REAL declared command and the REAL "+
+        "journal — a regression_suite field the seal path never consults cannot satisfy them. "+
+        "vitest exited "+res.status);
+      console.log("AC-2 OK: a red declared suite blocked the SUCCESS seal with the work kept, no "+
+        "operator involved and exactly one execution; a green one still seals SUCCESS; and a "+
+        "suite that could not finish is neither green nor a plain code red");
+      '
+
+budget_usd: 20
+max_steps: 6
+
+agent_classes:
+  executor: executor-default
+  judge: judge-default
+
+judge:
+  cadence: 1
