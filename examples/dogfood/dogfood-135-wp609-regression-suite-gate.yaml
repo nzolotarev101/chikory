@@ -60,6 +60,17 @@
 #   * A spec-declared, schema-round-tripped field has a worked precedent from WP-604:
 #     `judge.rubric_extra` (`src/taskspec.ts:237`, `src/schemas.ts:168`). A contract that crosses
 #     into the workflow must survive `src/schemas.ts`, not only `src/taskspec.ts`.
+#   * A new `TaskSpec` field is GUARDED and will fail `tsc --noEmit` until you classify it.
+#     `ChainTemplateFieldChecks` (`src/chain/node-spec.ts:148-151`) asserts `CHAIN_TEMPLATE_FIELDS`
+#     covers `keyof TaskSpec` in BOTH directions, so adding the field without deciding whether a
+#     chain node inherits it is a compile error, by design (WP-544/545 lineage). Measured while
+#     arming this spec: the reference implementation hit exactly this at `node-spec.ts:150`. Decide
+#     it deliberately — a node that inherits the repository verification command is the intent.
+#   * The passthrough has TWO plausible landing sites and only one is right. In `runJudgePass`
+#     (`src/judge/harness.ts:284`) the evidence is gathered by `collectEvidence`; the neighbouring
+#     `buildJudgeMessages` call only renders the PROMPT. Threading the command into the prompt makes
+#     the judge read about a command nobody ran — trap F wearing the fix as a costume. Measured
+#     while arming: that exact mis-wire passed typecheck and build, and AC-2 caught it.
 #   * The infra-kill discipline already exists and must be honored: `CheckRun.infraFailed` +
 #     WP-263(b) — a check killed at its cap proves the check infrastructure died, not that the code
 #     is red (`src/judge/harness.ts:123-135`).
@@ -72,14 +83,17 @@
 #      reads as "not finished yet" (the loop spends more steps) rather than "a regression must block
 #      the seal". AC-1 requires a rubric id in `DETERMINISTIC_RUBRIC_IDS`, not a criterion.
 #   B. **Running it on every judge pass.** The most expensive thing in the loop belongs at the seal.
-#      AC-2 requires the declared command to execute exactly ONCE across a multi-step run.
+#      AC-2's green scenario takes TWO steps and requires EXACTLY ONE execution — a per-step
+#      implementation cannot produce that. (The red scenario allows a second execution: the
+#      post-repair re-review is the only way the bounded fix can be verified.)
 #   C. **Laundering an infra kill into green.** A suite killed at its own cap has proven nothing; if
 #      that records `pass: true` the gate is decorative and the F-316 defect survives in a new
-#      costume. AC-2's third scenario runs a command that cannot finish and requires the run NOT to
-#      seal SUCCESS claiming a green suite.
+#      costume. AC-1 owns this as a pure oracle: a `CheckRun` carrying `infraFailed: true` must not
+#      settle the item as passing. (Live-testing it would cost a full 120 s cap kill and blow AC-2
+#      past the judge's own per-check cap.)
 #   D. **Treating an infra kill as a code red.** The mirror error, and it breaks WP-263(b): a killed
-#      check must be marked `infraFailed` so the stuck-criterion history skips it. AC-2 requires the
-#      journaled evidence to carry the infra flag rather than a plain failure.
+#      check must be marked `infraFailed` so the stuck-criterion history skips it. AC-1 requires the
+#      recorded row to carry `infraFailed` rather than reading as a plain code failure.
 #   E. **Rolling back on a red suite.** `destructive: true` would fire CONTRACTS.md §4 rule 1 and
 #      restore the workspace, destroying good work over a regression that a repair step could fix —
 #      the WP-605 harm and dogfood-134's trap A. AC-1 requires the item to stay non-destructive and
@@ -122,9 +136,11 @@ goal: >
       `no_architecture_violations` and `no_secrets_introduced`. Its recorded answer comes from the
       command's exit code, never from what the model wrote, and the justification names the command.
 
-    * **It runs once, at the seal — not on every step.** Across a multi-step run the declared
-      command executes exactly ONCE, at the run-completion review. The per-step judge passes are
-      unchanged, and a spec without the field spends nothing.
+    * **It runs at the seal, not on every step.** The declared command NEVER runs on a per-step
+      judge pass. On a clean multi-step run it executes exactly ONCE, at the run-completion review.
+      When it fails it may run once more — the post-repair re-review, which is the only way the
+      bounded fix can be verified — and never more than the completion-review budget
+      (MAX_COMPLETION_REVIEWS = 2). A spec without the field spends nothing.
 
     * **A red suite blocks the SUCCESS seal, and does not roll back.** A run whose acceptance
       criteria all pass but whose declared command exits nonzero at the final review must NOT
@@ -144,22 +160,22 @@ goal: >
   (src/judge/harness.ts:106) already rebuilds `rubricResults` from evidence and already overrides
   three items that way; the completion-review gate (src/workflow/agent-loop.ts:1048-1137) already
   grants one bounded fix step and already seals FAILED for a surviving deterministic failure;
-  `runCheck` (src/judge/evidence.ts:170) already executes a bounded shell command and already
-  reports `infraFailed` on a cap kill; and `judge.rubric_extra` (src/taskspec.ts:237,
+  runCheck (src/judge/evidence.ts:170) already executes a bounded shell command and already
+  reports `infraFailed` on a cap kill; and judge.rubric_extra (src/taskspec.ts:237,
   src/schemas.ts:168) is the worked precedent for a spec field that crosses into the workflow.
 
   Everything already proven stays proven: `tests_pass` keeps its JD-4 meaning and its override
   (src/judge/harness.ts:148-171) unchanged; `no_architecture_violations` and `no_secrets_introduced`
   keep the WP-607 behavior dogfood-134 landed; a destructive STANDING failure still returns ROLLBACK
   (CONTRACTS.md §4 rule 1); a form missing a declared item is still an error, not a pass;
-  `judge.rubric_extra` keeps exactly the semantics WP-604 landed; and the chain-side gate repair and
+  judge.rubric_extra keeps exactly the semantics WP-604 landed; and the chain-side gate repair and
   node heal tiers (WP-542/543/544) are untouched. If an existing test pins the old shape, update its
   expectation and say plainly in the step summary that you did — do not delete it, and do not weaken
   it into a tautology.
 
   Constraints: TypeScript stays strict ESM with named exports and no `any`; no new dependency, no
   provider SDK, no API key, no global install. Workflow code stays deterministic and replay-safe.
-  `src/types.ts` is the CORE layer — it must not import from src/judge/, src/workflow/ or
+  src/types.ts is the CORE layer — it must not import from src/judge/, src/workflow/ or
   src/runner/. Project commands run sequentially inside the already-activated Devbox environment, so
   invoke pinned tools directly and never nest `devbox run`.
 
@@ -199,10 +215,11 @@ acceptance_criteria:
       const A=(c,m)=>{if(!c){console.error("FAIL: "+m);process.exit(1);}};
       const mod=await import(pathToFileURL(join(process.cwd(),"dist/index.js")).href);
       const {parseTaskSpec,computeVerdict,STANDING_RUBRIC,COMPLETION_REVIEW_RUBRIC,
-             DETERMINISTIC_RUBRIC_IDS,TaskSpecSchema}=mod;
+             DETERMINISTIC_RUBRIC_IDS,TaskSpecSchema,applyCheckOverrides}=mod;
       A(typeof parseTaskSpec==="function"&&typeof computeVerdict==="function"&&
         Array.isArray(STANDING_RUBRIC)&&Array.isArray(COMPLETION_REVIEW_RUBRIC)&&
-        DETERMINISTIC_RUBRIC_IDS!==undefined&&TaskSpecSchema!==undefined,
+        DETERMINISTIC_RUBRIC_IDS!==undefined&&TaskSpecSchema!==undefined&&
+        typeof applyCheckOverrides==="function",
         "the pre-existing public surface must be intact");
 
       const CMD="echo regression-suite-probe";
@@ -274,9 +291,45 @@ acceptance_criteria:
         {},STANDING_RUBRIC).kind==="ROLLBACK",
         "a failing DESTRUCTIVE standing item must still return ROLLBACK (CONTRACTS.md §4 rule 1)");
 
+      // 6. traps C+D — the infra-kill semantics, owned HERE as a pure oracle.
+      //    A suite killed at its cap has proven nothing: it must never be recorded as
+      //    passing (trap C), and it must stay distinguishable from a genuine code red
+      //    via the WP-263(b) infraFailed flag (trap D).
+      const crit=[{id:"AC-1",description:"d",check:"true"}];
+      const modelForm={criterionResults:[{id:"AC-1",pass:true,justification:"m"}],
+        rubricResults:rubric.map((r)=>({id:r.id,pass:true,justification:"model says fine"})),
+        concerns:[]};
+      const overrideWith=(run)=>{
+        const out=applyCheckOverrides(modelForm,crit,rubric,[],[],[],run);
+        A(!("error" in out),"applyCheckOverrides must accept the regression-suite run, got "+
+          JSON.stringify(out));
+        return out.form.rubricResults.find((r)=>r.id===NEW);
+      };
+      const REDRUN={criterionId:NEW,command:"exit 1",exitCode:1,output:"boom",durationMs:5,
+        infraFailed:false};
+      const GREENRUN={criterionId:NEW,command:"exit 0",exitCode:0,output:"ok",durationMs:5,
+        infraFailed:false};
+      const KILLED={criterionId:NEW,command:"sleep 600",exitCode:1,
+        output:"[check timed out after 120000ms]",durationMs:120000,infraFailed:true};
+      const red=overrideWith(REDRUN);
+      A(red!==undefined&&red.pass===false,
+        "a NONZERO regression suite must settle "+NEW+" as FAILED over a model PASS, got "+
+        JSON.stringify(red));
+      const green=overrideWith(GREENRUN);
+      A(green!==undefined&&green.pass===true,
+        "a ZERO-exit regression suite must settle "+NEW+" as PASS, got "+JSON.stringify(green));
+      const killed=overrideWith(KILLED);
+      A(killed!==undefined&&killed.pass!==true,
+        "trap C: a suite KILLED at its cap has proven nothing and must NEVER be recorded as "+
+        "passing, got "+JSON.stringify(killed));
+      A(killed.infraFailed===true,
+        "trap D: WP-263(b) — a cap kill is an INFRA failure, not a code red, and must carry "+
+        "infraFailed so the stuck-criterion history skips it. Got "+JSON.stringify(killed));
+
       console.log("AC-1 OK: regression_suite parses and survives the workflow schema round-trip, "+
-        "is optional, and exactly one NEW non-destructive machine-settled rubric item ("+NEW+
-        ") answers it without ever rolling back");
+        "is optional, exactly one NEW non-destructive machine-settled rubric item ("+NEW+
+        ") answers it without ever rolling back, and a killed suite is neither green nor a "+
+        "plain code red");
       '
 
   - id: AC-2
@@ -287,11 +340,12 @@ acceptance_criteria:
       command EXITS NONZERO while the scripted judge answers every rubric item ✓ and every
       criterion ✓ — the run must NOT seal SUCCESS, must open NO `ROLLBACK` verdict, must leave its
       files on disk, must reach a terminal state unattended (F-107), must have taken its bounded
-      completion-review repair step first (trap G), and the command must have run exactly ONCE
-      across the whole run (trap B). Scenario 2: the identical run with a command that exits 0
-      seals SUCCESS. Scenario 3: a command that cannot finish inside its cap must NOT seal SUCCESS
-      claiming a green suite (trap C) and must be recorded with the infra discipline rather than as
-      a plain code failure (trap D). The generated file is removed by the check.
+      completion-review repair step first (trap G), and the command must not have run more than the
+      completion-review budget allows (trap B). Scenario 2: the identical TWO-STEP run with a
+      command that exits 0 seals SUCCESS having executed the command EXACTLY ONCE — which a
+      per-step implementation cannot do (trap B's real oracle). (Traps C+D — the infra-kill semantics — are owned by AC-1 as a pure oracle:
+      a live cap kill would take 120 s and blow AC-2 past the judge's own per-check cap.) The
+      generated file is removed by the check.
     check: |
       cd packages/sdk-ts && pnpm run typecheck && node --input-type=module -e '
       import {writeFileSync,rmSync} from "node:fs";
@@ -333,7 +387,7 @@ acceptance_criteria:
             async runStep(input) {
               const file = join(input.workspaceDir, "src/feature.ts");
               await mkdir(dirname(file), { recursive: true });
-              await writeFile(file, "export const feature = 1;\n");
+              await writeFile(file, "export const feature = 1;\\n");
               const [diffRef, transcriptRef] = await Promise.all([
                 ctx.store.put("adapter diff", { kind: "diff", summary: "adapter diff" }),
                 ctx.store.put("adapter transcript", { kind: "transcript", summary: "t" }),
@@ -426,13 +480,16 @@ acceptance_criteria:
           expect(r.verdicts.some((v) => v.includes("\\"ROLLBACK\\""))).toBe(false);
           // trap G: the bounded completion-review repair still ran first.
           expect(r.steps).toBeGreaterThan(1);
-          // the run's own file survives.
+          // the file this run wrote survives (no apostrophes here: one would close
+          // the outer bash single-quoted string and make the check DIE, not judge).
           const kept = await readFile(
             join(r.dataDir, "runs", r.runId, "workspace", "src", "feature.ts"), "utf8");
           expect(kept).toContain("feature");
-          // trap B: the declared command ran EXACTLY ONCE across the whole run.
+          // trap B: bounded by the completion-review budget, never per-step. Two is legal
+          // here — the review, then the re-review that verifies the bounded repair.
           const runs = (await readFile(marker, "utf8")).trim().split("\\n").filter(Boolean);
-          expect(runs).toHaveLength(1);
+          expect(runs.length).toBeGreaterThanOrEqual(1);
+          expect(runs.length).toBeLessThanOrEqual(2);
         }, 240_000);
 
         test("scenario 2 — the identical run with a GREEN declared suite seals SUCCESS", async () => {
@@ -441,18 +498,13 @@ acceptance_criteria:
           const marker = join(tmp, "runs.txt");
           const r = await runOne(countingCommand(marker, 0));
           expect(r.report.status).toBe("SUCCESS");
+          // trap B real oracle: this run takes TWO steps. A per-step implementation would
+          // execute the command at least twice; only a seal-scoped one executes it once.
+          expect(r.steps).toBeGreaterThan(1);
           const runs = (await readFile(marker, "utf8")).trim().split("\\n").filter(Boolean);
           expect(runs).toHaveLength(1);
         }, 240_000);
 
-        test("scenario 3 — a suite that cannot finish is not a green suite (traps C+D)", async () => {
-          const r = await runOne("sleep 600");
-          // trap C: an unfinished suite has proven nothing — it must not seal SUCCESS.
-          expect(r.report.status).not.toBe("SUCCESS");
-          expect(TERMINAL_STATUSES).toContain(r.report.status);
-          // trap D: WP-263(b) — a cap kill is INFRA, distinguishable from a code red.
-          expect(r.all).toContain("infraFailed");
-        }, 300_000);
       });
       `;
       writeFileSync(target, SRC);
