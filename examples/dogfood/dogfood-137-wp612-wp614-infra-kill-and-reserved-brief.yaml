@@ -265,7 +265,7 @@ acceptance_criteria:
           {criterionResults:[{id:"AC-1",pass:true,justification:"m"}],
            rubricResults:rubric.map((r)=>({id:r.id,pass:!failing.includes(r.id),
              justification:failing.includes(r.id)?DESIGN:"fine"})),concerns:[]},
-          crit,rubric,[],[],failing.includes("no_architecture_violations")?["seeded"]:[],
+          crit,rubric,[],failing.includes("no_architecture_violations")?["seeded"]:[],[],
           {criterionId:NEW,command:CMD,exitCode:1,output:BIG,durationMs:4000,infraFailed:false});
         A(!("error" in form),"n="+n+": overrides must settle, got "+JSON.stringify(form));
         const brief=buildCompletionReviewBrief(form.form);
@@ -342,7 +342,7 @@ acceptance_criteria:
     description: >
       THE REAL LOOP, THE REAL SEAL, THE REAL JOURNAL — three live Temporal scenarios written from the
       repo test infrastructure. Scenario 1: a run declaring `check_timeout_ms: 3000` and a suite that
-      sleeps far past it — the check must be killed AT THE DECLARED CAP (trap C: a field the runner
+      sleeps 30 s — ten times the cap it declared, and well inside the 120 s default — the check must be killed AT THE DECLARED CAP (trap C: a field the runner
       never plumbs leaves the 120 s default in force, and the scenario's own wall-clock proves which
       one governed), the journaled row must carry `infraFailed`, and the run must NOT seal with the
       code-red reason; it must reach terminal unattended with no ROLLBACK and its files on disk.
@@ -491,18 +491,20 @@ acceptance_criteria:
           const tmp = await mkdtemp(join(tmpdir(), "ac2-marker-"));
           cleanups.push(() => rm(tmp, { recursive: true, force: true }));
           const marker = join(tmp, "runs.txt");
-          const r = await runOne(countingCommand(marker, undefined, "sleep 90; exit 0"));
+          const r = await runOne(countingCommand(marker, undefined, "sleep 30; exit 0"));
 
-          // trap C: if the declared cap never reached the check, the 120 s default governed and
-          // the whole run cannot have finished this fast. Wall-clock is the oracle.
-          expect(r.elapsedMs).toBeLessThan(110_000);
-          // the record keeps the evidence: a non-pass, flagged infra.
+          // trap C, signal 1: under the DECLARED 3 s cap the command is killed and the row is
+          // flagged infra. If the field never reached the check, the 120 s default governed, the
+          // 30 s sleep simply SUCCEEDED, and there is no infra row anywhere in the journal.
           const infra = r.verdicts.filter((v) => v.includes("infraFailed"));
           expect(infra.length).toBeGreaterThan(0);
+          // trap C, signal 2: wall-clock. A run killed at 3 s cannot take 20 s; a run that let
+          // the 30 s sleep finish cannot come in under it. Two independent reads of one wire.
+          expect(r.elapsedMs).toBeLessThan(20_000);
           // trap A: the row is NOT scored green.
           for (const v of infra) {
-            expect(v).not.toMatch(
-              new RegExp('"id":"' + RUBRIC_PRE_EXISTING_SUITE_GREEN + '","pass":true'));
+            expect(v).not.toContain(
+              "\\"id\\":\\"" + RUBRIC_PRE_EXISTING_SUITE_GREEN + "\\",\\"pass\\":true");
           }
           // the seal must not read as a code red.
           expect(JSON.stringify(r.report)).not.toContain("deterministic rubric failure");
