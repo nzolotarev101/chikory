@@ -1,6 +1,6 @@
-import { readFileSync, existsSync, readdirSync } from "node:fs";
+import { readFileSync, existsSync, readdirSync, rmSync } from "node:fs";
 import { join } from "node:path";
-import { execSync } from "node:child_process";
+import { execFileSync } from "node:child_process";
 import { tmpdir } from "node:os";
 import type { BenchmarkTask } from "./task.js";
 
@@ -235,11 +235,11 @@ export function loadTargetEngineSource(task: BenchmarkTask, workspaceDir: string
     const tempDir = join(tmpdir(), `temp-git-${task.id}-${Date.now()}`);
     try {
       // First try quick clone of just package.json via filter
-      execSync(`git clone --depth 1 --no-checkout --filter=blob:none ${JSON.stringify(task.repo.url)} ${JSON.stringify(tempDir)}`, {
+      execFileSync("git", ["clone", "--depth", "1", "--no-checkout", "--filter=blob:none", task.repo.url, tempDir], {
         stdio: "ignore",
         timeout: 15000,
       });
-      execSync(`git -C ${JSON.stringify(tempDir)} fetch --depth 1 origin ${JSON.stringify(task.repo.ref)}`, {
+      execFileSync("git", ["-C", tempDir, "fetch", "--depth", "1", "origin", task.repo.ref], {
         stdio: "ignore",
         timeout: 15000,
       });
@@ -247,14 +247,17 @@ export function loadTargetEngineSource(task: BenchmarkTask, workspaceDir: string
       // declares no engine constraint — that is not a read failure and must not
       // shrink the corpus. Only a repo we could not READ degrades to a skip, so
       // ask the tree before treating a failed checkout as an error.
-      const listed = execSync(
-        `git -C ${JSON.stringify(tempDir)} ls-tree --name-only FETCH_HEAD package.json`,
-        { encoding: "utf8", timeout: 15000 },
-      ).trim();
+      const listed = execFileSync("git", [
+        "-C", tempDir,
+        "ls-tree",
+        "--name-only",
+        "FETCH_HEAD",
+        "package.json"
+      ], { encoding: "utf8", timeout: 15000 }).trim();
       if (!listed) {
         return { type: "success", content: "{}" };
       }
-      execSync(`git -C ${JSON.stringify(tempDir)} checkout FETCH_HEAD -- package.json`, {
+      execFileSync("git", ["-C", tempDir, "checkout", "FETCH_HEAD", "--", "package.json"], {
         stdio: "ignore",
         timeout: 15000,
       });
@@ -265,7 +268,7 @@ export function loadTargetEngineSource(task: BenchmarkTask, workspaceDir: string
     } finally {
       try {
         if (existsSync(tempDir)) {
-          execSync(`rm -rf ${JSON.stringify(tempDir)}`, { stdio: "ignore" });
+          rmSync(tempDir, { recursive: true, force: true });
         }
       } catch {
         // ignore rm error
@@ -427,30 +430,33 @@ export function getTargetPackageJson(task: BenchmarkTask, workspaceDir: string):
   }
 
   if (task.repo) {
+    const tempDir = join(workspaceDir, "..", `temp-git-${task.id}-${Date.now()}`);
     try {
       // First try quick clone of just package.json via filter
-      const tempDir = join(workspaceDir, "..", `temp-git-${task.id}-${Date.now()}`);
-      execSync(`git clone --depth 1 --no-checkout --filter=blob:none ${JSON.stringify(task.repo.url)} ${JSON.stringify(tempDir)}`, {
+      execFileSync("git", ["clone", "--depth", "1", "--no-checkout", "--filter=blob:none", task.repo.url, tempDir], {
         stdio: "ignore",
         timeout: 15000,
       });
-      execSync(`git -C ${JSON.stringify(tempDir)} fetch --depth 1 origin ${JSON.stringify(task.repo.ref)}`, {
+      execFileSync("git", ["-C", tempDir, "fetch", "--depth", "1", "origin", task.repo.ref], {
         stdio: "ignore",
         timeout: 15000,
       });
-      execSync(`git -C ${JSON.stringify(tempDir)} checkout FETCH_HEAD -- package.json`, {
+      execFileSync("git", ["-C", tempDir, "checkout", "FETCH_HEAD", "--", "package.json"], {
         stdio: "ignore",
         timeout: 15000,
       });
       const content = readFileSync(join(tempDir, "package.json"), "utf8");
-      try {
-        execSync(`rm -rf ${JSON.stringify(tempDir)}`, { stdio: "ignore" });
-      } catch {
-        // ignore rm error
-      }
       return content;
     } catch {
       return null;
+    } finally {
+      try {
+        if (existsSync(tempDir)) {
+          rmSync(tempDir, { recursive: true, force: true });
+        }
+      } catch {
+        // ignore rm error
+      }
     }
   }
 

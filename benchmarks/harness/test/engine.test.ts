@@ -1,4 +1,4 @@
-import { mkdtempSync, writeFileSync } from "node:fs";
+import { mkdtempSync, writeFileSync, existsSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -265,6 +265,24 @@ describe("loadTargetEngineSource — absent vs unreadable (F-188)", () => {
     } as unknown as BenchmarkTask;
     const result = loadTargetEngineSource(task, mkdtempSync(join(tmpdir(), "engine-unreachable-")));
     expect(result.type).toBe("error");
+  });
+
+  it("handles repository URLs with shell metacharacters securely without executing them", () => {
+    // Construct a payload that would create a file if run inside a shell.
+    const sentinelFile = join(tmpdir(), `sentinel-${Date.now()}`);
+    const maliciousUrl = `https://invalid.example/repo; touch ${sentinelFile}`;
+    const task = {
+      id: "injection-test",
+      class: "brownfield",
+      repo: { url: maliciousUrl, ref: "main" },
+    } as unknown as BenchmarkTask;
+
+    const result = loadTargetEngineSource(task, mkdtempSync(join(tmpdir(), "engine-injection-")));
+
+    // It must fail (as the URL is invalid and we are not using a shell to interpret the '; touch...')
+    expect(result.type).toBe("error");
+    // Assert the sentinel file was NOT created (command injection prevented)
+    expect(existsSync(sentinelFile)).toBe(false);
   });
 });
 
