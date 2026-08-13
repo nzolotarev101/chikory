@@ -363,4 +363,132 @@ describe("TieredMemory", () => {
       },
     ]);
   });
+
+  it("supports maxEntries = 1 as the minimum capacity and evicts immediately on subsequent puts", () => {
+    const memory = new TieredMemory<string>({ maxEntries: 1 });
+
+    memory.put("a", "first", writeFromSource("step:a"));
+    expect(memory.list().map((r) => r.id)).toEqual(["a"]);
+    expect(memory.listArchival()).toEqual([]);
+
+    memory.put("b", "second", writeFromSource("step:b"));
+    expect(memory.list().map((r) => r.id)).toEqual(["b"]);
+    expect(memory.listArchival().map((r) => r.id)).toEqual(["a"]);
+  });
+
+  it("retains exactly maxEntries in core and spills the rest to archival when adding many items in a loop", () => {
+    const maxEntries = 10;
+    const memory = new TieredMemory<number>({ maxEntries });
+
+    for (let i = 0; i < 100; i++) {
+      memory.put(`id-${i}`, i, writeFromSource(`step:${i}`));
+    }
+
+    const coreList = memory.list();
+    expect(coreList).toHaveLength(maxEntries);
+    expect(coreList.map((r) => r.id)).toEqual(
+      Array.from({ length: maxEntries }, (_, i) => `id-${100 - maxEntries + i}`),
+    );
+
+    const archivalList = memory.listArchival();
+    expect(archivalList).toHaveLength(100 - maxEntries);
+    expect(archivalList.map((r) => r.id)).toEqual(
+      Array.from({ length: 100 - maxEntries }, (_, i) => `id-${i}`),
+    );
+
+    for (const record of coreList) {
+      expect(record.tier).toBe(CORE_MEMORY_TIER);
+    }
+    for (const record of archivalList) {
+      expect(record.tier).toBe(ARCHIVAL_MEMORY_TIER);
+    }
+  });
+
+  it("rejects non-integer, negative, or invalid type maxEntries options", () => {
+    // @ts-expect-error maxEntries must be a number
+    expect(() => new TieredMemory<string>({ maxEntries: "ten" })).toThrow(RangeError);
+    expect(() => new TieredMemory<string>({ maxEntries: -5 })).toThrow(RangeError);
+    expect(() => new TieredMemory<string>({ maxEntries: NaN })).toThrow(RangeError);
+    expect(() => new TieredMemory<string>({ maxEntries: 1.5 })).toThrow(RangeError);
+  });
+
+  it("rejects whitespace-only ids", () => {
+    const memory = new TieredMemory<string>();
+    expect(() => memory.put("   ", "value", writeFromSource("step:a"))).toThrow(TypeError);
+    expect(() => memory.get("   ")).toThrow(TypeError);
+    expect(() => memory.getArchival("   ")).toThrow(TypeError);
+  });
+
+  it("rejects invalid recall queries and limits", () => {
+    const memory = new TieredMemory<string>();
+    // limit less than 0
+    expect(() => memory.recall({ text: "test", limit: -1 })).toThrow(RangeError);
+    // limit non-integer
+    expect(() => memory.recall({ text: "test", limit: 2.5 })).toThrow(RangeError);
+  });
+
+  it("supports both sourceRef and origin in provenance simultaneously", () => {
+    const memory = new TieredMemory<string>();
+    const record = memory.put("a", "value", {
+      provenance: { sourceRef: "step:a", origin: "runner" },
+    });
+    expect(record.provenance).toEqual({ sourceRef: "step:a", origin: "runner" });
+  });
+
+  it("resolves equal score query matches by falling back to most-recent sequence order in best-match mode", () => {
+    const memory = new TieredMemory<string>();
+
+    memory.put("r1", "same score search text", writeFromSource("step:r1"));
+    memory.put("r2", "same score search text", writeFromSource("step:r2"));
+
+    const recalled = memory.recall({ text: "search" });
+    expect(recalled).toHaveLength(2);
+    // "r2" is more recent than "r1", so it must come first despite identical match scores
+    expect(recalled[0]?.id).toBe("r2");
+    expect(recalled[1]?.id).toBe("r1");
+  });
+
+  it("handles various value types, including circular references, bigints, and booleans during stringification", () => {
+    const memory = new TieredMemory<unknown>();
+
+    const circularObj: Record<string, unknown> = { tag: "circular" };
+    circularObj.self = circularObj;
+
+    memory.put("r-circular", circularObj, writeFromSource("step:circular"));
+    memory.put("r-bigint", 98765432109876543210n, writeFromSource("step:bigint"));
+    memory.put("r-boolean", true, writeFromSource("step:boolean"));
+    memory.put("r-null", null, writeFromSource("step:null"));
+    memory.put("r-undefined", undefined, writeFromSource("step:undefined"));
+
+    // Circular reference should catch JSON.stringify error and fallback to String() -> "[object Object]"
+    expect(memory.recall({ text: "[object Object]" }).map((r) => r.id)).toContain("r-circular");
+    // BigInt serialization check
+    expect(memory.recall({ text: "98765432109876543210" }).map((r) => r.id)).toContain("r-bigint");
+    // Boolean serialization check
+    expect(memory.recall({ text: "true" }).map((r) => r.id)).toContain("r-boolean");
+    // Null serialization check
+    expect(memory.recall({ text: "null" }).map((r) => r.id)).toContain("r-null");
+    // Undefined serialization check
+    expect(memory.recall({ text: "undefined" }).map((r) => r.id)).toContain("r-undefined");
+  });
+
+  it("returns an empty array when getArchival is called for an ID with no archival entries", () => {
+    const memory = new TieredMemory<string>();
+    memory.put("a", "value", writeFromSource("step:a"));
+    expect(memory.getArchival("a")).toEqual([]);
+    expect(memory.getArchival("non-existent")).toEqual([]);
+  });
+
+  it("handles recall query limits and non-matching searches correctly", () => {
+    const memory = new TieredMemory<string>();
+    memory.put("a", "hello world", writeFromSource("step:a"));
+    memory.put("b", "hello world 2", writeFromSource("step:b"));
+
+    // limit = 0 should return empty list
+    expect(memory.recall({ text: "hello", limit: 0 })).toEqual([]);
+    // limit larger than matching records should return all matches
+    expect(memory.recall({ text: "hello", limit: 10 })).toHaveLength(2);
+    // non-matching queries should return empty list
+    expect(memory.recall({ text: "non-existent" })).toEqual([]);
+  });
 });
