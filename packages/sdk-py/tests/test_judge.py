@@ -56,9 +56,7 @@ async def test_judge_base_evaluate_raises_not_implemented_error() -> None:
 async def test_dummy_judge_evaluate() -> None:
     judge = DummyJudge()
     evidence = JudgeEvidence(
-        diff_refs=[
-            ArtifactRef(id="ref-1", kind="diff", bytes=120, summary="Short diff")
-        ],
+        diff_refs=[ArtifactRef(id="ref-1", kind="diff", bytes=120, summary="Short diff")],
         test_results=None,
         criteria=[AcceptanceCriterion(id="criterion-1", description="Description")],
         criteria_history={"criterion-1": [True]},
