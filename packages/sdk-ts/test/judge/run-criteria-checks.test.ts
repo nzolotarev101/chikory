@@ -127,4 +127,23 @@ describe("runCriteriaChecks (WP-561)", () => {
     });
     expect(runs[0]?.exitCode).toBe(0);
   });
+
+  it("benchmarks sequential execution of checks with delay", async () => {
+    const startTime = performance.now();
+    const runs = await runCriteriaChecks({
+      workspaceDir: dir,
+      criteria: [
+        criterion("AC-1", "sleep 0.5 && test -f landed.txt"),
+        criterion("AC-2", "sleep 0.5 && test -f landed.txt"),
+        criterion("AC-3", "sleep 0.5 && test -f landed.txt"),
+      ],
+    });
+    const durationMs = performance.now() - startTime;
+    console.log(`[BENCHMARK] Elapsed duration for 3 checks with 0.5s sleep: ${durationMs.toFixed(2)} ms`);
+    expect(runs.map((run) => [run.criterionId, run.exitCode])).toEqual([
+      ["AC-1", 0],
+      ["AC-2", 0],
+      ["AC-3", 0],
+    ]);
+  });
 });
