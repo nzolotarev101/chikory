@@ -232,8 +232,14 @@ export async function runCriteriaChecks(input: {
       : [{ dir: input.workspaceDir }];
 
   const beforeSnapshots = new Map<string, WorkspaceDirtySnapshot>();
-  for (const repo of reposToSnapshot) {
-    beforeSnapshots.set(repo.dir, await snapshotWorkspace(repo.dir));
+  const snapshots = await Promise.all(
+    reposToSnapshot.map(async (repo) => {
+      const snapshot = await snapshotWorkspace(repo.dir);
+      return { dir: repo.dir, snapshot };
+    })
+  );
+  for (const { dir, snapshot } of snapshots) {
+    beforeSnapshots.set(dir, snapshot);
   }
   try {
     for (const criterion of input.criteria) {
@@ -248,11 +254,13 @@ export async function runCriteriaChecks(input: {
       );
     }
   } finally {
-    for (const repo of reposToSnapshot) {
-      const before = beforeSnapshots.get(repo.dir);
-      const after = await snapshotWorkspace(repo.dir);
-      await applyCleanupPlan(repo.dir, planCheckSideEffectCleanup(before ?? "", after), before);
-    }
+    await Promise.all(
+      reposToSnapshot.map(async (repo) => {
+        const before = beforeSnapshots.get(repo.dir);
+        const after = await snapshotWorkspace(repo.dir);
+        await applyCleanupPlan(repo.dir, planCheckSideEffectCleanup(before ?? "", after), before);
+      })
+    );
   }
   return runs;
 }
@@ -312,8 +320,14 @@ export async function collectEvidence(input: CollectEvidenceInput): Promise<Coll
       : [{ dir: input.workspaceDir }];
 
   const beforeSnapshots = new Map<string, WorkspaceDirtySnapshot>();
-  for (const r of reposToSnapshot) {
-    beforeSnapshots.set(r.dir, await snapshotWorkspace(r.dir));
+  const snapshots = await Promise.all(
+    reposToSnapshot.map(async (r) => {
+      const snapshot = await snapshotWorkspace(r.dir);
+      return { dir: r.dir, snapshot };
+    })
+  );
+  for (const { dir, snapshot } of snapshots) {
+    beforeSnapshots.set(dir, snapshot);
   }
 
   try {
@@ -341,12 +355,14 @@ export async function collectEvidence(input: CollectEvidenceInput): Promise<Coll
       );
     }
   } finally {
-    for (const r of reposToSnapshot) {
-      const before = beforeSnapshots.get(r.dir);
-      const after = await snapshotWorkspace(r.dir);
-      const plan = planCheckSideEffectCleanup(before ?? "", after);
-      await applyCleanupPlan(r.dir, plan, before);
-    }
+    await Promise.all(
+      reposToSnapshot.map(async (r) => {
+        const before = beforeSnapshots.get(r.dir);
+        const after = await snapshotWorkspace(r.dir);
+        const plan = planCheckSideEffectCleanup(before ?? "", after);
+        await applyCleanupPlan(r.dir, plan, before);
+      })
+    );
   }
 
   let testResults: TestResultArtifact | undefined;
