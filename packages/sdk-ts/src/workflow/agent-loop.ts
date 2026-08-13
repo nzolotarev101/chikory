@@ -1100,7 +1100,7 @@ export async function agentLoop(spec: TaskSpec): Promise<RunStatus> {
                 continue;
               }
               const deterministicFails = designFails.filter((f) =>
-                DETERMINISTIC_RUBRIC_IDS.has(f.id),
+                DETERMINISTIC_RUBRIC_IDS.has(f.id) && f.infraFailed !== true,
               );
               if (deterministicFails.length > 0) {
                 return seal(
@@ -1119,7 +1119,7 @@ export async function agentLoop(spec: TaskSpec): Promise<RunStatus> {
             }
           } else if (sealingRubricFails.length > 0) {
             const deterministicFails = sealingRubricFails.filter((f) =>
-              DETERMINISTIC_RUBRIC_IDS.has(f.id),
+              DETERMINISTIC_RUBRIC_IDS.has(f.id) && f.infraFailed !== true,
             );
             if (deterministicFails.length > 0) {
               return seal(

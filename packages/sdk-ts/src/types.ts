@@ -92,6 +92,11 @@ export interface TaskSpec {
    */
   regressionSuite?: string;
   /**
+   * Optional timeout in milliseconds for each judge-executed check command.
+   * Defaults to DEFAULT_CHECK_TIMEOUT_MS (120,000 ms).
+   */
+  checkTimeoutMs?: number;
+  /**
    * WP-509/F-88 — chain-only decomposition floor. When set, `chikory chain`
    * rejects a plan with fewer nodes (the planner collapsed a decomposable goal
    * too coarsely). Absent = no floor. Ignored by single `chikory run`.

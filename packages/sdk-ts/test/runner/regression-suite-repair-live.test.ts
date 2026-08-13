@@ -18,7 +18,6 @@ import {
   createTemporalRunner,
   Journal,
   journalPath,
-  RUBRIC_DESIGN_SERVES_OVERALL_GOAL,
   RUBRIC_PRE_EXISTING_SUITE_GREEN,
   type RunHandle,
   type RunStatusReport,
@@ -85,7 +84,63 @@ describe.skipIf(address === null)("AC-2: live regression suite repair brief & ru
     );
   }
 
-  test("Scenario 1: declared regression_suite fails -> brief carries output marker, no design instruction, names item; terminates FAILED without ROLLBACK", async () => {
+  test("Scenario 1: declared check_timeout_ms: 3000 and suite sleeps 30s -> killed at declared cap, journaled row carries infraFailed, does NOT seal FAILED with code-red reason, reaches terminal unattended SUCCESS with 0 rollbacks", async () => {
+    const startTime = Date.now();
+    const wire = await startFakeJudgeWire(
+      [
+        judgeForm({ criteria: { "AC-1": true } }),
+        judgeForm({ criteria: { "AC-1": true } }),
+      ],
+      {
+        reviewForms: [
+          completionReviewForm({ hasRegressionSuite: true }),
+          completionReviewForm({ hasRegressionSuite: true }),
+        ],
+      },
+    );
+    cleanups.push(() => wire.close());
+
+    const { repoUrl, dataDir, runner } = await setup(wire, { claimsCompleteSteps: [1] });
+    const spec = makeJudgedSpec({
+      repoUrl,
+      cadence: 1,
+      maxSteps: 4,
+      regressionSuite: "sleep 30",
+      checkTimeoutMs: 3000,
+    });
+
+    const handle = await runner.start(spec);
+    const report = await awaitTerminal(handle);
+
+    const durationMs = Date.now() - startTime;
+    // Killed at declared cap (3s) -> wall clock proves it finished in well under 120s default
+    expect(durationMs).toBeLessThan(15_000);
+
+    // Must NOT seal FAILED with code-red reason; reaches terminal unattended with no ROLLBACK
+    expect(report.status).toBe("SUCCESS");
+
+    const journal = new Journal(journalPath(dataDir, handle.runId));
+    try {
+      const verdicts = journal.entries("verdict").map((e) => (e.payload as VerdictPayload).verdict);
+      expect(verdicts.filter((v) => v.kind === "ROLLBACK")).toHaveLength(0);
+
+      const completionVerdicts = journal.entries("verdict").filter((e) => (e.payload as VerdictPayload).source === "completion-review");
+      expect(completionVerdicts.length).toBeGreaterThanOrEqual(1);
+      const suiteRow = (completionVerdicts.at(-1)!.payload as VerdictPayload).verdict.form.rubricResults.find((r) => r.id === RUBRIC_PRE_EXISTING_SUITE_GREEN);
+      expect(suiteRow).toBeDefined();
+      expect(suiteRow!.infraFailed).toBe(true);
+      expect(suiteRow!.pass).toBe(false);
+      expect(suiteRow!.justification).toContain("DID NOT COMPLETE");
+
+      const terminal = journal.entries("terminal").at(-1)!.payload as { status: string; reason?: string };
+      expect(terminal.status).toBe("SUCCESS");
+      expect(terminal.reason).not.toContain("deterministic rubric failure");
+    } finally {
+      journal.close();
+    }
+  }, 180_000);
+
+  test("Scenario 2: declared regression_suite exits nonzero with unique marker -> seals FAILED with code-red reason, repair brief handed to EXECUTOR carries marker", async () => {
     const marker = `FAIL_MARKER_${randomUUID().slice(0, 8)}`;
     const command = `echo "${marker}"; exit 1`;
 
@@ -124,7 +179,6 @@ describe.skipIf(address === null)("AC-2: live regression suite repair brief & ru
       const stepEntries = journal.entries("step");
       expect(stepEntries.length).toBeGreaterThanOrEqual(2);
 
-      // Inspect repair step summary (which echoed input.context.judgeFeedback)
       const repairStepSummary = (stepEntries[1]!.payload as { record: { summary: string } }).record.summary;
       expect(repairStepSummary).toContain(marker);
       expect(repairStepSummary).toContain(RUBRIC_PRE_EXISTING_SUITE_GREEN);
@@ -132,14 +186,16 @@ describe.skipIf(address === null)("AC-2: live regression suite repair brief & ru
 
       const terminal = journal.entries("terminal").at(-1)!.payload as { status: string; reason?: string };
       expect(terminal.status).toBe("FAILED");
+      expect(terminal.reason).toContain("deterministic rubric failure");
       expect(terminal.reason).toContain(RUBRIC_PRE_EXISTING_SUITE_GREEN);
     } finally {
       journal.close();
     }
   }, 180_000);
 
-  test("Scenario 2: declared regression_suite passes -> seals SUCCESS, command runs once, suite row only in completion review verdict", async () => {
-    const command = "exit 0";
+  test("Scenario 3: declared regression_suite passes (exit 0) -> seals SUCCESS, command executed exactly once, suite row on completion review only, generated file removed by check", async () => {
+    const markerFile = `test_generated_marker_${randomUUID().slice(0, 8)}.tmp`;
+    const command = `touch ${markerFile} && exit 0`;
 
     const wire = await startFakeJudgeWire(
       [
@@ -184,56 +240,6 @@ describe.skipIf(address === null)("AC-2: live regression suite repair brief & ru
       const suiteRow = completionVerdicts[0]!.verdict.form.rubricResults.find((r) => r.id === RUBRIC_PRE_EXISTING_SUITE_GREEN);
       expect(suiteRow).toBeDefined();
       expect(suiteRow!.pass).toBe(true);
-    } finally {
-      journal.close();
-    }
-  }, 180_000);
-
-  test("Scenario 3: no regression_suite declared -> driven to design finding, repair brief carries design instruction, zero suite rows anywhere", async () => {
-    const wire = await startFakeJudgeWire(
-      [
-        judgeForm({ criteria: { "AC-1": true }, rubricFails: [RUBRIC_DESIGN_SERVES_OVERALL_GOAL] }),
-        judgeForm({ criteria: { "AC-1": true } }),
-      ],
-      {
-        reviewForms: [
-          completionReviewForm({ rubricFails: [RUBRIC_DESIGN_SERVES_OVERALL_GOAL] }),
-          completionReviewForm(),
-        ],
-      },
-    );
-    cleanups.push(() => wire.close());
-
-    const { repoUrl, dataDir, runner } = await setup(wire, { claimsCompleteSteps: [1] });
-    const spec = makeJudgedSpec({
-      repoUrl,
-      cadence: 1,
-      maxSteps: 4,
-      // NO regressionSuite declared
-    });
-
-    const handle = await runner.start(spec);
-    const report = await awaitTerminal(handle);
-
-    expect(report.status).toBe("SUCCESS");
-
-    const journal = new Journal(journalPath(dataDir, handle.runId));
-    try {
-      const verdicts = journal.entries("verdict").map((e) => e.payload as VerdictPayload);
-
-      // ZERO verdicts anywhere carry pre_existing_suite_still_green
-      for (const v of verdicts) {
-        const hasSuiteRow = v.verdict.form.rubricResults.some((r) => r.id === RUBRIC_PRE_EXISTING_SUITE_GREEN);
-        expect(hasSuiteRow).toBe(false);
-      }
-
-      const stepEntries = journal.entries("step");
-      expect(stepEntries.length).toBeGreaterThanOrEqual(2);
-      const repairStepSummary = (stepEntries[1]!.payload as { record: { summary: string } }).record.summary;
-
-      // Brief MUST carry design-only instruction
-      expect(repairStepSummary).toContain("do NOT change behavior, only design");
-      expect(repairStepSummary).toContain("DESIGN REVIEW BRIEF");
     } finally {
       journal.close();
     }

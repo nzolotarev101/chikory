@@ -288,4 +288,163 @@ index 123456..789012 100644
     expect(secretResult?.pass).toBe(true);
     expect(secretResult?.justification).toContain("no secrets introduced");
   });
+
+  it("pin constants: COMPLETION_BRIEF_MAX_CHARS is 2000 and DEFAULT_CHECK_TIMEOUT_MS is 120000", async () => {
+    const { DEFAULT_CHECK_TIMEOUT_MS } = await import("../../src/judge/index.js");
+    const { buildCompletionReviewBrief } = await import("../../src/workflow/completion-review.js");
+    expect(DEFAULT_CHECK_TIMEOUT_MS).toBe(120000);
+    // Pin 2000 char cap via boundary test
+    const longBriefForm: JudgeForm = {
+      criterionResults: [],
+      rubricResults: [{ id: "cumulative_design_coherent", pass: false, justification: "x".repeat(3000) }],
+      concerns: [],
+    };
+    expect(buildCompletionReviewBrief(longBriefForm).length).toBe(2000);
+  });
+
+  it("drives repair brief at 0, 1, 2, and 3 co-occurring design findings against a 4 KB suite output", async () => {
+    const { buildCompletionReviewBrief } = await import("../../src/workflow/completion-review.js");
+    const suiteOutputHeader = "START OF 4KB OUTPUT\n" + "x".repeat(3000) + "\n";
+    const suiteOutputTail = "FAIL test/a.test.ts > TEST_FAIL_MARKER_TAIL\n1 test failed, 49 passed.";
+    const full4KbOutput = suiteOutputHeader + suiteOutputTail;
+
+    const possibleDesignFails = [
+      { id: "cumulative_design_coherent", pass: false, justification: "design finding 1: duplicated logic" },
+      { id: "design_serves_overall_goal", pass: false, justification: "design finding 2: abstraction mismatch" },
+      { id: "no_architecture_violations", pass: false, justification: "design finding 3: import cycle" },
+    ];
+
+    for (let count = 0; count <= 3; count++) {
+      const designFails = possibleDesignFails.slice(0, count);
+      const form: JudgeForm = {
+        criterionResults: [],
+        rubricResults: [
+          ...designFails,
+          {
+            id: RUBRIC_PRE_EXISTING_SUITE_GREEN,
+            pass: false,
+            justification: `regression suite command \`pnpm test\` exited 1:\n${full4KbOutput}`,
+          },
+        ],
+        concerns: [],
+      };
+
+      const brief = buildCompletionReviewBrief(form);
+
+      // Must stay within 2000 char cap
+      expect(brief.length).toBeLessThanOrEqual(2000);
+
+      // Must name failing item
+      expect(brief).toContain(RUBRIC_PRE_EXISTING_SUITE_GREEN);
+
+      // Must carry TAIL of output where test names live
+      expect(brief).toContain("TEST_FAIL_MARKER_TAIL");
+
+      // Must list EVERY co-occurring design finding
+      for (const df of designFails) {
+        expect(brief).toContain(df.id);
+        expect(brief).toContain(df.justification);
+      }
+
+      // Must keep closing instruction at end
+      expect(brief).toContain("a fix must resolve these findings while keeping every acceptance criterion passing.");
+      expect(brief.trimEnd().endsWith("a fix must resolve these findings while keeping every acceptance criterion passing.")).toBe(true);
+
+      // Must omit design-only instruction
+      expect(brief).not.toContain("do NOT change behavior, only design");
+    }
+  });
+
+  // F-326 (dogfood-137 review). The test above sweeps the COUNT dimension at a fixed
+  // ~40-char justification; the defect lived in the LENGTH dimension. When the fixed
+  // part of the brief lands within 4 chars of the cap the excerpt budget goes to zero,
+  // and `String.prototype.slice(-0)` is `slice(0)` — the WHOLE string. Measured on the
+  // delivery as landed: a 2000-char brief became 46,095 chars.
+  it("holds the 2000-char cap at EVERY design-justification length, not just short ones", async () => {
+    const { buildCompletionReviewBrief } = await import("../../src/workflow/completion-review.js");
+    const tail = "FAIL test/a.test.ts > TEST_FAIL_MARKER_TAIL\n Test Files  2 failed (177)";
+    const output = `${"noise line ".repeat(4000)}${tail}`;
+    expect(output.length).toBeGreaterThan(40_000);
+
+    let sawZeroBudget = false;
+    for (let justificationLen = 1200; justificationLen <= 2200; justificationLen++) {
+      const form: JudgeForm = {
+        criterionResults: [],
+        rubricResults: [
+          { id: "design_serves_overall_goal", pass: false, justification: "d".repeat(justificationLen) },
+          {
+            id: RUBRIC_PRE_EXISTING_SUITE_GREEN,
+            pass: false,
+            justification: `regression suite command \`pnpm test\` exited 1:\n${output}`,
+          },
+        ],
+        concerns: [],
+      };
+      const brief = buildCompletionReviewBrief(form);
+      expect(
+        brief.length,
+        `brief overflowed its cap at justification length ${justificationLen}`,
+      ).toBeLessThanOrEqual(2000);
+      // The other failing finding is never squeezed out to make room (trap E).
+      expect(brief).toContain("design_serves_overall_goal");
+      if (!brief.includes("TEST_FAIL_MARKER_TAIL")) sawZeroBudget = true;
+    }
+    // The zero-budget window must actually be reached, or the sweep proves nothing.
+    expect(sawZeroBudget).toBe(true);
+  });
+
+  it("asserts infra/red distinction on settled row and seal decision", () => {
+    // Settled row: infraFailed: true carries through check override
+    const form: JudgeForm = {
+      criterionResults: [],
+      rubricResults: [{ id: RUBRIC_PRE_EXISTING_SUITE_GREEN, pass: true, justification: "model claim" }],
+      concerns: [],
+    };
+
+    const infraRow = applyCheckOverrides(
+      form,
+      [],
+      [RUBRIC_PRE_EXISTING_SUITE_GREEN_ITEM],
+      [],
+      [],
+      [],
+      {
+        criterionId: "pre_existing_suite_still_green",
+        command: "pnpm test",
+        exitCode: -1,
+        output: "",
+        durationMs: 120000,
+        infraFailed: true,
+      },
+    );
+    expect("form" in infraRow).toBe(true);
+    if ("form" in infraRow) {
+      expect(infraRow.form.rubricResults[0]!.infraFailed).toBe(true);
+      expect(infraRow.form.rubricResults[0]!.pass).toBe(false);
+      expect(infraRow.form.rubricResults[0]!.justification).toContain("DID NOT COMPLETE");
+    }
+
+    const codeRedRow = applyCheckOverrides(
+      form,
+      [],
+      [RUBRIC_PRE_EXISTING_SUITE_GREEN_ITEM],
+      [],
+      [],
+      [],
+      {
+        criterionId: "pre_existing_suite_still_green",
+        command: "pnpm test",
+        exitCode: 1,
+        output: "FAIL test",
+        durationMs: 500,
+        infraFailed: false,
+      },
+    );
+    expect("form" in codeRedRow).toBe(true);
+    if ("form" in codeRedRow) {
+      expect(codeRedRow.form.rubricResults[0]!.infraFailed).toBeUndefined();
+      expect(codeRedRow.form.rubricResults[0]!.pass).toBe(false);
+      expect(codeRedRow.form.rubricResults[0]!.justification).toContain("exited 1");
+    }
+  });
 });

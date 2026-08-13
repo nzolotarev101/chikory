@@ -1783,6 +1783,7 @@ export function createRunnerActivities(deps: RunnerActivityDeps) {
             rubric: effectiveRubric,
             ...(input.completionReview ? { reviewScope: "cumulative" as const } : {}),
             ...(input.completionReview && spec.regressionSuite ? { regressionSuite: spec.regressionSuite } : {}),
+            ...(spec.checkTimeoutMs !== undefined ? { checkTimeoutMs: spec.checkTimeoutMs } : {}),
             lastGoodCheckpointId: input.lastGoodCheckpointId,
           });
           verdict = pass.verdict;
