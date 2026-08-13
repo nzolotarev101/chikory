@@ -1,4 +1,4 @@
-import { readFileSync, existsSync, readdirSync } from "node:fs";
+import { readFileSync, existsSync, readdirSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { execSync } from "node:child_process";
 import { tmpdir } from "node:os";
@@ -265,7 +265,7 @@ export function loadTargetEngineSource(task: BenchmarkTask, workspaceDir: string
     } finally {
       try {
         if (existsSync(tempDir)) {
-          execSync(`rm -rf ${JSON.stringify(tempDir)}`, { stdio: "ignore" });
+          rmSync(tempDir, { recursive: true, force: true });
         }
       } catch {
         // ignore rm error
@@ -444,7 +444,7 @@ export function getTargetPackageJson(task: BenchmarkTask, workspaceDir: string):
       });
       const content = readFileSync(join(tempDir, "package.json"), "utf8");
       try {
-        execSync(`rm -rf ${JSON.stringify(tempDir)}`, { stdio: "ignore" });
+        rmSync(tempDir, { recursive: true, force: true });
       } catch {
         // ignore rm error
       }
