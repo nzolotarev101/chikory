@@ -193,24 +193,50 @@ export async function applyCleanupPlan(
 ): Promise<void> {
   const beforeMap = beforeSnapshot ? parseDirtySnapshot(beforeSnapshot) : undefined;
 
-  for (const relPath of plan.toDelete) {
-    const fullPath = join(dir, relPath);
-    await rm(fullPath, { recursive: true, force: true });
-  }
+  // Parallelize deletions
+  await Promise.all(
+    plan.toDelete.map((relPath) => {
+      const fullPath = join(dir, relPath);
+      return rm(fullPath, { recursive: true, force: true });
+    })
+  );
+
+  const writePromises: Promise<void>[] = [];
+  const gitCheckoutPaths: string[] = [];
 
   for (const relPath of plan.toRestore) {
     const b = beforeMap?.get(relPath);
     if (b && b.content !== undefined) {
       const fullPath = join(dir, relPath);
-      await writeFile(fullPath, b.content);
+      writePromises.push(writeFile(fullPath, b.content));
     } else {
+      gitCheckoutPaths.push(relPath);
+    }
+  }
+
+  // Parallelize local file writes
+  await Promise.all(writePromises);
+
+  if (gitCheckoutPaths.length > 0) {
+    try {
+      // Attempt to batch checkout HEAD
+      await git(dir, ["checkout", "HEAD", "--", ...gitCheckoutPaths]);
+    } catch {
       try {
-        await git(dir, ["checkout", "HEAD", "--", relPath]);
+        // Fallback to batch checkout default
+        await git(dir, ["checkout", "--", ...gitCheckoutPaths]);
       } catch {
-        try {
-          await git(dir, ["checkout", "--", relPath]);
-        } catch {
-          // Ignored if checkout fails
+        // Fallback to sequential checkout in case git pathspec error occurs
+        for (const relPath of gitCheckoutPaths) {
+          try {
+            await git(dir, ["checkout", "HEAD", "--", relPath]);
+          } catch {
+            try {
+              await git(dir, ["checkout", "--", relPath]);
+            } catch {
+              // Ignored if checkout fails
+            }
+          }
         }
       }
     }
