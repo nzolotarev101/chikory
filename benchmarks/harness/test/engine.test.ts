@@ -10,14 +10,15 @@ import type { BenchmarkTask } from "../src/task.js";
 const mockExecFileSync = vi.fn();
 
 vi.mock("node:child_process", async (importOriginal) => {
-  const original = await importOriginal<any>();
+  const original = await importOriginal<Record<string, unknown>>();
   return {
     ...original,
-    execFileSync: (...args: any[]) => {
+    execFileSync: (...args: unknown[]) => {
       if (mockExecFileSync.getMockImplementation()) {
         return mockExecFileSync(...args);
       }
-      return original.execFileSync(...args);
+      const fn = original.execFileSync as (...args: unknown[]) => unknown;
+      return fn(...args);
     },
   };
 });
