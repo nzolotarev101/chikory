@@ -161,4 +161,109 @@ describe("decideLimitPacing (WP-310)", () => {
     expect(decision.action).toBe("throttle");
     expect(decision.interStepDelayMs).toBe(MAX_THROTTLE_DELAY_MS);
   });
+
+  it("empty or zero duration steps fall back correctly", () => {
+    // Empty durations - meanStepDurationMs falls back to 1
+    // recentStepTokens: [1000], but durations are [0] -> mean step duration is Math.max(1, 0) = 1ms
+    // observedPerMs should handle totalDurationMs = 0 -> observedPerMs = 0
+    // If observedPerMs is 0, we should expect "push" action (spend freely, observe)
+    const decisionZeroDurations = decideLimitPacing(
+      burn({
+        recentStepTokens: [1000, 1000],
+        recentStepDurationsMs: [0, 0],
+        windows: [weekly({ capacityTokens: 100_000, resetAtMs: NOW + 10 * HOUR })],
+      }),
+    );
+    expect(decisionZeroDurations.action).toBe("push");
+    expect(decisionZeroDurations.observedTokensPerHour).toBe(0);
+  });
+
+  it("negative or zero remaining tokens clamp to 0", () => {
+    // If capacityTokens < consumedTokens, remainingTokens should clamp to 0
+    // sustainablePerMs should be 0, leading to targetPerMs = 0 or requiredPerMs (if deadline is set)
+    // If targetPerMs is 0, neededDelayMs should be Infinity, and if !paceConflict, we should predict-limit.
+    const decisionClamped = decideLimitPacing(
+      burn({
+        windows: [weekly({ capacityTokens: 10_000, consumedTokens: 15_000, resetAtMs: NOW + 10 * HOUR })],
+      }),
+    );
+    expect(decisionClamped.sustainableTokensPerHour).toBe(0);
+    expect(decisionClamped.action).toBe("predict-limit");
+  });
+
+  it("expired reset times clamp untilResetMs to at least 1ms", () => {
+    // If resetAtMs <= nowMs, untilResetMs = Math.max(1, resetAtMs - nowMs) = 1ms
+    // capacity: 100_000, consumed: 0 -> remaining: 100_000
+    // sustainablePerMs = 100_000 / 1ms = 100_000 tokens/ms
+    const decisionExpiredReset = decideLimitPacing(
+      burn({
+        windows: [weekly({ capacityTokens: 100_000, resetAtMs: NOW - 1000 })],
+      }),
+    );
+    expect(decisionExpiredReset.sustainableTokensPerHour).toBeCloseTo(100_000 * HOUR, 0);
+  });
+
+  it("deadline/horizon expired or estimated steps zero", () => {
+    // If horizonDeadlineMs <= nowMs, requiredTokensPerHour should be 0
+    const decisionExpiredDeadline = decideLimitPacing(
+      burn({
+        windows: [weekly({ capacityTokens: 100_000, resetAtMs: NOW + 10 * HOUR })],
+        horizonDeadlineMs: NOW - 1000,
+        estimatedRemainingSteps: 10,
+      }),
+    );
+    expect(decisionExpiredDeadline.requiredTokensPerHour).toBe(0);
+
+    // If estimatedRemainingSteps <= 0, requiredTokensPerHour should be 0
+    const decisionZeroSteps = decideLimitPacing(
+      burn({
+        windows: [weekly({ capacityTokens: 100_000, resetAtMs: NOW + 10 * HOUR })],
+        horizonDeadlineMs: NOW + HOUR,
+        estimatedRemainingSteps: 0,
+      }),
+    );
+    expect(decisionZeroSteps.requiredTokensPerHour).toBe(0);
+  });
+
+  it("extremely close deadline calculates high required pace", () => {
+    // deadline is in 1ms, estimated remaining steps = 1, mean tokens = 1000
+    // requiredPerMs = (1 * 1000) / 1ms = 1000 tokens/ms
+    const decisionCloseDeadline = decideLimitPacing(
+      burn({
+        windows: [weekly({ capacityTokens: 100_000, resetAtMs: NOW + 10 * HOUR })],
+        horizonDeadlineMs: NOW + 1,
+        estimatedRemainingSteps: 1,
+      }),
+    );
+    expect(decisionCloseDeadline.requiredTokensPerHour).toBeCloseTo(1000 * HOUR, 0);
+  });
+
+  it("mean step tokens is 0 under tightest window prevents predict-limit branch", () => {
+    // capacity: 10, consumed: 5 -> remaining: 5
+    // but meanStepTokens = 0, so next step won't blow the window
+    const decisionZeroTokens = decideLimitPacing(
+      burn({
+        recentStepTokens: [0, 0, 0],
+        windows: [weekly({ capacityTokens: 10, consumedTokens: 5, resetAtMs: NOW + HOUR })],
+      }),
+    );
+    // Since observed is 0 (meanStepTokens is 0, so observed is 0), action should be push
+    expect(decisionZeroTokens.action).toBe("push");
+  });
+
+  it("multi-window checks tightest limit correctly", () => {
+    // Window 1: rolling-5h, capacity 100_000, reset in 1 hour -> sustainable 100_000 / hour
+    // Window 2: weekly, capacity 50_000, reset in 1 hour -> sustainable 50_000 / hour
+    // Tightest sustainable pace is 50_000 / hour from weekly.
+    const decisionMulti = decideLimitPacing(
+      burn({
+        windows: [
+          { window: "rolling-5h", windowMs: 5 * HOUR, capacityTokens: 100_000, consumedTokens: 0, resetAtMs: NOW + HOUR },
+          weekly({ capacityTokens: 50_000, consumedTokens: 0, resetAtMs: NOW + HOUR }),
+        ],
+      }),
+    );
+    expect(decisionMulti.limitingWindow).toBe("weekly");
+    expect(decisionMulti.sustainableTokensPerHour).toBeCloseTo(50_000, 0);
+  });
 });
