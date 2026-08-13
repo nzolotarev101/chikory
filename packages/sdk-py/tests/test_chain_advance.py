@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+import pytest
+from pydantic import ValidationError
+
 from chikory import advance_chain, derive_chain_status
 from chikory.types import (
     AcceptanceCriterion,
@@ -135,3 +138,75 @@ def test_advance_chain_folds_outcome_recomputes_status_and_preserves_input() -> 
     assert advanced.status == derive_chain_status(advanced)
     assert "N-1" not in record.node_outcomes
     assert record.status == "RUNNING"
+
+
+def test_derive_chain_status_with_different_verdicts_but_success() -> None:
+    # Non-ESCALATE verdicts with SUCCESS status should result in SUCCESS if all nodes are complete.
+    record = _chain_record(
+        {
+            "N-1": NodeOutcome(status="SUCCESS", verdict="PROCEED"),
+            "N-2": NodeOutcome(status="SUCCESS", verdict="ROLLBACK"),
+            "N-3": NodeOutcome(status="SUCCESS", verdict="BRANCH"),
+        },
+    )
+    assert derive_chain_status(record) == "SUCCESS"
+
+
+def test_derive_chain_status_with_different_verdicts_but_failed() -> None:
+    # Non-ESCALATE verdicts with FAILED status should result in FAILED status.
+    for verdict in ["PROCEED", "ROLLBACK", "HALT", "BRANCH"]:
+        record = _chain_record(
+            {
+                "N-1": SUCCESS_OUTCOME,
+                "N-2": NodeOutcome(status="FAILED", verdict=verdict),  # type: ignore
+                "N-3": SUCCESS_OUTCOME,
+            },
+        )
+        assert derive_chain_status(record) == "FAILED"
+
+
+def test_derive_chain_status_with_extra_outcomes_not_in_plan() -> None:
+    # Extra outcomes in node_outcomes that are not in the plan nodes list.
+    # We should ignore extra outcomes for success determination.
+    record = _chain_record(
+        {
+            "N-1": SUCCESS_OUTCOME,
+            "N-2": SUCCESS_OUTCOME,
+            "N-3": SUCCESS_OUTCOME,
+            "N-EXTRA": SUCCESS_OUTCOME,
+        }
+    )
+    assert derive_chain_status(record) == "SUCCESS"
+
+    # If an extra outcome is FAILED, it should still trigger FAILED status.
+    record_failed_extra = _chain_record(
+        {
+            "N-1": SUCCESS_OUTCOME,
+            "N-2": SUCCESS_OUTCOME,
+            "N-3": SUCCESS_OUTCOME,
+            "N-EXTRA": NodeOutcome(status="FAILED", verdict="HALT"),
+        }
+    )
+    assert derive_chain_status(record_failed_extra) == "FAILED"
+
+    # If an extra outcome is ESCALATE, it should still trigger AWAITING_PLAN_APPROVAL.
+    record_escalate_extra = _chain_record(
+        {
+            "N-1": SUCCESS_OUTCOME,
+            "N-2": SUCCESS_OUTCOME,
+            "N-3": SUCCESS_OUTCOME,
+            "N-EXTRA": NodeOutcome(status="SUCCESS", verdict="ESCALATE"),
+        }
+    )
+    assert derive_chain_status(record_escalate_extra) == "AWAITING_PLAN_APPROVAL"
+
+
+def test_plan_requires_at_least_one_node() -> None:
+    # A plan cannot be constructed with empty nodes due to Pydantic min_length=1 validation.
+    with pytest.raises(ValidationError):
+        Plan(
+            id="plan-empty",
+            goal="Empty task",
+            created_at="2026-06-19T00:00:00.000Z",
+            nodes=[],
+        )
