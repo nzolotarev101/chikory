@@ -46,10 +46,41 @@ describe("budget estimate math (WP-124)", () => {
     expect(estimateNextStepCost([100, 0.01, 0.01, 0.01, 0.01, 0.01])).toBeCloseTo(0.015, 10);
   });
 
+  test("estimateNextStepCost: small history (length 2) sliding window", () => {
+    // Mean of [2, 4] is 3; 3 * 1.5 = 4.5
+    expect(estimateNextStepCost([2, 4])).toBeCloseTo(4.5, 10);
+  });
+
+  test("estimateNextStepCost: exactly 5 items sliding window boundary", () => {
+    // Mean of [1, 2, 3, 4, 5] is 3; 3 * 1.5 = 4.5
+    expect(estimateNextStepCost([1, 2, 3, 4, 5])).toBeCloseTo(4.5, 10);
+  });
+
+  test("estimateNextStepCost: more than 5 items averages only last 5", () => {
+    // Mean of last 5: [1, 2, 3, 4, 5] is 3; 3 * 1.5 = 4.5
+    expect(estimateNextStepCost([10, 20, 1, 2, 3, 4, 5])).toBeCloseTo(4.5, 10);
+  });
+
   test("breach on remaining <= 0 even when estimate is 0", () => {
     expect(budgetBreached(1, 1, 0)).toBe(true);
     expect(budgetBreached(0, 1, 0)).toBe(false);
     expect(budgetBreached(0.99, 1, 0.015)).toBe(true);
+  });
+
+  test("budgetBreached: remaining budget <= 0 (negative and exactly zero)", () => {
+    // Remaining is exactly 0
+    expect(budgetBreached(10, 10, 2)).toBe(true);
+    // Remaining is negative
+    expect(budgetBreached(12, 10, 2)).toBe(true);
+  });
+
+  test("budgetBreached: remaining budget relative to estimate", () => {
+    // Remaining (3) > estimate (2) -> no breach
+    expect(budgetBreached(7, 10, 2)).toBe(false);
+    // Remaining (2) == estimate (2) -> no breach (strict inequality)
+    expect(budgetBreached(8, 10, 2)).toBe(false);
+    // Remaining (1.5) < estimate (2) -> breach
+    expect(budgetBreached(8.5, 10, 2)).toBe(true);
   });
 
   // WP-218 — the token twin of the USD math (same estimator/predicate shape).
@@ -60,10 +91,41 @@ describe("budget estimate math (WP-124)", () => {
     expect(estimateNextStepTokens([1e9, 1000, 1000, 1000, 1000, 1000])).toBeCloseTo(1500, 6);
   });
 
+  test("estimateNextStepTokens: small history (length 2) sliding window", () => {
+    // Mean of [200, 400] is 300; 300 * 1.5 = 450
+    expect(estimateNextStepTokens([200, 400])).toBeCloseTo(450, 6);
+  });
+
+  test("estimateNextStepTokens: exactly 5 items sliding window boundary", () => {
+    // Mean of [100, 200, 300, 400, 500] is 300; 300 * 1.5 = 450
+    expect(estimateNextStepTokens([100, 200, 300, 400, 500])).toBeCloseTo(450, 6);
+  });
+
+  test("estimateNextStepTokens: more than 5 items averages only last 5", () => {
+    // Mean of last 5: [100, 200, 300, 400, 500] is 300; 300 * 1.5 = 450
+    expect(estimateNextStepTokens([1000, 2000, 100, 200, 300, 400, 500])).toBeCloseTo(450, 6);
+  });
+
   test("token breach on remaining <= 0 even when estimate is 0", () => {
     expect(tokenBudgetBreached(1000, 1000, 0)).toBe(true);
     expect(tokenBudgetBreached(0, 1000, 0)).toBe(false);
     expect(tokenBudgetBreached(990, 1000, 15)).toBe(true);
+  });
+
+  test("tokenBudgetBreached: remaining tokens <= 0 (negative and exactly zero)", () => {
+    // Remaining is exactly 0
+    expect(tokenBudgetBreached(1000, 1000, 200)).toBe(true);
+    // Remaining is negative
+    expect(tokenBudgetBreached(1200, 1000, 200)).toBe(true);
+  });
+
+  test("tokenBudgetBreached: remaining tokens relative to estimate", () => {
+    // Remaining (300) > estimate (200) -> no breach
+    expect(tokenBudgetBreached(700, 1000, 200)).toBe(false);
+    // Remaining (200) == estimate (200) -> no breach (strict inequality)
+    expect(tokenBudgetBreached(800, 1000, 200)).toBe(false);
+    // Remaining (150) < estimate (200) -> breach
+    expect(tokenBudgetBreached(850, 1000, 200)).toBe(true);
   });
 });
 
