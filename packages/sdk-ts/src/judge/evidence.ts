@@ -129,22 +129,24 @@ export async function collectPerRepoDiffs(input: CollectPerRepoDiffsInput): Prom
     (writableRepos.length === 1 && writableRepos[0]?.relativePath !== ".");
   const sections: DiffSection[] = [];
   if (perRepoDiff) {
-    for (const repo of writableRepos) {
+    const promises = writableRepos.map(async (repo) => {
       const repoDir = repo.relativePath === "." ? input.workspaceDir : join(input.workspaceDir, repo.relativePath);
       const sinceCommit = input.repoDiffBases?.[repo.name] ?? input.sinceCommit;
       await clearStaleIndexLock(repoDir);
       await git(repoDir, ["add", "-N", "."]);
       const repoDiff = await git(repoDir, ["diff", sinceCommit]);
       const label = diffEvidenceLabel(repo.name, repo.relativePath);
-      sections.push({
+      return {
         repoName: repo.name,
         relativePath: repo.relativePath,
         sinceCommit,
         label,
         diffText: repoDiff,
         evidenceText: labeledDiffEvidence(label, repoDiff),
-      });
-    }
+      };
+    });
+    const resolvedSections = await Promise.all(promises);
+    sections.push(...resolvedSections);
   } else {
     await clearStaleIndexLock(input.workspaceDir);
     await git(input.workspaceDir, ["add", "-N", "."]);
