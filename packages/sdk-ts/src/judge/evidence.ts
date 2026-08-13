@@ -236,17 +236,18 @@ export async function runCriteriaChecks(input: {
     beforeSnapshots.set(repo.dir, await snapshotWorkspace(repo.dir));
   }
   try {
-    for (const criterion of input.criteria) {
-      if (!criterion.check) continue;
-      runs.push(
-        await runCheck(
+    const activeCriteria = input.criteria.filter((criterion) => criterion.check);
+    const results = await Promise.all(
+      activeCriteria.map((criterion) =>
+        runCheck(
           input.workspaceDir,
           criterion,
           input.checkTimeoutMs ?? DEFAULT_CHECK_TIMEOUT_MS,
           input.workspaceRepos ?? [],
         ),
-      );
-    }
+      ),
+    );
+    runs.push(...results);
   } finally {
     for (const repo of reposToSnapshot) {
       const before = beforeSnapshots.get(repo.dir);
@@ -317,17 +318,19 @@ export async function collectEvidence(input: CollectEvidenceInput): Promise<Coll
   }
 
   try {
-    for (const criterion of input.criteria) {
-      if (!criterion.check) continue;
-      checkRuns.push(
-        await runCheck(
+    const activeCriteria = input.criteria.filter((criterion) => criterion.check);
+    const results = await Promise.all(
+      activeCriteria.map((criterion) =>
+        runCheck(
           input.workspaceDir,
           criterion,
           input.checkTimeoutMs ?? DEFAULT_CHECK_TIMEOUT_MS,
           input.workspaceRepos ?? [],
         ),
-      );
-    }
+      ),
+    );
+    checkRuns.push(...results);
+
     if (input.regressionSuite) {
       regressionSuiteRun = await runCheck(
         input.workspaceDir,
