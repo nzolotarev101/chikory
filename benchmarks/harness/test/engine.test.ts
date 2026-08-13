@@ -1,10 +1,24 @@
-import { mkdtempSync, writeFileSync } from "node:fs";
+import { mkdtempSync, writeFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-import { describe, expect, it } from "vitest";
+import { vi, describe, expect, it } from "vitest";
 import { resolveTargetNodeEngine, planNodeProvisioning, decideTargetNode, loadTargetEngineSource, pinnedNodeProvisioning, satisfiesRange } from "../src/engine.js";
 import type { BenchmarkTask } from "../src/task.js";
+
+vi.mock("node:fs", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("node:fs")>();
+  return {
+    ...actual,
+    rmSync: vi.fn(),
+    existsSync: vi.fn((path: string) => {
+      if (typeof path === "string" && path.includes("temp-git")) {
+        return true;
+      }
+      return actual.existsSync(path);
+    }),
+  };
+});
 
 describe("resolveTargetNodeEngine", () => {
   it("handles >=24", () => {
@@ -313,5 +327,26 @@ describe("pinnedNodeProvisioning (F-254)", () => {
       available: ["22.22.3"],
     });
     expect((decision as { error: string }).error).toContain("node_version");
+  });
+});
+
+describe("cleanup security using rmSync", () => {
+  it("uses rmSync instead of shell execution during cleanup in loadTargetEngineSource", () => {
+    vi.mocked(rmSync).mockClear();
+
+    const task = {
+      id: "security-test-task",
+      class: "brownfield",
+      repo: { url: "https://invalid.example/repo", ref: "main" },
+    } as unknown as BenchmarkTask;
+
+    loadTargetEngineSource(task, "/invalid-path-does-not-exist");
+
+    expect(rmSync).toHaveBeenCalled();
+    const calls = vi.mocked(rmSync).mock.calls;
+    expect(calls.length).toBeGreaterThanOrEqual(1);
+
+    const firstCallArgs = calls[0];
+    expect(firstCallArgs[1]).toEqual({ recursive: true, force: true });
   });
 });
