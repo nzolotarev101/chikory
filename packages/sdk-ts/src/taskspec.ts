@@ -193,6 +193,8 @@ const RawTaskSpecYaml = z
     max_steps: z.number().int().positive().optional(),
     regression_suite: z.string().min(1).optional(),
     regressionSuite: z.string().min(1).optional(),
+    check_timeout_ms: z.number().int().positive().optional(),
+    checkTimeoutMs: z.number().int().positive().optional(),
     min_nodes: z.number().int().positive().optional(),
     max_reject_strikes: z.number().int().nonnegative().optional(),
     maxRejectStrikes: z.number().int().nonnegative().optional(),
@@ -469,6 +471,11 @@ export function parseTaskSpec(yamlText: string, opts: ParseTaskSpecOptions = {})
       ? { regressionSuite: raw.regression_suite }
       : raw.regressionSuite !== undefined
         ? { regressionSuite: raw.regressionSuite }
+        : {}),
+    ...(raw.check_timeout_ms !== undefined
+      ? { checkTimeoutMs: raw.check_timeout_ms }
+      : raw.checkTimeoutMs !== undefined
+        ? { checkTimeoutMs: raw.checkTimeoutMs }
         : {}),
     ...(raw.min_nodes !== undefined ? { minNodes: raw.min_nodes } : {}),
     ...(raw.max_reject_strikes !== undefined
