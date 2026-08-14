@@ -89,6 +89,7 @@ export {
 } from "./base-verify.js";
 export {
   buildLeaderboard,
+  generateLeaderboardHtml,
   generateLeaderboardMarkdown,
   writeLeaderboard,
   type LeaderboardData,
