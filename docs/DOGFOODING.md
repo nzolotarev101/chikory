@@ -8,18 +8,16 @@ recover a run, and how to land the result as a normal PR.
 **Status (2026-08-12, bounded — update discipline: REPLACE this block, ≤15 lines;
 displaced prose moves verbatim to [`PLAN-HISTORY.md`](PLAN-HISTORY.md); per-run detail:
 `docs/reports/`; queue + course correction: `plan.md` §6/§7).**
-**Status (2026-08-12, bounded — update discipline: REPLACE this block, ≤15 lines;
+**Status (2026-08-14, bounded — update discipline: REPLACE this block, ≤15 lines;
 displaced prose moves verbatim to [`PLAN-HISTORY.md`](PLAN-HISTORY.md); per-run detail:
 `docs/reports/`; queue + course correction: `plan.md` §6/§7).**
-🟢 **dogfood-136 / WP-611 (brief the repair with the failing tests) + WP-613 (no unmeasured green row) DELIVERED** — `run-44abed04-fa4e-465b-8fd1-9c0de732c1a3`, SUCCESS 1 step, $0.1050/$20.00, 6m 38s, 2/2 criteria, harvest byte-identical 9/9, `docs/reports/dogfood-136.md`.
+🟢 **dogfood-139 / WP-303 (leaderboard site + methodology) DELIVERED — WP-303 IS COMPLETE** — `run-ab72b901-4f3f-4b98-b6e1-ca00324ff0a6`, SUCCESS 1 step, $0.1048/$20.00, 4m 40s, 2/2 criteria, harvest byte-IDENTICAL 5/5, `docs/reports/dogfood-139.md`.
 
-**The gate now says what broke, and stays silent about what it never measured.** When a declared `regression_suite:` comes back red, the one repair step the run grants is handed a **REPAIR BRIEF** carrying a bounded tail of the command's own output — the failing test names — with the standing *"do NOT change behavior, only design"* line absent; an ordinary design finding keeps that wording unchanged. And `pre_existing_suite_still_green` no longer sits in either default rubric: it joins the effective rubric only on the **run-completion review of a run that declares a suite**, and the override now ERRORS (routed to `escalate()`) rather than recording a pass when it is ever asked without evidence.
+**The benchmark result is now a page a skeptic can open.** `chikory-bench leaderboard` writes a self-contained `index.html` beside the JSON and Markdown, published at `benchmarks/publications/leaderboard/index.html`: both arms as 95% intervals, *"Overlap at 95% confidence; the arms are not separated"*, methodology read from the bundle, zero network assets, regenerable from the data it publishes. All 8 designed traps rejected. **The ladder does NOT advance (`rung=4`)** — rung 5 also needs WP-304's arm, and a rung is satisfied only when its proof is whole.
 
-**WP-609 is live-proven.** This was the first spec to declare `regression_suite:`, and its own journal carries the row settled from a real exit code (`… exited 0`) — the F-197 debt from dogfood-135 is paid. Independently re-run this review: **175 files / 1348 tests green in 49.75 s**.
+**🔴 The judge PROVED two defects and the run shipped them anyway (F-335 → WP-619, the next headline).** Judge pass #1 ESCALATEd with 3 concerns; pass #2 ran a smaller rubric over the **byte-identical diff**, never re-tested them, and sealed 🟢 SUCCESS. Two named real defects the ACs did not test for. **🔴 F-334 hand-fixed (WP-621):** `regressionGateBeforeSuccess` returned `undefined` for any non-deterministic finding, and on the converged-escalate path `undefined` means "SUCCESS stands" — so `design_serves_overall_goal: ✗` sealed green. Now condemns FAILED + resumable, still terminal-or-nothing; sdk 1379 → **1380**. **F-331 is LIVE-PROVEN this run** — judge pass #2 carried `✓ pre_existing_suite_still_green`.
 
-**Read this before the next launch — two live caveats.** ① A suite slower than the **fixed 120 s** per-check cap seals the run FAILED as if the code were red (🟡 F-320 → WP-612) — declare the narrowest suite covering what you edit, and time it at HEAD. ② The repair brief's evidence can still be cut: the excerpt is bounded at 1000 chars but the brief is clamped to 2000 from the tail, so at **two** co-occurring design findings the suite summary and the closing instruction are both lost (🟡 F-323 → WP-614).
-
-**Keep putting `unattended: escalation: seal_resumable_failed` in every headline spec (F-322).** dogfood-136 carried it and reached terminal unattended; dogfood-135 omitted it and parked 11h 59m in `AWAITING_APPROVAL`.
+**Still standing.** ① Three page defects the ACs missed were hand-fixed (🟠 F-336 fabricated corpus counts on empty data · 🟠 F-337 bundle data could inject a remote `<script>` · 🟠 F-338 evidence links depended on the CLI's cwd) — bench suite 210 → **213**; §8 carries the note. ② 🟡 F-339 → WP-620 — the stale-spec guard refused this very spec at $0 and is wrong on **7 plan rows in both directions**; launch with `CHIKORY_ALLOW_STALE_SPEC=1` when you have re-measured the WP by hand. ③ 🟠 F-328 → WP-616 · 🟠 F-332 → WP-618 still open. ④ Keep `unattended: escalation: seal_resumable_failed` in every headline spec (F-322).
 
 Related docs: [`docs/spec/task-spec.md`](spec/task-spec.md) (schema
 reference) · [`docs/TASK-PROTOCOL.md`](TASK-PROTOCOL.md) (WP etiquette, §7 is
@@ -866,24 +864,40 @@ broken (a false-green, not a follow-on fix).
 | A step summary pastes a `vitest`/typecheck log that green-lights files you do not recognise, or the executor's verification table cites a suite size you cannot reproduce | **The CLI replayed a task log from a DIFFERENT session, and the executor transcribed it as this run's evidence** (🔴 **F-312**, envelope hand-fixed dogfood-133). On `run-83bf691d` the summary carried two `<gmsg name="task_notification">` blocks (48.0% of 6,917 bytes) whose "558/558 tests across 46 test files" named **17 files that do not exist** — the workspace holds 174. Only JD-4 (judge-executed checks override the model's `tests_pass`) kept it out of the acceptance path. Both envelope forms are now stripped (`src/executors/gemini-cli.ts:51,61`), but the transcription into prose is not. **Never let a gate rest on what the executor says it ran — re-run the suite yourself.** |
 | A run you expected to finish is sitting in `AWAITING_APPROVAL`, its last verdict `⚠ ESCALATE`, and the judge form shows every criterion AND every rubric item ✓ | **A converged out-of-rubric escalation with no unattended policy** (🟡 F-322, dogfood-135 — parked **11h 59m 31s** overnight). `agent-loop.ts:1213-1224` auto-seals SUCCESS for exactly this state, but only when the spec carries `unattended:` / `escalation: seal_resumable_failed`; dogfood-135's spec omitted it. **Fix now:** `devbox run -- pnpm chikory approve <run-id>` — with all criteria passing, the approve path force-seals SUCCESS at $0 without re-judging (`agent-loop.ts:1252-1258`). Do NOT `--reject`: that routes to heal and spends a strike on a delivery the judge already scored green. **Fix forever:** put the two-line `unattended:` block in every headline spec (dogfood-126/128 have it). Before approving, verify the concern yourself — dogfood-135's escalation ("the full-suite/build/lint claim appears only in the executor's untrusted step summary") was formally right and factually wrong; the hand re-run was 174 files / 1342 tests green. |
 | A run seals `FAILED — completion review: deterministic rubric failure — pre_existing_suite_still_green`, but the same suite passes when you run it by hand | **Your declared `regression_suite` was KILLED at the per-check cap, not red** (🟡 F-320 → WP-612, dogfood-135). The rubric justification distinguishes them — a kill reads *"DID NOT COMPLETE (killed at the per-check cap) — infra failure, not a code red"* — but the seal does not: the WP-263(b) infra-skip covers CRITERION rows only (`src/judge/verdict.ts:101`), so an `infraFailed` rubric row still reaches `deterministicFails` (`src/workflow/agent-loop.ts:1108,1127`). The cap is fixed at `DEFAULT_CHECK_TIMEOUT_MS = 120_000` (`src/judge/evidence.ts:37`) and **is not spec-settable**. Declare the narrowest suite that still proves the repository green (sdk-ts alone ≈ 50.7 s; the full `devbox run test` ≈ 68 s, leaving little headroom on a loaded machine). |
+| A run seals 🟢 `SUCCESS` with the reason `completion review: design findings recorded — pre_existing_suite_still_green`, but the run's rubric row says DID NOT COMPLETE | **The declared `regression_suite:` was KILLED at its per-check cap and never finished** (🟠 **F-327** → **WP-615**, dogfood-137). WP-612 correctly withdrew the FAILED seal an infra kill used to produce, but the branch it falls through to is the design-finding one (`src/workflow/agent-loop.ts:1113-1118`, `:1132-1137`), so the outcome names the killed gate as a design nit and `report.failure` is `undefined`. **The gate did NOT pass — it never ran to completion.** Read the completion-review verdict's `pre_existing_suite_still_green` row: an infra kill carries `infraFailed: true` and a justification saying `DID NOT COMPLETE (killed at the per-check cap)`. Raise `check_timeout_ms:` on the spec and re-run before believing the SUCCESS. |
+| A repair step is handed a brief tens of thousands of characters long, or its context blows up on a red suite | **Fixed 2026-08-12 — but check you are past it** (🔴 **F-326**, dogfood-137 review). `buildCompletionReviewBrief` computed the excerpt budget with `Math.max(0, availableForLog - 2)`, and `String.prototype.slice(-0)` is `slice(0)` — the WHOLE string — with no cap check on the final return. When the fixed part of the brief (header + other failing findings + suite header + closing line) landed within 4 chars of the 2000-char cap, the ENTIRE suite output was emitted: **46,095 chars measured**. Fixed at `src/workflow/completion-review.ts:168-189`; the sweep that catches it is `test/judge/deterministic-rubric-oracle.test.ts:363-393`. |
 
-- **A declared `regression_suite:` is measured against a FIXED 120 s per-check
-  cap, and a cap kill seals the run FAILED as if the code were red** (F-320 →
-  WP-612). `checkTimeoutMs` is not spec-settable (`src/judge/evidence.ts:37`),
-  and the WP-263(b) infra-skip covers CRITERION rows only
-  (`src/judge/verdict.ts:101`), so an `infraFailed` RUBRIC row still reaches
-  `deterministicFails`. This repo's judge+workflow slice runs in ~4 s and its
-  FULL suite in ~50 s — real margin, but unguarded. Declare the narrowest
-  suite that still covers the surface you are editing, and time it at HEAD
-  before you launch.
-- **A repair brief can lose the failing-test evidence it was just given**
-  (F-323 → WP-614). The suite excerpt is bounded at 1000 chars but the whole
-  brief is clamped to 2000 from the TAIL
-  (`src/workflow/completion-review.ts:19,137-139`) and the suite row renders
-  LAST. Measured on dogfood-136: with **two** co-occurring design findings the
-  vitest summary line and the brief's closing instruction are both cut. If a
-  repair step comes back confused about what to fix, read the brief it was
-  actually handed before blaming the executor.
+- **A declared `regression_suite:` cap is now the SPEC'S to choose, but an
+  inconclusive run still calls itself a design finding** (F-320 fixed by WP-612,
+  dogfood-137; F-327 → WP-615 open). Set `check_timeout_ms: <ms>` on the spec and
+  both the acceptance checks and the regression suite are measured against it
+  (`src/taskspec.ts:196-197` → `src/runner/activities.ts:1786`); absent, the 120 s
+  default is unchanged. A cap kill no longer seals FAILED — but it seals
+  `SUCCESS · "design findings recorded — pre_existing_suite_still_green"`, which is
+  not what happened. **Never read that SUCCESS as the gate passing.** Also unforwarded
+  at the second `runJudgePass` call site (`src/chain/activities.ts:437`, 🟡 F-330) —
+  latent while that pass runs no checks. This repo's judge+workflow slice runs in
+  ~4 s and its FULL suite in ~50 s; still time your suite at HEAD before you launch.
+- **The repair brief now RESERVES room for the failing tests** (F-323/F-324 fixed
+  by WP-614, dogfood-137). The excerpt's budget is computed from the room left after
+  the header, every other failing finding and the closing line
+  (`src/workflow/completion-review.ts:146-196`), so at 0–3 co-occurring design
+  findings the brief still names the failing item, carries the output TAIL where the
+  test names live, and keeps its closing instruction inside an unchanged 2000-char
+  cap. **Residual cost → WP-616 (F-328):** the budget was bought by deleting the
+  1000-char bound at the settle site (`src/judge/harness.ts:205-208`), so the RAW
+  suite output — up to the 64 KB capture ceiling — now rides into the verdict
+  rationale (`src/judge/verdict.ts:44,167-169`) and prints in full in `chikory trace`
+  (`src/cli/trace.ts:501,505`). A 44 KB `rationale:` line in the journal is this, not
+  corruption.
+- **An AC that sweeps one input dimension is blind to the other** (🟡 F-329,
+  dogfood-137). dogfood-136's oracle drove one case and missed the co-occurrence
+  family (F-324); dogfood-137's closed that family — 0/1/2/3 findings — and missed
+  the LENGTH family, at ONE fixed ~353-char justification, shipping F-326. Sharper
+  rule for the `ac-must-enumerate-input-families` discipline: **when a check computes
+  a budget, an offset or an index FROM a length, that length is an input family and a
+  single value is not a sweep — drive the boundary, and assert the boundary was
+  actually reached.**
 - **A step summary can narrate one command and report another's output**
   (F-325, F-306 lineage → WP-606). On dogfood-136 the executor issued four
   tasks 12–17 s apart, each narrated *"Let's run `pnpm run build`"* and each
@@ -893,8 +907,48 @@ broken (a false-green, not a follow-on fix).
   on that run `build`, `lint` and the full suite had all really run and the
   claimed counts were exact. Re-run the suite yourself; never conclude from
   the transcript alone, in either direction.
+- **✅ FIXED — a declared `regression_suite:` now runs before ANY success seal**
+  (🔴 F-331 → WP-617, hand-fixed in the dogfood-138 review). The suite executes
+  only inside the completion review, which is dispatched from the PROCEED arm;
+  the two `ESCALATE` exits that seal SUCCESS used to fire upstream of it, so any
+  advisory free-text judge remark on a converged step silently skipped the gate.
+  dogfood-138 declared a suite for the third live WP-609 proof and it **never
+  executed**: one judge entry, `completionReview` undefined, no
+  `pre_existing_suite_still_green` row, terminal `SUCCESS · "converged
+  out-of-rubric escalation … (F-229/F-271)"`. Both escalate seals now call
+  `regressionGateBeforeSuccess` (`src/workflow/agent-loop.ts:397`, wired at
+  `:1301` and `:1339`), which runs a declared suite once and routes the result
+  through the shared outcome ladder `sealFromRubricFails` (`:352`). A red suite
+  seals FAILED even on a converged escalation; a green one leaves the F-229/F-271
+  wording untouched; a run that declares no suite is unaffected and buys no extra
+  judge pass. **Reading a run either way:** `chikory trace <run-id>` on a
+  suite-declaring run must show a judge pass carrying a settled
+  `pre_existing_suite_still_green` row. On any run sealed before 2026-08-13, one
+  judge pass plus an `⚠ ESCALATE` seal means the gate was skipped — re-run that
+  suite by hand before trusting the green.
 
 ## 8. Known P1 limitations (so you don't fight them)
+
+- **🔴 A judge's out-of-rubric CONCERN is recorded, never acted on** (F-335 →
+  WP-619, dogfood-139). When a converged step escalates with free-text concerns,
+  the seal carries them verbatim into the terminal reason and ships. In
+  dogfood-139 two of three concerns named **real, reproducible defects in the
+  delivered code** — and the run sealed 🟢 SUCCESS with both in the diff. The
+  completion-review pass that follows runs a *different, smaller* rubric over the
+  byte-identical diff and never re-tests them. **Until WP-619 lands: read the
+  `concern:` lines of every ESCALATE pass in `chikory trace` before trusting a
+  converged SUCCESS** — a green seal is not evidence the concerns were wrong.
+  (F-334/WP-621 closed the sibling hole where a non-deterministic *rubric* finding
+  on the same path was discarded; that one now condemns.)
+
+- **🟡 The stale-spec launch guard can refuse a legitimate spec** (F-339 →
+  WP-620, dogfood-139). `chikory run` reads WP completion out of `plan.md` Notes
+  prose, treats a bare `LANDED` as done, and only scans the first 300 characters
+  for an open-qualifier — so a row reading *"**DATA HALF LANDED** … Still open:
+  <the thing you are about to build>"* refuses the launch at $0. Measured against
+  the real `plan.md` it is wrong on **7 rows in both directions** (WP-540 reads
+  open though done). **Re-measure the WP by hand, then launch with
+  `CHIKORY_ALLOW_STALE_SPEC=1`.** Do not edit the plan row to appease the guard.
 
 - **✅ FIXED — a heal no longer throws away work nobody condemned** (🟠 F-302
   → WP-605, dogfood-132). Whether a self-heal restores a checkpoint is now decided

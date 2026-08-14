@@ -68,6 +68,7 @@ const COMPLETE_TEMPLATE = {
   notifications: { onEscalation: [] },
   horizon: { targetSteps: 30 },
   regressionSuite: "pnpm run test",
+  checkTimeoutMs: 120_000,
 };
 
 describe("templateGaps (F-220)", () => {
@@ -82,6 +83,7 @@ describe("templateGaps (F-220)", () => {
       "horizon",
       "budgetTokens",
       "regressionSuite",
+      "checkTimeoutMs",
     ]);
   });
 
