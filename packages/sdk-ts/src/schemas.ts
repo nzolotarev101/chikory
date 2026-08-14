@@ -256,7 +256,6 @@ export const TaskSpecSchema = z
     budgetTokens: z.number().int().positive().optional(),
     maxSteps: z.number().int().positive().optional(),
     regressionSuite: z.string().min(1).optional(),
-    checkTimeoutMs: z.number().int().positive().optional(),
     minNodes: z.number().int().positive().optional(),
     maxRejectStrikes: z.number().int().nonnegative().optional(),
     chain: z
@@ -575,7 +574,6 @@ export const RunStatusReportSchema = z
       })
       .strict()
       .optional(),
-    inconclusiveCheck: z.string().min(1).optional(),
   })
   .strict();
 

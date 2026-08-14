@@ -115,85 +115,26 @@ export function buildCompletionReviewBrief(form: JudgeForm): string {
   const rubricFails = form.rubricResults.filter((r) => !r.pass);
   const hasSuiteFail = rubricFails.some((r) => r.id === RUBRIC_PRE_EXISTING_SUITE_GREEN);
 
-  if (!hasSuiteFail) {
-    const lines: string[] = [
-      "DESIGN REVIEW BRIEF — every acceptance criterion passes; a completion review",
-      "of the run's CUMULATIVE changes found design findings. One bounded fix",
-      "attempt is granted; do NOT change behavior, only design.",
-    ];
-    if (rubricFails.length > 0) {
-      lines.push("design findings (judge evidence):");
-      for (const fail of rubricFails) lines.push(`- ${fail.id}: ${fail.justification}`);
-    }
-    lines.push(
-      "a fix must resolve these findings while keeping every acceptance criterion passing.",
-    );
-    const text = lines.join("\n");
-    return text.length <= COMPLETION_BRIEF_MAX_CHARS
-      ? text
-      : `${text.slice(0, COMPLETION_BRIEF_MAX_CHARS - 1)}…`;
+  const lines: string[] = hasSuiteFail
+    ? [
+        "REPAIR BRIEF — every acceptance criterion passes; a completion review",
+        "of the run's CUMULATIVE changes found regression test failures. One bounded repair",
+        "attempt is granted; fix the broken behavior and restore the test suite to green.",
+      ]
+    : [
+        "DESIGN REVIEW BRIEF — every acceptance criterion passes; a completion review",
+        "of the run's CUMULATIVE changes found design findings. One bounded fix",
+        "attempt is granted; do NOT change behavior, only design.",
+      ];
+  if (rubricFails.length > 0) {
+    lines.push(hasSuiteFail ? "failing items (judge evidence):" : "design findings (judge evidence):");
+    for (const fail of rubricFails) lines.push(`- ${fail.id}: ${fail.justification}`);
   }
-
-  const headerLines = [
-    "REPAIR BRIEF — every acceptance criterion passes; a completion review",
-    "of the run's CUMULATIVE changes found regression test failures. One bounded repair",
-    "attempt is granted; fix the broken behavior and restore the test suite to green.",
-    "failing items (judge evidence):",
-  ];
-  const closingLine =
-    "a fix must resolve these findings while keeping every acceptance criterion passing.";
-
-  const otherFails = rubricFails.filter((r) => r.id !== RUBRIC_PRE_EXISTING_SUITE_GREEN);
-  const otherFailLines = otherFails.map((fail) => `- ${fail.id}: ${fail.justification}`);
-
-  const suiteFail = rubricFails.find((r) => r.id === RUBRIC_PRE_EXISTING_SUITE_GREEN)!;
-  let statusPrefix = suiteFail.justification;
-  let outputLog = "";
-  const colonIdx = suiteFail.justification.indexOf(":\n");
-  if (colonIdx !== -1) {
-    statusPrefix = suiteFail.justification.slice(0, colonIdx);
-    outputLog = suiteFail.justification.slice(colonIdx + 2);
-  }
-
-  const suiteHeaderLine = `- pre_existing_suite_still_green: ${statusPrefix}`;
-
-  const fixedLinesWithoutLog = [
-    ...headerLines,
-    ...otherFailLines,
-    suiteHeaderLine,
-    closingLine,
-  ];
-  const fixedLengthWithoutLog = fixedLinesWithoutLog.join("\n").length;
-
-  // The brief with the suite's own output omitted entirely — the floor this
-  // function falls back to whenever there is no room to carry an excerpt.
-  const withoutLog = (): string => {
-    const text = fixedLinesWithoutLog.join("\n");
-    return text.length <= COMPLETION_BRIEF_MAX_CHARS
-      ? text
-      : `${text.slice(0, COMPLETION_BRIEF_MAX_CHARS - 1)}…`;
-  };
-
-  if (!outputLog || fixedLengthWithoutLog >= COMPLETION_BRIEF_MAX_CHARS) return withoutLog();
-
-  const availableForLog = COMPLETION_BRIEF_MAX_CHARS - fixedLengthWithoutLog - 2;
-  let logExcerpt = outputLog;
-  if (outputLog.length > availableForLog) {
-    // F-326: `String.prototype.slice(-0)` is `slice(0)` — the WHOLE string, not the
-    // empty one. When the fixed part leaves no room for even the `…\n` marker the
-    // excerpt must be DROPPED; emitting it in full blew the 2000-char brief to
-    // 46,095 chars on the dogfood-137 delivery.
-    const sliceLen = availableForLog - 2;
-    if (sliceLen <= 0) return withoutLog();
-    logExcerpt = `…\n${outputLog.slice(-sliceLen)}`;
-  }
-
-  const finalLines = [
-    ...headerLines,
-    ...otherFailLines,
-    `${suiteHeaderLine}:\n${logExcerpt}`,
-    closingLine,
-  ];
-
-  return finalLines.join("\n");
+  lines.push(
+    "a fix must resolve these findings while keeping every acceptance criterion passing.",
+  );
+  const text = lines.join("\n");
+  return text.length <= COMPLETION_BRIEF_MAX_CHARS
+    ? text
+    : `${text.slice(0, COMPLETION_BRIEF_MAX_CHARS - 1)}…`;
 }
