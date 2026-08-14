@@ -232,9 +232,12 @@ export async function runCriteriaChecks(input: {
       : [{ dir: input.workspaceDir }];
 
   const beforeSnapshots = new Map<string, WorkspaceDirtySnapshot>();
-  for (const repo of reposToSnapshot) {
-    beforeSnapshots.set(repo.dir, await snapshotWorkspace(repo.dir));
-  }
+  const snapshotResults = await Promise.all(
+    reposToSnapshot.map((repo) => snapshotWorkspace(repo.dir))
+  );
+  reposToSnapshot.forEach((repo, idx) => {
+    beforeSnapshots.set(repo.dir, snapshotResults[idx]!);
+  });
   try {
     for (const criterion of input.criteria) {
       if (!criterion.check) continue;
@@ -312,9 +315,12 @@ export async function collectEvidence(input: CollectEvidenceInput): Promise<Coll
       : [{ dir: input.workspaceDir }];
 
   const beforeSnapshots = new Map<string, WorkspaceDirtySnapshot>();
-  for (const r of reposToSnapshot) {
-    beforeSnapshots.set(r.dir, await snapshotWorkspace(r.dir));
-  }
+  const snapshotResults = await Promise.all(
+    reposToSnapshot.map((r) => snapshotWorkspace(r.dir))
+  );
+  reposToSnapshot.forEach((r, idx) => {
+    beforeSnapshots.set(r.dir, snapshotResults[idx]!);
+  });
 
   try {
     for (const criterion of input.criteria) {
