@@ -575,6 +575,7 @@ export const RunStatusReportSchema = z
       })
       .strict()
       .optional(),
+    inconclusiveCheck: z.string().min(1).optional(),
   })
   .strict();
 

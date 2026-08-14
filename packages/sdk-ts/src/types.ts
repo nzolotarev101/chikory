@@ -676,6 +676,8 @@ export interface RunStatusReport {
   checkpoints: Checkpoint[];
   /** Explicit terminal (CG-1). */
   failure?: { reason: string; lastCheckpoint: CheckpointId };
+  /** Additive marker: check that did not complete (inconclusive outcome, killed at cap). */
+  inconclusiveCheck?: string;
 }
 
 /**

@@ -8,15 +8,13 @@ recover a run, and how to land the result as a normal PR.
 **Status (2026-08-12, bounded — update discipline: REPLACE this block, ≤15 lines;
 displaced prose moves verbatim to [`PLAN-HISTORY.md`](PLAN-HISTORY.md); per-run detail:
 `docs/reports/`; queue + course correction: `plan.md` §6/§7).**
-🟢 **dogfood-137 / WP-612 (an infra kill is not a code red at the seal) + WP-614 (a repair brief reserves room for the failing tests) DELIVERED** — `run-308cc0d4-e7ae-4676-a251-eb4c9d940426`, SUCCESS 1 step, $0.1095/$20.00, 7m 0s, 2/2 criteria, harvest byte-IDENTICAL 11/11, `docs/reports/dogfood-137.md`.
+🟢 **dogfood-138 / WP-615 (an unfinished check must say it did not finish) DELIVERED** — `run-3ca8f79a-ab47-44bf-a90b-14ff26b09215`, SUCCESS 1 step, $0.0814/$20.00, 6m 36s, 2/2 criteria, harvest byte-IDENTICAL 7/7, `docs/reports/dogfood-138.md`.
 
-**The regression-suite gate is usable on a real project now.** A suite killed for being slow no longer seals the run FAILED, and `check_timeout_ms:` lets a spec name its own per-check cap instead of living with a fixed 120 s (absent → 120 s unchanged). The repair brief budgets the failing-test excerpt from the room actually left, so other findings no longer push the test names off the page.
+**A test command killed by the clock now tells the truth.** The seal reads `completion review: check did not complete — pre_existing_suite_still_green` instead of the design-findings sentence, and the terminal record plus `RunStatusReport` carry an additive `inconclusiveCheck` field, so a script reads it without parsing English. `TerminalStatus` is still exactly `SUCCESS | FAILED`. A red suite, a green suite and an ordinary design finding all keep exactly their old outcome — pinned by four real Temporal runs.
 
-**WP-613 is live-proven, WP-609 for the second time.** Judge pass #1 (per-step) carries no `pre_existing_suite_still_green` row at all; judge pass #2 (the completion review) carries exactly one, settled from a real exit code. That is the F-197 debt from dogfood-136 paid.
+**🔴 F-331 FOUND AND HAND-FIXED THIS REVIEW (WP-617) — the run's own declared suite had never run.** A converged out-of-rubric ESCALATE sealed SUCCESS upstream of the completion review, which is the only place a `regression_suite:` executes. Both escalate seals now call `regressionGateBeforeSuccess` (`src/workflow/agent-loop.ts:397`, wired at `:1301`/`:1339`) and route the result through the shared ladder `sealFromRubricFails` (`:352`): a red suite seals FAILED even on a converged escalation, a green one leaves the F-229/F-271 wording untouched, a suite-less run is unaffected. Verified RED-then-GREEN against the pre-fix tree; sdk suite 1376 → **1379** green. §7 carries the full note. **Any run sealed before 2026-08-13 with one judge pass and an `⚠ ESCALATE` seal had its gate skipped — re-run that suite by hand before trusting the green.**
 
-**Read this before the next launch — three live caveats.** ① A cap-killed suite seals 🟢 `SUCCESS · "completion review: design findings recorded — pre_existing_suite_still_green"` — the gate did NOT pass, it never finished (🟠 F-327 → WP-615, §7). ② A red suite's RAW output (≤64 KB) now rides into the verdict rationale and prints in full in `chikory trace` (🟠 F-328 → WP-616, §8). ③ 🔴 F-326 — the "reserved" brief hit 46,095 chars against its 2000-char cap in a 4-char window — was HAND-FIXED in the dogfood-137 review; a tree without `src/workflow/completion-review.ts:168-189` still has it.
-
-**Keep putting `unattended: escalation: seal_resumable_failed` in every headline spec (F-322).** dogfood-136 and dogfood-137 both carried it and both reached terminal unattended; dogfood-135 parked 11h 59m 31s for want of it. **And sweep the LENGTH, not just the count (🟡 F-329):** an AC that computes a budget from a length must drive that length's boundary and assert the boundary was reached — a single fixed value is not a sweep, and it is exactly how F-326 shipped green.
+**Still standing.** ① A red suite's RAW output (≤64 KB) rides into the verdict rationale and prints in full in `chikory trace` (🟠 F-328 → WP-616, §8). ② 🟠 F-332 → WP-618 — a chain drops `inconclusiveCheck`, so it cannot tell a node's gate never finished. ③ Keep `unattended: escalation: seal_resumable_failed` in every headline spec (F-322). ④ Sweep the LENGTH, not just the count (🟡 F-329). ⑤ Re-measure a blocker's **scope**, not just whether it still stands: rung 5 sat "blocked" for eight reviews because nobody checked that both blockers gated only WP-304 (F-203, applied to our own reasoning).
 
 Related docs: [`docs/spec/task-spec.md`](spec/task-spec.md) (schema
 reference) · [`docs/TASK-PROTOCOL.md`](TASK-PROTOCOL.md) (WP etiquette, §7 is
@@ -906,6 +904,25 @@ broken (a false-green, not a follow-on fix).
   on that run `build`, `lint` and the full suite had all really run and the
   claimed counts were exact. Re-run the suite yourself; never conclude from
   the transcript alone, in either direction.
+- **✅ FIXED — a declared `regression_suite:` now runs before ANY success seal**
+  (🔴 F-331 → WP-617, hand-fixed in the dogfood-138 review). The suite executes
+  only inside the completion review, which is dispatched from the PROCEED arm;
+  the two `ESCALATE` exits that seal SUCCESS used to fire upstream of it, so any
+  advisory free-text judge remark on a converged step silently skipped the gate.
+  dogfood-138 declared a suite for the third live WP-609 proof and it **never
+  executed**: one judge entry, `completionReview` undefined, no
+  `pre_existing_suite_still_green` row, terminal `SUCCESS · "converged
+  out-of-rubric escalation … (F-229/F-271)"`. Both escalate seals now call
+  `regressionGateBeforeSuccess` (`src/workflow/agent-loop.ts:397`, wired at
+  `:1301` and `:1339`), which runs a declared suite once and routes the result
+  through the shared outcome ladder `sealFromRubricFails` (`:352`). A red suite
+  seals FAILED even on a converged escalation; a green one leaves the F-229/F-271
+  wording untouched; a run that declares no suite is unaffected and buys no extra
+  judge pass. **Reading a run either way:** `chikory trace <run-id>` on a
+  suite-declaring run must show a judge pass carrying a settled
+  `pre_existing_suite_still_green` row. On any run sealed before 2026-08-13, one
+  judge pass plus an `⚠ ESCALATE` seal means the gate was skipped — re-run that
+  suite by hand before trusting the green.
 
 ## 8. Known P1 limitations (so you don't fight them)
 

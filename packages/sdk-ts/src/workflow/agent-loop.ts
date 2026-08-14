@@ -230,6 +230,7 @@ export async function agentLoop(spec: TaskSpec): Promise<RunStatus> {
   let calibratedWindowTokens: number | undefined;
   let judgeFeedback: string | undefined;
   let failure: { reason: string; lastCheckpoint: string } | undefined;
+  let inconclusiveCheck: string | undefined;
   const recentSummaries: string[] = [];
   const stepCosts: number[] = [];
   const stepTokens: number[] = [];
@@ -287,6 +288,7 @@ export async function agentLoop(spec: TaskSpec): Promise<RunStatus> {
     lastVerdict,
     checkpoints,
     failure,
+    ...(inconclusiveCheck !== undefined ? { inconclusiveCheck } : {}),
   }));
 
   const maxSteps = spec.maxSteps ?? 100;
@@ -299,7 +301,11 @@ export async function agentLoop(spec: TaskSpec): Promise<RunStatus> {
     // WP-520 (ADR-009 D4): a resumable FAILED is healable — `chikory resume`
     // re-enters it with the failure evidence (and remediation brief, if any)
     // in context. Omitted → a dead seal, the default.
-    opts?: { resumable?: boolean; remediation?: { attempts: number; brief: string } },
+    opts?: {
+      resumable?: boolean;
+      remediation?: { attempts: number; brief: string };
+      inconclusiveCheck?: string;
+    },
   ): Promise<RunStatus> {
     const lastCheckpoint = checkpoints[checkpoints.length - 1]?.id ?? "";
     let handoff: ChainNodeHandoff | undefined;
@@ -311,6 +317,9 @@ export async function agentLoop(spec: TaskSpec): Promise<RunStatus> {
     if (terminal === "FAILED") {
       failure = { reason: reason ?? "unknown", lastCheckpoint };
     }
+    if (opts?.inconclusiveCheck !== undefined) {
+      inconclusiveCheck = opts.inconclusiveCheck;
+    }
     await activities.sealRun({
       runId,
       status: terminal,
@@ -320,9 +329,95 @@ export async function agentLoop(spec: TaskSpec): Promise<RunStatus> {
       ...(handoff !== undefined ? { handoff } : {}),
       ...(opts?.resumable === true ? { resumable: true } : {}),
       ...(opts?.remediation !== undefined ? { remediation: opts.remediation } : {}),
+      ...(opts?.inconclusiveCheck !== undefined ? { inconclusiveCheck: opts.inconclusiveCheck } : {}),
     });
     status = terminal;
     return status;
+  }
+
+  /**
+   * The ONE place a set of failing rubric rows becomes a terminal outcome.
+   *
+   * Deterministic red (a real nonzero exit, no infra kill) → FAILED. A row that
+   * was KILLED before it could answer → SUCCESS carrying the additive
+   * `inconclusiveCheck` marker (WP-615) — the code was never condemned, so the
+   * work stays. Anything else (an ordinary design finding) returns `undefined`:
+   * the caller owns that wording, and there are three different callers with
+   * three different right answers.
+   *
+   * Extracted at the dogfood-138 review (F-331) — the ladder was duplicated
+   * verbatim at two completion-review seal sites and ABSENT at the two escalate
+   * seal sites, which is exactly how a declared gate came to be skippable.
+   */
+  async function sealFromRubricFails(
+    fails: ReadonlyArray<{ id: string; pass: boolean; infraFailed?: boolean }>,
+  ): Promise<RunStatus | undefined> {
+    const deterministicFails = fails.filter(
+      (f) => DETERMINISTIC_RUBRIC_IDS.has(f.id) && f.infraFailed !== true,
+    );
+    if (deterministicFails.length > 0) {
+      return seal(
+        "FAILED",
+        `completion review: deterministic rubric failure — ${deterministicFails
+          .map((fail) => fail.id)
+          .join(", ")}`,
+      );
+    }
+    const inconclusiveFails = fails.filter((f) => f.infraFailed === true);
+    if (inconclusiveFails.length > 0) {
+      const checkName = inconclusiveFails.map((fail) => fail.id).join(", ");
+      return seal("SUCCESS", `completion review: check did not complete — ${checkName}`, {
+        inconclusiveCheck: checkName,
+      });
+    }
+    return undefined;
+  }
+
+  /**
+   * F-331 (dogfood-138): a spec that DECLARES a deterministic gate must never
+   * seal SUCCESS with that gate unrun.
+   *
+   * `regressionSuite` executes only inside the completion review, which is
+   * dispatched from the PROCEED arm. Both ESCALATE seals below — the unattended
+   * converged one (F-229/F-271) and the operator-approved one (F-107) — used to
+   * `return seal("SUCCESS", …)` before it ever ran, so any advisory free-text
+   * remark on a converged step silently skipped the project's own test suite.
+   * dogfood-138 declared a suite for its third live proof and the command never
+   * executed; nothing in the outcome said so.
+   *
+   * Returns a terminal when the gate condemns the code (FAILED) or could not
+   * answer (SUCCESS + marker); `undefined` means the caller's own SUCCESS seal
+   * stands, unchanged and with its reason intact.
+   *
+   * Deliberately terminal-or-nothing: this NEVER re-enters the loop. Re-judging
+   * a converged step re-raises the same advisory concern forever, which is the
+   * whole reason the escalate seals exist (dogfood-121 lost a 5-node chain to
+   * it). One gate run, then a seal, either way.
+   */
+  async function regressionGateBeforeSuccess(
+    sealingDiffBase: string,
+  ): Promise<RunStatus | undefined> {
+    if (spec.regressionSuite === undefined) return undefined;
+    const review = decideCompletionReview({
+      sealingDiffBase,
+      baseCommit,
+      reviewAttemptsUsed: completionReviewAttempts,
+      sealingVerdictHasRubricFailures: false,
+      hasRegressionSuite: true,
+    });
+    if (review.action !== "review") return undefined;
+    completionReviewAttempts += 1;
+    const reviewVerdict = await activities.judgeStep({
+      runId,
+      judgeIndex: judgeIndex++,
+      atStep: stepIndex - 1,
+      criteria: [],
+      sinceCommit: baseCommit,
+      completionReview: true,
+      lastGoodCheckpointId,
+    });
+    spentUsd += reviewVerdict.costUsd;
+    return sealFromRubricFails(reviewVerdict.form.rubricResults.filter((r) => !r.pass));
   }
 
   async function applyRemediation(
@@ -1099,17 +1194,8 @@ export async function agentLoop(spec: TaskSpec): Promise<RunStatus> {
                 if (soakTerminal !== undefined) return soakTerminal;
                 continue;
               }
-              const deterministicFails = designFails.filter((f) =>
-                DETERMINISTIC_RUBRIC_IDS.has(f.id) && f.infraFailed !== true,
-              );
-              if (deterministicFails.length > 0) {
-                return seal(
-                  "FAILED",
-                  `completion review: deterministic rubric failure — ${deterministicFails
-                    .map((fail) => fail.id)
-                    .join(", ")}`,
-                );
-              }
+              const condemned = await sealFromRubricFails(designFails);
+              if (condemned !== undefined) return condemned;
               return seal(
                 "SUCCESS",
                 `completion review: design findings recorded — ${designFails
@@ -1118,17 +1204,8 @@ export async function agentLoop(spec: TaskSpec): Promise<RunStatus> {
               );
             }
           } else if (sealingRubricFails.length > 0) {
-            const deterministicFails = sealingRubricFails.filter((f) =>
-              DETERMINISTIC_RUBRIC_IDS.has(f.id) && f.infraFailed !== true,
-            );
-            if (deterministicFails.length > 0) {
-              return seal(
-                "FAILED",
-                `completion review: deterministic rubric failure — ${deterministicFails
-                  .map((fail) => fail.id)
-                  .join(", ")}`,
-              );
-            }
+            const condemned = await sealFromRubricFails(sealingRubricFails);
+            if (condemned !== undefined) return condemned;
             return seal(
               "SUCCESS",
               `completion review: design findings recorded — ${sealingRubricFails
@@ -1218,6 +1295,11 @@ export async function agentLoop(spec: TaskSpec): Promise<RunStatus> {
           allCriteriaPass(verdict) &&
           allRubricPass(verdict)
         ) {
+          // F-331: converged is not the same as verified. A spec that declared a
+          // regression suite has not had it run yet — the suite lives in the
+          // completion review, and this seal is upstream of it.
+          const gated = await regressionGateBeforeSuccess(sealingDiffBase);
+          if (gated !== undefined) return gated;
           return seal(
             "SUCCESS",
             `converged out-of-rubric escalation, all criteria and rubric pass — ` +
@@ -1252,6 +1334,10 @@ export async function agentLoop(spec: TaskSpec): Promise<RunStatus> {
         // to. A judge-drift (Rule 5 flip-flop) escalate, or one where criteria are
         // not all passing, still resumes to re-judge.
         if (verdict.escalateClass === "out_of_rubric" && allCriteriaPass(verdict)) {
+          // F-331: the operator adjudicated the CONCERN, not the test suite.
+          // Same hole as the unattended seal above, same gate.
+          const gated = await regressionGateBeforeSuccess(sealingDiffBase);
+          if (gated !== undefined) return gated;
           return seal(
             "SUCCESS",
             `approved out-of-rubric escalation, all criteria pass — ${verdict.escalateReason ?? verdict.rationale} (F-107)`,
