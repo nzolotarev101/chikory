@@ -205,8 +205,7 @@ export function applyCheckOverrides(
           : `regression suite command \`${regressionSuiteRun.command}\` exited ${regressionSuiteRun.exitCode}`;
         if (!pass && regressionSuiteRun.output && regressionSuiteRun.output.trim().length > 0) {
           const rawOutput = regressionSuiteRun.output.trim();
-          const boundedOutput = rawOutput.length > 1000 ? `…\n${rawOutput.slice(-1000)}` : rawOutput;
-          justification += `:\n${boundedOutput}`;
+          justification += `:\n${rawOutput}`;
         }
         rubricResults.push({
           id: item.id,
