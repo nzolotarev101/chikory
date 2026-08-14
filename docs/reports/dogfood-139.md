@@ -286,40 +286,67 @@ proof is whole (the dogfood-124 precedent), so the ledger stays `rung=4`.
 
 ## NEXT RUN
 
-**Make a judge's out-of-rubric concern something the run must answer, so a converged
-step cannot seal green while carrying a named defect in its own code.**
+**Make a reviewer's flagged concern something the run has to answer before it may
+finish green — so it can no longer name a real defect and ship it anyway.**
 
 - **Spec:** `examples/dogfood/dogfood-140-wp619-adjudicate-escalation-concerns.yaml`
 - **WP:** WP-619 (adjudicate escalation concerns before the converged seal) — new
-  row, spawned by F-335 this review.
-- **Why THIS and not the ladder rung:** the §0 progression gate reads ⛔ **STALLED**,
-  which binds the next headline to the P3 ladder rung (WP-530). Rung 5's remaining
-  half is **WP-304**, and it cannot run: it needs the OpenHands arm plus a corpus
-  wide enough to separate 19 requirements — a quota-bound multi-hour suite that
-  dogfood-122 proved an LLM executor must not supervise, and the operator runs those
-  arms by hand. WP-303's half is closed by this run. So the rung is not runnable as
-  a dogfood headline this sitting, and the next headline is the 🔴 that let this very
-  run ship two defects green. **This will be re-confirmed against the gate before the
-  spec is armed** (see below).
-- **Designed trap:** the plausible-but-wrong delivery is a gate that condemns on the
-  *presence* of any concern — which would re-seal dogfood-121's fate (a converged
-  step re-raising an evidence-shaped concern forever, killing a chain whose delivery
-  was already committed). The ACs must drive **both** shapes through the real seal
-  path: an evidence-shaped concern ("the diff cannot show me the suite totals") must
-  still seal SUCCESS, and a defect-shaped concern naming the delivered code must seal
-  FAILED — with the adjudication settled in exactly **one** extra judge pass, never a
-  loop re-entry.
+  `plan.md` §6 row, spawned by F-335 this review.
+- **Why THIS and not the ladder rung:** the §0 progression gate now reads
+  ✅ **PROGRESSING** (the ledger `rung` column moved 0 → 4 as the campaign returned
+  to the ladder), so the default candidate is the next ladder rung and a non-ladder
+  candidate must beat it. It does, because **the rung has no agent-runnable work
+  left**: P3-rung-5 = WP-303 + WP-304, this run CLOSED WP-303, and WP-304's
+  remainder needs the OpenHands arm plus a corpus wide enough to separate 19
+  requirements — a quota-bound multi-hour suite that dogfood-122 proved an LLM
+  executor must not supervise, and which the operator runs by hand. No spec can
+  headline it.
+- **The designed trap:** condemning on the *presence* of a concern. That is the
+  obvious fix and it re-seals dogfood-121's fate — a converged step re-raising an
+  evidence-shaped concern forever, killing a five-node chain whose delivery was
+  already committed. AC-1 drives both shapes with **byte-identical concern text**,
+  flipping only the judge's answer, so a text-matching heuristic produces the same
+  outcome twice and fails; the evidence-shaped direction must still seal SUCCESS.
 
-**Gate verdicts — NOT YET RECORDED.** Phases 0–4 of this review are complete and
-landed; the phase-5 gates (§1.1 failure-surface, §1.2 product-progress, §1.3
-mission-critical, §1.5 friction-budget), the spec itself, and its RED/GREEN arming
-have **not** been done. I stopped here rather than write a spec whose gates I had not
-actually applied.
+**Gate verdicts**
 
-**AC arming evidence:** none yet — the spec does not exist.
+| gate | verdict | one line |
+|---|---|---|
+| §0 progression | ✅ PROGRESSING | rung moved 0 → 4; the rung's remaining half (WP-304) is not agent-runnable, so a non-ladder candidate is permitted and this one beats it on thesis value |
+| §1.1 failure surface | ✅ | thesis pillar (real-time judging), cross-file (`agent-loop.ts` + the judge prompt/harness path), and the reference implementation needed 5 files — plausibly failable |
+| §1.2 product progress | ✅ | lands in `packages/sdk-ts/src/` on the judging pillar; no scaffolding, no invented utility |
+| §1.3 mission-critical | ✅ PROCEED | not busy work: this is the mechanism that let dogfood-139 ship two named defects green |
+| §1.5 friction budget | ✅ | `class=product` (primary surface is the runner/judge, not `scripts/` or spec hygiene); trailing-3 harness-meta 0/3, cap intact |
 
-To finish readying dogfood-140 (gates, spec, both-direction arming, `$0` preflight):
+**AC arming evidence** — both ACs are VERIFY-SUITE, so `dogfood.sh` does **not**
+dry-run them; both were verified BY HAND in both directions with `dogfood-arm.sh`
+against a throwaway reference implementation, which was then reverted **by name**
+(never `--discard`, F-arm-discard) and the tree re-verified clean and green.
+
+| AC | RED on HEAD | GREEN vs reference | % of 120 s cap |
+|---|---|---|---|
+| AC-1 | ✅ exit **1**, **4s** | ✅ exit 0, **5s** | 4 % |
+| AC-2 | ✅ exit **1**, **11s** | ✅ exit 0, **11s** | 9 % |
+
+Worst case **11s = 9% of the 120s judge cap**.
+
+**The RED signature is the good kind — read it, not just the exit code.** Every
+failure is a real assertion, and on HEAD the non-regression halves already PASS:
+
+- AC-1 — `expected 0 to be greater than or equal to 1` (no adjudication row exists)
+  and `expected 'SUCCESS' to be 'FAILED'` (an upheld concern still seals green);
+  the "cleared concern still seals SUCCESS with the converged wording" case **passes
+  on HEAD**.
+- AC-2 — `expected false to be true` (the concern never reaches the review pass) and
+  `expected +0 to be 1` (a suite-less run buys zero review passes); the concern-less
+  and F-334-still-condemns cases **pass on HEAD**.
+
+So the ACs cannot be satisfied by breaking what already works — the shape that
+burned dogfood-133.
+
+Preflight is green at $0 and the spec-pick glob resolves to this file; all 6 agent
+class members answered.
 
 ```sh
-devbox run -- bash scripts/dogfood-open.sh   # then continue the review at phase 5
+devbox run run-dogfood
 ```
