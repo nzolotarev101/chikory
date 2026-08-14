@@ -54,6 +54,7 @@ interface TerminalPayload {
   lastCheckpoint?: string;
   /** WP-520 (ADR-009 D4): this FAILED seal is healable — `chikory resume` re-enters it. */
   resumable?: boolean;
+  inconclusiveCheck?: string;
 }
 
 /** journal-format.md §3 `remediation` entry (WP-519, ADR-009 D3). */
@@ -433,6 +434,8 @@ export function renderTrace(run: RunRow, entries: JournalEntry[], totals: RunTot
           (payload.lastCheckpoint ? ` (last checkpoint ${payload.lastCheckpoint})` : "") +
           (payload.resumable === true ? " — resumable: chikory resume re-enters this seal" : ""),
       );
+    } else if (payload.inconclusiveCheck !== undefined) {
+      lines.push(`inconclusive check: ${payload.inconclusiveCheck}`);
     }
   }
   return lines.join("\n");
@@ -802,7 +805,8 @@ export function formatEntryLine(entry: JournalEntry): string {
       const statusIcon = payload.status === "SUCCESS" ? "🏁" : "⚠️";
       return (
         `[${ts}] ${statusIcon} terminal ${statusColor}${bold}${payload.status}${reset}${payload.reason ? ` — ${payload.reason}` : ""}` +
-        (payload.resumable === true ? ` ${yellow}(resumable)${reset}` : "")
+        (payload.resumable === true ? ` ${yellow}(resumable)${reset}` : "") +
+        (payload.inconclusiveCheck !== undefined ? ` ${yellow}(inconclusive: ${payload.inconclusiveCheck})${reset}` : "")
       );
     }
     default:
