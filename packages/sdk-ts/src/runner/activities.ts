@@ -560,23 +560,24 @@ export async function commitAllRepos(input: {
   repoCount: number;
   stepIndex: number;
 }): Promise<Record<string, string>> {
-  const commits: Record<string, string> = {};
-  for (const workspaceRepo of input.writableRepos) {
-    const repoDir = workspaceRepoDir(input.workspaceDir, workspaceRepo);
-    await git(repoDir, ["add", "-A"]);
-    // --allow-empty: a no-change step still checkpoints (DX-4 holds for every
-    // step, and resume always has a commit to anchor on).
-    await git(repoDir, [
-      "commit",
-      "--no-verify",
-      "--allow-empty",
-      "-m",
-      `chikory: step ${input.stepIndex}`,
-    ]);
-    commits[workspaceRepoCheckpointId(workspaceRepo, input.repoCount)] =
-      await git(repoDir, ["rev-parse", "HEAD"]);
-  }
-  return commits;
+  const entries = await Promise.all(
+    input.writableRepos.map(async (workspaceRepo) => {
+      const repoDir = workspaceRepoDir(input.workspaceDir, workspaceRepo);
+      await git(repoDir, ["add", "-A"]);
+      // --allow-empty: a no-change step still checkpoints (DX-4 holds for every
+      // step, and resume always has a commit to anchor on).
+      await git(repoDir, [
+        "commit",
+        "--no-verify",
+        "--allow-empty",
+        "-m",
+        `chikory: step ${input.stepIndex}`,
+      ]);
+      const sha = await git(repoDir, ["rev-parse", "HEAD"]);
+      return [workspaceRepoCheckpointId(workspaceRepo, input.repoCount), sha] as const;
+    }),
+  );
+  return Object.fromEntries(entries);
 }
 
 async function publishRepoHandoff(input: {
