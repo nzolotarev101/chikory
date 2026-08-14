@@ -59,6 +59,8 @@ export interface ChainNodeTemplate {
   soak?: SoakPolicy;
   notifications?: NotificationPolicy;
   horizon?: TaskSpec["horizon"];
+  regressionSuite?: string;
+  checkTimeoutMs?: number;
   /**
    * WP-243 dogfood/test-only: force a deterministic SUSPEND park. `nodeIndex`
    * (0-based dispatch order) targets a single node — node A = 0, node B = 1 —
@@ -116,6 +118,7 @@ export const CHAIN_TEMPLATE_FIELDS = {
     "notifications",
     "horizon",
     "regressionSuite",
+    "checkTimeoutMs",
   ],
   /**
    * Deliberately not forwarded, each for a stated reason:
@@ -168,6 +171,7 @@ const OPTIONAL_TEMPLATE_FIELDS = [
   "budgetTokens",
   "maxSteps",
   "regressionSuite",
+  "checkTimeoutMs",
 ] as const;
 
 /**
@@ -302,6 +306,8 @@ export function planNodeToTaskSpec(
   if (template.soak !== undefined) spec.soak = template.soak;
   if (template.notifications !== undefined) spec.notifications = template.notifications;
   if (template.horizon !== undefined) spec.horizon = template.horizon;
+  if (template.regressionSuite !== undefined) spec.regressionSuite = template.regressionSuite;
+  if (template.checkTimeoutMs !== undefined) spec.checkTimeoutMs = template.checkTimeoutMs;
   // WP-243/WP-246: arm the dogfood debug seams on the targeted node (or all
   // nodes when `nodeIndex` is absent). Deterministic — dispatch order is fixed.
   // Both seams can be armed at once, so build `spec.debug` additively.
