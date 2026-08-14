@@ -1,4 +1,5 @@
 import { mkdtempSync, writeFileSync } from "node:fs";
+import * as fs from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -397,5 +398,33 @@ describe("pinnedNodeProvisioning (F-254)", () => {
       available: ["22.22.3"],
     });
     expect((decision as { error: string }).error).toContain("node_version");
+  });
+});
+
+describe("security vulnerability secure cleanup check", () => {
+  it("loadTargetEngineSource cleans up temp directory securely", () => {
+    const task = {
+      id: "security-cleanup-test",
+      class: "brownfield",
+      repo: { url: "https://invalid.example/repo", ref: "main" },
+    } as unknown as BenchmarkTask;
+
+    // Trigger cleanup via an execution that fails clone (hence entering the finally block)
+    const result = loadTargetEngineSource(task, "/invalid-workspace-path");
+    expect(result.type).toBe("error");
+
+    // The temporary directory should have been cleaned up and must not exist anymore
+    const tempDirPrefix = "temp-git-security-cleanup-test-";
+    const files = fs.readdirSync(tmpdir());
+    const matchingDirs = files.filter(f => f.startsWith(tempDirPrefix));
+    expect(matchingDirs.length).toBe(0);
+  });
+
+  it("ensures no shell execution of rm -rf is present in engine.ts", () => {
+    const engineSrcPath = join(import.meta.dirname, "..", "src", "engine.ts");
+    const content = fs.readFileSync(engineSrcPath, "utf8");
+    expect(content).not.toContain("rm -rf");
+    expect(content).not.toContain("execSync(`rm -rf");
+    expect(content).toContain("rmSync");
   });
 });
