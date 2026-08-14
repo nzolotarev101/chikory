@@ -20,6 +20,7 @@ export const CONTEXT_WINDOW_TABLE: Record<string, number> = {
   "gpt-5.2": 400_000,
   "gpt-5.2-mini": 400_000,
   // Gemini
+  "gemini-3.7-flash": 1_000_000,
   "gemini-3.6-flash": 1_000_000,
   "gemini-3.5-flash": 1_000_000,
   "gemini-3.1-pro-preview": 1_000_000,

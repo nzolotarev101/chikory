@@ -12,7 +12,7 @@
 # Rotation still works, in lockstep pairs — invariant #2 (judge family must
 # differ from the executor's) holds in BOTH states:
 #
-#   executor gemini-3-6-flash  ↔  judge gpt-5-6-sol     (gemini / openai)
+#   executor gemini-3-7-flash  ↔  judge gpt-5-6-sol     (gemini / openai)
 #   executor gpt-5-6-terra     ↔  judge gemini-3-1-pro  (openai / gemini)
 #
 # The class ids are deliberately NOT `executor-default`/`judge-default`. A
@@ -35,11 +35,11 @@ classes:
   executor-bench:
     role: executor
     primary:
-      id: gemini-3-6-flash
+      id: gemini-3-7-flash
       adapter: gemini-cli
       family: gemini
       backend: gemini
-      model: gemini-3.6-flash-high
+      model: gemini-3.7-flash-high
     adjacent:
       - id: gpt-5-6-terra
         adapter: codex

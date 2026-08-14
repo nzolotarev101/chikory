@@ -56,7 +56,7 @@ judge:
     // its routing and the judge stage stays pinned to the walled model.
     expect(spec.routing.stages.code).toEqual({
       provider: "gemini",
-      model: "gemini-3.6-flash-high",
+      model: "gemini-3.7-flash-high",
     });
     for (const stage of ["plan", "review", "judge"] as const) {
       expect(spec.routing.stages[stage]).toEqual({

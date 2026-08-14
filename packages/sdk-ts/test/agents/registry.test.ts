@@ -108,7 +108,7 @@ describe("agent class registry", () => {
 
     // The standing arming directive: Gemini executes, Codex judges. A class does
     // not change the default — it only adds somewhere to go when it is walled.
-    expect(executors.primary.id).toBe("gemini-3-6-flash");
+    expect(executors.primary.id).toBe("gemini-3-7-flash");
     expect(executors.primary.backend).toBe("gemini");
     expect(judges.primary.backend).toBe("openai");
     expect(executors.adjacent.length).toBeGreaterThan(0);

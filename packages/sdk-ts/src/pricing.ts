@@ -18,7 +18,7 @@ export interface ModelPricing {
 /**
  * Keyed by model id. Date-suffixed ids (e.g. `claude-haiku-4-5-20251001`)
  * fall back to their longest matching prefix entry. Effort-suffixed CLI ids do
- * too — `gemini-3.6-flash-high` resolves off the `gemini-3.6-flash` row.
+ * too — `gemini-3.7-flash-high` resolves off the `gemini-3.7-flash` row.
  *
  * WP-566/WP-567: every model named by an agent class member MUST have a row
  * here. `lookupPricing` returns undefined for an unknown model and
@@ -48,6 +48,7 @@ export const PRICE_TABLE: Record<string, ModelPricing> = {
   "gpt-5.2": { inputPerMTok: 1.25, outputPerMTok: 10 },
   "gpt-5.2-mini": { inputPerMTok: 0.25, outputPerMTok: 2 },
   // Gemini
+  "gemini-3.7-flash": { inputPerMTok: 0.3, outputPerMTok: 2.5 },
   "gemini-3.6-flash": { inputPerMTok: 0.3, outputPerMTok: 2.5 },
   "gemini-3.5-flash": { inputPerMTok: 0.3, outputPerMTok: 2.5 },
   "gemini-3.1-pro-preview": { inputPerMTok: 1.25, outputPerMTok: 10 },

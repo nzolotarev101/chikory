@@ -33,11 +33,11 @@ classes:
   executor-default:
     role: executor
     primary:
-      id: gemini-3-6-flash
+      id: gemini-3-7-flash
       adapter: gemini-cli
       family: gemini
       backend: gemini
-      model: gemini-3.6-flash-high
+      model: gemini-3.7-flash-high
     adjacent:
       - id: gpt-5-6-terra
         adapter: codex

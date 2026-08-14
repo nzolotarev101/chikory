@@ -33,7 +33,7 @@ describe("selectAgentPair", () => {
 
     expect(result.action).toBe("selected");
     if (result.action !== "selected") return;
-    expect(result.pair.executor.id).toBe("gemini-3-6-flash");
+    expect(result.pair.executor.id).toBe("gemini-3-7-flash");
     expect(result.pair.judge.id).toBe("gpt-5-6-sol");
     expect(result.blocked).toEqual([]);
   });
@@ -42,7 +42,7 @@ describe("selectAgentPair", () => {
     // The primary executor is walled, so the next member is codex (openai) —
     // which collides with the primary judge gpt-5.6-sol (also openai). The
     // judge must move too, or invariant #2 breaks silently.
-    const result = select([cooled("gemini-3-6-flash", NOW_MS + 60_000)]);
+    const result = select([cooled("gemini-3-7-flash", NOW_MS + 60_000)]);
 
     expect(result.action).toBe("selected");
     if (result.action !== "selected") return;
@@ -59,7 +59,7 @@ describe("selectAgentPair", () => {
 
   it("returns the judge to its primary once the executor no longer collides", () => {
     const result = select([
-      cooled("gemini-3-6-flash", NOW_MS + 60_000),
+      cooled("gemini-3-7-flash", NOW_MS + 60_000),
       cooled("gpt-5-6-terra", NOW_MS + 60_000),
     ]);
 
@@ -76,7 +76,7 @@ describe("selectAgentPair", () => {
 
     expect(result.action).toBe("selected");
     if (result.action !== "selected") return;
-    expect(result.pair.executor.id).toBe("gemini-3-6-flash");
+    expect(result.pair.executor.id).toBe("gemini-3-7-flash");
     expect(result.pair.judge.id).toBe("opus-5");
   });
 
@@ -84,7 +84,7 @@ describe("selectAgentPair", () => {
     // codex executor: gpt-5.6-sol collides (openai), opus-5 is walled, so the
     // only survivor is the gemini judge.
     const result = select([
-      cooled("gemini-3-6-flash", NOW_MS + 60_000),
+      cooled("gemini-3-7-flash", NOW_MS + 60_000),
       cooled("opus-5", NOW_MS + 60_000),
     ]);
 
@@ -96,7 +96,7 @@ describe("selectAgentPair", () => {
 
   it("parks until the EARLIEST expiry when every executor is walled", () => {
     const result = select([
-      cooled("gemini-3-6-flash", NOW_MS + 9_000),
+      cooled("gemini-3-7-flash", NOW_MS + 9_000),
       cooled("gpt-5-6-terra", NOW_MS + 3_000),
       cooled("sonnet-5", NOW_MS + 5_000),
     ]);
@@ -122,20 +122,20 @@ describe("selectAgentPair", () => {
 
   it("ignores a cooldown that has already expired", () => {
     const result = select([
-      cooled("gemini-3-6-flash", NOW_MS),
+      cooled("gemini-3-7-flash", NOW_MS),
       cooled("gpt-5-6-sol", NOW_MS - 1),
     ]);
 
     expect(result.action).toBe("selected");
     if (result.action !== "selected") return;
-    expect(result.pair.executor.id).toBe("gemini-3-6-flash");
+    expect(result.pair.executor.id).toBe("gemini-3-7-flash");
     expect(result.pair.judge.id).toBe("gpt-5-6-sol");
   });
 
   it("honours the LATEST expiry when a member was cooled more than once", () => {
     const result = select([
-      cooled("gemini-3-6-flash", NOW_MS + 1_000),
-      cooled("gemini-3-6-flash", NOW_MS + 50_000),
+      cooled("gemini-3-7-flash", NOW_MS + 1_000),
+      cooled("gemini-3-7-flash", NOW_MS + 50_000),
       cooled("gpt-5-6-terra", NOW_MS + 2_000),
       cooled("sonnet-5", NOW_MS + 2_000),
     ]);
@@ -145,7 +145,7 @@ describe("selectAgentPair", () => {
     if (result.action !== "park-until-reset") return;
     expect(result.retryAtMs).toBe(NOW_MS + 2_000);
     expect(result.blocked).toContainEqual({
-      memberId: "gemini-3-6-flash",
+      memberId: "gemini-3-7-flash",
       role: "executor",
       reason: "cooldown",
       cooldownUntilMs: NOW_MS + 50_000,
@@ -153,7 +153,7 @@ describe("selectAgentPair", () => {
   });
 
   it("keeps a same-backend judge under the explicit allow_same_family opt-in", () => {
-    const result = select([cooled("gemini-3-6-flash", NOW_MS + 60_000)], true);
+    const result = select([cooled("gemini-3-7-flash", NOW_MS + 60_000)], true);
 
     expect(result.action).toBe("selected");
     if (result.action !== "selected") return;

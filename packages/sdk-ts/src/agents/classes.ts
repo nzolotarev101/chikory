@@ -136,7 +136,7 @@ export function findMember(agentClass: AgentClass, memberId: string): AgentMembe
  * always tried before any adjacent member. What changes is that the adjacent
  * group exists at all, and that it may name any vendor.
  *
- * Model ids are the ones the real CLIs accept. `gemini-3.6-flash-high` is
+ * Model ids are the ones the real CLIs accept. `gemini-3.7-flash-high` is
  * verbatim from `agy models`; note that `agy` offers only 4.6-era Claude
  * (`claude-sonnet-4-6`, `claude-opus-4-6-thinking`), which is why the Claude
  * members route through the `claude` CLI and the proxy's `claude` backend
@@ -149,12 +149,12 @@ export const DEFAULT_AGENT_CLASSES: AgentClassRegistry = {
       id: "executor-default",
       role: "executor",
       primary: {
-        id: "gemini-3-6-flash",
+        id: "gemini-3-7-flash",
         role: "executor",
         adapter: "gemini-cli",
         family: "gemini",
         backend: "gemini",
-        model: "gemini-3.6-flash-high",
+        model: "gemini-3.7-flash-high",
       },
       adjacent: [
         {
