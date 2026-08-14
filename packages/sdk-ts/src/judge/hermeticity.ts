@@ -193,24 +193,53 @@ export async function applyCleanupPlan(
 ): Promise<void> {
   const beforeMap = beforeSnapshot ? parseDirtySnapshot(beforeSnapshot) : undefined;
 
-  for (const relPath of plan.toDelete) {
-    const fullPath = join(dir, relPath);
-    await rm(fullPath, { recursive: true, force: true });
-  }
+  // Perform concurrent file deletions
+  await Promise.all(
+    plan.toDelete.map(async (relPath) => {
+      const fullPath = join(dir, relPath);
+      await rm(fullPath, { recursive: true, force: true });
+    })
+  );
+
+  const toWrite: { relPath: string; content: string }[] = [];
+  const toCheckout: string[] = [];
 
   for (const relPath of plan.toRestore) {
     const b = beforeMap?.get(relPath);
     if (b && b.content !== undefined) {
-      const fullPath = join(dir, relPath);
-      await writeFile(fullPath, b.content);
+      toWrite.push({ relPath, content: b.content });
     } else {
+      toCheckout.push(relPath);
+    }
+  }
+
+  // Perform concurrent file writes
+  await Promise.all(
+    toWrite.map(async ({ relPath, content }) => {
+      const fullPath = join(dir, relPath);
+      await writeFile(fullPath, content);
+    })
+  );
+
+  // Perform batched git checkouts
+  if (toCheckout.length > 0) {
+    try {
+      await git(dir, ["checkout", "HEAD", "--", ...toCheckout]);
+    } catch {
       try {
-        await git(dir, ["checkout", "HEAD", "--", relPath]);
+        await git(dir, ["checkout", "--", ...toCheckout]);
       } catch {
-        try {
-          await git(dir, ["checkout", "--", relPath]);
-        } catch {
-          // Ignored if checkout fails
+        // Fall back to sequential checkouts if batched checkout fails
+        for (const relPath of toCheckout) {
+          try {
+            await git(dir, ["checkout", "HEAD", "--", relPath]);
+          } catch {
+            try {
+              await git(dir, ["checkout", "--", relPath]);
+            } catch {
+              // Ignored if checkout fails
+            }
+          }
         }
       }
     }
