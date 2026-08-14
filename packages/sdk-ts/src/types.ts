@@ -92,6 +92,11 @@ export interface TaskSpec {
    */
   regressionSuite?: string;
   /**
+   * Optional timeout in milliseconds for each judge-executed check command.
+   * Defaults to DEFAULT_CHECK_TIMEOUT_MS (120,000 ms).
+   */
+  checkTimeoutMs?: number;
+  /**
    * WP-509/F-88 — chain-only decomposition floor. When set, `chikory chain`
    * rejects a plan with fewer nodes (the planner collapsed a decomposable goal
    * too coarsely). Absent = no floor. Ignored by single `chikory run`.
@@ -671,6 +676,8 @@ export interface RunStatusReport {
   checkpoints: Checkpoint[];
   /** Explicit terminal (CG-1). */
   failure?: { reason: string; lastCheckpoint: CheckpointId };
+  /** Additive marker: check that did not complete (inconclusive outcome, killed at cap). */
+  inconclusiveCheck?: string;
 }
 
 /**

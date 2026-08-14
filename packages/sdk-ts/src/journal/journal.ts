@@ -269,6 +269,7 @@ interface TerminalPayload {
   lastCheckpoint?: string;
   /** WP-520 (ADR-009 D4): this FAILED seal is healable — `chikory resume` re-enters it. */
   resumable?: boolean;
+  inconclusiveCheck?: string;
 }
 
 interface VerdictPayload {
@@ -307,13 +308,16 @@ export function reportFromJournal(journal: Journal): RunStatusReport | undefined
   // run row still says FAILED (reopenRun flips it back to RUNNING).
   const terminals = journal.entries("terminal");
   const terminal = terminals[terminals.length - 1];
-  if (terminal && run.status === "FAILED") {
+  if (terminal) {
     const payload = terminal.payload as TerminalPayload;
-    if (payload.status === "FAILED") {
+    if (run.status === "FAILED" && payload.status === "FAILED") {
       report.failure = {
         reason: payload.reason ?? "unknown",
         lastCheckpoint: payload.lastCheckpoint ?? "",
       };
+    }
+    if (payload.inconclusiveCheck !== undefined) {
+      report.inconclusiveCheck = payload.inconclusiveCheck;
     }
   }
   return report;
