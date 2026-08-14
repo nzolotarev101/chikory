@@ -1,4 +1,4 @@
-import { execFileSync, execSync } from "node:child_process";
+import { execFileSync } from "node:child_process";
 import { existsSync } from "node:fs";
 import { resolve } from "node:path";
 
@@ -26,6 +26,46 @@ export const VERIFY_COMMANDS: readonly string[] = [
   "devbox run typecheck",
   "devbox run test",
 ];
+
+export function splitCommand(command: string): string[] {
+  const args: string[] = [];
+  let current = "";
+  let inDoubleQuotes = false;
+  let inSingleQuotes = false;
+  let escaped = false;
+
+  for (let i = 0; i < command.length; i++) {
+    const char = command[i];
+
+    if (escaped) {
+      current += char;
+      escaped = false;
+    } else if (char === "\\") {
+      escaped = true;
+    } else if (char === '"' && !inSingleQuotes) {
+      inDoubleQuotes = !inDoubleQuotes;
+    } else if (char === "'" && !inDoubleQuotes) {
+      inSingleQuotes = !inSingleQuotes;
+    } else if (char === " " && !inDoubleQuotes && !inSingleQuotes) {
+      if (current !== "") {
+        args.push(current);
+        current = "";
+      }
+    } else {
+      current += char;
+    }
+  }
+
+  if (current !== "") {
+    args.push(current);
+  }
+
+  if (inDoubleQuotes || inSingleQuotes || escaped) {
+    throw new Error("Unmatched quotes or trailing backslash in command string");
+  }
+
+  return args;
+}
 
 function git(cwd: string, args: string[], input?: string): string {
   return execFileSync("git", ["-C", cwd, ...args], {
@@ -77,7 +117,12 @@ export async function cmdLand(args: LandArgs, deps: LandDeps = {}): Promise<numb
   const runCheck =
     deps.runCheck ??
     ((command: string, cwd: string): void => {
-      execSync(command, { cwd, stdio: ["ignore", "inherit", "inherit"] });
+      const parts = splitCommand(command);
+      if (parts.length === 0) {
+        throw new Error("Empty command");
+      }
+      const [executable, ...cmdArgs] = parts;
+      execFileSync(executable, cmdArgs, { cwd, stdio: ["ignore", "inherit", "inherit"] });
     });
   const loadAcceptanceChecks = deps.loadAcceptanceChecks ?? defaultLoadAcceptanceChecks;
   const workspace = workspaceDir(args.dataDir, args.runId);

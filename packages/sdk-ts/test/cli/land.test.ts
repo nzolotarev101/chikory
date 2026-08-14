@@ -5,7 +5,7 @@ import { join } from "node:path";
 
 import { afterEach, describe, expect, test } from "vitest";
 
-import { type LandDeps, VERIFY_COMMANDS } from "../../src/cli/land.js";
+import { type LandDeps, VERIFY_COMMANDS, splitCommand } from "../../src/cli/land.js";
 import { main } from "../../src/cli/main.js";
 
 interface Cli {
@@ -253,5 +253,45 @@ describe("chikory land (WP-220)", () => {
     expect(c.err).toHaveLength(1);
     expect(c.err[0]).toContain("land failed");
     expect(c.err[0]).toContain("landed.txt");
+  });
+
+  describe("splitCommand and command injection protection", () => {
+    test("splitCommand parses simple space separated commands", () => {
+      expect(splitCommand("devbox run build")).toEqual(["devbox", "run", "build"]);
+    });
+
+    test("splitCommand handles single quotes and double quotes", () => {
+      expect(splitCommand("echo 'hello world' \"goodbye world\"")).toEqual([
+        "echo",
+        "hello world",
+        "goodbye world",
+      ]);
+    });
+
+    test("splitCommand preserves quotes inside quotes correctly", () => {
+      expect(splitCommand("grep \"'some pattern'\"")).toEqual(["grep", "'some pattern'"]);
+    });
+
+    test("splitCommand throws error on mismatched quotes", () => {
+      expect(() => splitCommand("echo 'hello")).toThrow("Unmatched quotes or trailing backslash");
+    });
+
+    test("splitCommand parses command injection sequences into safe arguments instead of shell metacharacters", () => {
+      expect(splitCommand("echo 'injection-test'; touch injection_failed.txt")).toEqual([
+        "echo",
+        "injection-test;",
+        "touch",
+        "injection_failed.txt",
+      ]);
+
+      expect(splitCommand("devbox run build && touch malicious.txt")).toEqual([
+        "devbox",
+        "run",
+        "build",
+        "&&",
+        "touch",
+        "malicious.txt",
+      ]);
+    });
   });
 });
