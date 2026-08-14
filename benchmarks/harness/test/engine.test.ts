@@ -2,9 +2,26 @@ import { mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-import { describe, expect, it } from "vitest";
-import { resolveTargetNodeEngine, planNodeProvisioning, decideTargetNode, loadTargetEngineSource, pinnedNodeProvisioning, satisfiesRange } from "../src/engine.js";
+import { describe, expect, it, vi, afterEach } from "vitest";
+import { resolveTargetNodeEngine, planNodeProvisioning, decideTargetNode, loadTargetEngineSource, pinnedNodeProvisioning, satisfiesRange, getTargetPackageJson } from "../src/engine.js";
 import type { BenchmarkTask } from "../src/task.js";
+
+// Vitest allows variables starting with "mock" to be referenced inside vi.mock factory
+const mockExecFileSync = vi.fn();
+
+vi.mock("node:child_process", async (importOriginal) => {
+  const original = await importOriginal<Record<string, unknown>>();
+  return {
+    ...original,
+    execFileSync: (...args: unknown[]) => {
+      if (mockExecFileSync.getMockImplementation()) {
+        return mockExecFileSync(...args);
+      }
+      const fn = original.execFileSync as (...args: unknown[]) => unknown;
+      return fn(...args);
+    },
+  };
+});
 
 describe("resolveTargetNodeEngine", () => {
   it("handles >=24", () => {
@@ -277,6 +294,73 @@ describe("loadTargetEngineSource — absent vs unreadable (F-188)", () => {
  * node 24.14.1 runs 1128/1128 green; node 24.15.0 SIGABRTs vitest 4.1.9 before
  * a single test executes. p3-rung-4 drew 24.15.0 and lost the task.
  */
+describe("secure execFileSync invocation", () => {
+  afterEach(() => {
+    mockExecFileSync.mockReset();
+  });
+
+  it("ensures git is executed with execFileSync as an array to prevent shell injection", () => {
+    mockExecFileSync.mockImplementation(() => {
+      return "package.json";
+    });
+
+    const task = {
+      id: "sec-task",
+      class: "brownfield",
+      repo: { url: "https://github.com/org/repo; rm -rf /", ref: "main; injection" },
+    } as unknown as BenchmarkTask;
+
+    loadTargetEngineSource(task, "/nonexistent-workspace");
+
+    // Expect git commands to be called via execFileSync without shell involvement
+    expect(mockExecFileSync).toHaveBeenCalled();
+    const calls = mockExecFileSync.mock.calls;
+
+    // Verify git clone args
+    expect(calls[0]?.[0]).toBe("git");
+    const cloneArgs = calls[0]?.[1];
+    expect(cloneArgs).toContain("clone");
+    expect(cloneArgs).toContain("https://github.com/org/repo; rm -rf /");
+
+    // Verify git fetch args
+    expect(calls[1]?.[0]).toBe("git");
+    const fetchArgs = calls[1]?.[1];
+    expect(fetchArgs).toContain("fetch");
+    expect(fetchArgs).toContain("main; injection");
+
+    // Verify git ls-tree args
+    expect(calls[2]?.[0]).toBe("git");
+    const lsTreeArgs = calls[2]?.[1];
+    expect(lsTreeArgs).toContain("ls-tree");
+
+    // Verify git checkout args
+    expect(calls[3]?.[0]).toBe("git");
+    const checkoutArgs = calls[3]?.[1];
+    expect(checkoutArgs).toContain("checkout");
+  });
+
+  it("ensures getTargetPackageJson also executes git with execFileSync securely", () => {
+    mockExecFileSync.mockImplementation(() => {
+      return "package.json";
+    });
+
+    const task = {
+      id: "sec-task-2",
+      class: "brownfield",
+      repo: { url: "https://github.com/org/repo; rm -rf /", ref: "main; injection" },
+    } as unknown as BenchmarkTask;
+
+    getTargetPackageJson(task, "/nonexistent-workspace");
+
+    expect(mockExecFileSync).toHaveBeenCalled();
+    const calls = mockExecFileSync.mock.calls;
+
+    expect(calls[0]?.[0]).toBe("git");
+    expect(calls[0]?.[1]).toContain("clone");
+    expect(calls[0]?.[1]).toContain("https://github.com/org/repo; rm -rf /");
+  });
+});
+
 describe("pinnedNodeProvisioning (F-254)", () => {
   const toolchains = [
     { version: "22.22.3", binDir: "/nix/store/n22/bin" },
