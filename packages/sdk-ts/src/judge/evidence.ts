@@ -254,11 +254,13 @@ export async function runCriteriaChecks(input: {
     const results = await Promise.all(promises);
     runs.push(...results);
   } finally {
-    for (const repo of reposToSnapshot) {
-      const before = beforeSnapshots.get(repo.dir);
-      const after = await snapshotWorkspace(repo.dir);
-      await applyCleanupPlan(repo.dir, planCheckSideEffectCleanup(before ?? "", after), before);
-    }
+    await Promise.all(
+      reposToSnapshot.map(async (repo) => {
+        const before = beforeSnapshots.get(repo.dir);
+        const after = await snapshotWorkspace(repo.dir);
+        await applyCleanupPlan(repo.dir, planCheckSideEffectCleanup(before ?? "", after), before);
+      }),
+    );
   }
   return runs;
 }
@@ -352,12 +354,14 @@ export async function collectEvidence(input: CollectEvidenceInput): Promise<Coll
       );
     }
   } finally {
-    for (const r of reposToSnapshot) {
-      const before = beforeSnapshots.get(r.dir);
-      const after = await snapshotWorkspace(r.dir);
-      const plan = planCheckSideEffectCleanup(before ?? "", after);
-      await applyCleanupPlan(r.dir, plan, before);
-    }
+    await Promise.all(
+      reposToSnapshot.map(async (r) => {
+        const before = beforeSnapshots.get(r.dir);
+        const after = await snapshotWorkspace(r.dir);
+        const plan = planCheckSideEffectCleanup(before ?? "", after);
+        await applyCleanupPlan(r.dir, plan, before);
+      }),
+    );
   }
 
   let testResults: TestResultArtifact | undefined;
