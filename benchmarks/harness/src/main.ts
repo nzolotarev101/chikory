@@ -600,10 +600,11 @@ export async function main(argv: string[], io = { out: console.log, err: console
     }
 
     try {
-      const { jsonPath, mdPath, data } = writeLeaderboard(bundles, outDir);
+      const { jsonPath, mdPath, htmlPath, data } = writeLeaderboard(bundles, outDir);
       io.out(`leaderboard generated across ${data.entries.length} arms (${bundles.length} bundle(s)):`);
       io.out(`  JSON: ${jsonPath}`);
       io.out(`  Markdown: ${mdPath}`);
+      io.out(`  HTML: ${htmlPath}`);
       return 0;
     } catch (err) {
       io.err(`chikory-bench leaderboard: ${(err as Error).message}`);
