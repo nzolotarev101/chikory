@@ -135,8 +135,8 @@ export function commandComplete(template: string, timeoutMs = 300_000): Complete
       const dir = mkdtempSync(join(tmpdir(), "chikory-bench-judge-"));
       const promptFile = join(dir, "prompt.md");
       writeFileSync(promptFile, `${system}\n\n${user}\n`);
-      const command = template.replaceAll("{promptFile}", promptFile);
-      const child = spawn("bash", ["-c", command], { stdio: ["ignore", "pipe", "pipe"] });
+      const command = template.replaceAll("{promptFile}", `"$1"`);
+      const child = spawn("bash", ["-c", command, "bash", promptFile], { stdio: ["ignore", "pipe", "pipe"] });
       let stdout = "";
       let stderr = "";
       child.stdout.on("data", (c: Buffer) => (stdout += c.toString()));

@@ -1,7 +1,25 @@
 import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
+
+const mockState = {
+  value: null as string | null,
+};
+
+vi.mock("node:fs", async (importOriginal) => {
+  const original = await importOriginal<typeof import("node:fs")>();
+  return {
+    ...original,
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    mkdtempSync: (prefix: string, options?: any) => {
+      if (mockState.value !== null) {
+        return mockState.value;
+      }
+      return original.mkdtempSync(prefix, options);
+    },
+  };
+});
 
 import {
   buildEvidence,
@@ -76,5 +94,26 @@ describe("makeJudgeGrader + commandComplete", () => {
   it("rejects when the judge command fails", async () => {
     const complete = commandComplete("exit 3");
     await expect(complete({ system: "s", user: "u" })).rejects.toThrow(/exit 3/);
+  });
+
+  it("prevents command injection even if the directory path contains special characters", async () => {
+    // Create a real directory that contains spaces, single/double quotes, and semicolons.
+    const parentDir = mkdtempSync(join(tmpdir(), "chikory-bench-judge-"));
+    const injectionDirName = "evil dir; echo INJECTED_BAD_CMD; '\"";
+    const maliciousDir = join(parentDir, injectionDirName);
+    mkdirSync(maliciousDir, { recursive: true });
+
+    // Mock mkdtempSync to return this specific malicious directory
+    mockState.value = maliciousDir;
+
+    try {
+      // If we had command injection, the command execution would fail or be hijacked.
+      // With our safe positional parameter solution, the path is correctly passed as a single argument.
+      const complete = commandComplete("cat {promptFile}");
+      const result = await complete({ system: "SECURE", user: "SYSTEM" });
+      expect(result).toContain("SECURE\n\nSYSTEM\n");
+    } finally {
+      mockState.value = null;
+    }
   });
 });
