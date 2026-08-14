@@ -274,3 +274,108 @@ describe("router normalization & retry (WP-103)", () => {
     expect(() => createRouter(compatPolicy(), { env: {} })).toThrow(/OPENAI_COMPAT_BASE_URL/);
   });
 });
+
+describe("RouterOptions overrides", () => {
+  it("respects pricing overrides for cost calculation", async () => {
+    const fake = await startFakeServer();
+    fake.setHandler((_req, res) => {
+      res.setHeader("content-type", "application/json");
+      res.end(chatCompletion("hello"));
+    });
+    const router = createRouter(compatPolicy("override-model"), {
+      env: ENV,
+      baseUrls: { "openai-compat": fake.url },
+      retry: FAST_RETRY,
+      pricing: {
+        "override-model": { inputPerMTok: 10.0, outputPerMTok: 20.0 },
+      },
+    });
+    const result = await router.complete(request());
+    expect(result).toMatchObject({
+      status: "SUCCESS",
+      content: "hello",
+      provider: "openai-compat",
+      model: "override-model",
+      tokens: { input: 10, output: 5 },
+      // Cost should be (10 * 10 + 5 * 20) / 1,000,000 = 200 / 1,000,000 = 0.0002
+      costUsd: 0.0002,
+    });
+  });
+
+  it("respects retry policy overrides", async () => {
+    const fake = await startFakeServer();
+    let handlerCalledTimes = 0;
+    fake.setHandler((_req, res) => {
+      handlerCalledTimes++;
+      res.statusCode = 503;
+      res.end("temporary issue");
+    });
+
+    const router = createRouter(compatPolicy(), {
+      env: ENV,
+      baseUrls: { "openai-compat": fake.url },
+      retry: {
+        maxAttempts: 2,
+        baseDelayMs: 2,
+        factor: 2,
+        maxDelayMs: 10,
+        jitter: false,
+      },
+    });
+
+    const result = await router.complete(request());
+    expect(result).toMatchObject({
+      status: "FAILED",
+      retriable: true,
+      attempts: 2,
+    });
+    expect(handlerCalledTimes).toBe(2);
+  });
+
+  it("respects timeoutMs override propagation", async () => {
+    const fake = await startFakeServer();
+    fake.setHandler(() => {
+      /* hang indefinitely */
+    });
+    const router = createRouter(compatPolicy(), {
+      env: ENV,
+      baseUrls: { "openai-compat": fake.url },
+      retry: { maxAttempts: 1, baseDelayMs: 1, factor: 1, maxDelayMs: 1, jitter: false },
+      timeoutMs: 50,
+    });
+    const result = await router.complete(request());
+    expect(result).toMatchObject({
+      status: "FAILED",
+      retriable: true,
+      attempts: 1,
+    });
+    expect(result.status === "FAILED" && result.reason).toMatch(/timeout/i);
+  });
+
+  it("respects custom env and baseUrls overrides", async () => {
+    const fake = await startFakeServer();
+    fake.setHandler((_req, res) => {
+      res.setHeader("content-type", "application/json");
+      res.end(chatCompletion("custom-env-success"));
+    });
+
+    const customEnv = {
+      CUSTOM_OPENAI_COMPAT_BASE_URL: "ignored", // check that we only look at what's requested
+      OPENAI_COMPAT_BASE_URL: "http://something-else.invalid",
+    };
+
+    const router = createRouter(compatPolicy(), {
+      env: customEnv,
+      baseUrls: { "openai-compat": fake.url }, // explicitly overriding the baseUrls
+      retry: FAST_RETRY,
+    });
+
+    const result = await router.complete(request());
+    expect(result).toMatchObject({
+      status: "SUCCESS",
+      content: "custom-env-success",
+      provider: "openai-compat",
+    });
+    expect(fake.hits).toBe(1);
+  });
+});
