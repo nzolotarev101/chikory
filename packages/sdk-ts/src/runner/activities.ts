@@ -1784,6 +1784,7 @@ export function createRunnerActivities(deps: RunnerActivityDeps) {
             rubric: effectiveRubric,
             ...(input.completionReview ? { reviewScope: "cumulative" as const } : {}),
             ...(input.completionReview && spec.regressionSuite ? { regressionSuite: spec.regressionSuite } : {}),
+            ...(spec.checkTimeoutMs !== undefined ? { checkTimeoutMs: spec.checkTimeoutMs } : {}),
             lastGoodCheckpointId: input.lastGoodCheckpointId,
           });
           verdict = pass.verdict;
@@ -2847,6 +2848,8 @@ export function createRunnerActivities(deps: RunnerActivityDeps) {
       resumable?: boolean;
       /** WP-519: the exhausted heal attempt this seal preserves for the resume. */
       remediation?: { attempts: number; brief: string };
+      /** Additive marker naming the check that did not complete (killed at cap). */
+      inconclusiveCheck?: string;
     }): Promise<void> {
       const journal = openJournal(deps, input.runId);
       try {
@@ -2877,6 +2880,7 @@ export function createRunnerActivities(deps: RunnerActivityDeps) {
               ...(input.handoff !== undefined ? { handoff: input.handoff } : {}),
               ...(input.resumable === true ? { resumable: true } : {}),
               ...(input.remediation !== undefined ? { remediation: input.remediation } : {}),
+              ...(input.inconclusiveCheck !== undefined ? { inconclusiveCheck: input.inconclusiveCheck } : {}),
             },
             costDeltaUsd: 0,
             artifactRefs:
