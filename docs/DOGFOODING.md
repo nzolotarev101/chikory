@@ -8,13 +8,16 @@ recover a run, and how to land the result as a normal PR.
 **Status (2026-08-12, bounded — update discipline: REPLACE this block, ≤15 lines;
 displaced prose moves verbatim to [`PLAN-HISTORY.md`](PLAN-HISTORY.md); per-run detail:
 `docs/reports/`; queue + course correction: `plan.md` §6/§7).**
-🟢 **dogfood-138 / WP-615 (an unfinished check must say it did not finish) DELIVERED** — `run-3ca8f79a-ab47-44bf-a90b-14ff26b09215`, SUCCESS 1 step, $0.0814/$20.00, 6m 36s, 2/2 criteria, harvest byte-IDENTICAL 7/7, `docs/reports/dogfood-138.md`.
+**Status (2026-08-14, bounded — update discipline: REPLACE this block, ≤15 lines;
+displaced prose moves verbatim to [`PLAN-HISTORY.md`](PLAN-HISTORY.md); per-run detail:
+`docs/reports/`; queue + course correction: `plan.md` §6/§7).**
+🟢 **dogfood-139 / WP-303 (leaderboard site + methodology) DELIVERED — WP-303 IS COMPLETE** — `run-ab72b901-4f3f-4b98-b6e1-ca00324ff0a6`, SUCCESS 1 step, $0.1048/$20.00, 4m 40s, 2/2 criteria, harvest byte-IDENTICAL 5/5, `docs/reports/dogfood-139.md`.
 
-**A test command killed by the clock now tells the truth.** The seal reads `completion review: check did not complete — pre_existing_suite_still_green` instead of the design-findings sentence, and the terminal record plus `RunStatusReport` carry an additive `inconclusiveCheck` field, so a script reads it without parsing English. `TerminalStatus` is still exactly `SUCCESS | FAILED`. A red suite, a green suite and an ordinary design finding all keep exactly their old outcome — pinned by four real Temporal runs.
+**The benchmark result is now a page a skeptic can open.** `chikory-bench leaderboard` writes a self-contained `index.html` beside the JSON and Markdown, published at `benchmarks/publications/leaderboard/index.html`: both arms as 95% intervals, *"Overlap at 95% confidence; the arms are not separated"*, methodology read from the bundle, zero network assets, regenerable from the data it publishes. All 8 designed traps rejected. **The ladder does NOT advance (`rung=4`)** — rung 5 also needs WP-304's arm, and a rung is satisfied only when its proof is whole.
 
-**🔴 F-331 FOUND AND HAND-FIXED THIS REVIEW (WP-617) — the run's own declared suite had never run.** A converged out-of-rubric ESCALATE sealed SUCCESS upstream of the completion review, which is the only place a `regression_suite:` executes. Both escalate seals now call `regressionGateBeforeSuccess` (`src/workflow/agent-loop.ts:397`, wired at `:1301`/`:1339`) and route the result through the shared ladder `sealFromRubricFails` (`:352`): a red suite seals FAILED even on a converged escalation, a green one leaves the F-229/F-271 wording untouched, a suite-less run is unaffected. Verified RED-then-GREEN against the pre-fix tree; sdk suite 1376 → **1379** green. §7 carries the full note. **Any run sealed before 2026-08-13 with one judge pass and an `⚠ ESCALATE` seal had its gate skipped — re-run that suite by hand before trusting the green.**
+**🔴 The judge PROVED two defects and the run shipped them anyway (F-335 → WP-619, the next headline).** Judge pass #1 ESCALATEd with 3 concerns; pass #2 ran a smaller rubric over the **byte-identical diff**, never re-tested them, and sealed 🟢 SUCCESS. Two named real defects the ACs did not test for. **🔴 F-334 hand-fixed (WP-621):** `regressionGateBeforeSuccess` returned `undefined` for any non-deterministic finding, and on the converged-escalate path `undefined` means "SUCCESS stands" — so `design_serves_overall_goal: ✗` sealed green. Now condemns FAILED + resumable, still terminal-or-nothing; sdk 1379 → **1380**. **F-331 is LIVE-PROVEN this run** — judge pass #2 carried `✓ pre_existing_suite_still_green`.
 
-**Still standing.** ① A red suite's RAW output (≤64 KB) rides into the verdict rationale and prints in full in `chikory trace` (🟠 F-328 → WP-616, §8). ② 🟠 F-332 → WP-618 — a chain drops `inconclusiveCheck`, so it cannot tell a node's gate never finished. ③ Keep `unattended: escalation: seal_resumable_failed` in every headline spec (F-322). ④ Sweep the LENGTH, not just the count (🟡 F-329). ⑤ Re-measure a blocker's **scope**, not just whether it still stands: rung 5 sat "blocked" for eight reviews because nobody checked that both blockers gated only WP-304 (F-203, applied to our own reasoning).
+**Still standing.** ① Three page defects the ACs missed were hand-fixed (🟠 F-336 fabricated corpus counts on empty data · 🟠 F-337 bundle data could inject a remote `<script>` · 🟠 F-338 evidence links depended on the CLI's cwd) — bench suite 210 → **213**; §8 carries the note. ② 🟡 F-339 → WP-620 — the stale-spec guard refused this very spec at $0 and is wrong on **7 plan rows in both directions**; launch with `CHIKORY_ALLOW_STALE_SPEC=1` when you have re-measured the WP by hand. ③ 🟠 F-328 → WP-616 · 🟠 F-332 → WP-618 still open. ④ Keep `unattended: escalation: seal_resumable_failed` in every headline spec (F-322).
 
 Related docs: [`docs/spec/task-spec.md`](spec/task-spec.md) (schema
 reference) · [`docs/TASK-PROTOCOL.md`](TASK-PROTOCOL.md) (WP etiquette, §7 is
@@ -925,6 +928,27 @@ broken (a false-green, not a follow-on fix).
   suite by hand before trusting the green.
 
 ## 8. Known P1 limitations (so you don't fight them)
+
+- **🔴 A judge's out-of-rubric CONCERN is recorded, never acted on** (F-335 →
+  WP-619, dogfood-139). When a converged step escalates with free-text concerns,
+  the seal carries them verbatim into the terminal reason and ships. In
+  dogfood-139 two of three concerns named **real, reproducible defects in the
+  delivered code** — and the run sealed 🟢 SUCCESS with both in the diff. The
+  completion-review pass that follows runs a *different, smaller* rubric over the
+  byte-identical diff and never re-tests them. **Until WP-619 lands: read the
+  `concern:` lines of every ESCALATE pass in `chikory trace` before trusting a
+  converged SUCCESS** — a green seal is not evidence the concerns were wrong.
+  (F-334/WP-621 closed the sibling hole where a non-deterministic *rubric* finding
+  on the same path was discarded; that one now condemns.)
+
+- **🟡 The stale-spec launch guard can refuse a legitimate spec** (F-339 →
+  WP-620, dogfood-139). `chikory run` reads WP completion out of `plan.md` Notes
+  prose, treats a bare `LANDED` as done, and only scans the first 300 characters
+  for an open-qualifier — so a row reading *"**DATA HALF LANDED** … Still open:
+  <the thing you are about to build>"* refuses the launch at $0. Measured against
+  the real `plan.md` it is wrong on **7 rows in both directions** (WP-540 reads
+  open though done). **Re-measure the WP by hand, then launch with
+  `CHIKORY_ALLOW_STALE_SPEC=1`.** Do not edit the plan row to appease the guard.
 
 - **✅ FIXED — a heal no longer throws away work nobody condemned** (🟠 F-302
   → WP-605, dogfood-132). Whether a self-heal restores a checkpoint is now decided

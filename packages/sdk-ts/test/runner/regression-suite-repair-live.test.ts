@@ -403,6 +403,74 @@ describe.skipIf(address === null)("AC-2: live regression suite repair brief & ru
     }
   }, 180_000);
 
+  /**
+   * F-334 (dogfood-139): the converged-escalate gate condemns on a NARROWER set
+   * than the PROCEED path it borrows from. `sealFromRubricFails` seals FAILED
+   * only for `DETERMINISTIC_RUBRIC_IDS` and returns `undefined` for everything
+   * else — and on the PROCEED path that `undefined` is correct, because the
+   * caller then hands the executor a bounded design-fix brief
+   * (`buildCompletionReviewBrief`). `regressionGateBeforeSuccess` has no such
+   * caller: `undefined` means "the caller's SUCCESS seal stands". So a
+   * completion review that answers `design_serves_overall_goal: ✗` on a
+   * converged step sealed 🟢 SUCCESS with the finding discarded in silence —
+   * the judge-detects-but-does-not-gate shape (F-180/WP-537) surviving at the
+   * one altitude WP-537 never reached.
+   *
+   * The gate stays terminal-or-nothing (dogfood-121: re-entering the loop on a
+   * converged step re-raises the same concern forever), so the fix condemns
+   * rather than granting a repair attempt: FAILED + resumable, finding named.
+   */
+  test("F-334 Scenario 8: a converged ESCALATE whose completion review fails a NON-deterministic rubric item seals FAILED, not SUCCESS", async () => {
+    const wire = await startFakeJudgeWire([escalatingForm(), escalatingForm()], {
+      reviewForms: [
+        completionReviewForm({
+          hasRegressionSuite: true,
+          rubricFails: ["design_serves_overall_goal"],
+        }),
+        completionReviewForm({
+          hasRegressionSuite: true,
+          rubricFails: ["design_serves_overall_goal"],
+        }),
+      ],
+    });
+    cleanups.push(() => wire.close());
+
+    const { repoUrl, dataDir, runner } = await setup(wire, { claimsCompleteSteps: [1] });
+    const spec = makeJudgedSpec({
+      repoUrl,
+      cadence: 1,
+      maxSteps: 4,
+      // GREEN suite — the only thing condemning this run is the design finding.
+      regressionSuite: "exit 0",
+      unattended: { escalation: "seal_resumable_failed" },
+    });
+
+    const handle = await runner.start(spec);
+    const report = await awaitTerminal(handle);
+
+    // Before the fix this sealed SUCCESS on the converged-escalate reason, with
+    // `design_serves_overall_goal: ✗` sitting unremarked in the journal.
+    expect(report.status).toBe("FAILED");
+    expect(report.inconclusiveCheck).toBeUndefined();
+    // Still exactly one gate run — condemning must not buy a second review.
+    expect(wire.reviewHits).toBe(1);
+
+    const journal = new Journal(journalPath(dataDir, handle.runId));
+    try {
+      const terminal = journal.entries("terminal").at(-1)!.payload as {
+        status: string;
+        reason?: string;
+      };
+      expect(terminal.status).toBe("FAILED");
+      // The finding is NAMED in the outcome, not buried in a verdict payload.
+      expect(terminal.reason).toContain("design_serves_overall_goal");
+      // …and it is not misreported as the deterministic-suite failure.
+      expect(terminal.reason).not.toContain(RUBRIC_PRE_EXISTING_SUITE_GREEN);
+    } finally {
+      journal.close();
+    }
+  }, 180_000);
+
   test("F-331 Scenario 7: a converged ESCALATE on a run that declares NO suite buys no judge pass and keeps today's wording", async () => {
     const wire = await startFakeJudgeWire([escalatingForm(), escalatingForm()]);
     cleanups.push(() => wire.close());

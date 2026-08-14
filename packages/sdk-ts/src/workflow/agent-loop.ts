@@ -417,7 +417,34 @@ export async function agentLoop(spec: TaskSpec): Promise<RunStatus> {
       lastGoodCheckpointId,
     });
     spentUsd += reviewVerdict.costUsd;
-    return sealFromRubricFails(reviewVerdict.form.rubricResults.filter((r) => !r.pass));
+    const fails = reviewVerdict.form.rubricResults.filter((r) => !r.pass);
+    const condemned = await sealFromRubricFails(fails);
+    if (condemned !== undefined) return condemned;
+
+    // F-334 (dogfood-139): `sealFromRubricFails` condemns only
+    // `DETERMINISTIC_RUBRIC_IDS` and returns `undefined` for everything else.
+    // On the PROCEED path that is correct — the caller answers `undefined` by
+    // handing the executor a bounded design-fix brief. Here `undefined` means
+    // "the caller's SUCCESS seal stands", so a completion review answering
+    // `design_serves_overall_goal: ✗` on a converged step sealed 🟢 SUCCESS with
+    // the finding discarded: judge-detects-but-does-not-gate (F-180/WP-537) at
+    // the one altitude WP-537 never reached.
+    //
+    // This gate stays terminal-or-nothing — dogfood-121 lost a 5-node chain to a
+    // converged step re-raising the same concern forever — so a surviving
+    // finding CONDEMNS rather than buying a repair attempt. Resumable, and the
+    // item is named in the reason so the outcome says what was wrong.
+    // (Anything `infraFailed` was already settled by `sealFromRubricFails`.)
+    if (fails.length > 0) {
+      return seal(
+        "FAILED",
+        `completion review: unresolved finding on a converged step — ${fails
+          .map((fail) => fail.id)
+          .join(", ")}`,
+        { resumable: true },
+      );
+    }
+    return undefined;
   }
 
   async function applyRemediation(
