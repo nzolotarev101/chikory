@@ -38,6 +38,10 @@ describe("parentDirOf", () => {
     expect(parentDirOf("/root-file.ts")).toBe("");
     expect(parentDirOf("/src/index.ts")).toBe("/src");
   });
+
+  it("should handle directory path trailing slashes", () => {
+    expect(parentDirOf("src/components/")).toBe("src/components");
+  });
 });
 
 describe("isTestPath", () => {
@@ -47,6 +51,8 @@ describe("isTestPath", () => {
     expect(isTestPath("src/test/helper.ts")).toBe(true);
     expect(isTestPath("packages/sdk-ts/tests/foo.ts")).toBe(true);
     expect(isTestPath("packages/sdk-ts/test/runner/pacing.test.ts")).toBe(true);
+    expect(isTestPath("foo/test/bar.ts")).toBe(true);
+    expect(isTestPath("foo/tests/bar.ts")).toBe(true);
   });
 
   it("should match test or spec suffixes on standard extensions", () => {
@@ -58,14 +64,21 @@ describe("isTestPath", () => {
     expect(isTestPath("src/left.spec.jsx")).toBe(true);
     expect(isTestPath("src/left.test.cts")).toBe(true);
     expect(isTestPath("src/left.spec.mts")).toBe(true);
+    expect(isTestPath("left.test.cjs")).toBe(true);
+    expect(isTestPath("left.spec.mjs")).toBe(true);
   });
 
-  it("should reject non-test files even if they contain partial words", () => {
+  it("should reject non-test files even if they contain partial words or non-matching extensions", () => {
     expect(isTestPath("src/left.ts")).toBe(false);
     expect(isTestPath("src/test-helper.ts")).toBe(false); // test is not a segment, and suffix is not .test.ts
     expect(isTestPath("src/spec-loader.ts")).toBe(false);
     expect(isTestPath("src/tester.ts")).toBe(false);
     expect(isTestPath("src/tests-helper.ts")).toBe(false);
+    expect(isTestPath("foo/testing/bar.ts")).toBe(false);
+    expect(isTestPath("foo/atest/bar.ts")).toBe(false);
+    expect(isTestPath("test.ts")).toBe(false);
+    expect(isTestPath("foo.test.json")).toBe(false);
+    expect(isTestPath("foo.spec.md")).toBe(false);
   });
 
   it("should handle edge cases like directories/bare names", () => {
@@ -83,6 +96,8 @@ describe("isBarrelPath", () => {
     expect(isBarrelPath("index.jsx")).toBe(true);
     expect(isBarrelPath("index.cts")).toBe(true);
     expect(isBarrelPath("index.mts")).toBe(true);
+    expect(isBarrelPath("index.cjs")).toBe(true);
+    expect(isBarrelPath("index.mjs")).toBe(true);
     expect(isBarrelPath("src/index.ts")).toBe(true);
     expect(isBarrelPath("packages/sdk-ts/src/chain/index.js")).toBe(true);
   });
@@ -92,6 +107,9 @@ describe("isBarrelPath", () => {
     expect(isBarrelPath("src/index2.ts")).toBe(false);
     expect(isBarrelPath("src/main.ts")).toBe(false);
     expect(isBarrelPath("src/INDEX.ts")).toBe(false); // case-sensitive in regex
+    expect(isBarrelPath("index.json")).toBe(false);
+    expect(isBarrelPath("index.md")).toBe(false);
+    expect(isBarrelPath("index.test.ts")).toBe(false);
     expect(isBarrelPath("")).toBe(false);
   });
 });
@@ -116,15 +134,16 @@ describe("renderWriteBoundary", () => {
     expect(bulletCount).toBe(2);
   });
 
-  it("should list the unique parent directories of declared paths", () => {
+  it("should list the unique parent directories of declared paths in sorted order", () => {
     const rendered = renderWriteBoundary([
+      "z_dir/file.ts",
       "src/components/button.tsx",
       "src/components/card.tsx",
       "src/utils/math.ts",
       "root-file.ts", // No parent dir (parentDirOf is "")
     ]);
 
-    expect(rendered).toContain("src/components, src/utils");
+    expect(rendered).toContain("src/components, src/utils, z_dir");
     expect(rendered).not.toContain("none");
   });
 
@@ -140,5 +159,21 @@ describe("renderWriteBoundary", () => {
     expect(rendered).toContain("any test file (in a `test`/`tests` directory, or named `*.test.*` / `*.spec.*`)");
     expect(rendered).toContain("barrel `index.*`");
     expect(rendered).toContain("Everything else is outside.");
+  });
+
+  it("should render exact formatted output structure for a complex writeSet", () => {
+    const writeSet = ["src/chain/write-boundary.ts", "src/chain/write-set.ts", "README.md"];
+    const rendered = renderWriteBoundary(writeSet);
+    const expected = [
+      "This node's plan declares the files it may write. When the node seals, ANY changed path outside that boundary FAILS the whole node and throws its work away — a passing judge verdict does not save it.",
+      "Declared paths:",
+      "  - README.md",
+      "  - src/chain/write-boundary.ts",
+      "  - src/chain/write-set.ts",
+      "Also admitted: any file directly inside a declared directory (src/chain), any test file (in a `test`/`tests` directory, or named `*.test.*` / `*.spec.*`), and a barrel `index.*`.",
+      "Everything else is outside. The notes, evidence, provenance records and reports the goal asks you to produce belong at a declared path — never at a path you invent elsewhere in the repo. If the work genuinely needs a path no rule above admits, say so in your step summary instead of writing it.",
+    ].join("\n");
+
+    expect(rendered).toBe(expected);
   });
 });
