@@ -1,14 +1,27 @@
 import { describe, expect, test } from "vitest";
 import {
+  ESTIMATE_WINDOW,
+  ESTIMATE_SAFETY_FACTOR,
   estimateNextStepCost,
   budgetBreached,
   estimateNextStepTokens,
   tokenBudgetBreached,
 } from "../../src/runner/budget.js";
 
+describe("budget constants", () => {
+  test("exports expected budget constants", () => {
+    expect(ESTIMATE_WINDOW).toBe(5);
+    expect(ESTIMATE_SAFETY_FACTOR).toBe(1.5);
+  });
+});
+
 describe("estimateNextStepCost", () => {
   test("empty history estimates 0", () => {
     expect(estimateNextStepCost([])).toBe(0);
+  });
+
+  test("all zero history estimates 0", () => {
+    expect(estimateNextStepCost([0, 0, 0])).toBe(0);
   });
 
   test("single input cost estimation is mean * 1.5", () => {
@@ -67,10 +80,14 @@ describe("budgetBreached", () => {
     expect(budgetBreached(8, 10, 3)).toBe(true);
   });
 
-  test("not breached when remaining is greater than or equal to estimate and greater than 0", () => {
+  test("not breached when remaining is exactly equal to estimate and greater than 0", () => {
+    // spent = 5, budget = 10, remaining = 5, estimate = 5 -> remaining >= estimate
+    expect(budgetBreached(5, 10, 5)).toBe(false);
+  });
+
+  test("not breached when remaining is greater than estimate and greater than 0", () => {
     // spent = 5, budget = 10, remaining = 5, estimate = 3 -> remaining >= estimate
     expect(budgetBreached(5, 10, 3)).toBe(false);
-    expect(budgetBreached(5, 10, 5)).toBe(false);
   });
 
   test("handles negative estimate safely if it occurs", () => {
@@ -82,6 +99,10 @@ describe("budgetBreached", () => {
 describe("estimateNextStepTokens", () => {
   test("empty history estimates 0 tokens", () => {
     expect(estimateNextStepTokens([])).toBe(0);
+  });
+
+  test("all zero history estimates 0 tokens", () => {
+    expect(estimateNextStepTokens([0, 0, 0])).toBe(0);
   });
 
   test("single input token estimation is mean * 1.5", () => {
@@ -121,9 +142,17 @@ describe("tokenBudgetBreached", () => {
     expect(tokenBudgetBreached(800, 1000, 300)).toBe(true);
   });
 
-  test("not breached when remaining tokens is greater than or equal to estimate and greater than 0", () => {
+  test("not breached when remaining tokens is exactly equal to estimate and greater than 0", () => {
+    // spent = 500, budget = 1000, remaining = 500, estimate = 500 -> remaining >= estimate
+    expect(tokenBudgetBreached(500, 1000, 500)).toBe(false);
+  });
+
+  test("not breached when remaining tokens is greater than estimate and greater than 0", () => {
     // spent = 500, budget = 1000, remaining = 500, estimate = 300 -> remaining >= estimate
     expect(tokenBudgetBreached(500, 1000, 300)).toBe(false);
-    expect(tokenBudgetBreached(500, 1000, 500)).toBe(false);
+  });
+
+  test("handles negative estimate safely if it occurs", () => {
+    expect(tokenBudgetBreached(500, 1000, -100)).toBe(false);
   });
 });
