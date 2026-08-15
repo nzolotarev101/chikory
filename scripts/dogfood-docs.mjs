@@ -53,7 +53,10 @@ const TARGETS = {
   dogfooding: {
     file: "docs/DOGFOODING.md",
     cap: 15,
-    from: /^🟢 \*\*dogfood-|^🔴 \*\*dogfood-|^🟡 \*\*dogfood-/,
+    // F-346 (dogfood-141): the block STARTS at its `**Status (…)**` header, not
+    // at the 🟢/🔴/🟡 body line — anchoring on the body left every prior
+    // review's header stacked above the replacement (three deep by 2026-08-15).
+    from: /^\*\*Status \(\d{4}-\d{2}-\d{2}/,
     to: /^Related docs:/,
     label: "DOGFOODING.md status block",
   },

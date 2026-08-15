@@ -107,10 +107,21 @@ export const COMPLETION_REVIEW_RUBRIC: RubricItem[] = [
   },
   {
     id: RUBRIC_ESCALATION_CONCERNS_ADJUDICATED,
+    // F-344 (dogfood-141): a concern about MISSING PROCESS EVIDENCE — "the
+    // executor never showed it ran its own verification commands" — can never
+    // be cleared by inspecting a diff, so wording that asks only "is the
+    // concern true?" condemns every honest run that carries one. The standard
+    // below pins adjudication to the delivered artifact and makes this pass's
+    // own trusted evidence (judge-executed checks, the declared regression
+    // suite) the arbiter for verification-shaped concerns.
     description:
-      "Any free-text concerns or objections raised outside the rubric during previous passes " +
-      "are cleared by the cumulative diff: they do not identify real defects, regressions, or " +
-      "unfulfilled requirements in the delivered code.",
+      "Every standing finding put to this review is CLEARED: judged against the cumulative " +
+      "diff and this pass's trusted check results, it does not identify a real defect, " +
+      "regression, or unfulfilled requirement in the DELIVERED code. Uphold (fail) only a " +
+      "finding that names something wrong with the delivery itself. A finding that process " +
+      "evidence is missing — the executor did not show it ran its own verification commands — " +
+      "is settled by the trusted evidence of this pass: passing judge-executed checks and a " +
+      "passing declared regression suite CLEAR it.",
     destructive: false,
   },
 ];

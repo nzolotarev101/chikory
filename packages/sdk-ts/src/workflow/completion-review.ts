@@ -50,6 +50,10 @@ export interface CompletionReviewState {
    * the concerns, even if no regression suite was declared.
    */
   hasEscalationConcerns?: boolean;
+  /**
+   * Whether the run has standing findings from earlier passes or the sealing pass.
+   */
+  hasStandingFindings?: boolean;
 }
 
 export type CompletionReviewDecision =
@@ -82,7 +86,8 @@ export function decideCompletionReview(
     isFirstVerdictSeal &&
     !failingRubric &&
     !state.hasRegressionSuite &&
-    !state.hasEscalationConcerns
+    !state.hasEscalationConcerns &&
+    !state.hasStandingFindings
   ) {
     return {
       action: "skip",

@@ -168,8 +168,8 @@ describe.skipIf(address === null)("WP-607: a machine-settled finding gates the s
       const verdicts = journal.entries("verdict").map((e) => (e.payload as VerdictPayload).verdict);
       expect(verdicts.filter((v) => v.kind === "ROLLBACK")).toHaveLength(0);
 
-      // The bounded completion-review repair still ran first (trap F).
-      expect(journal.entries("step").length).toBeGreaterThan(1);
+      // Single-pass adjudication: adjudicate once, then seal (trap F).
+      expect(journal.entries("step").length).toBe(1);
     } finally {
       journal.close();
     }

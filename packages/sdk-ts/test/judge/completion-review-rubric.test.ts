@@ -89,4 +89,33 @@ describe("cumulative review scope prompt", () => {
     expect(content).not.toContain("## REVIEW SCOPE");
     expect(content).toContain("## EVIDENCE — workspace diff since last verdict");
   });
+
+  // F-344 (dogfood-141): a converged run was condemned because the adjudicating
+  // pass was asked only "is the concern true?" about a concern no diff could
+  // ever clear (missing executor process evidence). The charter must carry an
+  // adjudication standard scoping upholds to defects in the DELIVERED work and
+  // naming this pass's trusted evidence as the arbiter for verification-shaped
+  // concerns — and it must appear ONLY when there are concerns to adjudicate
+  // (F-340: no subject, no question).
+  it("concerns bring the adjudication standard: upholds are scoped to the delivered work", () => {
+    const concern = "no evidence the executor ran its four verification commands";
+    const userMessage = buildJudgeMessages({
+      ...input("cumulative"),
+      escalationConcerns: [concern],
+    }).find((m) => m.role === "user");
+    expect(userMessage).toBeDefined();
+    const content = userMessage!.content;
+
+    expect(content).toContain("adjudicates the out-of-rubric concerns");
+    expect(content).toContain(concern);
+    expect(content).toContain("Adjudication standard: UPHOLD a concern only if you can point");
+    expect(content).toContain("A concern that process evidence is MISSING");
+  });
+
+  it("a concern-less cumulative review renders neither the concern charter nor the standard", () => {
+    const content = userContent("cumulative");
+
+    expect(content).not.toContain("adjudicates the out-of-rubric concerns");
+    expect(content).not.toContain("Adjudication standard:");
+  });
 });

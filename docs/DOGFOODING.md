@@ -5,19 +5,13 @@ This is the complete operating manual for executing Phase 2+ work packages
 task spec for a WP (every field explained), how to launch, supervise, and
 recover a run, and how to land the result as a normal PR.
 
-**Status (2026-08-12, bounded — update discipline: REPLACE this block, ≤15 lines;
+**Status (2026-08-15, bounded — update discipline: REPLACE this block, ≤15 lines;
 displaced prose moves verbatim to [`PLAN-HISTORY.md`](PLAN-HISTORY.md); per-run detail:
 `docs/reports/`; queue + course correction: `plan.md` §6/§7).**
-**Status (2026-08-14, bounded — update discipline: REPLACE this block, ≤15 lines;
-displaced prose moves verbatim to [`PLAN-HISTORY.md`](PLAN-HISTORY.md); per-run detail:
-`docs/reports/`; queue + course correction: `plan.md` §6/§7).**
-🟢 **dogfood-140 / WP-619 (adjudicate escalation concerns before the converged seal) DELIVERED — WP-619 IS COMPLETE** — `run-cd11c095-754c-42b5-b57c-d712710d9612`, SUCCESS 1 step, $0.1326/$20.00, 9m 40s, 2/2 criteria, harvest byte-IDENTICAL 11/11, `docs/reports/dogfood-140.md`.
-
-**A judge concern raised outside the checklist now has to be answered before a run may finish green.** A converged out-of-rubric escalation buys exactly ONE completion-review pass, shown the concern text verbatim, answering through a named rubric row; cleared → SUCCESS with the F-229/F-271 wording, upheld → resumable FAILED naming the item — with or without a declared `regression_suite`, still terminal-or-nothing. Nothing reads the concern string. All 8 designed traps rejected. **This closes the fifth altitude of judge-detects-but-does-not-gate**; WP-601 (F-295) is the last open member and the next headline. **Ladder unchanged (`rung=4`)** — off-ladder; the P3 exit gate needs WP-304's arm, which the operator runs by hand.
-
-**🔴 F-340 hand-fixed — every new gate is a new way to fail a correct run.** The adjudication row (and a scope sentence claiming the pass adjudicates concerns) was rendered on **every** completion review, including the concern-LESS one that any `regression_suite` run buys; a ✗ on that subject-less question condemns a correct SUCCESS through this delivery's own catch-all. Proven from the RAW wire request, fixed at `src/runner/activities.ts:1699` + `src/judge/prompt.ts:189`; Scenario 9 RED→GREEN, sdk 1454 → **1455**. **Neither AC could see it — both directions were driven by a SCRIPTED judge.** 🟢 F-341 hand-fixed (unreachable second rendering path).
-
-**Still standing.** ① 🟡 **F-342 → WP-622** — this spec's *"timed at HEAD"* suite premise was **95 tests stale** (claimed 175 files/1380, HEAD was 185/1475) because PRs #19–#30 landed 10 test files between the review and the launch; **re-measure a declared `regression_suite` before writing it into a spec**, never transcribe it. ② **F-343 / F-197** — the run reproduced the defect it fixes (its own concern sealed unadjudicated); the next run is the proof, signature = a `completion-review` verdict carrying an `escalation_concerns_adjudicated` row. ③ 🟡 F-339 → WP-620 — launch with `CHIKORY_ALLOW_STALE_SPEC=1` when you have re-measured the WP by hand. ④ 🟠 F-306 → WP-606 recurred (7 lines of CLI narration opened the step summary) · 🟠 F-328 → WP-616 · 🟠 F-332 → WP-618 still open. ⑤ Keep `unattended: escalation: seal_resumable_failed` in every headline spec (F-322).
+🟢 **dogfood-141 / WP-601 (a judge finding outlives its diff window) DELIVERED — the judge-detects-but-does-not-gate family is CLOSED (all six altitudes)** — `run-5ab10621-fd38-420d-aff2-176486cf9f9a`, terminal FAILED-resumable, 1 step, $0.1036/$20.00, 13m 12s, AC 2/2 re-run green, harvest byte-IDENTICAL 6/6, delivery landed after independent verification (`docs/reports/dogfood-141.md`).
+**The run was condemned by its own new gate, and the gate's question was wrong, not the delivery:** the only concern ("executor never showed its verification commands") is un-clearable by any diff, so the adjudicator honestly upheld it. The F-197 signature predicted last review appeared exactly as written — a `completion-review` verdict carrying `escalation_concerns_adjudicated` — proving WP-619 live in the condemning direction.
+**Hand-fixed this sitting:** 🔴 **F-344** — adjudication standard scopes upholds to defects in the DELIVERED work; process-evidence concerns are settled by this pass's trusted checks (`src/judge/prompt.ts:202`, `src/judge/rubric.ts:110`, +2 tests). 🟠 **F-345** — the VERIFY-YOUR-OWN-WORK goal boilerplate retired (§3.2): it demanded evidence the judge refuses to trust and ran the full suite into the 600 s step cap (killed at 601.4 s).
+**Still standing.** ① 🟡 F-342 → WP-622 — measure a declared `regression_suite` at launch HEAD, never transcribe counts. ② 🟡 F-339 → WP-620 — launch with `CHIKORY_ALLOW_STALE_SPEC=1` when you have re-measured the WP by hand. ③ 🟠 F-306 → WP-606 recurred (a cap-killed step's summary is 12 lines of waiting narration) · 🟠 F-328 → WP-616 · 🟠 F-332 → WP-618 still open. ④ Keep `unattended: escalation: seal_resumable_failed` in every headline spec (F-322). **NEXT = dogfood-142 / WP-608** (a 0-byte "may I proceed?" step is a named outcome, never a silent PROCEED, and never spends the repair attempt).
 
 Related docs: [`docs/spec/task-spec.md`](spec/task-spec.md) (schema
 reference) · [`docs/TASK-PROTOCOL.md`](TASK-PROTOCOL.md) (WP etiquette, §7 is
@@ -330,6 +324,19 @@ open and `AGENTS.md` read:
   its goal; dogfood-017's redundant-spec failure was the same drift taken to
   its limit). Leave a real decision in every spec so the run is genuine thesis
   evidence — autonomy exercised, judge grading something independent.
+- **Never mandate full-suite self-verification in the goal (F-345, dogfood-141).**
+  The old "VERIFY YOUR OWN WORK: run build, lint, typecheck and the full vitest
+  suite and report the ACTUAL counts" boilerplate is a concern factory: the
+  judging rules refuse to trust executor self-reports, so the demanded evidence
+  is worthless when present and its ABSENCE reads as a violation — the exact
+  concern the F-344 adjudication was then asked to clear against a diff that can
+  never prove process compliance. It also collides with the step cap: dogfood-141's
+  executor finished its 34 KB diff, launched the full suite in-step, and was
+  killed at 601.4 s of a 600 s cap while waiting on it. Tell the executor to run
+  only **fast per-package checks** (`pnpm exec tsc --noEmit`, `pnpm exec eslint`,
+  the one test file it touched); the trusted full-suite verification is the
+  declared `regression_suite` (§3.10) plus judge-executed AC checks — which run
+  anyway, on evidence the judge actually trusts.
 
 ### 3.3 `repos` (required, exactly 1 in P1)
 
@@ -746,6 +753,7 @@ broken (a false-green, not a follow-on fix).
 
 | Symptom | Cause → fix |
 |---|---|
+| A converged, all-green run seals `FAILED … escalation_concerns_adjudicated`, and the upheld concern is about MISSING EVIDENCE rather than broken code | **The adjudication was asked a question no diff can answer — 🔴 F-344, dogfood-141.** The judge's concern ("the executor never showed it ran its verification commands") is TRUE by construction — executor self-reports are untrusted — so an honest adjudicator upholds it every time, even while the same pass holds green trusted evidence. Fixed 2026-08-15: the charter (`src/judge/prompt.ts:202`) + rubric item (`src/judge/rubric.ts:110`) now scope upholds to defects in the DELIVERED work and make this pass's trusted checks settle process-evidence concerns. If you see this seal on a pre-fix run: the delivery may be fine — verify it independently (`dogfood-open.sh` re-runs the ACs) before discarding. Companion spec rule: §3.2 (never mandate full-suite self-verification — F-345). |
 | A spec's "timed at HEAD" suite baseline disagrees with what the executor reports | **You transcribed it instead of measuring it — 🟡 F-342, dogfood-140.** The dogfood-140 spec asserted `175 files / 1380 tests`; HEAD was `185 files / 1475`, because PRs #19–#30 landed 10 test files in `packages/sdk-ts/test/` between the previous review and the launch. The `1376 → 1379 → 1380` figure carried across reports is a hand-incremented counter, not a measurement. **Run the spec's declared `regression_suite` yourself at the commit you are about to launch from, and paste ITS counts.** The premise is fed to the executor AND used to sanity-check its claims, so a stale one reads as fabrication. → WP-622. |
 | `Invalid task spec: provider 'x' … missing env var Y` | Parse-time key validation. Export the key, or use the §3.8 routing workaround for keyless CLI runs. |
 | `Is the Temporal dev server up?` | It isn't. `devbox run temporal-dev`. |

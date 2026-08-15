@@ -190,11 +190,23 @@ function renderCompletionReviewScope(escalationConcerns?: string[]): string {
   // TOGETHER or not at all. A concern-less review that is told it "adjudicates
   // out-of-rubric concerns" is being asked a question with no subject and no
   // row to answer in, and a ✗ on that row condemns a converged run.
+  // F-344 (dogfood-141): the adjudication standard below is part of the
+  // charter, not the runner — the runner never reads a concern's text (the
+  // WP-619 invariant), so the only place to keep an un-answerable concern
+  // class from condemning every honest run is the question the judge is asked.
   const charter = hasConcerns
     ? [
         "This pass judges whether the run's cumulative changes form a coherent",
         "design in service of the goal, and adjudicates the out-of-rubric concerns",
         "listed below.",
+        "Adjudication standard: UPHOLD a concern only if you can point at a real",
+        "defect, regression, or unfulfilled requirement in the DELIVERED work,",
+        "evidenced by the cumulative diff or a failing trusted check in this pass.",
+        "A concern that process evidence is MISSING — e.g. the executor never",
+        "showed it ran its own verification commands — is not a defect in the",
+        "delivery: it is answered by this pass's trusted evidence, and when the",
+        "judge-executed checks and the declared regression suite are green, that",
+        "concern is CLEARED.",
       ]
     : [
         "This pass judges ONLY whether the run's cumulative changes form a coherent",

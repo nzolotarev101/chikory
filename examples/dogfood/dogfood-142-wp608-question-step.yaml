@@ -1,0 +1,450 @@
+# Plain: sometimes the coding agent finishes a step by ASKING — "here is my plan, would you like me
+# to proceed?" — changing nothing. Today the harness treats that like a finished step: the judge
+# looks at an empty change, finds nothing wrong, and the run walks on having paid full price for a
+# step that did no work. Worse, when the harness grants exactly ONE repair step to fix a real
+# problem, an "asking" step can eat that only chance. This run makes an asking step a first-class,
+# named event: it is not judged, it does not eat bounded retries, and the agent is re-driven with a
+# standing answer — there is no approver; the step itself is the approval.
+# WP: WP-608 (a step that ends in a question is not a step, and must not spend the loop's one
+#   repair attempt — F-311)
+# Ladder-rung: 0 (off-ladder — see WHY; the remaining rung-5 half is WP-304, not agent-runnable)
+# Thesis-KPI: per-step reliability + cost-per-delivered-diff. MEASURED harm (run-83bf691d,
+#   dogfood-133): 2 of 3 steps were 0-byte "may I proceed?" steps; $0.1071 of $0.1887 (56.8%) of
+#   run spend judged steps that changed nothing, and the single WP-537 bounded repair step was one
+#   of them — the correct fix was WRITTEN DOWN in its plan and never applied, so the defect shipped.
+#   Executor passivity is a family: dogfood-141's step burned its whole 600 s cap WAITING on a test
+#   suite (F-345). This run closes the ask-permission half.
+# Format: loose — the outcomes and the named observables are fixed, the mechanism is the executor's
+#
+# Launch mode: RUN (single node — one deliverable, one seam).
+#   CHIKORY_PREFLIGHT_ONLY=1 devbox run run-dogfood
+#   devbox run run-dogfood
+#
+# WHY THIS AND NOT THE LADDER RUNG (dogfood-141 review, 2026-08-15):
+#   The progression gate reads ✅ PROGRESSING, so the default candidate is the next ladder rung and a
+#   non-ladder candidate must beat it on thesis value AND pass every gate. It does, because the rung
+#   is not runnable as a dogfood headline — unchanged since dogfood-140:
+#     * P3-rung-5 (EXIT) = WP-303 + WP-304. WP-303 closed in dogfood-139.
+#     * WP-304 needs the OpenHands arm plus a corpus wide enough to separate 19 requirements — a
+#       quota-bound multi-hour suite the operator runs BY HAND (dogfood-122). No spec can headline it.
+#   With the judge-detects-but-does-not-gate family CLOSED (WP-601, dogfood-141), the highest-value
+#   open defect family moves to the EXECUTOR side of the loop: steps that spend budget without
+#   working. WP-608 is its sharpest, measured member. (WP-606 is track-B sized; WP-616/618 are
+#   narrower plumbing.)
+#
+# THE MEASURED PREMISE (re-measured on this tree 2026-08-15; do not re-litigate):
+#   * The loop has NO notion of a question step. `grep -rn "question" src/workflow/` finds nothing
+#     step-outcome-shaped; a 0-byte diff with an asking summary is journaled and judged like any
+#     other step (run-83bf691d steps 1 and 3: PROCEED on empty diffs, `no_unrelated_deletions` /
+#     `scope_matches_instruction` trivially ✓).
+#   * The step prompt never tells the executor it IS the approver. `renderStepPrompt`
+#     (`src/executors/prompt.ts`) demands a terminal completion-marker line but nowhere says
+#     no human will answer a question — and CLI agents are TRAINED to ask before wide edits.
+#   * The bounded repair is review-counted, not step-counted: `completionReviewAttempts` increments
+#     per REVIEW (`src/workflow/agent-loop.ts`), so the granted fix step itself is what a question
+#     step wastes (F-311's measured case).
+#   * `control_event` is the established additive journal kind for loop events that are not steps
+#     (`source: "soak"`, `source: "pace"` precedents) — replay-safe, no frozen-contract change.
+#   * The suite this run must not break, MEASURED at the launch commit (F-342 — run
+#     `pnpm --filter @chikory/sdk exec vitest run` yourself and read its own tail; at the
+#     dogfood-141 review it stood at 186 files / 1488 tests (~1464 passed | 23 skipped) in ~55 s.
+#     If your number differs, yours is right and this comment is stale.
+#   * The `unattended:` block below is not decoration (F-322).
+#
+# Designed traps — the plausible-but-wrong deliveries the acceptance criteria exist to reject:
+#   A. **Prompt-only fix.** Adding the no-approver sentence to the step prompt and changing nothing
+#      in the loop. AC-1 requires the journaled `question_step` control_event and the skipped judge
+#      pass — a prompt edit alone leaves the judge pass count and the journal unchanged.
+#   B. **Classifying EVERY empty diff as a question.** A step that legitimately finishes with no
+#      change ("already satisfied", claims complete, no question) must keep today's behavior —
+#      judged normally, no control_event. AC-1 drives this negative explicitly.
+#   C. **Condemning the run.** An asking step is passivity, not failure — the loop must re-drive,
+#      not seal FAILED. AC-1's main path must reach SUCCESS.
+#   D. **Spending the bounded repair anyway.** The F-311 harm itself: when the completion review
+#      grants its ONE fix step and the executor answers with a question, the REAL fix step must
+#      still happen. AC-1 drives review → question → real fix → SUCCESS and requires the
+#      control_event plus the real fix step in the journal.
+#   E. **Re-driving forever.** An executor that only ever asks must still reach a terminal state
+#      within max_steps — question steps are named, not free. AC-1 bounds this explicitly.
+#   F. **Judging the question anyway.** The classifier must act BEFORE the judge: a question step
+#      buys ZERO judge passes (the 56.8% measured waste). AC-1 counts judge journal entries.
+#   G. **Text-sniffing a diff-bearing step.** A step that produced a REAL diff is judged normally
+#      even if its summary happens to end with a question — work was done; grade it. AC-2 pins the
+#      classifier: non-empty diff → never a question step.
+#
+# NOT IN SCOPE: WP-606/F-306 (summary hygiene); WP-616/F-328; WP-618/F-332; WP-620/F-339;
+#   WP-622/F-342; the judge/adjudication path (WP-601/WP-619 landed dogfood-141 — do not touch
+#   completion-review semantics); anything in `benchmarks/`.
+
+name: dogfood-142-wp608-question-step
+wp: WP-608
+goal: >
+  A step that ends in a question is not a step — it must be named, answered, and never billed as
+  progress.
+
+  Today an executor step that changes nothing and asks "would you like me to proceed?" is journaled
+  and judged like a finished step: the judge sees an empty diff, finds nothing to object to, and the
+  run pays a full judge pass to learn nothing. On run-83bf691d, 2 of 3 steps were exactly this, they
+  consumed 56.8% of the run's spend, and one of them was the SINGLE bounded repair step the
+  completion review had granted — its plan named the correct fix and never applied it, so the defect
+  shipped.
+
+  Make these true:
+
+    * **An asking step is a NAMED outcome.** When a step returns an EMPTY diff and a summary that
+      asks for permission or approval instead of finishing, the loop journals an additive
+      `control_event` with `source: "question_step"` — the established kind for loop events that are
+      not work (`soak` and `pace` precedents). A trace reader must see the ask without opening the
+      transcript.
+
+    * **It buys no judge pass.** Cost follows work: an asking step is classified BEFORE judging and
+      the judge is not invoked on it. The classification is a pure, deterministic decision over the
+      step record — diff emptiness and the summary's own text — exported on the SDK surface as
+      `decideQuestionStep` so a test can hold it still.
+
+    * **The loop answers the question, once per ask.** The re-driven step's input must carry the
+      standing answer verbatim: "No approver exists — this step itself is the approval. Apply your
+      plan now." The same sentence becomes a permanent part of the CLI step prompt
+      (`renderStepPrompt`), so agents are told BEFORE they ask.
+
+    * **It never spends a bounded repair attempt.** When the completion review grants its one fix
+      step and the executor answers with a question, the run must still get its REAL fix step — the
+      ask is answered and re-driven under the same grant, not counted against it.
+
+    * **It is bounded.** A re-driven question step still consumes a normal step slot against
+      `max_steps`; an executor that only ever asks reaches a terminal state, never an infinite
+      re-drive loop.
+
+    * **The negative space keeps today's behavior.** A step that legitimately finishes with no
+      change and no question is judged exactly as today, with no control_event. A step that produced
+      a REAL diff is judged normally even if its summary ends with a question — work was done;
+      grade it.
+
+  Nothing else changes. The judge, completion-review, and adjudication semantics that landed through
+  dogfood-141 are untouched; the terminal status type stays the frozen SUCCESS/FAILED pair; no
+  StepRecord, Checkpoint, or JournalEntry SHAPE changes (the control_event kind already exists);
+  no new dependency, no provider SDK, no API key. TypeScript stays strict ESM with named exports and
+  no `any`; the workflow stays Temporal-replay-safe (the classifier is pure; no new nondeterminism,
+  no wall-clock branch).
+
+  If an existing test pins a shape this change must alter, update its expectation and say plainly in
+  the step summary that you did — do not delete it, and do not weaken it into a tautology.
+
+  Verify your work with FAST checks only: the package typecheck (tsc with noEmit), eslint over the
+  files you touched, and vitest over only the test files you touched. Do NOT run the full vitest
+  suite inside a step — it does not fit the step time cap (F-345, dogfood-141), and this run's
+  declared regression suite plus the judge-executed checks are the trusted full-suite verification
+  whatever your summary says.
+
+repos:
+  - url: /Users/nikitazolotarev/repos/chikory
+    writable: true
+
+# The SDK suite is both the surface this run edits and the gate it must not break.
+# MEASURE it at the launch commit rather than trusting this line (F-342, dogfood-140).
+regression_suite: pnpm --filter @chikory/sdk exec vitest run
+check_timeout_ms: 180000
+
+acceptance_criteria:
+  - id: AC-1
+    description: >
+      THIS CHECK OWNS ITS ORACLE, AND IT DRIVES REAL TEMPORAL RUNS with a test-scoped adapter that
+      scripts asking steps exactly (empty diff + "Would you like me to proceed with these
+      changes?"). It pins: the named journal event — a `control_event` carrying
+      `source: "question_step"` (trap A), zero judge passes on
+      the ask with the answer sentence reaching the re-driven step's input (traps F + A), SUCCESS
+      on ask-then-work (trap C), today's behavior on a question-less empty step (trap B), the
+      granted repair step surviving an ask (trap D), and termination when the executor only ever
+      asks (trap E).
+    check: |
+      cd packages/sdk-ts && node --input-type=module -e '
+      import {writeFileSync,rmSync} from "node:fs";
+      import {spawnSync} from "node:child_process";
+      import {join} from "node:path";
+      const A=(c,m)=>{if(!c){console.error("FAIL: "+m);process.exit(1);}};
+      const target=join(process.cwd(),"test/runner/ac1-question-step.generated.test.ts");
+      rmSync(target,{force:true});
+      const SRC=`
+      import { randomUUID } from "node:crypto";
+      import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+      import { tmpdir } from "node:os";
+      import { dirname, join } from "node:path";
+      import { afterEach, describe, expect, inject, test } from "vitest";
+      import {
+        createRunnerWorker, createTemporalRunner, Journal, journalPath,
+        RUBRIC_DESIGN_SERVES_OVERALL_GOAL,
+        type AdapterRegistry, type RunHandle, type RunStatusReport, type StepInput,
+      } from "../../src/index.js";
+      import {
+        completionReviewForm, initSourceRepo, judgeForm, makeJudgedSpec,
+        startFakeJudgeWire, TERMINAL_STATUSES, waitFor, type FakeJudgeWire,
+      } from "./helpers.js";
+
+      const address = inject("temporalAddress");
+      const bundlePath = inject("workflowBundlePath");
+
+      const ASK = "I have prepared the plan. Would you like me to proceed with these changes?";
+      const ANSWER = "No approver exists" + " — this step itself is the approval.";
+
+      type Scripted = { kind: "ask" } | { kind: "work"; claims?: boolean } | { kind: "idle" };
+
+      // Test-scoped adapter: each attempt consumes the next script entry (the last entry
+      // repeats). "ask" = empty diff + approval question; "work" = real src-pathed diff;
+      // "idle" = empty diff, NO question, claims complete (the trap-B negative).
+      function scriptedAsker(script: Scripted[], seen: StepInput[]): AdapterRegistry {
+        let attempt = 0;
+        return {
+          scripted: (ctx) => ({
+            name: "scripted",
+            modelFamily: "anthropic" as const,
+            async runStep(input) {
+              seen.push(input);
+              const entry = script[Math.min(attempt, script.length - 1)]!;
+              attempt += 1;
+              const working = entry.kind === "work";
+              if (working) {
+                const file = join(input.workspaceDir, "src/answer-" + attempt + ".ts");
+                await mkdir(dirname(file), { recursive: true });
+                await writeFile(file, "export const answer" + attempt + " = " + attempt + ";\\n");
+              }
+              const [diffRef, transcriptRef] = await Promise.all([
+                ctx.store.put(working ? "real diff " + attempt : "", {
+                  kind: "diff", summary: "diff " + attempt,
+                }),
+                ctx.store.put("t" + attempt, { kind: "transcript", summary: "t" }),
+              ]);
+              return {
+                status: "SUCCESS" as const,
+                diffRef, transcriptRef,
+                claimsComplete: entry.kind === "work" ? entry.claims === true : entry.kind === "idle",
+                summary: entry.kind === "ask" ? ASK
+                  : entry.kind === "idle" ? "nothing to change; the goal is already satisfied"
+                  : "wrote src/answer-" + attempt + ".ts",
+                toolCalls: working ? 1 : 0,
+                tokens: { input: 100, output: 50 },
+                costUsd: 0.01, costEstimated: false, durationMs: 0,
+              };
+            },
+          }),
+        };
+      }
+
+      describe.skipIf(address === null)("AC-1: a question step is named, unjudged, answered, and un-billed", () => {
+        const cleanups: Array<() => Promise<void>> = [];
+        afterEach(async () => {
+          while (cleanups.length > 0) await cleanups.pop()!();
+        });
+
+        async function drive(opts: {
+          script: Scripted[];
+          forms: ReturnType<typeof judgeForm>[];
+          reviewForms?: ReturnType<typeof completionReviewForm>[];
+          maxSteps?: number;
+          suite?: string;
+        }) {
+          const wire = await startFakeJudgeWire(opts.forms, {
+            reviewForms: opts.reviewForms ?? [],
+          });
+          cleanups.push(() => wire.close());
+          const tmp = await mkdtemp(join(tmpdir(), "chikory-ac1-question-"));
+          cleanups.push(() => rm(tmp, { recursive: true, force: true }));
+          const repoUrl = await initSourceRepo(join(tmp, "src"), {});
+          const dataDir = join(tmp, "data");
+          const taskQueue = "tq-" + randomUUID();
+          const seen: StepInput[] = [];
+          const worker = await createRunnerWorker({
+            adapters: scriptedAsker(opts.script, seen),
+            address: address!, taskQueue, dataDir,
+            workflowBundlePath: bundlePath!,
+            routerOptions: { baseUrls: { "openai-compat": wire.url } },
+          });
+          const workerDone = worker.run();
+          const runner = createTemporalRunner({ address: address!, taskQueue, dataDir });
+          cleanups.push(async () => {
+            worker.shutdown(); await workerDone; await runner.close();
+          });
+          const spec = makeJudgedSpec({
+            repoUrl, cadence: 1, maxSteps: opts.maxSteps ?? 4,
+            ...(opts.suite === undefined ? {} : { regressionSuite: opts.suite }),
+            unattended: { escalation: "seal_resumable_failed" },
+          });
+          const handle: RunHandle = await runner.start(spec);
+          const report: RunStatusReport = await waitFor(
+            async () => {
+              const r = await handle.status();
+              return TERMINAL_STATUSES.includes(r.status) ? r : undefined;
+            },
+            { what: "run to reach a terminal status" },
+          );
+          const journal = new Journal(journalPath(dataDir, handle.runId));
+          const control = journal.entries("control_event")
+            .map((e) => e.payload as { source?: string })
+            .filter((p) => p.source === "question_step");
+          const judged = journal.entries("judge").length;
+          journal.close();
+          return { report, wire, seen, control, judged };
+        }
+
+        test("ask then work: named, unjudged, answered, SUCCESS (traps A + C + F)", async () => {
+          const { report, control, judged, seen } = await drive({
+            script: [{ kind: "ask" }, { kind: "work", claims: true }],
+            forms: [judgeForm({ criteria: { "AC-1": true } })],
+          });
+          expect(report.status).toBe("SUCCESS");
+          expect(control.length).toBeGreaterThanOrEqual(1);
+          expect(judged).toBe(1);
+          expect(seen.length).toBeGreaterThanOrEqual(2);
+          expect(JSON.stringify(seen[1])).toContain(ANSWER);
+        }, 300_000);
+
+        test("a question-less empty step keeps today behavior: judged, no control_event (trap B)", async () => {
+          const { report, control, judged } = await drive({
+            script: [{ kind: "idle" }],
+            forms: [judgeForm({ criteria: { "AC-1": true } })],
+          });
+          expect(report.status).toBe("SUCCESS");
+          expect(control).toHaveLength(0);
+          expect(judged).toBe(1);
+        }, 300_000);
+
+        test("the granted repair step survives an ask (trap D)", async () => {
+          // Sealing pass converges but the review finds a fresh design defect and grants the
+          // ONE bounded fix step; the executor ANSWERS WITH A QUESTION; the real fix must
+          // still happen and the run still seals SUCCESS after the re-review. The declared
+          // suite is what makes the completion review fire on a first-verdict seal.
+          const { report, control, seen } = await drive({
+            script: [
+              { kind: "work", claims: true },
+              { kind: "ask" },
+              { kind: "work", claims: true },
+            ],
+            forms: [
+              judgeForm({ criteria: { "AC-1": true } }),
+              judgeForm({ criteria: { "AC-1": true } }),
+            ],
+            reviewForms: [
+              completionReviewForm({
+                hasRegressionSuite: true,
+                rubricFails: [RUBRIC_DESIGN_SERVES_OVERALL_GOAL],
+              }),
+              completionReviewForm({ hasRegressionSuite: true }),
+            ],
+            maxSteps: 5,
+            suite: "exit 0",
+          });
+          expect(report.status).toBe("SUCCESS");
+          expect(control.length).toBeGreaterThanOrEqual(1);
+          expect(seen.length).toBeGreaterThanOrEqual(3);
+        }, 300_000);
+
+        test("an executor that only ever asks still terminates within max_steps (trap E)", async () => {
+          const { report, control } = await drive({
+            script: [{ kind: "ask" }],
+            forms: [judgeForm({ criteria: { "AC-1": false } })],
+            maxSteps: 3,
+          });
+          expect(TERMINAL_STATUSES.includes(report.status)).toBe(true);
+          expect(control.length).toBeGreaterThanOrEqual(1);
+        }, 300_000);
+      });
+      `;
+      writeFileSync(target, SRC);
+      const res=spawnSync("pnpm",["exec","vitest","run",
+        "test/runner/ac1-question-step.generated.test.ts"],{stdio:"inherit"});
+      rmSync(target,{force:true});
+      A(res.status===0,
+        "an asking step must be journaled as a question_step control_event, buy no judge pass, "+
+        "carry the standing answer into the re-driven step, leave a question-less empty step "+
+        "untouched, survive the bounded repair grant, and stay bounded. vitest exited "+res.status);
+      console.log("AC-1 OK: a question step is named, unjudged, answered once, repair-safe, and bounded");
+      '
+
+  - id: AC-2
+    description: >
+      The pure classifier and the prompt, held still. `decideQuestionStep` must be exported on the
+      SDK surface and deterministic: empty diff + asking summary → question; empty diff + no
+      question → not; a REAL diff → never a question, whatever the summary says (trap G). And
+      `renderStepPrompt` must permanently carry the standing answer sentence so agents are told
+      before they ask. Runs the package typecheck first so the delivery compiles as strict TS.
+    check: |
+      cd packages/sdk-ts && pnpm run typecheck && node --input-type=module -e '
+      import {writeFileSync,rmSync} from "node:fs";
+      import {spawnSync} from "node:child_process";
+      import {join} from "node:path";
+      const A=(c,m)=>{if(!c){console.error("FAIL: "+m);process.exit(1);}};
+      const target=join(process.cwd(),"test/runner/ac2-question-step-unit.generated.test.ts");
+      rmSync(target,{force:true});
+      const SRC=`
+      import { describe, expect, test } from "vitest";
+      import { decideQuestionStep } from "../../src/index.js";
+      import { renderStepPrompt } from "../../src/executors/prompt.js";
+
+      const ANSWER = "No approver exists" + " — this step itself is the approval.";
+      const record = (diffBytes: number, summary: string) => ({ diffBytes, summary });
+
+      describe("AC-2: decideQuestionStep is pure and scoped; the prompt answers in advance", () => {
+        test("empty diff + approval question => question step", () => {
+          expect(decideQuestionStep(record(0,
+            "Here is my plan. Would you like me to proceed with these changes?")).question).toBe(true);
+          expect(decideQuestionStep(record(0,
+            "Shall I go ahead and apply the refactor?")).question).toBe(true);
+        });
+
+        test("empty diff without a question keeps today behavior", () => {
+          expect(decideQuestionStep(record(0,
+            "nothing to change; the goal is already satisfied")).question).toBe(false);
+        });
+
+        test("a REAL diff is never a question step, whatever the summary says (trap G)", () => {
+          expect(decideQuestionStep(record(2048,
+            "Applied the change. Would you like me to also update the docs?")).question).toBe(false);
+        });
+
+        test("deterministic: same input, same answer", () => {
+          const r = record(0, "Would you like me to proceed?");
+          expect(decideQuestionStep(r)).toEqual(decideQuestionStep(r));
+        });
+
+        test("the step prompt carries the standing answer verbatim", () => {
+          const prompt = renderStepPrompt({
+            instruction: "do the thing",
+            workspaceDir: "/tmp/ws",
+            limits: { maxSeconds: 60 },
+            context: {
+              goal: "g",
+              planItem: "p",
+              acceptanceCriteria: [],
+              notes: {},
+              recentSteps: [],
+              injections: [],
+              memoryRefs: [],
+            },
+          } as never);
+          expect(prompt).toContain(ANSWER);
+        });
+      });
+      `;
+      writeFileSync(target, SRC);
+      const res=spawnSync("pnpm",["exec","vitest","run",
+        "test/runner/ac2-question-step-unit.generated.test.ts"],{stdio:"inherit"});
+      rmSync(target,{force:true});
+      A(res.status===0,
+        "decideQuestionStep must be exported, deterministic, fire only on empty-diff asking steps, "+
+        "and renderStepPrompt must carry the standing answer sentence. vitest exited "+res.status);
+      console.log("AC-2 OK: the classifier is pure and scoped, and the prompt answers before the ask");
+      '
+
+budget_usd: 20
+max_steps: 6
+
+agent_classes:
+  executor: executor-default
+  judge: judge-default
+
+judge:
+  cadence: 1
+
+# F-322 (dogfood-135): without this, a converged out-of-rubric escalation parks overnight for a
+# human instead of auto-sealing.
+unattended:
+  escalation: seal_resumable_failed

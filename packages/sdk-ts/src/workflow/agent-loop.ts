@@ -261,6 +261,9 @@ export async function agentLoop(spec: TaskSpec): Promise<RunStatus> {
   // Run-completion holistic review: cumulative-diff design passes already
   // taken (bounded — initial review + one re-review after the design fix).
   let completionReviewAttempts = 0;
+  // Standing findings from earlier passes (both rubric failures and free-text concerns)
+  // that survive across intervening clean passes until adjudicated at completion review.
+  const standingFindings: string[] = [];
 
   setHandler(cancelSignal, () => {
     cancelRequested = true;
@@ -398,7 +401,8 @@ export async function agentLoop(spec: TaskSpec): Promise<RunStatus> {
     sealingDiffBase: string,
     escalationConcerns: string[] = [],
   ): Promise<RunStatus | undefined> {
-    const hasConcerns = escalationConcerns.length > 0;
+    const allConcerns = Array.from(new Set([...standingFindings, ...escalationConcerns]));
+    const hasConcerns = allConcerns.length > 0;
     const hasRegressionSuite = Boolean(spec.regressionSuite);
     if (!hasRegressionSuite && !hasConcerns) return undefined;
     const review = decideCompletionReview({
@@ -408,6 +412,7 @@ export async function agentLoop(spec: TaskSpec): Promise<RunStatus> {
       sealingVerdictHasRubricFailures: false,
       hasRegressionSuite,
       hasEscalationConcerns: hasConcerns,
+      hasStandingFindings: hasConcerns,
     });
     if (review.action !== "review") return undefined;
     completionReviewAttempts += 1;
@@ -419,7 +424,7 @@ export async function agentLoop(spec: TaskSpec): Promise<RunStatus> {
       sinceCommit: baseCommit,
       completionReview: true,
       lastGoodCheckpointId,
-      ...(hasConcerns ? { escalationConcerns } : {}),
+      ...(hasConcerns ? { escalationConcerns: allConcerns } : {}),
     });
     spentUsd += reviewVerdict.costUsd;
     const fails = reviewVerdict.form.rubricResults.filter((r) => !r.pass);
@@ -1073,6 +1078,21 @@ export async function agentLoop(spec: TaskSpec): Promise<RunStatus> {
       spentUsd += verdict.costUsd;
       lastVerdict = { kind: verdict.kind, atStep: stepIndex - 1 };
 
+      // Collect standing findings from this judge pass (both rubric failures and concerns).
+      for (const fail of verdict.form.rubricResults) {
+        if (!fail.pass) {
+          const entry = `${fail.id}: ${fail.justification}`;
+          if (!standingFindings.includes(entry)) {
+            standingFindings.push(entry);
+          }
+        }
+      }
+      for (const concern of verdict.form.concerns) {
+        if (concern && !standingFindings.includes(concern)) {
+          standingFindings.push(concern);
+        }
+      }
+
       // ROLLBACK restores BEFORE the covering checkpoint commits, so the
       // checkpoint captures the restored tree and the run resumes from a
       // verified-good state (judge.md verdict table).
@@ -1175,20 +1195,18 @@ export async function agentLoop(spec: TaskSpec): Promise<RunStatus> {
         }
         if (acceptanceCriteriaMet) {
           // Run-completion holistic review: one judge pass over the CUMULATIVE
-          // diff (run base → final state) before sealing. Advisory-with-one-heal:
-          // a design finding grants ONE bounded fix step (re-reviewed after);
-          // still failing — or any review-pass ESCALATE/failure — seals SUCCESS
-          // with the finding recorded, never parking a run whose criteria all
-          // pass (the F-107 discipline).
+          // diff (run base → final state) before sealing.
           const sealingRubricFails = verdict.form.rubricResults.filter((r) => !r.pass);
           const sealingVerdictHasRubricFailures = sealingRubricFails.length > 0;
+          const hasStanding = standingFindings.length > 0;
           const review = decideCompletionReview({
             sealingDiffBase,
             baseCommit,
             reviewAttemptsUsed: completionReviewAttempts,
             sealingVerdictHasRubricFailures,
             hasRegressionSuite: Boolean(spec.regressionSuite),
-            hasEscalationConcerns: verdict.form.concerns.length > 0,
+            hasEscalationConcerns: hasStanding,
+            hasStandingFindings: hasStanding,
           });
           if (review.action === "review") {
             completionReviewAttempts += 1;
@@ -1200,16 +1218,34 @@ export async function agentLoop(spec: TaskSpec): Promise<RunStatus> {
               sinceCommit: baseCommit,
               completionReview: true,
               lastGoodCheckpointId,
-              ...(verdict.form.concerns.length > 0 ? { escalationConcerns: verdict.form.concerns } : {}),
+              ...(hasStanding ? { escalationConcerns: standingFindings } : {}),
             });
             spentUsd += reviewVerdict.costUsd;
-            // The objection the SEALING verdict raised is carried into the brief
-            // alongside the review's own — an independent review that comes back
-            // clean must not silently drop it (the goal's trap C).
+            const reviewFails = reviewVerdict.form.rubricResults.filter((r) => !r.pass);
             const designFails = mergeDesignFindings(
               sealingRubricFails,
               reviewVerdict.form.rubricResults,
             );
+
+            // When standing findings from earlier passes or sealing concerns were being adjudicated,
+            // the pass is terminal-or-nothing: adjudicate once, then seal (never return to the loop).
+            if (hasStanding) {
+              const condemned = await sealFromRubricFails(reviewFails);
+              if (condemned !== undefined) return condemned;
+
+              if (reviewFails.length > 0) {
+                return seal(
+                  "FAILED",
+                  `completion review: unresolved finding on a converged step — ${reviewFails
+                    .map((fail) => fail.id)
+                    .join(", ")}`,
+                  { resumable: true },
+                );
+              }
+              return seal("SUCCESS");
+            }
+
+            // Otherwise, standard completion review for fresh findings (grants 1 bounded repair/fix retry).
             if (designFails.length > 0) {
               const canRetry =
                 decideCompletionReview({

@@ -217,6 +217,31 @@ describe("decideCompletionReview — 2x2x3 input matrix", () => {
       }).action,
     ).toBe("skip");
   });
+
+  // ─── Standing findings ────────────────────────────────────────────────────
+  it("first-verdict seal + clean rubric + hasStandingFindings => review", () => {
+    expect(
+      decideCompletionReview({
+        sealingDiffBase: BASE,
+        baseCommit: BASE,
+        reviewAttemptsUsed: 0,
+        sealingVerdictHasRubricFailures: false,
+        hasStandingFindings: true,
+      }).action,
+    ).toBe("review");
+  });
+
+  it("first-verdict seal + clean rubric + hasStandingFindings + exhausted => skip", () => {
+    expect(
+      decideCompletionReview({
+        sealingDiffBase: BASE,
+        baseCommit: BASE,
+        reviewAttemptsUsed: MAX_COMPLETION_REVIEWS,
+        sealingVerdictHasRubricFailures: false,
+        hasStandingFindings: true,
+      }).action,
+    ).toBe("skip");
+  });
 });
 
 describe("mergeDesignFindings (trap C: the sealing objection must survive a clean review)", () => {
