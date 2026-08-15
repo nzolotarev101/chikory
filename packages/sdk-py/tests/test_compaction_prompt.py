@@ -91,3 +91,26 @@ def test_build_digest_messages_empty_and_whitespace_only_strings() -> None:
     assert "2.    " in user_content
     assert "3. \n\t" in user_content
     assert "4. actual content" in user_content
+
+
+def test_build_digest_messages_tuple_input() -> None:
+    # Test passing a sequence as a tuple instead of a list
+    tuple_input = ("first step summary", "second step summary")
+    messages = build_digest_messages(tuple_input)
+
+    assert len(messages) == 2
+    assert messages[0] == Message(role="system", content=DIGEST_SYSTEM_PROMPT)
+    assert messages[1].role == "user"
+    assert "1. first step summary" in messages[1].content
+    assert "2. second step summary" in messages[1].content
+
+
+def test_build_digest_messages_multiline_summaries() -> None:
+    # Test handling summaries that contain multiple lines
+    multiline_input = ["Line 1\nLine 2", "Another summary\nwith breaks"]
+    messages = build_digest_messages(multiline_input)
+
+    assert len(messages) == 2
+    user_content = messages[1].content
+    assert "1. Line 1\nLine 2" in user_content
+    assert "2. Another summary\nwith breaks" in user_content
