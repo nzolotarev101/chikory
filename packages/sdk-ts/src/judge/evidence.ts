@@ -286,9 +286,21 @@ export interface CollectEvidenceInput {
 }
 
 export async function collectEvidence(input: CollectEvidenceInput): Promise<CollectedEvidence> {
-  // Workspace diff since the last verdict — committed step work plus whatever
-  // is still uncommitted (the judge runs before the covering checkpoint).
-  const { perRepoDiff, sections } = await collectPerRepoDiffs(input);
+  const writableRepos = input.workspaceRepos?.filter((repo) => repo.writable) ?? [];
+  const reposToSnapshot =
+    writableRepos.length > 0
+      ? writableRepos.map((repo) => ({
+          dir: repo.relativePath === "." ? input.workspaceDir : join(input.workspaceDir, repo.relativePath),
+        }))
+      : [{ dir: input.workspaceDir }];
+
+  // Run repo diff collection and initial workspace snapshotting concurrently
+  const [diffResult, snapshotResults] = await Promise.all([
+    collectPerRepoDiffs(input),
+    Promise.all(reposToSnapshot.map((r) => snapshotWorkspace(r.dir))),
+  ]);
+
+  const { perRepoDiff, sections } = diffResult;
   const diff = sections
     .map((section) => (perRepoDiff ? section.evidenceText : section.diffText))
     .join("\n");
@@ -310,22 +322,11 @@ export async function collectEvidence(input: CollectEvidenceInput): Promise<Coll
   );
 
   // Judge-executed acceptance checks (JD-4) — sequential: checks may share
-  // workspace state (build artifacts, ports).
+  // workspace state (build artifacts, ports) and require hermetic side-effect cleanup (WP-623 / F-349).
   const checkRuns: CheckRun[] = [];
   let regressionSuiteRun: CheckRun | undefined;
 
-  const writableRepos = input.workspaceRepos?.filter((repo) => repo.writable) ?? [];
-  const reposToSnapshot =
-    writableRepos.length > 0
-      ? writableRepos.map((repo) => ({
-          dir: repo.relativePath === "." ? input.workspaceDir : join(input.workspaceDir, repo.relativePath),
-        }))
-      : [{ dir: input.workspaceDir }];
-
   const beforeSnapshots = new Map<string, WorkspaceDirtySnapshot>();
-  const snapshotResults = await Promise.all(
-    reposToSnapshot.map((r) => snapshotWorkspace(r.dir))
-  );
   reposToSnapshot.forEach((r, idx) => {
     beforeSnapshots.set(r.dir, snapshotResults[idx]!);
   });

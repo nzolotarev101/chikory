@@ -169,18 +169,25 @@ export async function snapshotWorkspace(dir: string): Promise<Map<string, GitDir
   const basicMap = parseDirtySnapshot(statusOutput);
   const snapshotMap = new Map<string, GitDirtyEntry>();
 
-  for (const [relPath, entry] of basicMap.entries()) {
-    const fullPath = join(dir, relPath);
-    let hash: string | undefined;
-    let content: string | undefined;
-    try {
-      const fileBuffer = await readFile(fullPath);
-      hash = createHash("sha256").update(fileBuffer).digest("hex");
-      content = fileBuffer.toString("utf8");
-    } catch {
-      // File may have been deleted or be unreadable
-    }
-    snapshotMap.set(relPath, { path: relPath, status: entry.status, hash, content });
+  const entries = Array.from(basicMap.entries());
+  const snapshotEntries = await Promise.all(
+    entries.map(async ([relPath, entry]) => {
+      const fullPath = join(dir, relPath);
+      let hash: string | undefined;
+      let content: string | undefined;
+      try {
+        const fileBuffer = await readFile(fullPath);
+        hash = createHash("sha256").update(fileBuffer).digest("hex");
+        content = fileBuffer.toString("utf8");
+      } catch {
+        // File may have been deleted or be unreadable
+      }
+      return [relPath, { path: relPath, status: entry.status, hash, content }] as const;
+    })
+  );
+
+  for (const [relPath, entryData] of snapshotEntries) {
+    snapshotMap.set(relPath, entryData);
   }
 
   return snapshotMap;
