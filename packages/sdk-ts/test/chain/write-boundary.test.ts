@@ -38,6 +38,12 @@ describe("parentDirOf", () => {
     expect(parentDirOf("/root-file.ts")).toBe("");
     expect(parentDirOf("/src/index.ts")).toBe("/src");
   });
+
+  it("should handle paths with trailing slashes and edge cases", () => {
+    expect(parentDirOf("src/")).toBe("src");
+    expect(parentDirOf("a/b/c/")).toBe("a/b/c");
+    expect(parentDirOf("/")).toBe("");
+  });
 });
 
 describe("isTestPath", () => {
@@ -66,6 +72,8 @@ describe("isTestPath", () => {
     expect(isTestPath("src/spec-loader.ts")).toBe(false);
     expect(isTestPath("src/tester.ts")).toBe(false);
     expect(isTestPath("src/tests-helper.ts")).toBe(false);
+    expect(isTestPath("src/left.test.md")).toBe(false); // non-script extension
+    expect(isTestPath("src/left.spec.json")).toBe(false); // non-script extension
   });
 
   it("should handle edge cases like directories/bare names", () => {
@@ -92,6 +100,8 @@ describe("isBarrelPath", () => {
     expect(isBarrelPath("src/index2.ts")).toBe(false);
     expect(isBarrelPath("src/main.ts")).toBe(false);
     expect(isBarrelPath("src/INDEX.ts")).toBe(false); // case-sensitive in regex
+    expect(isBarrelPath("index.md")).toBe(false); // non-script extension
+    expect(isBarrelPath("index.json")).toBe(false); // non-script extension
     expect(isBarrelPath("")).toBe(false);
   });
 });
@@ -131,6 +141,25 @@ describe("renderWriteBoundary", () => {
   it("should print 'none' when there are no valid parent directories", () => {
     const rendered = renderWriteBoundary(["file1.ts", "file2.ts"]);
     expect(rendered).toContain("(none)");
+  });
+
+  it("should generate exact multi-line message when formatted with a single directory", () => {
+    const rendered = renderWriteBoundary(["src/chain/write-boundary.ts"]);
+    const expected = [
+      "This node's plan declares the files it may write. When the node seals, ANY changed path " +
+        "outside that boundary FAILS the whole node and throws its work away — a passing judge " +
+        "verdict does not save it.",
+      "Declared paths:",
+      "  - src/chain/write-boundary.ts",
+      "Also admitted: any file directly inside a declared directory " +
+        "(src/chain), any test file (in a `test`/`tests` " +
+        "directory, or named `*.test.*` / `*.spec.*`), and a barrel `index.*`.",
+      "Everything else is outside. The notes, evidence, provenance records and reports the goal " +
+        "asks you to produce belong at a declared path — never at a path you invent elsewhere in " +
+        "the repo. If the work genuinely needs a path no rule above admits, say so in your step " +
+        "summary instead of writing it.",
+    ].join("\n");
+    expect(rendered).toBe(expected);
   });
 
   it("should include standard instructions and warning about failing the node", () => {
