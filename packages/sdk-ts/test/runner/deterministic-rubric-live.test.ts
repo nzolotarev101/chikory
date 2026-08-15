@@ -168,8 +168,8 @@ describe.skipIf(address === null)("WP-607: a machine-settled finding gates the s
       const verdicts = journal.entries("verdict").map((e) => (e.payload as VerdictPayload).verdict);
       expect(verdicts.filter((v) => v.kind === "ROLLBACK")).toHaveLength(0);
 
-      // Single-pass adjudication: adjudicate once, then seal (trap F).
-      expect(journal.entries("step").length).toBe(1);
+      // Bounded repair: 1 repair attempt granted, then seals FAILED when unresolved.
+      expect(journal.entries("step").length).toBe(2);
     } finally {
       journal.close();
     }
@@ -193,7 +193,7 @@ describe.skipIf(address === null)("WP-607: a machine-settled finding gates the s
     expect(report.status).toBe("SUCCESS");
   }, 180_000);
 
-  test("Scenario 3: a clean run whose completion review fails only model design items still seals SUCCESS with the findings recorded", async () => {
+  test("Scenario 3: a clean run whose completion review fails only model design items seals FAILED (resumable) when repair attempt does not resolve the finding", async () => {
     const wire = await allPassWire(
       [RUBRIC_DESIGN_SERVES_OVERALL_GOAL, RUBRIC_CUMULATIVE_DESIGN_COHERENT],
       true,
@@ -204,15 +204,17 @@ describe.skipIf(address === null)("WP-607: a machine-settled finding gates the s
     const handle = await runner.start(makeJudgedSpec({ repoUrl, cadence: 1, maxSteps: 4 }));
     const report = await awaitTerminal(handle);
 
-    expect(report.status).toBe("SUCCESS");
+    expect(report.status).toBe("FAILED");
 
     const journal = new Journal(journalPath(dataDir, handle.runId));
     try {
       const terminal = journal.entries("terminal").at(-1)!.payload as {
         status: string;
         reason?: string;
+        resumable?: boolean;
       };
-      expect(terminal.status).toBe("SUCCESS");
+      expect(terminal.status).toBe("FAILED");
+      expect(terminal.resumable).toBe(true);
       expect(terminal.reason).toContain(RUBRIC_DESIGN_SERVES_OVERALL_GOAL);
       expect(terminal.reason).toContain(RUBRIC_CUMULATIVE_DESIGN_COHERENT);
     } finally {

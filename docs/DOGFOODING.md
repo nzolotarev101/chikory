@@ -8,10 +8,10 @@ recover a run, and how to land the result as a normal PR.
 **Status (2026-08-15, bounded — update discipline: REPLACE this block, ≤15 lines;
 displaced prose moves verbatim to [`PLAN-HISTORY.md`](PLAN-HISTORY.md); per-run detail:
 `docs/reports/`; queue + course correction: `plan.md` §6/§7).**
-🟠 **dogfood-144 / WP-625 (check isolation must cover writes git does not track) HALF DELIVERED, SEALED FAILED, LANDED ANYWAY** — `run-a8fe46f3-b5e1-4f83-961c-2142220daa12`, terminal **FAILED (resumable)**, 1 step, $0.0831/$20.00, 5m 5s, AC 2/2 re-run green, harvest byte-IDENTICAL 3/3 (`docs/reports/dogfood-144.md`). `snapshotWorkspace` appends a **name-only** ignored inventory (`src/judge/hermeticity.ts:190`), `isCreatedStatus` accepts `!!` (`:39`), an unrestorable ignored deletion is skipped (`:149`). All five traps rejected; WP-623 intact; the new call measures **27,252 paths / 2.7 MB in 0.49 s** on this repo. Suite **188 files / 1,504 tests (1,481 passed | 23 skipped), 58.37 s**.
-**The judge was right to refuse — and this is the campaign's cleanest true-positive.** A structurally different family (gpt-5.6-sol over a gemini executor) read a delivery that passed BOTH hand-armed deterministic ACs and named the missing half by mechanism. Probe-confirmed at this review: isolation covers **create only** — an ignored file a check *overwrites* leaks to its sibling AND survives the batch with the wrong bytes; one it *deletes* is never restored. 🟠 **F-360 → WP-628.**
-🔴 **But self-correction never fired — F-359 → WP-627 (next headline).** The bounded design-fix retry (`src/workflow/agent-loop.ts:1301`) is guarded by `hasStanding` (`:1284`), and every judge pass pushes its failing rubric rows into `standingFindings` (`:1134`), so at `judge.cadence: 1` on a converging step the guard is always true and the repair path is **unreachable by construction**. The run condemned a precisely-diagnosed ~15-line gap with **1 of 6 steps, 99.6% of budget unspent, `injections 0`** — the executor was never told. `MAX_COMPLETION_REVIEWS = 2` (`src/workflow/completion-review.ts:16`) already bounds the dogfood-121 oscillation the guard was written against.
-**Standing rule (extends F-356):** a durability floor that counts TESTS does not raise COVERAGE — dogfood-144's repo test is a transcription of its own grading AC, so it inherited the same blind spot. Enumerate the goal's input families in the AC, and make the durability AC demand coverage the grading check lacks.
+✅ **dogfood-145 / WP-627 (one bounded repair for a design finding raised at the sealing pass) DELIVERED — sealed FAILED on an unrelated judge defect, landed anyway** — `run-1f2a02e0-4615-47fa-8847-ea37c4164cfb`, terminal **FAILED (resumable)**, 2 steps, $0.1651/$20.00, 17m 11s, AC 2/2 re-run green, harvest byte-IDENTICAL 6/6 (`docs/reports/dogfood-145.md`). The `hasStanding` early-seal is gone: fresh, standing and sealing-pass findings flow through ONE decision (`src/workflow/agent-loop.ts:1284`), buy **exactly one** bounded repair (`:1286-1303`), and seal **FAILED (resumable)** naming the item when the re-review still fails (`:1307`, `:1318`). Both `seal("SUCCESS", "design findings recorded")` arms deleted — healing did not arrive at the cost of gating. All five traps rejected; the proof reads the journal and asserts the executor's step summary carries the `DESIGN REVIEW BRIEF`. Suite **189 files / 1,510 tests (1,487 passed | 23 skipped), 60.40 s** (+1 file / +6).
+**1 genuine judge true-positive:** pass #1 caught a RED committed `test/runner/` tree (4 tests pinned the old shape); step 2 repaired it for $0.04 / 2m55s. **F-197 stands** — the worker is built from HEAD at launch, so dogfood-146 is WP-627's first live datum.
+🔴 **F-361 → WP-629 (next headline): a run whose acceptance check goes RED then GREEN is condemned at the seal.** `standingFindings` is **append-only** (`src/workflow/agent-loop.ts:1134-1146`) — `tests_pass` ✗ at pass #1 survived ✓ at pass #2 and condemned the run via `escalation_concerns_adjudicated`. The completion review runs with `criteria: []` (`:1269`), so it holds **no check evidence** to clear it: F-344's charter (`src/judge/prompt.ts:206-209`) promises green checks CLEAR a concern, but that pass executes none. Red-then-green is the normal shape of a multi-step run.
+**Standing caution:** this is the **third consecutive review** where the terminal state and the delivery disagree (F-344 → F-359 → F-361). Until WP-629 lands, treat an `escalation_concerns_adjudicated` seal as **unproven, not disproven** — re-run the ACs on the harvested tree and read judge pass #2 before believing it. 🟡 F-362 (track-B): `chikory trace` prints the completion review's `0/0 criteria` as the final step's own verdict.
 
 Related docs: [`docs/spec/task-spec.md`](spec/task-spec.md) (schema
 reference) · [`docs/TASK-PROTOCOL.md`](TASK-PROTOCOL.md) (WP etiquette, §7 is
@@ -939,6 +939,29 @@ broken (a false-green, not a follow-on fix).
   suite by hand before trusting the green.
 
 ## 8. Known P1 limitations (so you don't fight them)
+
+- **🔴 A run whose acceptance check goes RED then GREEN is condemned at the
+  seal** (F-361 → WP-629, open — found in the dogfood-145 review).
+  `standingFindings` (`packages/sdk-ts/src/workflow/agent-loop.ts:268`) is
+  **append-only**: `:1134-1146` pushes every failing rubric row's
+  `id: justification` and nothing anywhere removes an entry when a later pass
+  passes that same id. The stale text rides into the seal as `escalationConcerns`
+  (`:1273`), which also forces the `escalation_concerns_adjudicated` row to exist
+  at all (`packages/sdk-ts/src/runner/activities.ts:1699`). The completion review
+  is dispatched with `criteria: []` (`:1269`), so that pass runs **zero**
+  acceptance checks and carries no `test_results` evidence — F-344's charter
+  ("when the judge-executed checks and the declared regression suite are green,
+  that concern is CLEARED", `packages/sdk-ts/src/judge/prompt.ts:206-209`) names
+  evidence the pass does not hold, and a careful judge says so and upholds.
+  **MEASURED** (`run-1f2a02e0-4615-47fa-8847-ea37c4164cfb`): `tests_pass` ✗ at
+  pass #1 → ✓ at pass #2 → pass #3 sealed **FAILED** quoting pass #1, with both
+  ACs green on disk and the full suite green.
+  **What to do until WP-629 lands:** red-then-green is the normal shape of a
+  multi-step run, so treat a `completion review: unresolved finding on a converged
+  step — escalation_concerns_adjudicated` seal as **unproven, not disproven**.
+  Re-run the ACs against the harvested tree (`scripts/dogfood-open.sh` §3 does
+  this) and read judge pass #2's rubric before believing the terminal state.
+  A one-step run with a clean first pass is unaffected.
 
 - **✅ CLOSED — a judge's out-of-rubric CONCERN is now adjudicated before the
   converged seal** (F-335 → WP-619, landed in the dogfood-140 review). A converged

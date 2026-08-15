@@ -138,9 +138,9 @@ describe.skipIf(address === null)("run-completion holistic review", () => {
     expect(reviewVerdicts(dataDir, handle.runId)).toHaveLength(0);
   }, 120_000);
 
-  test("completion review design finding condemns the run to resumable FAILED with exactly 1 review pass", async () => {
-    // A standing design finding in completion review does not loop — it adjudicates once
-    // and condemns the run to resumable FAILED naming the failed item.
+  test("completion review design finding condemns the run to resumable FAILED after 1 bounded repair attempt", async () => {
+    // A standing design finding in completion review grants 1 bounded repair attempt;
+    // when the re-review still fails, it condemns the run to resumable FAILED.
     const wire = await startFakeJudgeWire(
       [
         judgeForm({
@@ -151,6 +151,7 @@ describe.skipIf(address === null)("run-completion holistic review", () => {
       ],
       {
         reviewForms: [
+          completionReviewForm({ rubricFails: [RUBRIC_CUMULATIVE_DESIGN_COHERENT] }),
           completionReviewForm({ rubricFails: [RUBRIC_CUMULATIVE_DESIGN_COHERENT] }),
         ],
       },
@@ -163,9 +164,9 @@ describe.skipIf(address === null)("run-completion holistic review", () => {
     const report = await awaitTerminal(handle);
 
     expect(report.status).toBe("FAILED");
-    expect(wire.reviewHits).toBe(1);
+    expect(wire.reviewHits).toBe(2);
     const reviews = reviewVerdicts(dataDir, handle.runId);
-    expect(reviews).toHaveLength(1);
+    expect(reviews).toHaveLength(2);
 
     const journal = new Journal(journalPath(dataDir, handle.runId));
     try {
@@ -182,19 +183,23 @@ describe.skipIf(address === null)("run-completion holistic review", () => {
     }
   }, 120_000);
 
-  test("first-verdict seal with a failing rubric item fires review and seals FAILED when upheld", async () => {
+  test("first-verdict seal with a failing rubric item fires review and seals FAILED when upheld after repair", async () => {
     // 1-step run (claimsCompleteSteps: [1]), AC-1 true on pass 1, but the sealing
     // verdict carries a failing rubric item (RUBRIC_DESIGN_SERVES_OVERALL_GOAL).
-    // Review fires and, when upheld, condemns to resumable FAILED.
+    // Review fires, executor gets 1 repair attempt; when re-review still fails, condemns to resumable FAILED.
     const wire = await startFakeJudgeWire(
       [
         judgeForm({
           criteria: { "AC-1": true },
           rubricFails: [RUBRIC_DESIGN_SERVES_OVERALL_GOAL],
         }),
+        judgeForm({
+          criteria: { "AC-1": true },
+        }),
       ],
       {
         reviewForms: [
+          completionReviewForm({ rubricFails: [RUBRIC_CUMULATIVE_DESIGN_COHERENT] }),
           completionReviewForm({ rubricFails: [RUBRIC_CUMULATIVE_DESIGN_COHERENT] }),
         ],
       },
@@ -210,10 +215,10 @@ describe.skipIf(address === null)("run-completion holistic review", () => {
     const report = await awaitTerminal(handle);
 
     expect(report.status).toBe("FAILED");
-    expect(wire.reviewHits).toBe(1);
+    expect(wire.reviewHits).toBe(2);
 
     const reviews = reviewVerdicts(dataDir, handle.runId);
-    expect(reviews).toHaveLength(1);
+    expect(reviews).toHaveLength(2);
 
     const journal = new Journal(journalPath(dataDir, handle.runId));
     try {
@@ -230,17 +235,25 @@ describe.skipIf(address === null)("run-completion holistic review", () => {
     }
   }, 120_000);
 
-  test("a CLEAN completion review discharges the earlier objection and seals SUCCESS with 1 review pass", async () => {
-    // The earlier objection reaches the review prompt; the independent completion
-    // review clears it and the run seals SUCCESS with exactly 1 review pass.
+  test("a failing rubric item at sealing pass earns 1 repair attempt and seals SUCCESS after clean re-review", async () => {
+    // The sealing objection reaches the executor as a repair brief; step 2 repairs it,
+    // the re-review is clean, and the run seals SUCCESS after 2 review passes.
     const wire = await startFakeJudgeWire(
       [
         judgeForm({
           criteria: { "AC-1": true },
           rubricFails: [RUBRIC_DESIGN_SERVES_OVERALL_GOAL],
         }),
+        judgeForm({
+          criteria: { "AC-1": true },
+        }),
       ],
-      { reviewForms: [completionReviewForm()] },
+      {
+        reviewForms: [
+          completionReviewForm(),
+          completionReviewForm(),
+        ],
+      },
     );
     cleanups.push(() => wire.close());
     const { repoUrl, dataDir, runner } = await setup(wire, {
@@ -253,7 +266,7 @@ describe.skipIf(address === null)("run-completion holistic review", () => {
     const report = await awaitTerminal(handle);
 
     expect(report.status).toBe("SUCCESS");
-    expect(wire.reviewHits).toBe(1);
+    expect(wire.reviewHits).toBe(2);
 
     const reviewRequest = wire.requests.find((body) =>
       body.includes("run-completion architecture review"),

@@ -197,9 +197,9 @@ describe.skipIf(address === null)("standing findings across incremental windows 
     const handle = await runner.start(spec);
     const report = await awaitTerminal(handle);
 
-    // Trap H: Upheld seals FAILED (resumable) naming what was upheld
+    // Upheld seals FAILED (resumable) naming what was upheld after 1 bounded repair attempt (2 review passes)
     expect(report.status).toBe("FAILED");
-    expect(wire.reviewHits).toBe(1);
+    expect(wire.reviewHits).toBe(2);
 
     const reviewRequest = wire.requests.find((body) =>
       body.includes("run-completion architecture review"),
@@ -314,7 +314,7 @@ describe.skipIf(address === null)("standing findings across incremental windows 
     const report = await awaitTerminal(handle);
 
     expect(report.status).toBe("FAILED");
-    expect(wire.reviewHits).toBe(1);
+    expect(wire.reviewHits).toBe(2);
 
     const journal = new Journal(journalPath(dataDir, handle.runId));
     try {

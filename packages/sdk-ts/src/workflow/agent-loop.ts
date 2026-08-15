@@ -1273,31 +1273,14 @@ export async function agentLoop(spec: TaskSpec): Promise<RunStatus> {
               ...(hasStanding ? { escalationConcerns: standingFindings } : {}),
             });
             spentUsd += reviewVerdict.costUsd;
-            const reviewFails = reviewVerdict.form.rubricResults.filter((r) => !r.pass);
             const designFails = mergeDesignFindings(
               sealingRubricFails,
               reviewVerdict.form.rubricResults,
             );
 
-            // When standing findings from earlier passes or sealing concerns were being adjudicated,
-            // the pass is terminal-or-nothing: adjudicate once, then seal (never return to the loop).
-            if (hasStanding) {
-              const condemned = await sealFromRubricFails(reviewFails);
-              if (condemned !== undefined) return condemned;
-
-              if (reviewFails.length > 0) {
-                return seal(
-                  "FAILED",
-                  `completion review: unresolved finding on a converged step — ${reviewFails
-                    .map((fail) => fail.id)
-                    .join(", ")}`,
-                  { resumable: true },
-                );
-              }
-              return seal("SUCCESS");
-            }
-
-            // Otherwise, standard completion review for fresh findings (grants 1 bounded repair/fix retry).
+            // Unified completion review: a failing design rubric row (whether fresh, standing,
+            // or raised at the sealing pass) earns exactly one bounded repair attempt if steps remain.
+            // A repair that does not resolve the finding still seals FAILED (resumable).
             if (designFails.length > 0) {
               const canRetry =
                 decideCompletionReview({
@@ -1306,6 +1289,8 @@ export async function agentLoop(spec: TaskSpec): Promise<RunStatus> {
                   reviewAttemptsUsed: completionReviewAttempts,
                   sealingVerdictHasRubricFailures: true,
                   hasRegressionSuite: Boolean(spec.regressionSuite),
+                  hasEscalationConcerns: hasStanding,
+                  hasStandingFindings: hasStanding,
                 }).action === "review" && stepIndex < maxSteps;
               if (canRetry) {
                 judgeFeedback = buildCompletionReviewBrief({
@@ -1320,20 +1305,22 @@ export async function agentLoop(spec: TaskSpec): Promise<RunStatus> {
               const condemned = await sealFromRubricFails(designFails);
               if (condemned !== undefined) return condemned;
               return seal(
-                "SUCCESS",
-                `completion review: design findings recorded — ${designFails
+                "FAILED",
+                `completion review: unresolved finding on a converged step — ${designFails
                   .map((fail) => fail.id)
                   .join(", ")}`,
+                { resumable: true },
               );
             }
           } else if (sealingRubricFails.length > 0) {
             const condemned = await sealFromRubricFails(sealingRubricFails);
             if (condemned !== undefined) return condemned;
             return seal(
-              "SUCCESS",
-              `completion review: design findings recorded — ${sealingRubricFails
+              "FAILED",
+              `completion review: unresolved finding on a converged step — ${sealingRubricFails
                 .map((fail) => fail.id)
                 .join(", ")}`,
+              { resumable: true },
             );
           }
           return seal("SUCCESS");

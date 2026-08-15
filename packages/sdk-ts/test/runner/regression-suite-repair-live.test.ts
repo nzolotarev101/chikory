@@ -263,7 +263,7 @@ describe.skipIf(address === null)("AC-2: live regression suite repair brief & ru
     }
   }, 180_000);
 
-  test("Scenario 4: no suite declared and ordinary design finding -> seals SUCCESS with design findings reason and NO marker", async () => {
+  test("Scenario 4: no suite declared and ordinary design finding -> seals FAILED (resumable) when repair attempt does not resolve finding", async () => {
     const wire = await startFakeJudgeWire(
       [
         judgeForm({ criteria: { "AC-1": false } }),
@@ -284,14 +284,20 @@ describe.skipIf(address === null)("AC-2: live regression suite repair brief & ru
     const handle = await runner.start(spec);
     const report = await awaitTerminal(handle);
 
-    expect(report.status).toBe("SUCCESS");
+    expect(report.status).toBe("FAILED");
     expect(report.inconclusiveCheck).toBeUndefined();
 
     const journal = new Journal(journalPath(dataDir, handle.runId));
     try {
-      const terminal = journal.entries("terminal").at(-1)!.payload as { status: string; reason?: string; inconclusiveCheck?: string };
-      expect(terminal.status).toBe("SUCCESS");
-      expect(terminal.reason).toBe("completion review: design findings recorded — cumulative_design_coherent");
+      const terminal = journal.entries("terminal").at(-1)!.payload as {
+        status: string;
+        reason?: string;
+        inconclusiveCheck?: string;
+        resumable?: boolean;
+      };
+      expect(terminal.status).toBe("FAILED");
+      expect(terminal.reason).toBe("completion review: unresolved finding on a converged step — cumulative_design_coherent");
+      expect(terminal.resumable).toBe(true);
       expect(terminal.inconclusiveCheck).toBeUndefined();
     } finally {
       journal.close();
