@@ -32,9 +32,24 @@ class DummyRouter(Router):
         )
 
 
+class UnimplementedRouter(Router):
+    pass
+
+
 @pytest.mark.anyio
 async def test_base_router_raises_not_implemented() -> None:
     router = Router()
+    request = CompletionRequest(
+        stage="code",
+        messages=[Message(role="user", content="hello")],
+    )
+    with pytest.raises(NotImplementedError):
+        await router.complete(request)
+
+
+@pytest.mark.anyio
+async def test_unimplemented_subclass_router_raises_not_implemented() -> None:
+    router = UnimplementedRouter()
     request = CompletionRequest(
         stage="code",
         messages=[Message(role="user", content="hello")],
