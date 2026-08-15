@@ -54,4 +54,42 @@ describe("runner paths", () => {
   it("computes endpointLedgerPath correctly", () => {
     expect(endpointLedgerPath(dummyDataDir)).toBe("my-data-dir/ledger/endpoints.db");
   });
+
+  describe("with DEFAULT_DATA_DIR", () => {
+    it("computes default paths correctly", () => {
+      expect(runDir(DEFAULT_DATA_DIR, dummyRunId)).toBe(".chikory/runs/run-123");
+      expect(journalPath(DEFAULT_DATA_DIR, dummyRunId)).toBe(".chikory/runs/run-123/journal.db");
+      expect(artifactsDir(DEFAULT_DATA_DIR, dummyRunId)).toBe(".chikory/runs/run-123/artifacts");
+      expect(sharedArtifactsDir(DEFAULT_DATA_DIR)).toBe(".chikory/artifacts");
+      expect(workspaceDir(DEFAULT_DATA_DIR, dummyRunId)).toBe(".chikory/runs/run-123/workspace");
+      expect(chainDir(DEFAULT_DATA_DIR, dummyChainId)).toBe(".chikory/chains/chain-456");
+      expect(chainJournalPath(DEFAULT_DATA_DIR, dummyChainId)).toBe(
+        ".chikory/chains/chain-456/chain.db",
+      );
+      expect(endpointLedgerPath(DEFAULT_DATA_DIR)).toBe(".chikory/ledger/endpoints.db");
+    });
+  });
+
+  describe("with absolute paths", () => {
+    const absDataDir = "/var/lib/chikory";
+
+    it("computes paths starting from root directory", () => {
+      expect(runDir(absDataDir, dummyRunId)).toBe("/var/lib/chikory/runs/run-123");
+      expect(journalPath(absDataDir, dummyRunId)).toBe(
+        "/var/lib/chikory/runs/run-123/journal.db",
+      );
+      expect(artifactsDir(absDataDir, dummyRunId)).toBe(
+        "/var/lib/chikory/runs/run-123/artifacts",
+      );
+      expect(sharedArtifactsDir(absDataDir)).toBe("/var/lib/chikory/artifacts");
+      expect(workspaceDir(absDataDir, dummyRunId)).toBe(
+        "/var/lib/chikory/runs/run-123/workspace",
+      );
+      expect(chainDir(absDataDir, dummyChainId)).toBe("/var/lib/chikory/chains/chain-456");
+      expect(chainJournalPath(absDataDir, dummyChainId)).toBe(
+        "/var/lib/chikory/chains/chain-456/chain.db",
+      );
+      expect(endpointLedgerPath(absDataDir)).toBe("/var/lib/chikory/ledger/endpoints.db");
+    });
+  });
 });
