@@ -1,0 +1,394 @@
+# Plain: when the grader reads finished work and finds a design problem, it is supposed to hand the
+# problem back to the agent for one fix attempt before giving up. It does that only when the problem
+# is brand new at the final read. If the same problem was already noticed one pass earlier — which is
+# what happens on almost every run — the grader skips the fix attempt and just fails the run. After
+# this run, the agent gets its one attempt either way.
+# WP: WP-627 (a design finding raised at the sealing pass must buy the one bounded repair attempt the
+#   same finding earns at completion review, F-359)
+# Ladder-rung: 0 (off-ladder — see WHY; the remaining rung-5 half is WP-304, not agent-runnable)
+# Thesis-KPI: self-correction rate (findings remediated in-run / findings raised in-run). MEASURED
+#   harm (dogfood-144, run-a8fe46f3-b5e1-4f83-961c-2142220daa12): the judge diagnosed a real gap by
+#   mechanism, the run sealed FAILED with `injections 0`, 1 of `max_steps: 6` used and $0.0831 of
+#   $20 spent. Current in-run remediation rate for a sealing-pass design finding: 0/1.
+# Format: loose — the outcomes and the named observables are fixed, the mechanism is the executor.
+#
+# Launch mode: RUN (single node — one deliverable, one seam).
+#   CHIKORY_PREFLIGHT_ONLY=1 devbox run run-dogfood
+#   devbox run run-dogfood
+#
+# WHY THIS AND NOT THE LADDER RUNG (dogfood-144 review, 2026-08-15):
+#   `scripts/dogfood-progression.sh` reads OK PROGRESSING, so the default candidate is the next
+#   ladder rung and a non-ladder candidate must beat it on thesis value AND pass every gate. It does,
+#   because the rung is not runnable as a dogfood headline — unchanged since dogfood-140:
+#     * P3-rung-5 (EXIT) = WP-303 + WP-304. WP-303 closed in dogfood-139.
+#     * WP-304 needs the OpenHands arm plus a corpus wide enough to separate 19 requirements — a
+#       quota-bound multi-hour suite the operator runs BY HAND (dogfood-122). No spec can headline it.
+#   Among runnable candidates WP-627 wins over WP-628 (finish WP-625): WP-627 is the self-correction
+#   pillar itself. Every future run that earns a design finding is currently condemned instead of
+#   repaired, WP-628 included.
+#
+# THE MEASURED PREMISE (measured on this tree 2026-08-15; do not re-litigate):
+#   * `agent-loop.ts` grants exactly ONE bounded design-fix retry when a completion review turns up a
+#     finding: `src/workflow/agent-loop.ts:1301` builds the brief with `buildCompletionReviewBrief`
+#     (`src/workflow/completion-review.ts:130`), sets `remediationPending`, and continues the loop.
+#   * That whole path sits AFTER `if (hasStanding)` (`src/workflow/agent-loop.ts:1284`), which is
+#     documented "terminal-or-nothing: adjudicate once, then seal (never return to the loop)".
+#   * Every judge pass pushes its failing rubric rows AND its free-text concerns into
+#     `standingFindings` (`src/workflow/agent-loop.ts:1134`). The pass that seals is a judge pass.
+#   * Therefore at `judge.cadence: 1` on a step that converges, `hasStanding` is ALWAYS true by the
+#     time the completion review runs, and the retry at `:1301` is unreachable by construction. The
+#     executor is never told. MEASURED: dogfood-144, `injections 0`.
+#   * The oscillation the guard was written against (dogfood-121, a converged step re-raising the
+#     same advisory concern forever) is ALREADY bounded elsewhere: `MAX_COMPLETION_REVIEWS = 2`
+#     (`src/workflow/completion-review.ts:16`) caps the loop at initial review + one re-review after
+#     one repair. One attempt cannot oscillate. This is an over-correction, not a wrong idea.
+#   * A SECOND terminal-or-nothing gate exists at `src/workflow/agent-loop.ts:402`
+#     (`regressionGateBeforeSuccess`). It runs on the PROCEED-without-criteria path and is NOT this
+#     defect; leaving it terminal is fine, breaking it is a regression.
+#   * FOUR COMMITTED TESTS (SIX assertions) PIN THE CURRENT SHAPE and will go red on any correct
+#     delivery. MEASURED against a throwaway reference at the arming pass — each asserts
+#     `wire.reviewHits` is 1 on an UPHELD path, which becomes 2 once a repair is granted, and the two
+#     in `completion-review-live.test.ts` ALSO assert `reviewVerdicts(...)` has length 1 (`:168`,
+#     `:216`), which becomes 2 for the same reason:
+#       test/runner/completion-review-live.test.ts — "completion review design finding condemns the
+#         run to resumable FAILED with exactly 1 review pass"
+#       test/runner/completion-review-live.test.ts — "first-verdict seal with a failing rubric item
+#         fires review and seals FAILED when upheld"
+#       test/runner/standing-findings-live.test.ts — "AC-1 Upheld: …"
+#       test/runner/standing-findings-live.test.ts — "AC-2 Upheld: …"
+#     UPDATE their expectations and say so in the step summary. Do NOT delete them, do NOT skip them,
+#     and do NOT keep `reviewHits` at 1 by suppressing the re-review — the re-review is what makes an
+#     unrepaired finding still seal FAILED. The extra judge pass is the price and it is bounded at one.
+#   * The suite this run must not break, MEASURED at the launch commit (F-342 — run
+#     `pnpm --filter @chikory/sdk exec vitest run` yourself and read its own tail): at the dogfood-144
+#     review it stood at 188 files / 1504 tests (1481 passed | 23 skipped) in 58.37 s, of which
+#     `test/runner/` is 53 files / 378 tests in 39.67 s. If your number differs, yours is right and
+#     this comment is stale.
+#   * The `unattended:` block below is not decoration (F-322).
+#
+# Designed traps — the plausible-but-wrong deliveries the acceptance criteria exist to reject:
+#   A. **Deleting the `hasStanding` branch and letting standing findings fall through to `:1301`.**
+#      The single most likely delivery, and it silently un-gates everything WP-619 built: when the
+#      retry is exhausted the fresh path seals **SUCCESS** with the findings merely "recorded"
+#      (`src/workflow/agent-loop.ts:1322`). An unresolved design finding must NEVER seal SUCCESS.
+#      AC-1 pins the unrepaired scenario at FAILED, resumable, naming the item.
+#   B. **Unbounding the retry.** Repairing until steps or budget run out. AC-1 pins the executor step
+#      count at EXACTLY 2 in the unrepaired scenario — one delivery, one repair, then seal.
+#   C. **Stopping the collection of the sealing pass rows into `standingFindings`** (`:1134`). Makes
+#      the retry reachable by making the finding invisible, and un-gates F-340's adjudication row.
+#      AC-1 keeps the negative: a run that raised NOTHING still buys no review pass at all.
+#   D. **Proving it by asserting the brief was BUILT.** `buildCompletionReviewBrief` is already unit
+#      tested. AC-1 asserts the EXECUTOR received it — the repair step summary must carry the brief
+#      text — and that the terminal outcome changed.
+#   E. **A repo test that is a transcription of AC-1** (F-360, dogfood-144). AC-2 is a COUNT floor on
+#      the committed `test/runner/` tree, which the deleted generated file cannot satisfy.
+#
+# NOT PROVABLE BY THIS RUN ITSELF (F-197): the Temporal worker is built from HEAD at launch, so this
+#   run executes the OLD loop. Its own seal says nothing about the fix. AC-1 therefore drives the loop
+#   IN-TEST against the scripted executor and the fake judge wire (`test/runner/helpers.ts`), which is
+#   the real workflow, the real judge activity and a real ephemeral Temporal server — only the LLM
+#   transport is faked. The first live datum is the NEXT run.
+#
+# NOT IN SCOPE: WP-628/F-360 (finish ignored-path isolation for the modify + delete families);
+#   WP-624/F-351; WP-626/F-358; WP-606/F-306; the rubric item set; the judge prompt; `benchmarks/`.
+
+name: dogfood-145-wp627-standing-finding-repair
+wp: WP-627
+goal: >
+  A design finding the judge raises at the pass that SEALS a run must buy the same one bounded repair
+  attempt that the identical finding earns when a completion review is the first to see it.
+
+  Measured on this tree: `agent-loop.ts` builds a design-fix brief and returns to the loop at
+  src/workflow/agent-loop.ts:1301, but that path sits after the hasStanding guard at :1284, and
+  every judge pass pushes its failing rubric rows into standingFindings at :1134. At judge cadence
+  1 on a step that converges, the sealing pass IS an earlier pass, so the guard is always true and
+  the repair never runs. dogfood-144 sealed FAILED on a precisely-diagnosed gap with 1 of 6 steps
+  used, 99.6% of budget unspent and `injections 0` — the executor was never told.
+
+  Make these true:
+
+    * **The finding reaches the executor.** When a converged run holds a failing DESIGN rubric row at
+      completion review and it still has steps and budget, the executor must receive one more step
+      whose instruction carries that finding. Not a log line, not a journal field — a step.
+
+    * **Exactly one.** A second repair attempt must be impossible. One delivery, one repair, then a
+      terminal seal, whatever the outcome.
+
+    * **A repair that does not resolve the finding still FAILS.** Resumable, with the rubric item
+      named in the reason. An unresolved design finding sealing SUCCESS is the defect this whole
+      family exists to prevent — do not reintroduce it.
+
+    * **A run that raised nothing is unaffected.** No extra judge pass, no repair step, no
+      adjudication row. The clean path must cost exactly what it costs today.
+
+  How you do it is yours: give the standing branch its own bounded attempt, unify the two branches
+  behind one decision that keeps the terminal-or-nothing seal, or something better. Say in your step
+  summary which you chose and — explicitly — what it still does NOT cover. Do not solve it by editing
+  any acceptance check, any test expectation that pins the current terminal semantics, or any dogfood
+  spec; and do not make the finding disappear rather than repairing it.
+
+  Nothing else changes. regressionGateBeforeSuccess (src/workflow/agent-loop.ts:402) is a DIFFERENT
+  gate on the no-criteria path and stays terminal-or-nothing. MAX_COMPLETION_REVIEWS stays a hard
+  bound. The rubric item set, the judge prompt, sealFromRubricFails's deterministic condemnations,
+  the TaskSpec contract and every chain semantic are untouched. No new dependency, no provider SDK,
+  no API key. TypeScript stays strict ESM with named exports and no `any`. This code DOES run inside
+  the Temporal workflow: keep it deterministic — no clocks, no randomness, no I/O outside activities.
+
+  Pin your work with a test that lives in the repo, under packages/sdk-ts/test/runner/. That is where
+  the standing-findings and completion-review guarantees are already pinned
+  (standing-findings-live.test.ts, completion-review.test.ts); extend either or add beside them. A
+  behaviour proved only by the acceptance check that grades this run is not pinned at all (F-356),
+  and a repo test copied verbatim from that check inherits its blind spots (F-360) — cover something
+  the grading check does not.
+
+  If an existing test pins a shape this change must alter, update its expectation and say plainly in
+  the step summary that you did — do not delete it, and do not weaken it into a tautology.
+
+  Verify your work with FAST checks only: the package typecheck (tsc with noEmit), eslint over the
+  files you touched, and vitest over only the test files you touched. Do NOT run the full vitest
+  suite inside a step — it does not fit the step time cap (F-345) — this run's declared regression
+  suite plus the judge-executed checks are the trusted full-suite verification whatever your summary
+  says.
+
+repos:
+  - url: /Users/nikitazolotarev/repos/chikory
+    writable: true
+
+# The SDK suite is both the surface this run edits and the gate it must not break.
+# MEASURE it at the launch commit rather than trusting this line (F-342, dogfood-140).
+regression_suite: pnpm --filter @chikory/sdk exec vitest run
+check_timeout_ms: 180000
+
+acceptance_criteria:
+  - id: AC-1
+    description: >
+      THIS CHECK OWNS ITS ORACLE. It drives the REAL agent loop end to end — real Temporal dev server,
+      real workflow bundle, real judgeStep activity, scripted executor, fake judge TRANSPORT — over
+      three scenarios that differ only in what the judge says. REPAIRED: a sealing pass that raises
+      `design_serves_overall_goal` must produce a SECOND executor step whose summary carries the
+      design brief, then seal SUCCESS after two review passes. UNREPAIRED: the same opening, with the
+      re-review still failing, must seal FAILED (resumable) naming the item after EXACTLY two executor
+      steps — never three (trap B) and never SUCCESS (trap A). NEGATIVE: a run that raises nothing
+      takes one step, buys zero review passes and seals SUCCESS (trap C). The Temporal substrate is
+      asserted present rather than skipped, so the check cannot pass vacuously.
+    check: |
+      cd packages/sdk-ts && node --input-type=module -e '
+      import {writeFileSync,rmSync} from "node:fs";
+      import {spawnSync} from "node:child_process";
+      import {join} from "node:path";
+      const A=(c,m)=>{if(!c){console.error("FAIL: "+m);process.exit(1);}};
+      const target=join(process.cwd(),"test/runner/ac1-standing-repair.generated.test.ts");
+      rmSync(target,{force:true});
+      const SRC=[
+      "import { randomUUID } from \"node:crypto\";",
+      "import { mkdtemp, rm } from \"node:fs/promises\";",
+      "import { tmpdir } from \"node:os\";",
+      "import { join } from \"node:path\";",
+      "",
+      "import { afterEach, describe, expect, inject, test } from \"vitest\";",
+      "",
+      "import {",
+      "  createRunnerWorker,",
+      "  createTemporalRunner,",
+      "  Journal,",
+      "  journalPath,",
+      "  RUBRIC_DESIGN_SERVES_OVERALL_GOAL,",
+      "  type JudgeForm,",
+      "  type RunHandle,",
+      "  type RunStatusReport,",
+      "} from \"../../src/index.js\";",
+      "import {",
+      "  completionReviewForm,",
+      "  initSourceRepo,",
+      "  judgeForm,",
+      "  makeJudgedSpec,",
+      "  scriptedRegistry,",
+      "  startFakeJudgeWire,",
+      "  TERMINAL_STATUSES,",
+      "  waitFor,",
+      "  type FakeJudgeWire,",
+      "} from \"./helpers.js\";",
+      "",
+      "const address = inject(\"temporalAddress\");",
+      "const bundlePath = inject(\"workflowBundlePath\");",
+      "",
+      "interface StepPayload { record: { summary?: string } }",
+      "interface TerminalPayload { status: string; reason?: string; resumable?: boolean }",
+      "",
+      "describe(\"AC-1 WP-627/F-359: a standing design finding buys ONE bounded repair\", () => {",
+      "  const cleanups: Array<() => Promise<void>> = [];",
+      "  afterEach(async () => {",
+      "    while (cleanups.length > 0) await cleanups.pop()!();",
+      "  });",
+      "",
+      "  test(\"the Temporal substrate is present — this AC must never pass vacuously\", () => {",
+      "    expect(address, \"temporalAddress was not provided\").not.toBeNull();",
+      "    expect(bundlePath, \"workflowBundlePath was not provided\").not.toBeNull();",
+      "  });",
+      "",
+      "  async function setup(wire: FakeJudgeWire) {",
+      "    const tmp = await mkdtemp(join(tmpdir(), \"chikory-wp627-\"));",
+      "    cleanups.push(() => rm(tmp, { recursive: true, force: true }));",
+      "    const repoUrl = await initSourceRepo(join(tmp, \"src\"), { echoJudgeFeedback: true });",
+      "    const dataDir = join(tmp, \"data\");",
+      "    const taskQueue = \"tq-\" + randomUUID();",
+      "    const worker = await createRunnerWorker({",
+      "      adapters: scriptedRegistry,",
+      "      address: address!,",
+      "      taskQueue,",
+      "      dataDir,",
+      "      workflowBundlePath: bundlePath!,",
+      "      routerOptions: { baseUrls: { \"openai-compat\": wire.url } },",
+      "    });",
+      "    const workerDone = worker.run();",
+      "    const runner = createTemporalRunner({ address: address!, taskQueue, dataDir });",
+      "    cleanups.push(async () => {",
+      "      worker.shutdown();",
+      "      await workerDone;",
+      "      await runner.close();",
+      "    });",
+      "    return { repoUrl, dataDir, runner };",
+      "  }",
+      "",
+      "  async function awaitTerminal(handle: RunHandle): Promise<RunStatusReport> {",
+      "    return waitFor(",
+      "      async () => {",
+      "        const report = await handle.status();",
+      "        return TERMINAL_STATUSES.includes(report.status) ? report : undefined;",
+      "      },",
+      "      { what: \"run to reach a terminal status\" },",
+      "    );",
+      "  }",
+      "",
+      "  const SEALS_WITH_FINDING: JudgeForm = judgeForm({",
+      "    criteria: { \"AC-1\": true },",
+      "    rubricFails: [RUBRIC_DESIGN_SERVES_OVERALL_GOAL],",
+      "  });",
+      "  const CLEAN_SEAL: JudgeForm = judgeForm({ criteria: { \"AC-1\": true } });",
+      "  const REVIEW_UPHOLDS: JudgeForm = completionReviewForm({",
+      "    rubricFails: [RUBRIC_DESIGN_SERVES_OVERALL_GOAL],",
+      "  });",
+      "",
+      "  function readJournal(dataDir: string, runId: string) {",
+      "    const journal = new Journal(journalPath(dataDir, runId));",
+      "    try {",
+      "      const steps = journal.entries(\"step\").map((e) => e.payload as StepPayload);",
+      "      const terminal = journal.entries(\"terminal\").at(-1)!.payload as TerminalPayload;",
+      "      return { steps, terminal };",
+      "    } finally {",
+      "      journal.close();",
+      "    }",
+      "  }",
+      "",
+      "  test(\"REPAIRED: the finding reaches the EXECUTOR as a step, and the run then seals SUCCESS\", async () => {",
+      "    const wire = await startFakeJudgeWire([SEALS_WITH_FINDING, CLEAN_SEAL], {",
+      "      reviewForms: [REVIEW_UPHOLDS, completionReviewForm()],",
+      "    });",
+      "    cleanups.push(() => wire.close());",
+      "    const { repoUrl, dataDir, runner } = await setup(wire);",
+      "    const handle = await runner.start(makeJudgedSpec({ repoUrl, cadence: 1, maxSteps: 4 }));",
+      "    const report = await awaitTerminal(handle);",
+      "",
+      "    const { steps } = readJournal(dataDir, handle.runId);",
+      "    // trap D: the brief must reach the EXECUTOR, not merely be built.",
+      "    expect(steps, \"a repair step was never handed to the executor\").toHaveLength(2);",
+      "    const repair = steps[1]!.record.summary ?? \"\";",
+      "    expect(repair, \"the repair step carries no design brief\").toContain(\"DESIGN REVIEW BRIEF\");",
+      "    expect(repair).toContain(RUBRIC_DESIGN_SERVES_OVERALL_GOAL);",
+      "    expect(report.status, \"a cleared repair must seal SUCCESS\").toBe(\"SUCCESS\");",
+      "    expect(wire.reviewHits, \"initial review + one re-review\").toBe(2);",
+      "  }, 300_000);",
+      "",
+      "  test(\"UNREPAIRED: exactly ONE repair, then FAILED (resumable) naming the item — never SUCCESS\", async () => {",
+      "    const wire = await startFakeJudgeWire([SEALS_WITH_FINDING, SEALS_WITH_FINDING], {",
+      "      reviewForms: [REVIEW_UPHOLDS, REVIEW_UPHOLDS],",
+      "    });",
+      "    cleanups.push(() => wire.close());",
+      "    const { repoUrl, dataDir, runner } = await setup(wire);",
+      "    const handle = await runner.start(makeJudgedSpec({ repoUrl, cadence: 1, maxSteps: 4 }));",
+      "    const report = await awaitTerminal(handle);",
+      "",
+      "    const { steps, terminal } = readJournal(dataDir, handle.runId);",
+      "    // trap A: an unresolved design finding must NEVER seal SUCCESS.",
+      "    expect(report.status).toBe(\"FAILED\");",
+      "    expect(terminal.status).toBe(\"FAILED\");",
+      "    expect(terminal.reason ?? \"\").toContain(RUBRIC_DESIGN_SERVES_OVERALL_GOAL);",
+      "    expect(terminal.resumable).toBe(true);",
+      "    // trap B: one delivery, one repair, then seal. maxSteps was 4, so 3 was reachable.",
+      "    expect(steps, \"the repair attempt is not bounded at one\").toHaveLength(2);",
+      "    expect(steps[1]!.record.summary ?? \"\").toContain(\"DESIGN REVIEW BRIEF\");",
+      "    expect(wire.reviewHits).toBe(2);",
+      "  }, 300_000);",
+      "",
+      "  test(\"NEGATIVE: a run that raised nothing buys no repair step and no review pass (trap C)\", async () => {",
+      "    const wire = await startFakeJudgeWire([CLEAN_SEAL]);",
+      "    cleanups.push(() => wire.close());",
+      "    const { repoUrl, dataDir, runner } = await setup(wire);",
+      "    const handle = await runner.start(makeJudgedSpec({ repoUrl, cadence: 1, maxSteps: 4 }));",
+      "    const report = await awaitTerminal(handle);",
+      "",
+      "    const { steps } = readJournal(dataDir, handle.runId);",
+      "    expect(report.status).toBe(\"SUCCESS\");",
+      "    expect(steps).toHaveLength(1);",
+      "    expect(wire.reviewHits, \"a clean run must not buy a review pass\").toBe(0);",
+      "  }, 300_000);",
+      "});",
+      ""].join("\n");
+      writeFileSync(target, SRC);
+      const res=spawnSync("pnpm",["exec","vitest","run",
+        "test/runner/ac1-standing-repair.generated.test.ts"],{stdio:"inherit"});
+      rmSync(target,{force:true});
+      A(res.status===0,
+        "a design finding raised by the pass that SEALS a run must reach the executor as one bounded "+
+        "repair step and then settle terminally: cleared -> SUCCESS, upheld -> FAILED (resumable) "+
+        "naming the item after EXACTLY two executor steps, and a run that raised nothing must still "+
+        "buy no repair step and no review pass. vitest exited "+res.status);
+      console.log("AC-1 OK: the finding reaches the executor, exactly once, and still gates");
+      '
+
+  - id: AC-2
+    description: >
+      The delivery compiles as strict TypeScript, the two workflow modules it is expected to change are
+      lint-clean, the WHOLE committed `test/runner/` tree passes (so WP-601's standing-findings
+      guarantees, F-340's adjudication row and F-334's gating all still hold), and that tree has GROWN.
+      The growth floor is a DURABILITY floor, not a proof of correctness — AC-1 carries the whole
+      gating burden for behaviour. It exists because a repo test transcribed from the grading check
+      inherits its blind spots (F-360) and a generate-run-delete check leaves no residue at all
+      (F-356). MEASURED baseline at the launch commit: 53 files / 378 tests.
+    check: |
+      cd packages/sdk-ts || exit 1
+      pnpm run typecheck || { echo "AC-2 FAIL: strict typecheck is red"; exit 1; }
+      pnpm exec eslint src/workflow/agent-loop.ts src/workflow/completion-review.ts || { echo "AC-2 FAIL: eslint is red on the workflow modules"; exit 1; }
+      OUT=$(pnpm exec vitest run test/runner/ 2>&1)
+      ST=$?
+      echo "$OUT" | tail -30
+      if [ "$ST" -ne 0 ]; then
+        echo "AC-2 FAIL: the committed test/runner tree is RED (vitest exited $ST). Four tests pin the OLD no-repair shape and must have their expectations UPDATED, not deleted or skipped."
+        exit 1
+      fi
+      N=$(echo "$OUT" | grep -oE "Tests +[0-9]+ passed" | grep -oE "[0-9]+" | head -1)
+      echo "committed test/runner tests: ${N:-UNPARSEABLE} (floor 381, measured baseline 378)"
+      if [ -z "$N" ]; then
+        echo "AC-2 FAIL: could not read a test count out of the vitest summary"
+        exit 1
+      fi
+      if [ "$N" -lt 381 ]; then
+        echo "AC-2 FAIL: durability floor not met — the committed runner tree did not grow by 3 tests. A behaviour proved only by the generated grading check is not pinned at all (F-356), and a repo test transcribed from it inherits its blind spots (F-360)."
+        exit 1
+      fi
+      echo "AC-2 OK: strict TS, lint clean, the committed runner tree is green AND larger"
+
+budget_usd: 20
+max_steps: 6
+
+agent_classes:
+  executor: executor-default
+  judge: judge-default
+
+judge:
+  cadence: 1
+
+# F-322 (dogfood-135): without this, a converged out-of-rubric escalation parks overnight for a
+# human instead of auto-sealing.
+unattended:
+  escalation: seal_resumable_failed

@@ -83,6 +83,7 @@ describe("planCheckSideEffectCleanup pure decision planner", () => {
       " M src/app.ts",
       '?? "path with spaces/file.txt"',
       "R  old.ts -> new.ts",
+      "!! dist/ignored.js",
     ].join("\n");
 
     const parsed = parseDirtySnapshot(rawPorcelain);
@@ -90,5 +91,26 @@ describe("planCheckSideEffectCleanup pure decision planner", () => {
     expect(parsed.get("src/app.ts")?.status).toBe(" M");
     expect(parsed.get("path with spaces/file.txt")?.status).toBe("??");
     expect(parsed.get("new.ts")?.status).toBe("R ");
+    expect(parsed.get("dist/ignored.js")?.status).toBe("!!");
+  });
+
+  it("check-created ignored path becomes a delete", () => {
+    const before = "";
+    const after = "!! dist/leak.js";
+
+    const plan = planCheckSideEffectCleanup(before, after);
+
+    expect(plan.toDelete).toEqual(["dist/leak.js"]);
+    expect(plan.toRestore).toEqual([]);
+  });
+
+  it("pre-existing ignored path untouched yields NOTHING in plan", () => {
+    const before = "!! dist/keep.js\n!! node_modules/pkg/index.js";
+    const after = "!! dist/keep.js\n!! node_modules/pkg/index.js";
+
+    const plan = planCheckSideEffectCleanup(before, after);
+
+    expect(plan.toDelete).toEqual([]);
+    expect(plan.toRestore).toEqual([]);
   });
 });

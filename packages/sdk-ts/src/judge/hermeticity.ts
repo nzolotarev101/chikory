@@ -36,7 +36,7 @@ export interface ParsedDirtyEntry {
 
 function isCreatedStatus(status: string): boolean {
   const s = status.trim();
-  return s.includes("?") || s.includes("A") || s === "N";
+  return s.includes("?") || s.includes("A") || s === "N" || s.includes("!");
 }
 
 export function parseDirtySnapshot(
@@ -146,7 +146,11 @@ export function planCheckSideEffectCleanup(
         toRestoreSet.add(path);
       }
     } else if (b && !a) {
-      toRestoreSet.add(path);
+      if (b.status.includes("!") && b.content === undefined) {
+        // Ignored file deleted during check cannot be restored via checkout without saved content
+      } else {
+        toRestoreSet.add(path);
+      }
     }
   }
 
@@ -181,6 +185,27 @@ export async function snapshotWorkspace(dir: string): Promise<Map<string, GitDir
       // File may have been deleted or be unreadable
     }
     snapshotMap.set(relPath, { path: relPath, status: entry.status, hash, content });
+  }
+
+  try {
+    const ignoredOutput = await git(dir, [
+      "ls-files",
+      "-z",
+      "--others",
+      "--ignored",
+      "--exclude-standard",
+    ]);
+    if (ignoredOutput) {
+      const ignoredPaths = ignoredOutput.split("\0");
+      for (const relPath of ignoredPaths) {
+        if (!relPath || relPath.trim() === "") continue;
+        if (!snapshotMap.has(relPath)) {
+          snapshotMap.set(relPath, { path: relPath, status: "!!" });
+        }
+      }
+    }
+  } catch {
+    // If git ls-files fails, proceed with porcelain status
   }
 
   return snapshotMap;
