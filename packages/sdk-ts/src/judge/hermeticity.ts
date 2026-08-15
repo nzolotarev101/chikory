@@ -169,19 +169,22 @@ export async function snapshotWorkspace(dir: string): Promise<Map<string, GitDir
   const basicMap = parseDirtySnapshot(statusOutput);
   const snapshotMap = new Map<string, GitDirtyEntry>();
 
-  for (const [relPath, entry] of basicMap.entries()) {
-    const fullPath = join(dir, relPath);
-    let hash: string | undefined;
-    let content: string | undefined;
-    try {
-      const fileBuffer = await readFile(fullPath);
-      hash = createHash("sha256").update(fileBuffer).digest("hex");
-      content = fileBuffer.toString("utf8");
-    } catch {
-      // File may have been deleted or be unreadable
-    }
-    snapshotMap.set(relPath, { path: relPath, status: entry.status, hash, content });
-  }
+  const entries = Array.from(basicMap.entries());
+  await Promise.all(
+    entries.map(async ([relPath, entry]) => {
+      const fullPath = join(dir, relPath);
+      let hash: string | undefined;
+      let content: string | undefined;
+      try {
+        const fileBuffer = await readFile(fullPath);
+        hash = createHash("sha256").update(fileBuffer).digest("hex");
+        content = fileBuffer.toString("utf8");
+      } catch {
+        // File may have been deleted or be unreadable
+      }
+      snapshotMap.set(relPath, { path: relPath, status: entry.status, hash, content });
+    })
+  );
 
   return snapshotMap;
 }
@@ -193,7 +196,7 @@ export async function applyCleanupPlan(
 ): Promise<void> {
   const beforeMap = beforeSnapshot ? parseDirtySnapshot(beforeSnapshot) : undefined;
 
-  // Perform concurrent file deletions
+  // Perform concurrent file deletions for optimized I/O performance
   await Promise.all(
     plan.toDelete.map(async (relPath) => {
       const fullPath = join(dir, relPath);
