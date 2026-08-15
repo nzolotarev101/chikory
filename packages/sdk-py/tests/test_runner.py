@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+from typing import Any
 
 import pytest
 
@@ -24,7 +25,7 @@ class MockAgentRunner(AgentRunner):
         return RunStatusReport.model_validate(STATUS_REPORT_DATA)
 
 
-@pytest.mark.asyncio
+@pytest.mark.anyio
 async def test_base_agent_runner_raises_not_implemented() -> None:
     runner = AgentRunner()
     spec = TaskSpec.model_validate(TASK_SPEC_DATA)
@@ -32,7 +33,7 @@ async def test_base_agent_runner_raises_not_implemented() -> None:
         await runner.start(spec)
 
 
-@pytest.mark.asyncio
+@pytest.mark.anyio
 async def test_mock_agent_runner_success() -> None:
     runner = MockAgentRunner()
     spec = TaskSpec.model_validate(TASK_SPEC_DATA)
@@ -41,3 +42,11 @@ async def test_mock_agent_runner_success() -> None:
     assert report.status == "RUNNING"
     assert report.current_step == 5
     assert report.spent_usd == 1.65
+
+
+@pytest.mark.anyio
+async def test_mock_agent_runner_type_error_on_invalid_spec() -> None:
+    runner = MockAgentRunner()
+    invalid_spec: Any = "not_a_task_spec"
+    with pytest.raises(TypeError, match="Expected TaskSpec"):
+        await runner.start(invalid_spec)
