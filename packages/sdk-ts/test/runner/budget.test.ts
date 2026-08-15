@@ -1,10 +1,19 @@
 import { describe, expect, test } from "vitest";
 import {
+  ESTIMATE_WINDOW,
+  ESTIMATE_SAFETY_FACTOR,
   estimateNextStepCost,
   budgetBreached,
   estimateNextStepTokens,
   tokenBudgetBreached,
 } from "../../src/runner/budget.js";
+
+describe("budget module constants", () => {
+  test("exports expected estimation window and safety factor", () => {
+    expect(ESTIMATE_WINDOW).toBe(5);
+    expect(ESTIMATE_SAFETY_FACTOR).toBe(1.5);
+  });
+});
 
 describe("estimateNextStepCost", () => {
   test("empty history estimates 0", () => {
@@ -103,6 +112,10 @@ describe("estimateNextStepTokens", () => {
     // Mean of [100, 200, 300, 400, 500] is 300. 300 * 1.5 = 450
     expect(estimateNextStepTokens([100000, 100, 200, 300, 400, 500])).toBeCloseTo(450, 6);
   });
+
+  test("inputs with floating point numbers are handled correctly", () => {
+    expect(estimateNextStepTokens([0.1, 0.2, 0.3])).toBeCloseTo(0.3, 6);
+  });
 });
 
 describe("tokenBudgetBreached", () => {
@@ -125,5 +138,10 @@ describe("tokenBudgetBreached", () => {
     // spent = 500, budget = 1000, remaining = 500, estimate = 300 -> remaining >= estimate
     expect(tokenBudgetBreached(500, 1000, 300)).toBe(false);
     expect(tokenBudgetBreached(500, 1000, 500)).toBe(false);
+  });
+
+  test("handles negative estimate safely if it occurs", () => {
+    // spent = 500, budget = 1000, remaining = 500, estimate = -200. remaining > 0, and remaining > estimate.
+    expect(tokenBudgetBreached(500, 1000, -200)).toBe(false);
   });
 });
