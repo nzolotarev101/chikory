@@ -431,9 +431,9 @@ export function getTargetPackageJson(task: BenchmarkTask, workspaceDir: string):
   }
 
   if (task.repo) {
+    const tempDir = join(workspaceDir, "..", `temp-git-${task.id}-${Date.now()}`);
     try {
       // First try quick clone of just package.json via filter
-      const tempDir = join(workspaceDir, "..", `temp-git-${task.id}-${Date.now()}`);
       execFileSync("git", ["clone", "--depth", "1", "--no-checkout", "--filter=blob:none", task.repo.url, tempDir], {
         stdio: "ignore",
         timeout: 15000,
@@ -447,14 +447,17 @@ export function getTargetPackageJson(task: BenchmarkTask, workspaceDir: string):
         timeout: 15000,
       });
       const content = readFileSync(join(tempDir, "package.json"), "utf8");
-      try {
-        rmSync(tempDir, { recursive: true, force: true });
-      } catch {
-        // ignore rm error
-      }
       return content;
     } catch {
       return null;
+    } finally {
+      try {
+        if (existsSync(tempDir)) {
+          rmSync(tempDir, { recursive: true, force: true });
+        }
+      } catch {
+        // ignore rm error
+      }
     }
   }
 
