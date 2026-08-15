@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+from typing import Any
 
 import pytest
 
@@ -41,3 +42,11 @@ async def test_mock_agent_runner_success() -> None:
     assert report.status == "RUNNING"
     assert report.current_step == 5
     assert report.spent_usd == 1.65
+
+
+@pytest.mark.asyncio
+async def test_mock_agent_runner_invalid_input() -> None:
+    runner = MockAgentRunner()
+    invalid_spec: Any = "not-a-task-spec"
+    with pytest.raises(TypeError, match="Expected TaskSpec"):
+        await runner.start(invalid_spec)
