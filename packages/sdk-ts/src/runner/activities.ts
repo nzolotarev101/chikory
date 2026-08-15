@@ -743,16 +743,20 @@ async function restoreWorkspaceReposToCheckpoint(input: {
   const ws = workspaceDir(input.dataDir, input.runId);
   const repoCount = input.workspaceRepos.length;
   const commits = await resolveCheckpointCommits(input);
-  for (const workspaceRepo of input.workspaceRepos.filter((repo) => repo.writable)) {
-    const key = workspaceRepoCheckpointId(workspaceRepo, repoCount);
-    const sha = commits[key];
-    if (sha === undefined) {
-      throw new Error(`checkpoint ${input.checkpointId} has no git commit recorded for ${key}`);
-    }
-    const repoDir = workspaceRepoDir(ws, workspaceRepo);
-    await git(repoDir, ["reset", "--hard", sha]);
-    await git(repoDir, ["clean", "-fd"]);
-  }
+  await Promise.all(
+    input.workspaceRepos
+      .filter((repo) => repo.writable)
+      .map(async (workspaceRepo) => {
+        const key = workspaceRepoCheckpointId(workspaceRepo, repoCount);
+        const sha = commits[key];
+        if (sha === undefined) {
+          throw new Error(`checkpoint ${input.checkpointId} has no git commit recorded for ${key}`);
+        }
+        const repoDir = workspaceRepoDir(ws, workspaceRepo);
+        await git(repoDir, ["reset", "--hard", sha]);
+        await git(repoDir, ["clean", "-fd"]);
+      }),
+  );
 }
 
 /**
@@ -976,18 +980,22 @@ export function createRunnerActivities(deps: RunnerActivityDeps) {
         }
         // Install deps so the executor can run its own verification (F-148).
         // Idempotent + guarded, so crash-retries and non-pnpm repos are cheap.
-        for (const workspaceRepo of workspaceRepos.all) {
-          await ensureWorkspaceDeps(workspaceRepoDir(ws, workspaceRepo));
-        }
+        await Promise.all(
+          workspaceRepos.all.map((workspaceRepo) =>
+            ensureWorkspaceDeps(workspaceRepoDir(ws, workspaceRepo)),
+          ),
+        );
         // Tag the run's base state — `<runId>@base` rollbacks resolve to it
         // (WP-132). Steps only run after prepareRun completes, so on a crashed
         // retry HEAD is still the base commit and tagging stays correct.
         const baseRepo = workspaceRepos.writable[0] ?? workspaceRepos.all[0];
         if (!baseRepo) throw new Error("TaskSpec.repos is empty");
         const baseCommit = await ensureBaseTag(workspaceRepoDir(ws, baseRepo));
-        for (const workspaceRepo of workspaceRepos.writable.slice(1)) {
-          await ensureBaseTag(workspaceRepoDir(ws, workspaceRepo));
-        }
+        await Promise.all(
+          workspaceRepos.writable
+            .slice(1)
+            .map((workspaceRepo) => ensureBaseTag(workspaceRepoDir(ws, workspaceRepo))),
+        );
         return { status: "SUCCESS", workspaceDir: ws, baseCommit };
       });
     },
@@ -2813,7 +2821,7 @@ export function createRunnerActivities(deps: RunnerActivityDeps) {
             };
           }
 
-          const handoffRepos: RepoHandoff[] = [];
+          const repoSourceCommits = new Map<string, string>();
           for (const workspaceRepo of writableRepos) {
             const parentSources = new Set(
               (link.parentHandoffs ?? [])
@@ -2827,20 +2835,26 @@ export function createRunnerActivities(deps: RunnerActivityDeps) {
                 reason: `parent handoffs for ${workspaceRepo.repo.url} do not share one source commit`,
               };
             }
-            const sourceCommit =
-              [...parentSources][0] ??
-              (await git(workspaceRepoDir(ws, workspaceRepo), ["rev-parse", `${BASE_TAG}^{commit}`]));
-            handoffRepos.push(
-              await publishRepoHandoff({
+            if (parentSources.size === 1) {
+              repoSourceCommits.set(workspaceRepo.repo.url, [...parentSources][0]!);
+            }
+          }
+
+          const handoffRepos: RepoHandoff[] = await Promise.all(
+            writableRepos.map(async (workspaceRepo) => {
+              const sourceCommit =
+                repoSourceCommits.get(workspaceRepo.repo.url) ??
+                (await git(workspaceRepoDir(ws, workspaceRepo), ["rev-parse", `${BASE_TAG}^{commit}`]));
+              return publishRepoHandoff({
                 deps,
                 runId: input.runId,
                 nodeId: link.nodeId,
                 workspaceDir: ws,
                 workspaceRepo,
                 sourceCommit,
-              }),
-            );
-          }
+              });
+            }),
+          );
 
           return {
             status: "SUCCESS",
