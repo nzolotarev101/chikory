@@ -240,20 +240,8 @@ export async function runCriteriaChecks(input: {
   reposToSnapshot.forEach((repo, idx) => {
     beforeSnapshots.set(repo.dir, snapshotResults[idx]!);
   });
-  try {
-    const promises = input.criteria
-      .filter((criterion) => criterion.check)
-      .map((criterion) =>
-        runCheck(
-          input.workspaceDir,
-          criterion,
-          input.checkTimeoutMs ?? DEFAULT_CHECK_TIMEOUT_MS,
-          input.workspaceRepos ?? [],
-        ),
-      );
-    const results = await Promise.all(promises);
-    runs.push(...results);
-  } finally {
+
+  const cleanup = async () => {
     await Promise.all(
       reposToSnapshot.map(async (repo) => {
         const before = beforeSnapshots.get(repo.dir);
@@ -261,6 +249,21 @@ export async function runCriteriaChecks(input: {
         await applyCleanupPlan(repo.dir, planCheckSideEffectCleanup(before ?? "", after), before);
       }),
     );
+  };
+
+  try {
+    for (const criterion of input.criteria.filter((c) => c.check)) {
+      const run = await runCheck(
+        input.workspaceDir,
+        criterion,
+        input.checkTimeoutMs ?? DEFAULT_CHECK_TIMEOUT_MS,
+        input.workspaceRepos ?? [],
+      );
+      runs.push(run);
+      await cleanup();
+    }
+  } finally {
+    await cleanup();
   }
   return runs;
 }
@@ -327,19 +330,28 @@ export async function collectEvidence(input: CollectEvidenceInput): Promise<Coll
     beforeSnapshots.set(r.dir, snapshotResults[idx]!);
   });
 
+  const cleanup = async () => {
+    await Promise.all(
+      reposToSnapshot.map(async (r) => {
+        const before = beforeSnapshots.get(r.dir);
+        const after = await snapshotWorkspace(r.dir);
+        const plan = planCheckSideEffectCleanup(before ?? "", after);
+        await applyCleanupPlan(r.dir, plan, before);
+      }),
+    );
+  };
+
   try {
-    const promises = input.criteria
-      .filter((criterion) => criterion.check)
-      .map((criterion) =>
-        runCheck(
-          input.workspaceDir,
-          criterion,
-          input.checkTimeoutMs ?? DEFAULT_CHECK_TIMEOUT_MS,
-          input.workspaceRepos ?? [],
-        ),
+    for (const criterion of input.criteria.filter((c) => c.check)) {
+      const run = await runCheck(
+        input.workspaceDir,
+        criterion,
+        input.checkTimeoutMs ?? DEFAULT_CHECK_TIMEOUT_MS,
+        input.workspaceRepos ?? [],
       );
-    const results = await Promise.all(promises);
-    checkRuns.push(...results);
+      checkRuns.push(run);
+      await cleanup();
+    }
 
     if (input.regressionSuite) {
       regressionSuiteRun = await runCheck(
@@ -352,16 +364,10 @@ export async function collectEvidence(input: CollectEvidenceInput): Promise<Coll
         input.checkTimeoutMs ?? DEFAULT_CHECK_TIMEOUT_MS,
         input.workspaceRepos ?? [],
       );
+      await cleanup();
     }
   } finally {
-    await Promise.all(
-      reposToSnapshot.map(async (r) => {
-        const before = beforeSnapshots.get(r.dir);
-        const after = await snapshotWorkspace(r.dir);
-        const plan = planCheckSideEffectCleanup(before ?? "", after);
-        await applyCleanupPlan(r.dir, plan, before);
-      }),
-    );
+    await cleanup();
   }
 
   let testResults: TestResultArtifact | undefined;

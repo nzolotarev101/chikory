@@ -1,0 +1,364 @@
+# Plain: the grader now runs a task's checks one at a time and sweeps up after each one — but it only
+# sweeps what version control can see. A check that writes a build file or a cache (anything listed in
+# .gitignore) still leaves it behind, where the next check trips over it. After this run, a check is
+# insulated from its sibling's mess wherever that mess lands.
+# WP: WP-625 (check isolation must cover writes git does not track — a gitignored artifact is still a
+#   sibling's side effect, F-357)
+# Ladder-rung: 0 (off-ladder — see WHY; the remaining rung-5 half is WP-304, not agent-runnable)
+# Thesis-KPI: judge reliability (true verdicts per run). MEASURED harm (dogfood-143 review, probe
+#   driving the real `runCriteriaChecks` against a temp repo whose .gitignore carries `dist/`):
+#     writer   check: mkdir -p dist; printf x > dist/leak.js
+#     observer check: test ! -e dist/leak.js
+#     -> observer exitCode=1        (the sibling artifact was visible)
+#     -> leftover-on-disk=true      (and it survived the whole batch)
+#   This is F-349 one .gitignore line away. F-349 cost dogfood-142 $0.1846 and a FAILED seal on a
+#   correct delivery.
+# Format: loose — the outcomes and the named observables are fixed, the mechanism is the executor's
+#
+# Launch mode: RUN (single node — one deliverable, one seam).
+#   CHIKORY_PREFLIGHT_ONLY=1 devbox run run-dogfood
+#   devbox run run-dogfood
+#
+# WHY THIS AND NOT THE LADDER RUNG (dogfood-143 review, 2026-08-15):
+#   The progression gate reads OK PROGRESSING, so the default candidate is the next ladder rung and a
+#   non-ladder candidate must beat it on thesis value AND pass every gate. It does, because the rung
+#   is not runnable as a dogfood headline — unchanged since dogfood-140:
+#     * P3-rung-5 (EXIT) = WP-303 + WP-304. WP-303 closed in dogfood-139.
+#     * WP-304 needs the OpenHands arm plus a corpus wide enough to separate 19 requirements — a
+#       quota-bound multi-hour suite the operator runs BY HAND (dogfood-122). No spec can headline it.
+#   Among runnable candidates WP-625 wins: it finishes the goal dogfood-143 only half-met, on the
+#   judge path that has condemned correct work in two of the last four runs (F-344, F-349).
+#
+# THE MEASURED PREMISE (measured on this tree 2026-08-15; do not re-litigate):
+#   * WP-623 landed serial execution plus per-check cleanup at BOTH call sites — `runCriteriaChecks`
+#     (`src/judge/evidence.ts:255`) and `collectEvidence` (`:345`). That part is DONE and must not
+#     regress; `packages/sdk-ts/test/judge/check-isolation.test.ts` pins it.
+#   * The gap is the snapshot, not the loop: `snapshotWorkspace` (`src/judge/hermeticity.ts:166`)
+#     reads `git status --porcelain` (`:168`), which by default lists NO ignored files. Anything a
+#     check writes to an ignored path is invisible to `planCheckSideEffectCleanup` and therefore
+#     never removed and never isolated.
+#   * `snapshotWorkspace` reads the FULL CONTENT of every entry it snapshots and sha256s it
+#     (`hermeticity.ts:166-186`). That is why "just add --ignored" is a trap and not a fix.
+#   * MEASURED at the arming pass: `git status --porcelain --ignored` AND `--ignored=matching`
+#     BOTH collapse an ignored directory to a single `!! dist/` entry, so neither can even SEE the
+#     leaked file — the naive fix does not merely cost too much, it does not work. The throwaway
+#     reference that greened AC-1 used `git ls-files --others --ignored --exclude-standard`, which
+#     enumerates per file. That is a hint about where the per-file view lives, NOT a mandated
+#     mechanism, and it is exactly the call whose cost AC-1 bounds — on this repo it enumerates
+#     every path under `node_modules`.
+#   * The suite this run must not break, MEASURED at the launch commit (F-342 — run
+#     `pnpm --filter @chikory/sdk exec vitest run` yourself and read its own tail): at the dogfood-143
+#     review it stood at 188 files / 1499 tests (1476 passed | 23 skipped) in 57.19 s. If your number
+#     differs, yours is right and this comment is stale.
+#   * The `unattended:` block below is not decoration (F-322).
+#
+# Designed traps — the plausible-but-wrong deliveries the acceptance criteria exist to reject:
+#   A. **`git status --porcelain --ignored`.** The one-line change that makes the observer pass. Git
+#      collapses an ignored directory to a single entry, so the snapshot gains `node_modules/` and the
+#      cleanup plan can classify a PRE-EXISTING dependency tree as a check side effect and delete or
+#      check-out over it; with `--ignored=matching` it instead enumerates and hashes every file in it.
+#      AC-1 pins that pre-existing ignored content survives the batch BYTE-IDENTICAL, and that a batch
+#      of trivial checks stays wall-clock bounded with a bulky ignored tree present.
+#   B. **`git clean -xfd` between checks.** "Isolates" by deleting the dependency tree. Same AC-1
+#      assertion rejects it.
+#   C. **Fixing one call site.** `collectEvidence` is the judge path; `runCriteriaChecks` is the
+#      baseline precheck (WP-561). AC-1 drives BOTH.
+#   D. **Isolating and then going lenient.** A check that genuinely fails must still fail with ITS own
+#      exit code, and the per-check cap must still kill and still report `infraFailed: true`.
+#   E. **Regressing WP-623.** The tracked-path interference pair must stay isolated; AC-1 carries it.
+#
+# NOT IN SCOPE: WP-624/F-351 (compile the TypeScript an AC generates — harness, track-B); WP-626/F-358
+#   (`toolCalls` unobservable); WP-606/F-306; WP-616/F-328; WP-618/F-332; WP-620/F-339; WP-622/F-342;
+#   F-355; the LLM verdict path, the rubric, the completion review and adjudication; `benchmarks/`.
+
+name: dogfood-144-wp625-ignored-path-isolation
+wp: WP-625
+goal: >
+  A judge-executed acceptance check must be insulated from a sibling check's writes WHEREVER those
+  writes land — including paths git does not track.
+
+  WP-623 made the checks run one at a time and swept each one's side effects before the next started.
+  The sweep is driven by snapshotWorkspace (src/judge/hermeticity.ts:166), which reads
+  git status --porcelain and therefore sees no ignored file at all. Measured on this tree: a check
+  running "mkdir -p dist; printf x > dist/leak.js" leaves that artifact visible to the next check
+  ("test ! -e dist/leak.js" exits 1) and still on disk after the batch.
+
+  Make these true:
+
+    * **An ignored write is a side effect like any other.** A check that creates a file under an
+      ignored path must not be observable by a sibling check, at BOTH call sites
+      (`runCriteriaChecks` and `collectEvidence`), and must not survive the batch.
+
+    * **Pre-existing ignored content is untouchable.** Whatever was in the workspace before the batch
+      — a dependency tree, a build output, a cache — must still be there afterwards, byte for byte.
+      A cleanup that removes it is worse than the defect.
+
+    * **The sweep stays cheap.** A batch of trivial checks in a workspace carrying a bulky ignored
+      tree must stay wall-clock bounded. Reading and hashing an entire dependency tree once per check
+      is not an acceptable price for isolation.
+
+    * **Nothing WP-623 established regresses.** Tracked-path interference stays isolated in either
+      declaration order; a genuinely failing check still fails with its own `exitCode`; a check over
+      `checkTimeoutMs` is still killed and still reports infraFailed true.
+
+  How you do it is yours: scope the snapshot to paths worth watching, track ignored entries by
+  inventory rather than by content, isolate the check somewhere else entirely, or something better.
+  Say in your step summary which you chose, what it costs, and — explicitly — what it still does NOT
+  cover. Do not solve it by editing any acceptance check, any `.gitignore`, any `tsconfig`, or any
+  dogfood spec — the defect is in the judge.
+
+  Nothing else changes. `CheckRun`'s shape, the `AcceptanceCriterion` contract, the regression-suite
+  path and every LLM-verdict, rubric, completion-review and adjudication semantic are untouched. No
+  new dependency, no provider SDK, no API key. TypeScript stays strict ESM with named exports and no
+  `any`; nothing here runs inside the Temporal workflow, so no replay concern — but do not add
+  nondeterminism to code that does.
+
+  Pin your work with a test that lives in the repo, under packages/sdk-ts/test/judge/. That is where
+  WP-623's guarantees are already pinned (check-isolation.test.ts); extend it or add beside it. A
+  behaviour proved only by the acceptance check that grades this run is not pinned at all (F-356) —
+  the acceptance check is deleted when the run ends, and dogfood-143 shipped exactly that way.
+
+  If an existing test pins a shape this change must alter, update its expectation and say plainly in
+  the step summary that you did — do not delete it, and do not weaken it into a tautology.
+
+  Verify your work with FAST checks only: the package typecheck (tsc with noEmit), eslint over the
+  files you touched, and vitest over only the test files you touched. Do NOT run the full vitest
+  suite inside a step — it does not fit the step time cap (F-345) — this run's declared regression
+  suite plus the judge-executed checks are the trusted full-suite verification whatever your summary
+  says.
+
+repos:
+  - url: /Users/nikitazolotarev/repos/chikory
+    writable: true
+
+# The SDK suite is both the surface this run edits and the gate it must not break.
+# MEASURE it at the launch commit rather than trusting this line (F-342, dogfood-140).
+regression_suite: pnpm --filter @chikory/sdk exec vitest run
+check_timeout_ms: 180000
+
+acceptance_criteria:
+  - id: AC-1
+    description: >
+      THIS CHECK OWNS ITS ORACLE. It drives the two REAL entry points (`runCriteriaChecks` and
+      `collectEvidence`) against a real temp git workspace whose `.gitignore` carries `dist/` and
+      `node_modules/`, seeded with pre-existing ignored content. It pins: a check-created IGNORED
+      artifact is invisible to its sibling at both call sites and gone after the batch; pre-existing
+      ignored content survives BYTE-IDENTICAL (traps A + B); the batch stays wall-clock bounded with a
+      bulky ignored tree present (trap A); honest failure keeps its own exit code and the per-check cap
+      still kills (trap D); and WP-623's tracked-path isolation still holds in either order (trap E).
+    check: |
+      cd packages/sdk-ts && node --input-type=module -e '
+      import {writeFileSync,rmSync} from "node:fs";
+      import {spawnSync} from "node:child_process";
+      import {join} from "node:path";
+      const A=(c,m)=>{if(!c){console.error("FAIL: "+m);process.exit(1);}};
+      const target=join(process.cwd(),"test/judge/ac1-ignored-isolation.generated.test.ts");
+      rmSync(target,{force:true});
+      const SRC=[
+      "import { execFileSync } from \"node:child_process\";",
+      "import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from \"node:fs\";",
+      "import { tmpdir } from \"node:os\";",
+      "import { join } from \"node:path\";",
+      "import { afterEach, beforeEach, describe, expect, it } from \"vitest\";",
+      "",
+      "import { createMemoryArtifactStore } from \"../../src/artifacts/index.js\";",
+      "import { collectEvidence, runCriteriaChecks, type CheckRun } from \"../../src/judge/evidence.js\";",
+      "import type { AcceptanceCriterion } from \"../../src/types.js\";",
+      "",
+      "const LEAK = \"dist/leak.js\";",
+      "const KEEP = \"dist/keep.js\";",
+      "const NM_KEEP = \"node_modules/pre-existing.txt\";",
+      "const KEEP_BYTES = \"pre-existing ignored content, must survive the batch\";",
+      "const TRACKED = \"sibling-scratch.tmp\";",
+      "",
+      "const IGNORED_WRITER: AcceptanceCriterion = {",
+      "  id: \"ignored-writer\",",
+      "  description: \"leaves an artifact under an ignored path\",",
+      "  check: \"mkdir -p dist; printf leak > \" + LEAK,",
+      "};",
+      "const IGNORED_OBSERVER: AcceptanceCriterion = {",
+      "  id: \"ignored-observer\",",
+      "  description: \"must never observe a sibling artifact, ignored or not\",",
+      "  check: \"test ! -e \" + LEAK,",
+      "};",
+      "const TRACKED_WRITER: AcceptanceCriterion = {",
+      "  id: \"tracked-writer\",",
+      "  description: \"WP-623 regression: holds a tracked scratch file, then removes it\",",
+      "  check: \"printf x > \" + TRACKED + \"; sleep 1; rm -f \" + TRACKED,",
+      "};",
+      "const TRACKED_OBSERVER: AcceptanceCriterion = {",
+      "  id: \"tracked-observer\",",
+      "  description: \"WP-623 regression: must not see the tracked scratch file\",",
+      "  check: \"sleep 0.4; test ! -e \" + TRACKED,",
+      "};",
+      "const HONEST_FAILURE: AcceptanceCriterion = {",
+      "  id: \"honest-failure\",",
+      "  description: \"a check that is genuinely wrong still fails, with its own exit code\",",
+      "  check: \"exit 3\",",
+      "};",
+      "const SLOW = (id: string): AcceptanceCriterion => ({",
+      "  id,",
+      "  description: \"exceeds the per-check cap\",",
+      "  check: \"sleep 30\",",
+      "});",
+      "",
+      "const byId = (runs: CheckRun[], id: string): CheckRun => {",
+      "  const hit = runs.find((r) => r.criterionId === id);",
+      "  expect(hit, \"no CheckRun for \" + id).toBeDefined();",
+      "  return hit!;",
+      "};",
+      "",
+      "describe(\"AC-1: check isolation covers writes git does not track (WP-625/F-357)\", () => {",
+      "  let dir: string;",
+      "",
+      "  const git = (args: string[]) => execFileSync(\"git\", args, { cwd: dir, stdio: \"ignore\" });",
+      "",
+      "  beforeEach(() => {",
+      "    dir = mkdtempSync(join(tmpdir(), \"chikory-ac1-ignored-\"));",
+      "    writeFileSync(join(dir, \".gitignore\"), \"dist/\\nnode_modules/\\n\");",
+      "    writeFileSync(join(dir, \"landed.txt\"), \"the delivery under grade\\n\");",
+      "    git([\"init\", \"-q\"]);",
+      "    git([\"config\", \"user.email\", \"test@chikory.local\"]);",
+      "    git([\"config\", \"user.name\", \"test\"]);",
+      "    git([\"add\", \"-A\"]);",
+      "    git([\"commit\", \"-qm\", \"base\"]);",
+      "    // Pre-existing IGNORED content: a build output and a dependency tree. Neither is the",
+      "    // check batch business, and neither may be removed or rewritten by it.",
+      "    mkdirSync(join(dir, \"dist\"), { recursive: true });",
+      "    mkdirSync(join(dir, \"node_modules\"), { recursive: true });",
+      "    writeFileSync(join(dir, KEEP), KEEP_BYTES);",
+      "    writeFileSync(join(dir, NM_KEEP), KEEP_BYTES);",
+      "  });",
+      "",
+      "  afterEach(() => {",
+      "    rmSync(dir, { recursive: true, force: true });",
+      "  });",
+      "",
+      "  const assertPreExistingSurvived = () => {",
+      "    for (const rel of [KEEP, NM_KEEP]) {",
+      "      expect(existsSync(join(dir, rel)), rel + \" was destroyed by the cleanup\").toBe(true);",
+      "      expect(readFileSync(join(dir, rel), \"utf8\"), rel + \" was rewritten\").toBe(KEEP_BYTES);",
+      "    }",
+      "  };",
+      "",
+      "  it(\"runCriteriaChecks: an ignored write is invisible to a sibling, in either order\", async () => {",
+      "    for (const criteria of [",
+      "      [IGNORED_WRITER, IGNORED_OBSERVER, HONEST_FAILURE],",
+      "      [IGNORED_OBSERVER, IGNORED_WRITER, HONEST_FAILURE],",
+      "    ]) {",
+      "      const runs = await runCriteriaChecks({ workspaceDir: dir, criteria });",
+      "      expect(byId(runs, \"ignored-writer\").exitCode).toBe(0);",
+      "      const obs = byId(runs, \"ignored-observer\");",
+      "      expect(obs.exitCode, obs.output).toBe(0);",
+      "      // trap D: isolation must not become leniency.",
+      "      expect(byId(runs, \"honest-failure\").exitCode).toBe(3);",
+      "      // the leak does not outlive the batch, and the pre-existing tree is intact.",
+      "      expect(existsSync(join(dir, LEAK)), \"the ignored leak survived the batch\").toBe(false);",
+      "      assertPreExistingSurvived();",
+      "    }",
+      "  }, 240_000);",
+      "",
+      "  it(\"collectEvidence: the same pair does not interfere on the judge path\", async () => {",
+      "    const base = execFileSync(\"git\", [\"-C\", dir, \"rev-parse\", \"HEAD\"], {",
+      "      encoding: \"utf8\",",
+      "    }).trim();",
+      "    const collected = await collectEvidence({",
+      "      workspaceDir: dir,",
+      "      store: createMemoryArtifactStore(),",
+      "      criteria: [IGNORED_WRITER, IGNORED_OBSERVER, HONEST_FAILURE],",
+      "      sinceCommit: base,",
+      "      criteriaHistory: {},",
+      "      stepSummaries: [],",
+      "    });",
+      "    const obs = byId(collected.checkRuns, \"ignored-observer\");",
+      "    expect(obs.exitCode, obs.output).toBe(0);",
+      "    expect(byId(collected.checkRuns, \"honest-failure\").exitCode).toBe(3);",
+      "    expect(existsSync(join(dir, LEAK))).toBe(false);",
+      "    assertPreExistingSurvived();",
+      "  }, 240_000);",
+      "",
+      "  it(\"the sweep stays cheap with a bulky ignored tree present (trap A)\", async () => {",
+      "    const pkg = join(dir, \"node_modules\", \"bulky\");",
+      "    mkdirSync(pkg, { recursive: true });",
+      "    const payload = \"x\".repeat(4096);",
+      "    for (let i = 0; i < 1500; i += 1) {",
+      "      writeFileSync(join(pkg, \"m\" + i + \".js\"), payload);",
+      "    }",
+      "    const started = Date.now();",
+      "    const runs = await runCriteriaChecks({",
+      "      workspaceDir: dir,",
+      "      criteria: [IGNORED_WRITER, IGNORED_OBSERVER, HONEST_FAILURE],",
+      "    });",
+      "    const elapsed = Date.now() - started;",
+      "    expect(byId(runs, \"ignored-observer\").exitCode).toBe(0);",
+      "    expect(elapsed, \"batch of 3 trivial checks took \" + elapsed + \"ms\").toBeLessThan(30_000);",
+      "    expect(existsSync(join(pkg, \"m0.js\")), \"the bulky tree was deleted\").toBe(true);",
+      "    assertPreExistingSurvived();",
+      "  }, 240_000);",
+      "",
+      "  it(\"WP-623 does not regress: tracked-path isolation, cap, and a clean tree\", async () => {",
+      "    const runs = await runCriteriaChecks({",
+      "      workspaceDir: dir,",
+      "      criteria: [TRACKED_WRITER, TRACKED_OBSERVER, HONEST_FAILURE],",
+      "    });",
+      "    const obs = byId(runs, \"tracked-observer\");",
+      "    expect(obs.exitCode, obs.output).toBe(0);",
+      "    expect(byId(runs, \"honest-failure\").exitCode).toBe(3);",
+      "    expect(existsSync(join(dir, TRACKED))).toBe(false);",
+      "    const status = execFileSync(\"git\", [\"-C\", dir, \"status\", \"--porcelain\"], {",
+      "      encoding: \"utf8\",",
+      "    });",
+      "    expect(status.trim()).toBe(\"\");",
+      "",
+      "    const started = Date.now();",
+      "    const slow = await runCriteriaChecks({",
+      "      workspaceDir: dir,",
+      "      criteria: [SLOW(\"slow-a\"), SLOW(\"slow-b\")],",
+      "      checkTimeoutMs: 2000,",
+      "    });",
+      "    const elapsed = Date.now() - started;",
+      "    for (const id of [\"slow-a\", \"slow-b\"]) {",
+      "      expect(byId(slow, id).infraFailed, id + \" must be killed at the cap\").toBe(true);",
+      "    }",
+      "    expect(elapsed, \"slow batch took \" + elapsed + \"ms\").toBeLessThan(20_000);",
+      "    assertPreExistingSurvived();",
+      "  }, 240_000);",
+      "});",
+      ""].join("\n");
+      writeFileSync(target, SRC);
+      const res=spawnSync("pnpm",["exec","vitest","run",
+        "test/judge/ac1-ignored-isolation.generated.test.ts"],{stdio:"inherit"});
+      rmSync(target,{force:true});
+      A(res.status===0,
+        "an acceptance check must not be able to fail because a sibling check wrote to a path git "+
+        "does not track — at BOTH call sites, in EITHER order — while pre-existing ignored content "+
+        "survives byte-identical, the sweep stays wall-clock bounded over a bulky ignored tree, and "+
+        "everything WP-623 established (tracked isolation, honest exit codes, the per-check cap) "+
+        "still holds. vitest exited "+res.status);
+      console.log("AC-1 OK: a check is insulated from a sibling wherever the sibling wrote");
+      '
+
+  - id: AC-2
+    description: >
+      The delivery compiles as strict TypeScript, the two judge modules it is expected to change are
+      lint-clean, and the whole committed judge test tree passes — including a test that constructs an
+      ignored path. That last clause is a DURABILITY FLOOR, not a proof of correctness: AC-1 carries
+      the whole gating burden for behaviour. It exists because dogfood-143 shipped WP-623 with the
+      suite unchanged at 1495 tests, so nothing in the repo would have caught a revert (F-356).
+    check: |
+      cd packages/sdk-ts && pnpm run typecheck && pnpm exec eslint src/judge/evidence.ts src/judge/hermeticity.ts && test -n "$(grep -rl gitignore test/judge/ || true)" && pnpm exec vitest run test/judge/ && echo "AC-2 OK: strict TS, lint clean, judge tests green, ignored-path coverage lives in the repo"
+
+budget_usd: 20
+max_steps: 6
+
+agent_classes:
+  executor: executor-default
+  judge: judge-default
+
+judge:
+  cadence: 1
+
+# F-322 (dogfood-135): without this, a converged out-of-rubric escalation parks overnight for a
+# human instead of auto-sealing.
+unattended:
+  escalation: seal_resumable_failed
