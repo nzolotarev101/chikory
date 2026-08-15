@@ -286,6 +286,10 @@ export interface CollectEvidenceInput {
 }
 
 export async function collectEvidence(input: CollectEvidenceInput): Promise<CollectedEvidence> {
+  // Workspace diff since the last verdict — committed step work plus whatever
+  // is still uncommitted (the judge runs before the covering checkpoint).
+  const { perRepoDiff, sections } = await collectPerRepoDiffs(input);
+
   const writableRepos = input.workspaceRepos?.filter((repo) => repo.writable) ?? [];
   const reposToSnapshot =
     writableRepos.length > 0
@@ -294,13 +298,11 @@ export async function collectEvidence(input: CollectEvidenceInput): Promise<Coll
         }))
       : [{ dir: input.workspaceDir }];
 
-  // Run repo diff collection and initial workspace snapshotting concurrently
-  const [diffResult, snapshotResults] = await Promise.all([
-    collectPerRepoDiffs(input),
-    Promise.all(reposToSnapshot.map((r) => snapshotWorkspace(r.dir))),
-  ]);
-
-  const { perRepoDiff, sections } = diffResult;
+  // Initial workspace snapshots for check side-effect tracking. Snapshotting runs
+  // after git diff prep so git index operations do not contend on .git/index.lock.
+  const snapshotResults = await Promise.all(
+    reposToSnapshot.map((r) => snapshotWorkspace(r.dir))
+  );
   const diff = sections
     .map((section) => (perRepoDiff ? section.evidenceText : section.diffText))
     .join("\n");
