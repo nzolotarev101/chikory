@@ -309,8 +309,11 @@ export async function collectEvidence(input: CollectEvidenceInput): Promise<Coll
     ),
   );
 
-  // Judge-executed acceptance checks (JD-4) — sequential: checks may share
-  // workspace state (build artifacts, ports).
+  // Judge-executed acceptance checks (JD-4) — MUST remain sequential (WP-623 / F-349):
+  // Checks share the workspace filesystem and ports. Running checks concurrently allows
+  // transient files created by one check (e.g. AC-1) to interfere with whole-workspace
+  // operations in a sibling check (e.g. AC-2 typecheck/build), and races per-check
+  // side-effect cleanup.
   const checkRuns: CheckRun[] = [];
   let regressionSuiteRun: CheckRun | undefined;
 
