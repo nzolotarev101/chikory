@@ -266,4 +266,85 @@ describe("decideLimitPacing (WP-310)", () => {
     expect(decisionMulti.limitingWindow).toBe("weekly");
     expect(decisionMulti.sustainableTokensPerHour).toBeCloseTo(50_000, 0);
   });
+
+  it("neededDelayMs <= 0 under over-sustainable pace returns steady with paceConflict", () => {
+    // Sustainable pace = 10k/h. Observed pace = 60k/h (> 10k/h).
+    // Deadline demands 60 steps × 1000 tokens in 1h = 60k tokens/h.
+    // Target pace = required pace = 60k/h.
+    // Needed step period = 1000 tokens / (60k/h) = 60s.
+    // Mean step duration = 60s.
+    // neededDelayMs = 60s - 60s = 0 <= 0.
+    const decision = decideLimitPacing(
+      burn({
+        windows: [weekly({ capacityTokens: 100_000, resetAtMs: NOW + 10 * HOUR })],
+        horizonDeadlineMs: NOW + HOUR,
+        estimatedRemainingSteps: 60,
+      }),
+    );
+    expect(decision.action).toBe("steady");
+    expect(decision.interStepDelayMs).toBe(0);
+    expect(decision.paceConflict).toBe(true);
+    expect(decision.limitingWindow).toBe("weekly");
+  });
+
+  it("truncates history beyond ESTIMATE_WINDOW when computing mean and observed pace", () => {
+    // 5 older high-burn steps (10,000 tokens each) + 5 recent low-burn steps (1,000 tokens each)
+    const decision = decideLimitPacing(
+      burn({
+        recentStepTokens: [10_000, 10_000, 10_000, 10_000, 10_000, 1000, 1000, 1000, 1000, 1000],
+        recentStepDurationsMs: [60_000, 60_000, 60_000, 60_000, 60_000, 60_000, 60_000, 60_000, 60_000, 60_000],
+        windows: [weekly({ capacityTokens: 1_300_000, resetAtMs: NOW + 10 * HOUR })],
+      }),
+    );
+    // Should evaluate based on last 5 steps (mean = 1,000 tokens, observed = 60k/h)
+    expect(decision.observedTokensPerHour).toBeCloseTo(60_000, 0);
+    expect(decision.action).toBe("push");
+  });
+
+  it("preserves limitingWindow when observed tokens per hour is zero and known window exists", () => {
+    const decision = decideLimitPacing(
+      burn({
+        recentStepTokens: [0, 0, 0, 0, 0],
+        windows: [weekly({ capacityTokens: 100_000, resetAtMs: NOW + 10 * HOUR })],
+      }),
+    );
+    expect(decision.action).toBe("push");
+    expect(decision.observedTokensPerHour).toBe(0);
+    expect(decision.limitingWindow).toBe("weekly");
+  });
+
+  it("predict-limit reports paceConflict when remaining tokens blow window and deadline demands higher pace", () => {
+    // Sustainable = 5k/h.
+    // Capacity remaining = 500 tokens (< next step mean of 1000 tokens) => predict-limit.
+    // Deadline demands 30 steps × 1000 tokens in 1h = 30k/h (> 5k/h).
+    const decision = decideLimitPacing(
+      burn({
+        windows: [weekly({ capacityTokens: 10_000, consumedTokens: 9_500, resetAtMs: NOW + 10 * HOUR })],
+        horizonDeadlineMs: NOW + HOUR,
+        estimatedRemainingSteps: 30,
+      }),
+    );
+    expect(decision.action).toBe("predict-limit");
+    expect(decision.paceConflict).toBe(true);
+    expect(decision.limitingWindow).toBe("weekly");
+  });
+
+  it("predict-limit triggers when minRemainingTokens is from a non-limiting window", () => {
+    // Window 1 (rolling-5h): capacity 100_000, reset in 10,000h => sustainable = 10 tokens/h.
+    // Window 2 (weekly): capacity 1_000_000, consumed 999_950, reset in 1h => sustainable = 50 tokens/h.
+    // limitingWindow is rolling-5h (10 tokens/h < 50 tokens/h).
+    // minRemainingTokens is 50 (from weekly).
+    // Next step mean is 1,000 tokens (> minRemainingTokens 50).
+    const decision = decideLimitPacing(
+      burn({
+        windows: [
+          { window: "rolling-5h", windowMs: 5 * HOUR, capacityTokens: 100_000, consumedTokens: 0, resetAtMs: NOW + 10_000 * HOUR },
+          weekly({ capacityTokens: 1_000_000, consumedTokens: 999_950, resetAtMs: NOW + HOUR }),
+        ],
+      }),
+    );
+    expect(decision.action).toBe("predict-limit");
+    expect(decision.limitingWindow).toBe("rolling-5h");
+    expect(decision.predictedResetAtMs).toBe(NOW + 10_000 * HOUR);
+  });
 });
