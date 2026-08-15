@@ -76,7 +76,7 @@ import {
 import { decideRejection, DEFAULT_MAX_REJECTION_STRIKES } from "./rejection.js";
 import { decideHealRollback } from "./heal-rollback.js";
 import { hasDestructiveRubricFailure } from "../judge/verdict.js";
-import { DETERMINISTIC_RUBRIC_IDS } from "../judge/rubric.js";
+import { DETERMINISTIC_RUBRIC_IDS, isRubricItemSettledAgainstWholeDelivery } from "../judge/rubric.js";
 
 import {
   buildCompletionReviewBrief,
@@ -265,7 +265,14 @@ export async function agentLoop(spec: TaskSpec): Promise<RunStatus> {
   let completionReviewAttempts = 0;
   // Standing findings from earlier passes (both rubric failures and free-text concerns)
   // that survive across intervening clean passes until adjudicated at completion review.
-  const standingFindings: string[] = [];
+  // Rubric findings are keyed by rubric ID so whole-delivery machine-settled items can be cleared,
+  // while model-judged findings and free-text concerns persist until completion review.
+  const standingRubricFindings = new Map<string, string>();
+  const standingConcerns: string[] = [];
+  const getStandingFindings = (): string[] => [
+    ...standingRubricFindings.values(),
+    ...standingConcerns,
+  ];
 
   setHandler(cancelSignal, () => {
     cancelRequested = true;
@@ -403,6 +410,7 @@ export async function agentLoop(spec: TaskSpec): Promise<RunStatus> {
     sealingDiffBase: string,
     escalationConcerns: string[] = [],
   ): Promise<RunStatus | undefined> {
+    const standingFindings = getStandingFindings();
     const allConcerns = Array.from(new Set([...standingFindings, ...escalationConcerns]));
     const hasConcerns = allConcerns.length > 0;
     const hasRegressionSuite = Boolean(spec.regressionSuite);
@@ -1131,17 +1139,19 @@ export async function agentLoop(spec: TaskSpec): Promise<RunStatus> {
       lastVerdict = { kind: verdict.kind, atStep: stepIndex - 1 };
 
       // Collect standing findings from this judge pass (both rubric failures and concerns).
+      // A rubric row settled against the whole delivery (e.g. tests_pass backed by check commands)
+      // clears any standing finding for that rubric id when it passes; model-judged rows and
+      // free-text concerns persist.
       for (const fail of verdict.form.rubricResults) {
         if (!fail.pass) {
-          const entry = `${fail.id}: ${fail.justification}`;
-          if (!standingFindings.includes(entry)) {
-            standingFindings.push(entry);
-          }
+          standingRubricFindings.set(fail.id, `${fail.id}: ${fail.justification}`);
+        } else if (isRubricItemSettledAgainstWholeDelivery(fail.id, spec)) {
+          standingRubricFindings.delete(fail.id);
         }
       }
       for (const concern of verdict.form.concerns) {
-        if (concern && !standingFindings.includes(concern)) {
-          standingFindings.push(concern);
+        if (concern && !standingConcerns.includes(concern)) {
+          standingConcerns.push(concern);
         }
       }
 
@@ -1248,9 +1258,10 @@ export async function agentLoop(spec: TaskSpec): Promise<RunStatus> {
         if (acceptanceCriteriaMet) {
           // Run-completion holistic review: one judge pass over the CUMULATIVE
           // diff (run base → final state) before sealing.
+          const currentStandingFindings = getStandingFindings();
           const sealingRubricFails = verdict.form.rubricResults.filter((r) => !r.pass);
           const sealingVerdictHasRubricFailures = sealingRubricFails.length > 0;
-          const hasStanding = standingFindings.length > 0;
+          const hasStanding = currentStandingFindings.length > 0;
           const review = decideCompletionReview({
             sealingDiffBase,
             baseCommit,
@@ -1270,7 +1281,7 @@ export async function agentLoop(spec: TaskSpec): Promise<RunStatus> {
               sinceCommit: baseCommit,
               completionReview: true,
               lastGoodCheckpointId,
-              ...(hasStanding ? { escalationConcerns: standingFindings } : {}),
+              ...(hasStanding ? { escalationConcerns: currentStandingFindings } : {}),
             });
             spentUsd += reviewVerdict.costUsd;
             const designFails = mergeDesignFindings(

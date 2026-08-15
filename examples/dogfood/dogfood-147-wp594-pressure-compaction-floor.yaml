@@ -1,0 +1,388 @@
+# Plain: when a run's context is filling up fast, the system is supposed to shrink what it is
+# carrying around so it does not run out of room. Right now that shrinking only happens once a
+# run has racked up a pile of history — a SHORT run under real pressure never has enough history
+# to trigger it, so the safety mechanism is a no-op exactly when it is needed most, and nothing
+# else steps in to help. After this run, a short run under sustained pressure must actually shrink
+# what it is carrying (or the mechanism responsible must be measurably touched), not sail past its
+# budget with its only defense structurally unable to fire.
+# WP: WP-594 (token-window pressure cannot fold below the `keepLastN` floor, F-272)
+# Ladder-rung: 0 (off-ladder — see WHY; the remaining rung-5 half is WP-304, not agent-runnable)
+# Thesis-KPI: context-rot mitigation under real pressure (CM-1). MEASURED harm (dogfood-125,
+#   run-f3d47cf8-…): trace footer read "pressure fired for 3 step(s), but no pacing folds were
+#   recorded" while utilization climbed 75% → 87% → 97% → 106% — the run's ONLY context-rot
+#   mitigation was structurally unavailable for its entire horizon.
+# Format: loose — the outcome and the named observables are fixed, the mechanism is the executor.
+#
+# Launch mode: RUN (single node — one deliverable, one seam).
+#   CHIKORY_PREFLIGHT_ONLY=1 devbox run run-dogfood
+#   devbox run run-dogfood
+#
+# WHY THIS AND NOT THE LADDER RUNG (dogfood-146 review, 2026-08-15):
+#   `scripts/dogfood-progression.sh` reads ⛔ STALLED, so the binding rule wants the current phase
+#   ladder rung (P3-rung-5, WP-530 §7) as the next headline. It is not runnable as a dogfood headline
+#   — unchanged since dogfood-139: rung-5's remaining half (WP-304's OpenHands arm + a corpus wide
+#   enough to separate 19 requirements at 95%) is a quota-bound multi-hour suite the OPERATOR runs
+#   by hand (dogfood-122's lesson). No spec can headline it.
+#   Among runnable candidates, WP-599 (F-288, a judge concern dropped alongside a rubric failure)
+#   was the plan.md-QUEUED default coming into this review. **It is now STALE — RE-MEASURED at this
+#   arming pass, not merely re-read:** a throwaway probe (`test/runner/wp599-probe.test.ts`, deleted
+#   after use, not part of this spec's delivery) drove the EXACT dogfood-129 shape live against
+#   current HEAD — a converging pass with a rubric failure (`design_serves_overall_goal`) AND a
+#   free-text concern together, the completion review upholding the finding. MEASURED: the concern
+#   text reached the review request (`"Out-of-rubric concerns"` section present, the probe's marker
+#   string present verbatim), and the run correctly sealed **FAILED**, not the wrongful SUCCESS
+#   dogfood-129 hit. WP-601 (unconditional per-pass concern collection) + WP-627 (a sealing-pass
+#   design finding always earns a bounded repair or seals FAILED, never SUCCESS-regardless) already
+#   close the correctness harm WP-599 was written against, as a side effect neither WP was written
+#   to fix. The one residual — `verdict.ts`'s Rule-2 rationale string still does not inline the
+#   concern text (visible only via the raw journaled form / `chikory trace --step n`) — is cosmetic,
+#   not a correctness defect, and is not worth a headline run. See `## NEXT RUN`-equivalent note in
+#   `docs/reports/dogfood-146.md` for the full probe transcript; plan.md's WP-599 row is corrected
+#   in this same review's landing commit.
+#   WP-594 wins instead: it is REAL, UNCHANGED since its own discovery (`src/runner/activities.ts`
+#   lines 2280-2288 and `src/runner/compaction.ts:21-22` are byte-identical to the dogfood-125
+#   measurement — confirmed by direct read at this arming pass, not assumed), it sits on a NAMED
+#   CLAUDE.md thesis pillar ("context rot: model perf degrades over long sessions; first-class
+#   mitigation required"), and it is real product code with real blast radius (a policy change on
+#   the context-rot path), which is exactly the failure-surface shape a headline run should have.
+#
+# THE MEASURED PREMISE (measured on this tree 2026-08-15; do not re-litigate):
+#   * `DEFAULT_COMPACTION_POLICY = { triggerAfterSteps: 8, keepLastN: 5 }` (`src/runner/activities.ts:133-136`).
+#   * Under context-window pressure (`pacing.action !== "continue"`), `compactContext` is called with
+#     `underPressure: true` (`src/workflow/agent-loop.ts:1017`, `:1082-1086`, `:1190-1194`), and the
+#     activity swaps in a policy of `{ triggerAfterSteps: keepLastN, keepLastN: keepLastN }` — i.e.
+#     BOTH fields collapse to the SAME constant, 5 (`src/runner/activities.ts:2280-2288`).
+#   * `planCompaction` (`src/runner/compaction.ts:21-22`, itself unchanged and untouched by this WP)
+#     returns an EMPTY fold (`{ keepVerbatim: [...summaries], toDigest: [] }`) whenever
+#     `summaries.length <= policy.keepLastN`. With the pressure policy's `keepLastN` fixed at 5, ANY
+#     run whose recall tier has not yet grown past 5 summaries gets a no-op fold from the pressure
+#     path — REGARDLESS of how much pressure the pacing decision reports.
+#   * MEASURED on `run-f3d47cf8-6d56-4c7b-85d1-fcfe185badef` (dogfood-125): pacing reported `compact`
+#     repeatedly while utilization climbed 75% → 87% → 97% → 106%, and `pressureFoldGapWarning`
+#     (`src/runner/compaction-pressure.ts:52-56`) fired ("pressure fired for 3 step(s), but no pacing
+#     folds were recorded") because the run's recall tier never exceeded 4 summaries in its 4 steps.
+#   * `park` (the OTHER pacing action) fires only when a SINGLE step's own estimated tokens exceed
+#     the whole window (`decideContextWindowPacing`, `src/runner/pacing.ts:93-101`) — sustained
+#     `compact` pressure across many steps is the NORMAL, common case this bug lives in, not an edge
+#     case.
+#   * The suite this run must not break, MEASURED at the launch commit (F-342 — run
+#     `pnpm --filter @chikory/sdk exec vitest run` yourself and read its own tail): at this review it
+#     stood at 190 files / 1,517 tests (1,494 passed | 23 skipped) in 60.82 s.
+#   * The `unattended:` block below is not decoration (F-322).
+#
+# Designed traps — the plausible-but-wrong deliveries the acceptance criteria exist to reject:
+#   A. **Widen the window instead of lowering the floor.** Raising `contextWindowTokens` or
+#      `compactAtFraction` makes pacing stop reporting `compact` — the pressure signal goes away
+#      instead of being honored. AC-1 pins that at least 3 of the 4 pacing decisions still read
+#      `compact` AND a fold still happened; AC-2 pins `DEFAULT_PACING_POLICY.compactAtFraction`
+#      byte-unchanged.
+#   B. **Lower `DEFAULT_COMPACTION_POLICY.keepLastN`/`triggerAfterSteps` globally.** This "fixes" the
+#      pressure path by breaking the UNPRESSURED default for every run, including ones with no
+#      window problem at all — not what this WP asks for. AC-2 pins the two constants unchanged.
+#   C. **Force `keepLastN: 0` under pressure**, folding away literally everything including the
+#      step just produced — a short-horizon run would lose the immediate continuity it needs to
+#      keep going. Not mechanically pinned (no AC can see `keepVerbatim` from the journal), but
+#      the goal states it as a hard constraint and the judge's `design_serves_overall_goal` /
+#      `no_unrelated_deletions` rubric, plus this review's own human read of the diff, are the
+#      backstop — flag it explicitly if you see it.
+#   D. **Escalate to a park instead of folding.** A valid alternative per the original finding, but
+#      NOT what this spec measures — parking is a bigger unattended-policy interaction with its own
+#      blast radius, deliberately deferred. AC-1 requires the run to reach terminal SUCCESS via
+#      folding, not via a park/suspend detour.
+#   E. **Fix it only in `planCompaction` and leave the pressure POLICY construction untouched.**
+#      `planCompaction` itself is correct — the bug is entirely in what policy `activities.ts`
+#      builds under pressure. A delivery that edits `compaction.ts`'s guard condition instead of
+#      the pressure-policy construction has moved the bug, not fixed it, and is likely to break
+#      the UNPRESSURED path (trap B's failure mode from a different file).
+#
+# NOT IN SCOPE: WP-599/F-288 (RE-MEASURED STALE this review, see WHY above — do not touch
+#   `src/judge/verdict.ts` Rule 4); the count-based trigger's own threshold; the digest LLM call or
+#   its prompt (`src/runner/compaction-prompt.ts`); `pacing.ts`'s thresholds
+#   (`compactAtFraction`/the park condition) — those are the SIGNAL, this WP is about what the signal
+#   is allowed to DO; chain semantics; the rubric item set; the TaskSpec contract.
+
+name: dogfood-147-wp594-pressure-compaction-floor
+wp: WP-594
+goal: >
+  A run under SUSTAINED context-window pressure (the pacing decision keeps reporting `compact`)
+  must be able to fold its resident context even when it has fewer step summaries than the
+  default `keepLastN` floor (5). Today it cannot: the pressure path swaps in a policy whose
+  `keepLastN` is the SAME constant as its `triggerAfterSteps` (both 5), so planCompaction's own
+  summaries.length <= keepLastN guard makes every pressure-triggered fold attempt a no-op below
+  that floor — exactly the run shape (short, but tight on window) that most needs the mitigation.
+
+  Make this true: a run whose recall tier has NOT yet reached 5 summaries, but whose pacing
+  decision has reported `compact` on every step so far, must still see a compaction fold happen
+  — a `compaction` journal row with `trigger: "pacing"` and a populated `digestRef` — before the
+  run reaches its terminal step. The fold must come from folding SOMETHING below today's floor,
+  not from making the pressure signal go away (do not widen `contextWindowTokens` or
+  `compactAtFraction`, and do not touch `pacing.ts`'s decision logic at all — the signal is
+  correct today, only the response to it is broken).
+
+  Hold this line: the UNPRESSURED path is untouched. A run with no window problem must keep
+  folding exactly as it does today — on the count-based `triggerAfterSteps` cadence, with the
+  same `DEFAULT_COMPACTION_POLICY` constants (`triggerAfterSteps: 8`, `keepLastN: 5`). The fix
+  belongs in what policy the PRESSURE PATH constructs (`src/runner/activities.ts` — the
+  underPressure branch of `compactContext`), not in planCompaction itself
+  (`src/runner/compaction.ts`, which is correct and should not need to change) and not in the
+  two `DEFAULT_COMPACTION_POLICY` constants (which govern the unpressured default too).
+
+  Hold this line too: never fold away the step JUST produced. Whatever lower floor the pressure
+  path uses, at least the single most-recent summary must stay verbatim — a fold that empties
+  keepVerbatim entirely would trade context-rot for context-amnesia on the very next step. Say
+  in your step summary what floor you chose under pressure and why it is not zero.
+
+  How you do it is yours: a fixed smaller pressure `keepLastN` (e.g. always fold down to 1 or 2
+  verbatim under sustained pressure), a floor that shrinks progressively with how long pressure
+  has persisted, or something else that respects the two lines above — pick one, defend it in one
+  sentence in your step summary, and do not invent a THIRD DEFAULT_COMPACTION_POLICY-shaped
+  constant duplicated in two places.
+
+  Nothing else changes. `pacing.ts`'s decision logic and thresholds, the digest LLM call and its
+  prompt, the count-based cadence, the rubric item set, the judge charter, the TaskSpec contract
+  and every chain semantic are untouched. TypeScript stays strict ESM with named exports and no
+  `any`. This code runs inside the Temporal workflow and its activities: keep the workflow side
+  deterministic — no clocks, no randomness, no I/O outside activities (the existing split between
+  `agent-loop.ts` and `activities.ts` already draws this line; keep drawing it there).
+
+  Pin your work with a test that lives in the repo, under `test/runner/`, beside
+  `compaction-wiring.test.ts`. A behaviour proved only by the acceptance check that grades this run
+  is not pinned at all (F-356), and a repo test copied verbatim from that check inherits its blind
+  spots (F-360) — cover something the grading check does not (for example: the UNPRESSURED path
+  still folding on the count cadence with the constants untouched, which AC-1 does not exercise).
+
+  If an existing test pins a shape this change must alter, update its expectation and say plainly
+  in the step summary that you did — do not delete it, and do not weaken it into a tautology.
+  `compaction-wiring.test.ts`'s two existing tests (the count-cadence fold, and the 7-step pressure
+  fold that ALREADY exceeds the keepLastN floor) must both stay green unmodified — they exercise
+  the ABOVE-floor case, which this WP does not change.
+
+  Verify your work with FAST checks only: the package typecheck (tsc with noEmit), eslint over the
+  files you touched, and vitest over only the test files you touched. Do NOT run the full vitest
+  suite inside a step — it does not fit the step time cap (F-345) — this run's declared regression
+  suite plus the judge-executed checks are the trusted full-suite verification whatever your
+  summary says.
+
+repos:
+  - url: /Users/nikitazolotarev/repos/chikory
+    writable: true
+
+# The SDK suite is both the surface this run edits and the gate it must not break.
+# MEASURE it at the launch commit rather than trusting this line (F-342, dogfood-140).
+regression_suite: pnpm --filter @chikory/sdk exec vitest run
+check_timeout_ms: 180000
+
+acceptance_criteria:
+  - id: AC-1
+    description: >
+      THIS CHECK OWNS ITS ORACLE. It drives the REAL agent loop end to end — real Temporal dev
+      server, real workflow bundle, real pacing decision, real compactContext activity, scripted
+      executor, fake judge wire — over a 4-step run tuned so the recall tier tops out at 4
+      summaries (below today's keepLastN=5 floor) while `debug.contextWindowTokens: 40` keeps the
+      pacing decision reporting `compact` on every step (never `park`, which needs a single
+      oversized step estimate, not accumulated pressure) and the count-based trigger
+      (`triggerAfterSteps: 8`) stays structurally unreachable in 4 steps. On HEAD this run
+      completes SUCCESS with the pacing log showing `compact` on 3 of its 4 steps (MEASURED: step 0
+      is legitimately `continue` — nothing has accumulated yet — steps 1-3 are `compact` at 87.5%,
+      102.5%, 117.5% utilization) and ZERO compaction rows — pressure fired repeatedly and folded
+      nothing (F-272, MEASURED dogfood-125). The fix must show `compaction` rows with
+      `trigger: "pacing"` and a `digestRef`, while at least 3 of the 4 pacing decisions still read
+      `compact` (trap A: a fix that widens the window instead would show `continue` throughout and
+      is rejected here, not by the mechanism disappearing). AC-2 additionally pins
+      `DEFAULT_PACING_POLICY.compactAtFraction` byte-unchanged.
+    check: |
+      cd packages/sdk-ts && node --input-type=module -e '
+      import {writeFileSync,rmSync} from "node:fs";
+      import {spawnSync} from "node:child_process";
+      import {join} from "node:path";
+      const A=(c,m)=>{if(!c){console.error("FAIL: "+m);process.exit(1);}};
+      const target=join(process.cwd(),"test/runner/ac1-pressure-floor.generated.test.ts");
+      rmSync(target,{force:true});
+      const SRC=[
+      "import { randomUUID } from \"node:crypto\";",
+      "import { mkdtemp, rm } from \"node:fs/promises\";",
+      "import { tmpdir } from \"node:os\";",
+      "import { join } from \"node:path\";",
+      "",
+      "import { afterEach, describe, expect, inject, test } from \"vitest\";",
+      "",
+      "import {",
+      "  createRunnerWorker,",
+      "  createTemporalRunner,",
+      "  Journal,",
+      "  journalPath,",
+      "  type RunStatusReport,",
+      "} from \"../../src/index.js\";",
+      "import {",
+      "  initSourceRepo,",
+      "  judgeForm,",
+      "  makeJudgedSpec,",
+      "  scriptedRegistry,",
+      "  startFakeJudgeWire,",
+      "  TERMINAL_STATUSES,",
+      "  waitFor,",
+      "} from \"./helpers.js\";",
+      "",
+      "const address = inject(\"temporalAddress\");",
+      "const bundlePath = inject(\"workflowBundlePath\");",
+      "",
+      "describe(\"AC-1 WP-594/F-272: pressure-triggered compaction must fold below the default keepLastN floor\", () => {",
+      "  const cleanups: Array<() => Promise<void>> = [];",
+      "  afterEach(async () => {",
+      "    while (cleanups.length > 0) await cleanups.pop()!();",
+      "  });",
+      "",
+      "  test(\"the Temporal substrate is present — this AC must never pass vacuously\", () => {",
+      "    expect(address, \"temporalAddress was not provided\").not.toBeNull();",
+      "    expect(bundlePath, \"workflowBundlePath was not provided\").not.toBeNull();",
+      "  });",
+      "",
+      "  test(\"a 4-step run under sustained compact pressure, with fewer summaries than keepLastN, still folds\", async () => {",
+      "    const tmp = await mkdtemp(join(tmpdir(), \"chikory-wp594-\"));",
+      "    cleanups.push(() => rm(tmp, { recursive: true, force: true }));",
+      "    const repoUrl = await initSourceRepo(join(tmp, \"src\"));",
+      "    const dataDir = join(tmp, \"data\");",
+      "    const taskQueue = \"tq-\" + randomUUID();",
+      "",
+      "    const wire = await startFakeJudgeWire([judgeForm({ criteria: { \"AC-1\": true } })], {",
+      "      digestContent: \"FOLDED DIGEST: pressure-triggered fold under a short horizon.\",",
+      "    });",
+      "    cleanups.push(() => wire.close());",
+      "",
+      "    const worker = await createRunnerWorker({",
+      "      adapters: scriptedRegistry,",
+      "      address: address!,",
+      "      taskQueue,",
+      "      dataDir,",
+      "      workflowBundlePath: bundlePath!,",
+      "      routerOptions: { baseUrls: { \"openai-compat\": wire.url } },",
+      "    });",
+      "    const workerDone = worker.run();",
+      "    const runner = createTemporalRunner({ address: address!, taskQueue, dataDir });",
+      "    cleanups.push(async () => {",
+      "      worker.shutdown();",
+      "      await workerDone;",
+      "      await runner.close();",
+      "    });",
+      "",
+      "    const spec = makeJudgedSpec({",
+      "      repoUrl,",
+      "      cadence: 4,",
+      "      maxSteps: 4,",
+      "      pacing: { mode: \"auto\" },",
+      "      debug: { contextWindowTokens: 40 },",
+      "      routing: {",
+      "        stages: {",
+      "          plan: { provider: \"anthropic\", model: \"claude-fable-5\" },",
+      "          code: { provider: \"anthropic\", model: \"claude-fable-5\" },",
+      "          review: { provider: \"openai-compat\", model: \"fake-review\" },",
+      "          judge: { provider: \"openai-compat\", model: \"fake-judge\" },",
+      "        },",
+      "      },",
+      "    });",
+      "",
+      "    const handle = await runner.start(spec);",
+      "    const report = await waitFor<RunStatusReport>(",
+      "      async () => {",
+      "        const r = await handle.status();",
+      "        return TERMINAL_STATUSES.includes(r.status) ? r : undefined;",
+      "      },",
+      "      { what: \"short pressure-compaction run to reach a terminal status\" },",
+      "    );",
+      "    expect(report.status).toBe(\"SUCCESS\");",
+      "",
+      "    const journal = new Journal(journalPath(dataDir, handle.runId));",
+      "    try {",
+      "      const pacingEntries = journal.entries(\"pacing\").map((e) => e.payload as { action?: string });",
+      "      expect(pacingEntries.length).toBeGreaterThan(0);",
+      "      const compactCount = pacingEntries.filter((p) => p.action === \"compact\").length;",
+      "      expect(",
+      "        compactCount,",
+      "        \"fewer than 3 of the 4 steps reported compact pressure — trap A: the window was widened so pressure went away instead of the floor being lowered (AC-2 also pins compactAtFraction byte-unchanged)\",",
+      "      ).toBeGreaterThanOrEqual(3);",
+      "",
+      "      const compactions = journal.entries(\"compaction\");",
+      "      expect(",
+      "        compactions.length,",
+      "        \"a run under SUSTAINED pressure with fewer summaries than the default keepLastN floor folded nothing — the pressure signal is decorative below the floor (F-272)\",",
+      "      ).toBeGreaterThan(0);",
+      "      const pacingFold = compactions.find(",
+      "        (e) => (e.payload as { trigger?: string }).trigger === \"pacing\",",
+      "      );",
+      "      expect(pacingFold, \"a fold happened but was not attributed to pressure\").toBeDefined();",
+      "      expect(",
+      "        (pacingFold!.payload as { digestRef?: unknown }).digestRef,",
+      "        \"a compaction row with nothing folded into it\",",
+      "      ).toBeDefined();",
+      "    } finally {",
+      "      journal.close();",
+      "    }",
+      "  }, 300_000);",
+      "});",
+      ""].join("\n");
+      writeFileSync(target, SRC);
+      const res=spawnSync("pnpm",["exec","vitest","run",
+        "test/runner/ac1-pressure-floor.generated.test.ts"],{stdio:"inherit"});
+      rmSync(target,{force:true});
+      A(res.status===0,
+        "a run under SUSTAINED compact pressure with FEWER summaries than the default keepLastN "+
+        "floor must still fold — a compaction row with trigger:pacing and a digestRef — "+
+        "while every pacing decision in the run keeps reporting compact (the signal was not made "+
+        "to disappear). vitest exited "+res.status);
+      console.log("AC-1 OK: pressure-triggered compaction folds below the default keepLastN floor");
+      '
+
+  - id: AC-2
+    description: >
+      The delivery compiles as strict TypeScript, the modules it is expected to change are
+      lint-clean, the WHOLE committed `test/runner/` tree passes, and that tree has GROWN. The two
+      `DEFAULT_COMPACTION_POLICY` constants (`triggerAfterSteps: 8`, `keepLastN: 5`) must be
+      BYTE-UNCHANGED — trap B (lowering the global default instead of the pressure-path policy)
+      is rejected here even if AC-1 happened to still pass under it. The growth floor is a
+      DURABILITY floor, not a proof of correctness — AC-1 carries the whole gating burden for
+      behaviour. MEASURED baseline at the launch commit: 55 files / 388 tests in `test/runner/`.
+    check: |
+      cd packages/sdk-ts || exit 1
+      pnpm run typecheck || { echo "AC-2 FAIL: strict typecheck is red"; exit 1; }
+      pnpm exec eslint src/runner/activities.ts src/runner/compaction.ts || { echo "AC-2 FAIL: eslint is red on the modules this WP touches"; exit 1; }
+      if ! grep -q "triggerAfterSteps: 8," src/runner/activities.ts || ! grep -q "keepLastN: 5," src/runner/activities.ts; then
+        echo "AC-2 FAIL: DEFAULT_COMPACTION_POLICY changed — trap B (the unpressured default must stay triggerAfterSteps:8, keepLastN:5)"
+        exit 1
+      fi
+      if ! grep -q "compactAtFraction: 0.8" src/workflow/agent-loop.ts; then
+        echo "AC-2 FAIL: DEFAULT_PACING_POLICY.compactAtFraction changed — pacing.ts's decision logic and thresholds are NOT IN SCOPE; the pressure signal itself must stay untouched, only what folds in response to it may change"
+        exit 1
+      fi
+      OUT=$(pnpm exec vitest run test/runner/ 2>&1)
+      ST=$?
+      echo "$OUT" | tail -30
+      if [ "$ST" -ne 0 ]; then
+        echo "AC-2 FAIL: the committed test/runner tree is RED (vitest exited $ST). If compaction-wiring.test.ts failed, you likely touched the UNPRESSURED or above-floor path — both existing tests there must stay green unmodified."
+        exit 1
+      fi
+      N=$(echo "$OUT" | grep -oE "Tests +[0-9]+ passed" | grep -oE "[0-9]+" | head -1)
+      echo "committed test/runner tests: ${N:-UNPARSEABLE} (floor 391, measured baseline 388)"
+      if [ -z "$N" ]; then
+        echo "AC-2 FAIL: could not read a test count out of the vitest summary"
+        exit 1
+      fi
+      if [ "$N" -lt 391 ]; then
+        echo "AC-2 FAIL: durability floor not met — the committed runner tree did not grow by 3 tests. A behaviour proved only by the generated grading check is not pinned at all (F-356), and a repo test transcribed from it inherits its blind spots (F-360)."
+        exit 1
+      fi
+      echo "AC-2 OK: strict TS, lint clean, defaults untouched, the committed runner tree is green AND larger"
+
+budget_usd: 20
+max_steps: 6
+
+agent_classes:
+  executor: executor-default
+  judge: judge-default
+
+judge:
+  cadence: 1
+
+# F-322 (dogfood-135): without this, a converged out-of-rubric escalation parks overnight for a
+# human instead of auto-sealing.
+unattended:
+  escalation: seal_resumable_failed

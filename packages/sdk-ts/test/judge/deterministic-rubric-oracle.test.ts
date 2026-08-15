@@ -3,9 +3,12 @@ import {
   COMPLETION_REVIEW_RUBRIC,
   computeVerdict,
   DETERMINISTIC_RUBRIC_IDS,
+  isRubricItemSettledAgainstWholeDelivery,
   parseTaskSpec,
+  RUBRIC_DESIGN_SERVES_OVERALL_GOAL,
   RUBRIC_PRE_EXISTING_SUITE_GREEN,
   RUBRIC_PRE_EXISTING_SUITE_GREEN_ITEM,
+  RUBRIC_TESTS_PASS,
   scanDiffForLayeringViolations,
   STANDING_RUBRIC,
 } from "../../src/index.js";
@@ -448,4 +451,56 @@ index 123456..789012 100644
       expect(codeRedRow.form.rubricResults[0]!.justification).toContain("exited 1");
     }
   });
+
+  describe("isRubricItemSettledAgainstWholeDelivery", () => {
+    it("returns true for tests_pass when acceptance criteria contain non-empty check commands", () => {
+      expect(
+        isRubricItemSettledAgainstWholeDelivery(RUBRIC_TESTS_PASS, {
+          acceptanceCriteria: [{ check: "npm test" }],
+        }),
+      ).toBe(true);
+      expect(
+        isRubricItemSettledAgainstWholeDelivery(RUBRIC_TESTS_PASS, {
+          acceptanceCriteria: [{ check: "" }, { check: "test -f foo" }],
+        }),
+      ).toBe(true);
+    });
+
+    it("returns false for tests_pass when criteria have no check commands or empty checks", () => {
+      expect(isRubricItemSettledAgainstWholeDelivery(RUBRIC_TESTS_PASS, {})).toBe(false);
+      expect(
+        isRubricItemSettledAgainstWholeDelivery(RUBRIC_TESTS_PASS, {
+          acceptanceCriteria: [{ check: "" }, { check: "   " }],
+        }),
+      ).toBe(false);
+      expect(
+        isRubricItemSettledAgainstWholeDelivery(RUBRIC_TESTS_PASS, {
+          acceptanceCriteria: [{}],
+        }),
+      ).toBe(false);
+    });
+
+    it("returns false for model-judged or diff-scoped items regardless of criteria checks", () => {
+      const specWithChecks = { acceptanceCriteria: [{ check: "npm test" }] };
+      expect(
+        isRubricItemSettledAgainstWholeDelivery(
+          RUBRIC_DESIGN_SERVES_OVERALL_GOAL,
+          specWithChecks,
+        ),
+      ).toBe(false);
+      expect(
+        isRubricItemSettledAgainstWholeDelivery("no_unrelated_deletions", specWithChecks),
+      ).toBe(false);
+      expect(
+        isRubricItemSettledAgainstWholeDelivery("scope_matches_instruction", specWithChecks),
+      ).toBe(false);
+      expect(
+        isRubricItemSettledAgainstWholeDelivery("no_architecture_violations", specWithChecks),
+      ).toBe(false);
+      expect(
+        isRubricItemSettledAgainstWholeDelivery("no_secrets_introduced", specWithChecks),
+      ).toBe(false);
+    });
+  });
 });
+

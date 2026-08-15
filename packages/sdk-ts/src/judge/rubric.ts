@@ -125,3 +125,24 @@ export const COMPLETION_REVIEW_RUBRIC: RubricItem[] = [
     destructive: false,
   },
 ];
+
+/**
+ * Determines whether a rubric item's pass/fail status is settled against the whole
+ * delivery (e.g. re-derived by executing check commands against the whole repository tree)
+ * rather than judged from an incremental diff.
+ */
+export function isRubricItemSettledAgainstWholeDelivery(
+  rubricId: string,
+  spec: { acceptanceCriteria?: ReadonlyArray<{ check?: string }> },
+): boolean {
+  if (rubricId === RUBRIC_TESTS_PASS) {
+    return (
+      spec.acceptanceCriteria !== undefined &&
+      spec.acceptanceCriteria.some(
+        (c) => typeof c.check === "string" && c.check.trim().length > 0,
+      )
+    );
+  }
+  return false;
+}
+
