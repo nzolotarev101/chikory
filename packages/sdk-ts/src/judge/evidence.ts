@@ -252,6 +252,10 @@ export async function runCriteriaChecks(input: {
   };
 
   try {
+    // Note: Acceptance criteria checks must run sequentially (WP-623/WP-625) because checks
+    // execute directly in the workspace and may mutate workspace state, write temporary files,
+    // or bind network ports. Running checks in parallel would break isolation and cause race
+    // conditions between checks. Cleanup is run after each check to restore state.
     for (const criterion of input.criteria.filter((c) => c.check)) {
       const run = await runCheck(
         input.workspaceDir,
@@ -310,7 +314,8 @@ export async function collectEvidence(input: CollectEvidenceInput): Promise<Coll
   );
 
   // Judge-executed acceptance checks (JD-4) — sequential: checks may share
-  // workspace state (build artifacts, ports).
+  // workspace state (build artifacts, ports) and mutate files in the tree.
+  // Must remain sequential to preserve check isolation and hermetic cleanup (WP-623/WP-625).
   const checkRuns: CheckRun[] = [];
   let regressionSuiteRun: CheckRun | undefined;
 
