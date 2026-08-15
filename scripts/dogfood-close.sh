@@ -66,11 +66,16 @@ if [ "$FAILED" -eq 1 ]; then
 else
   SUITE_LOG="$(mktemp)"
   # Already inside devbox (CLAUDE.md: never nest `devbox run`), so drive the
-  # same commands `devbox run test` does.
+  # same commands `devbox run test` does — which is the AGGREGATOR
+  # scripts/test-scripts.sh, not one hand-picked script test. F-347
+  # (dogfood-142): this gate called test-harvest-chain.sh directly and so ran
+  # NONE of the other scripts/test-*.sh; dogfood-141 landed `aafb762` with a red
+  # test-dogfood-review.sh under a commit trailer that read "full suite green".
+  # Keep this list byte-identical to devbox.json `shell.scripts.test`.
   if pnpm -r test > "$SUITE_LOG" 2>&1 \
      && (cd packages/sdk-py && uv run pytest >> "$SUITE_LOG" 2>&1) \
-     && bash scripts/test-harvest-chain.sh >> "$SUITE_LOG" 2>&1; then
-    grep -E 'Tests +[0-9]+ passed|passed in |integration: PASS' "$SUITE_LOG" | tail -5
+     && bash scripts/test-scripts.sh >> "$SUITE_LOG" 2>&1; then
+    grep -E 'Tests +[0-9]+ passed|passed in |script tests: ALL PASS' "$SUITE_LOG" | tail -5
     echo "✅ suite green"
   else
     echo "⛔ suite RED — tail:"

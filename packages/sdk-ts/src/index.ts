@@ -424,6 +424,12 @@ export {
   type WorkChunkState,
 } from "./workflow/work-chunk.js";
 export {
+  decideQuestionStep,
+  type QuestionStepCandidate,
+  type QuestionStepDecision,
+} from "./workflow/question-step.js";
+export { STANDING_APPROVAL_ANSWER } from "./util/standing-answer.js";
+export {
   Journal,
   MAX_PAYLOAD_BYTES,
   reportFromJournal,

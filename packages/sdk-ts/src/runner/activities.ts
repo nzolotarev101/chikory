@@ -2388,14 +2388,14 @@ export function createRunnerActivities(deps: RunnerActivityDeps) {
       }
     },
 
-    /** Operator HITL suspend/resume and durable re-entry audit trail (WP-206). */
+    /** Operator HITL suspend/resume, question steps, and durable re-entry audit trail (WP-206, WP-608). */
     async recordControlEvent(input: {
       runId: string;
       controlEventIndex: number;
-      event: "suspend" | "resume";
+      event: "suspend" | "resume" | "question";
       atStep: number;
-      source?: "operator" | "soak" | "limit" | "pace";
-      details?: Record<string, number>;
+      source?: "operator" | "soak" | "limit" | "pace" | "question_step";
+      details?: Record<string, number | string>;
     }): Promise<void> {
       const journal = openJournal(deps, input.runId);
       try {
@@ -2418,9 +2418,13 @@ export function createRunnerActivities(deps: RunnerActivityDeps) {
           recordSoakSpan({
             runId: input.runId,
             atStep: input.atStep,
-            sleepMs: input.details.sleepMs ?? 0,
-            completedReentries: input.details.completedReentries ?? 0,
-            totalSleptMs: input.details.totalSleptMs ?? 0,
+            sleepMs: typeof input.details.sleepMs === "number" ? input.details.sleepMs : 0,
+            completedReentries:
+              typeof input.details.completedReentries === "number"
+                ? input.details.completedReentries
+                : 0,
+            totalSleptMs:
+              typeof input.details.totalSleptMs === "number" ? input.details.totalSleptMs : 0,
           });
         }
       } finally {

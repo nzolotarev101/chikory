@@ -7,6 +7,7 @@
 import { WRITE_BOUNDARY_NOTE } from "../chain/write-boundary.js";
 import { formatPointerReference } from "../runner/memory-pointer.js";
 import type { StepInput } from "../types.js";
+import { STANDING_APPROVAL_ANSWER } from "../util/standing-answer.js";
 import { COMPLETION_MARKER } from "./step.js";
 
 export function renderStepPrompt(input: StepInput): string {
@@ -64,6 +65,7 @@ export function renderStepPrompt(input: StepInput): string {
       `graded tree, where it counts for nothing. Never resolve a path via \`origin\`, and never ` +
       `follow one out of the workspace.\n` +
       `Do not commit; the runner checkpoints for you.\n` +
+      `${STANDING_APPROVAL_ANSWER}\n` +
       // F-218: the workspace is the outer boundary; a chain node also has an
       // inner one — the plan's declared writeSet, enforced when the node seals.
       (writeBoundary === undefined ? "" : `\n## Declared write boundary\n${writeBoundary}\n`) +

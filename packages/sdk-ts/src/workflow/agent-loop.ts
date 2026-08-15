@@ -87,6 +87,8 @@ import { decideSoakDelay } from "./soak.js";
 import { decideStepForcing } from "./step-forcing.js";
 import { decideWorkChunk } from "./work-chunk.js";
 import { decideLimitParkDelay } from "./limit-park.js";
+import { decideQuestionStep } from "./question-step.js";
+import { STANDING_APPROVAL_ANSWER } from "../util/standing-answer.js";
 import { decideLimitPacing } from "../runner/limit-pacing.js";
 import { evaluateBaselinePrecheck } from "../util/precheck.js";
 
@@ -1041,6 +1043,56 @@ export async function agentLoop(spec: TaskSpec): Promise<RunStatus> {
       }
     }
     memoryEvictions += applyMemoryEviction(carriedRefs, memoryEvictionPolicy);
+
+    // WP-608: an asking step (0-byte diff + asking summary) is classified BEFORE judging.
+    // It buys zero judge passes, journals a control_event, answers with standing approval,
+    // and re-drives without spending a bounded repair grant.
+    const questionDecision = decideQuestionStep(record);
+    if (questionDecision.question) {
+      await activities.recordControlEvent({
+        runId,
+        controlEventIndex: controlEventIndex++,
+        // F-354 (dogfood-142): the delivery widened the event union to carry
+        // "question" and then journaled "resume" anyway, so a trace reader saw
+        // a resume that never happened. The event names the thing.
+        event: "question",
+        atStep: stepIndex - 1,
+        source: "question_step",
+      });
+      judgeFeedback = STANDING_APPROVAL_ANSWER;
+
+      const checkpoint = await activities.writeCheckpoint({
+        runId,
+        stepIndex: stepIndex - 1,
+        context,
+        budgetSpentUsd: spentUsd,
+        lastGood: false,
+        memoryCounters: { recalls: memoryRecalls, evicted: memoryEvictions },
+      });
+      checkpoints.push(checkpoint);
+
+      const compaction = await activities.compactContext({
+        runId,
+        stepIndex: stepIndex - 1,
+        summaries: recentSummaries,
+        underPressure,
+      });
+      if (compaction?.digestRef) {
+        const kept = carriedRefs.filter((r) => r.kind !== "context_snapshot");
+        carriedRefs.length = 0;
+        carriedRefs.push(...kept, compaction.digestRef);
+        memoryEvictions += applyMemoryEviction(carriedRefs, memoryEvictionPolicy);
+      }
+
+      if (spec.debug?.killAtStep === stepIndex - 1) {
+        await activities.maybeCrashForResumeDrill({ runId, atStep: stepIndex - 1 });
+      }
+
+      const soakTerminal = await soakBeforeNextStep();
+      if (soakTerminal !== undefined) return soakTerminal;
+
+      continue;
+    }
 
     // Judge on cadence or a completion milestone (JD-2); each pass is one
     // activity (WP-121/131).

@@ -1,0 +1,309 @@
+# Plain: the judge grades a step by running the task's acceptance checks. Today it runs them ALL AT
+# ONCE in ONE folder, so a check that writes a scratch file can make a different check fail — and the
+# run is condemned for work that was fine. dogfood-142 died exactly this way. After this run, a
+# check's result answers for the delivery and nothing else.
+# WP: WP-623 (a judge-executed acceptance check must be isolated from its siblings — a check's
+#   verdict may depend only on the delivery, F-349)
+# Ladder-rung: 0 (off-ladder — see WHY; the remaining rung-5 half is WP-304, not agent-runnable)
+# Thesis-KPI: judge reliability (true verdicts per run) + cost-per-delivered-diff. MEASURED harm
+#   (run-c857c058, dogfood-142): AC-1 wrote a transient generated test file; AC-2 ran the package
+#   typecheck over the whole tree, compiled AC-1's file and died —
+#   `error TS6133: 'FakeJudgeWire' is declared but its value is never read`. AC-2 `exited 2` on all
+#   FOUR passes, `AC-2 failed 3+ consecutive verdicts` fired the goal-drift HALT, and a delivery that
+#   passes both ACs sequentially sealed FAILED for $0.1846 and 9m 19s. This is the SECOND run in a
+#   row condemned by its own gate on correct work (dogfood-141 / F-344 was the first).
+# Format: loose — the outcomes and the named observables are fixed, the mechanism is the executor's
+#
+# Launch mode: RUN (single node — one deliverable, one seam).
+#   CHIKORY_PREFLIGHT_ONLY=1 devbox run run-dogfood
+#   devbox run run-dogfood
+#
+# WHY THIS AND NOT THE LADDER RUNG (dogfood-142 review, 2026-08-15):
+#   The progression gate reads ✅ PROGRESSING, so the default candidate is the next ladder rung and a
+#   non-ladder candidate must beat it on thesis value AND pass every gate. It does, because the rung
+#   is not runnable as a dogfood headline — unchanged since dogfood-140:
+#     * P3-rung-5 (EXIT) = WP-303 + WP-304. WP-303 closed in dogfood-139.
+#     * WP-304 needs the OpenHands arm plus a corpus wide enough to separate 19 requirements — a
+#       quota-bound multi-hour suite the operator runs BY HAND (dogfood-122). No spec can headline it.
+#   Among runnable candidates WP-623 wins outright: it is the MEASURED cause of the previous run's
+#   death, it lands in judge code on a thesis pillar (Agent-as-a-Judge), and until it is fixed every
+#   dogfood spec written from here carries a live coin flip. (F-355's executor-stall half is real but
+#   its fix probably reuses whatever this run settles; WP-606/616/618/620/622 are narrower.)
+#
+# THE MEASURED PREMISE (measured on this tree 2026-08-15; do not re-litigate):
+#   * There are TWO concurrent call sites, not one. `runCriteriaChecks` (`src/judge/evidence.ts:244`)
+#     and `collectEvidence` (`:331`) each build `input.criteria.filter(...).map(runCheck)` and await
+#     `Promise.all`. Every check gets the SAME `workspaceDir` — `runCheck` (`:170`) derives `checkCwd`
+#     from the criterion's repo, never a private tree.
+#   * The declared regression suite is ALREADY sequential (`:345`, after the `Promise.all`) — this run
+#     does not touch that path.
+#   * Cleanup is shared and runs AFTER the whole batch (`:257-263`, `planCheckSideEffectCleanup`), so
+#     it cannot see a file that appears and disappears mid-batch.
+#   * Reproduced by hand at the dogfood-142 review: dropping one file with a single unused type import
+#     into `packages/sdk-ts/test/runner/` makes `pnpm run typecheck` exit 2 with the identical TS6133;
+#     removing it restores exit 0.
+#   * The suite this run must not break, MEASURED at the launch commit (F-342 — run
+#     `pnpm --filter @chikory/sdk exec vitest run` yourself and read its own tail): at the dogfood-142
+#     review it stood at 187 files / 1495 tests (1472 passed | 23 skipped) in 57.58 s. If your number
+#     differs, yours is right and this comment is stale.
+#   * The `unattended:` block below is not decoration (F-322).
+#
+# Designed traps — the plausible-but-wrong deliveries the acceptance criteria exist to reject:
+#   A. **Appeasing the symptom.** Excluding `*.generated.*` from `tsconfig`, or teaching the judge to
+#      read a "broken-looking" exit code as skip/pass. Both make dogfood-142's failure disappear while
+#      leaving a check's verdict dependent on its siblings. AC-1 drives the REAL entry points with a
+#      check pair engineered to interfere, and pins the negative: a genuinely failing check STILL
+#      fails, with its own exit code.
+#   B. **Fixing one call site.** `collectEvidence` is the one the judge uses; `runCriteriaChecks` is
+#      the baseline precheck (WP-561) and is just as concurrent. AC-1 drives BOTH.
+#   C. **Ordering the criteria instead of isolating them.** Sorting so the writer runs last fixes this
+#      pair and no other. AC-1 runs the same pair in BOTH declaration orders.
+#   D. **Unbounding the cap.** Serializing is a legitimate fix; giving each check the FULL batch
+#      budget, or no longer killing a check at the cap, is not. AC-1 pins per-check timeout kill and a
+#      bounded total.
+#   E. **Isolating and then leaking.** A per-check copy that never syncs back, or that leaves the
+#      shared workspace dirty, breaks the standing side-effect-cleanup contract. AC-1 asserts the
+#      workspace is byte-clean afterwards (`git status --porcelain` empty, no scratch file left).
+#
+# NOT IN SCOPE: WP-624 (F-350/F-351 — arming must rehearse concurrently and compile generated ACs;
+#   that is harness work, track-B); WP-606/F-306; WP-616/F-328; WP-618/F-332; WP-620/F-339;
+#   WP-622/F-342; F-355 (the executor-stall half of WP-608); the LLM verdict path, the rubric, the
+#   completion review and adjudication (dogfood-140/141 — do not touch); anything in `benchmarks/`.
+#
+# AUTHORING NOTE (F-349, self-applied): AC-1 generates ONE test file into `packages/sdk-ts/test/judge/`
+#   while AC-2 typechecks the whole package concurrently. That is the very interference this WP
+#   removes, so the generated source is plain strict TS with no unused imports and was compiled during
+#   the arming pass — the mitigation DOGFOODING §7 prescribes until WP-623 lands.
+
+name: dogfood-143-wp623-check-isolation
+wp: WP-623
+goal: >
+  A judge-executed acceptance check must answer for the delivery, and for nothing else.
+
+  Today the judge runs every acceptance check concurrently in ONE shared workspace, at two call sites
+  (`runCriteriaChecks` and `collectEvidence` in `src/judge/evidence.ts`). A check that writes a scratch
+  file into the tree can therefore fail a sibling check that compiles, lints, or tests that same tree.
+  On run-c857c058 this condemned a correct delivery: one check's transient generated test file made the
+  other check's package typecheck exit 2, four passes running, and the run sealed FAILED.
+
+  Make these true:
+
+    * **A check's result does not depend on its siblings.** Two checks that interfere today — one
+      writing a transient file into the workspace, one asserting that file is absent — must BOTH pass,
+      at BOTH call sites, in EITHER declaration order.
+
+    * **Honest failure is preserved.** A check that genuinely fails still fails, and the reported
+      `exitCode` is the check's own, not a normalized stand-in. Isolation must never become leniency.
+
+    * **The cap stays per-check.** A check that exceeds `checkTimeoutMs` is still killed and still
+      reports `infraFailed: true`; a batch of slow checks must not consume a multiple of the budget
+      before returning.
+
+    * **The workspace is left as it was found.** After a batch, no check's scratch file survives and
+      the workspace's git status is unchanged — the existing side-effect-cleanup contract holds
+      whatever isolation mechanism you choose.
+
+  How you isolate is yours: run the checks serially, give each its own tree, or something better. Say
+  in your step summary which you chose and what it costs in judge wall-clock. Do not solve it by
+  editing any acceptance check, any `tsconfig`, or any dogfood spec — the defect is in the judge.
+
+  Nothing else changes. `CheckRun`'s shape, the `AcceptanceCriterion` contract, the regression-suite
+  path (already sequential) and every LLM-verdict, rubric, completion-review and adjudication
+  semantic are untouched. No new dependency, no provider SDK, no API key. TypeScript stays strict ESM
+  with named exports and no `any`; nothing here runs inside the Temporal workflow, so no replay
+  concern — but do not add nondeterminism to code that does.
+
+  If an existing test pins a shape this change must alter, update its expectation and say plainly in
+  the step summary that you did — do not delete it, and do not weaken it into a tautology.
+
+  Verify your work with FAST checks only: the package typecheck (tsc with noEmit), eslint over the
+  files you touched, and vitest over only the test files you touched. Do NOT run the full vitest
+  suite inside a step — it does not fit the step time cap (F-345, dogfood-141), and this run's
+  declared regression suite plus the judge-executed checks are the trusted full-suite verification
+  whatever your summary says.
+
+repos:
+  - url: /Users/nikitazolotarev/repos/chikory
+    writable: true
+
+# The SDK suite is both the surface this run edits and the gate it must not break.
+# MEASURE it at the launch commit rather than trusting this line (F-342, dogfood-140).
+regression_suite: pnpm --filter @chikory/sdk exec vitest run
+check_timeout_ms: 180000
+
+acceptance_criteria:
+  - id: AC-1
+    description: >
+      THIS CHECK OWNS ITS ORACLE. It drives the two REAL entry points (`runCriteriaChecks` and
+      `collectEvidence`) against a real temp git workspace with a check pair engineered to interfere:
+      a writer that holds a scratch file for 2 s, and an observer that fails if it ever sees one. It
+      pins isolation at both call sites (trap B) and in both declaration orders (trap C), honest
+      failure with the check's own exit code (trap A), the per-check timeout kill — a check killed at
+      `checkTimeoutMs` still reports `infraFailed: true` — plus a bounded batch wall-clock (trap D),
+      and a byte-clean workspace afterwards (trap E).
+    check: |
+      cd packages/sdk-ts && node --input-type=module -e '
+      import {writeFileSync,rmSync} from "node:fs";
+      import {spawnSync} from "node:child_process";
+      import {join} from "node:path";
+      const A=(c,m)=>{if(!c){console.error("FAIL: "+m);process.exit(1);}};
+      const target=join(process.cwd(),"test/judge/ac1-check-isolation.generated.test.ts");
+      rmSync(target,{force:true});
+      const SRC=`
+      import { execFileSync } from "node:child_process";
+      import { existsSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+      import { tmpdir } from "node:os";
+      import { join } from "node:path";
+      import { afterEach, beforeEach, describe, expect, it } from "vitest";
+
+      import { createMemoryArtifactStore } from "../../src/artifacts/index.js";
+      import { collectEvidence, runCriteriaChecks, type CheckRun } from "../../src/judge/evidence.js";
+      import type { AcceptanceCriterion } from "../../src/types.js";
+
+      const MARK = "sibling-scratch.tmp";
+
+      // The interfering pair, verbatim from F-349: one check writes a transient file
+      // into the workspace and cleans it up; the other fails if it can ever see it.
+      const WRITER: AcceptanceCriterion = {
+        id: "writer",
+        description: "writes a transient scratch file, then removes it",
+        check: "printf x > " + MARK + "; sleep 2; rm -f " + MARK,
+      };
+      const OBSERVER: AcceptanceCriterion = {
+        id: "observer",
+        description: "must never observe a sibling check writing into the tree",
+        check: "sleep 1; test ! -e " + MARK,
+      };
+      const HONEST_FAILURE: AcceptanceCriterion = {
+        id: "honest-failure",
+        description: "a check that is genuinely wrong still fails, with its own exit code",
+        check: "exit 3",
+      };
+      const SLOW = (id: string): AcceptanceCriterion => ({
+        id,
+        description: "exceeds the per-check cap",
+        check: "sleep 30",
+      });
+
+      const byId = (runs: CheckRun[], id: string): CheckRun => {
+        const hit = runs.find((r) => r.criterionId === id);
+        expect(hit, "no CheckRun for " + id).toBeDefined();
+        return hit!;
+      };
+
+      describe("AC-1: a judge-executed check is isolated from its siblings (WP-623/F-349)", () => {
+        let dir: string;
+
+        const git = (args: string[]) => execFileSync("git", args, { cwd: dir, stdio: "ignore" });
+
+        beforeEach(() => {
+          dir = mkdtempSync(join(tmpdir(), "chikory-ac1-isolation-"));
+          writeFileSync(join(dir, "landed.txt"), "the delivery under grade\\n");
+          git(["init", "-q"]);
+          git(["config", "user.email", "test@chikory.local"]);
+          git(["config", "user.name", "test"]);
+          git(["add", "-A"]);
+          git(["commit", "-qm", "base"]);
+        });
+
+        afterEach(() => {
+          rmSync(dir, { recursive: true, force: true });
+        });
+
+        it("runCriteriaChecks: the pair does not interfere, in either order (traps B + C)", async () => {
+          for (const criteria of [
+            [WRITER, OBSERVER, HONEST_FAILURE],
+            [OBSERVER, WRITER, HONEST_FAILURE],
+          ]) {
+            const runs = await runCriteriaChecks({ workspaceDir: dir, criteria });
+            expect(byId(runs, "writer").exitCode).toBe(0);
+            expect(byId(runs, "observer").exitCode, byId(runs, "observer").output).toBe(0);
+            // trap A: isolation must not become leniency — the honest failure keeps ITS code.
+            expect(byId(runs, "honest-failure").exitCode).toBe(3);
+          }
+        }, 240_000);
+
+        it("collectEvidence: the same pair does not interfere on the judge path (trap B)", async () => {
+          const base = execFileSync("git", ["-C", dir, "rev-parse", "HEAD"], {
+            encoding: "utf8",
+          }).trim();
+          const collected = await collectEvidence({
+            workspaceDir: dir,
+            store: createMemoryArtifactStore(),
+            criteria: [WRITER, OBSERVER, HONEST_FAILURE],
+            sinceCommit: base,
+            criteriaHistory: {},
+            stepSummaries: [],
+          });
+          expect(byId(collected.checkRuns, "writer").exitCode).toBe(0);
+          expect(
+            byId(collected.checkRuns, "observer").exitCode,
+            byId(collected.checkRuns, "observer").output,
+          ).toBe(0);
+          expect(byId(collected.checkRuns, "honest-failure").exitCode).toBe(3);
+        }, 240_000);
+
+        it("the per-check cap is still per-check, and the batch stays bounded (trap D)", async () => {
+          const started = Date.now();
+          const runs = await runCriteriaChecks({
+            workspaceDir: dir,
+            criteria: [SLOW("slow-a"), SLOW("slow-b")],
+            checkTimeoutMs: 3000,
+          });
+          const elapsed = Date.now() - started;
+          for (const id of ["slow-a", "slow-b"]) {
+            const run = byId(runs, id);
+            expect(run.infraFailed, id + " must be killed at the cap").toBe(true);
+            expect(run.exitCode).not.toBe(0);
+          }
+          // Serial is fine (2 x 3 s); a multiple of the budget, or no kill at all, is not.
+          expect(elapsed, "batch took " + elapsed + "ms").toBeLessThan(20_000);
+        }, 240_000);
+
+        it("the workspace is left byte-clean after the batch (trap E)", async () => {
+          await runCriteriaChecks({
+            workspaceDir: dir,
+            criteria: [WRITER, OBSERVER, HONEST_FAILURE],
+          });
+          expect(existsSync(join(dir, MARK))).toBe(false);
+          const status = execFileSync("git", ["-C", dir, "status", "--porcelain"], {
+            encoding: "utf8",
+          });
+          expect(status.trim()).toBe("");
+        }, 240_000);
+      });
+      `;
+      writeFileSync(target, SRC);
+      const res=spawnSync("pnpm",["exec","vitest","run",
+        "test/judge/ac1-check-isolation.generated.test.ts"],{stdio:"inherit"});
+      rmSync(target,{force:true});
+      A(res.status===0,
+        "an acceptance check must not be able to fail because a sibling check wrote into the same "+
+        "workspace — at BOTH call sites, in EITHER order — while a genuinely failing check still "+
+        "fails with its own exit code, the per-check cap still kills, and the workspace is left "+
+        "clean. vitest exited "+res.status);
+      console.log("AC-1 OK: a check answers for the delivery, not for its siblings");
+      '
+
+  - id: AC-2
+    description: >
+      The delivery compiles as strict TypeScript and the judge module it changes is lint-clean. Kept
+      deliberately free of generated files: AC-1 writes one into `test/judge/` and, until WP-623 lands,
+      these two checks are still running concurrently in one tree (F-349 — the defect this run removes).
+    check: |
+      cd packages/sdk-ts && pnpm run typecheck && pnpm exec eslint src/judge/evidence.ts && echo "AC-2 OK: strict TS + lint clean on the judge evidence path"
+
+budget_usd: 20
+max_steps: 6
+
+agent_classes:
+  executor: executor-default
+  judge: judge-default
+
+judge:
+  cadence: 1
+
+# F-322 (dogfood-135): without this, a converged out-of-rubric escalation parks overnight for a
+# human instead of auto-sealing.
+unattended:
+  escalation: seal_resumable_failed

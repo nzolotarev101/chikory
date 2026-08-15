@@ -64,7 +64,7 @@ EOF
 cat > "$FAKE/docs/DOGFOODING.md" <<'EOF'
 # Dogfooding guide
 
-**Status (bounded — REPLACE this block, <=15 lines).**
+**Status (2026-08-01, bounded — REPLACE this block, <=15 lines).**
 🟢 **dogfood-899 old block line one
 old block line two
 
@@ -98,7 +98,9 @@ contains "over-cap refusal names the cap" "caps at 15" "$WORK/out"
 contains "over-cap refusal forbids raising the cap" "do NOT raise the cap" "$WORK/out"
 
 # ── 2. block: replaces and overflows verbatim to PLAN-HISTORY ───────────────
-printf '🟢 **dogfood-900 brand new block\nsecond line\n' > "$WORK/ok.md"
+# The replacement carries its OWN `**Status (…)` header: F-346 moved the block
+# anchor onto that header, so the header is inside the replaced range.
+printf '**Status (2026-08-02, bounded — REPLACE this block, <=15 lines).**\n🟢 **dogfood-900 brand new block\nsecond line\n' > "$WORK/ok.md"
 set +e
 DOCS block --target dogfooding --block "$WORK/ok.md" --note "test" > "$WORK/out" 2>&1
 check "block replaces a within-cap block" 0 $?
@@ -110,6 +112,16 @@ if grep -qF "old block line two" "$FAKE/docs/DOGFOODING.md"; then
   FAILURES=$((FAILURES + 1))
 else
   echo "PASS: displaced prose removed from the live block"
+fi
+# F-346's own regression: exactly ONE status header survives a replacement. When
+# the anchor sat on the 🟢 body line, every review stacked another header above
+# the block (three deep before dogfood-141 caught it).
+HDRS=$(grep -c '^\*\*Status (' "$FAKE/docs/DOGFOODING.md")
+if [ "$HDRS" -eq 1 ]; then
+  echo "PASS: the status header is replaced, not stacked (F-346)"
+else
+  echo "FAIL: $HDRS status headers in DOGFOODING.md — expected exactly 1 (F-346 stacking)"
+  FAILURES=$((FAILURES + 1))
 fi
 
 # ── 3. ledger: derives from facts, validates, refuses duplicates ────────────
