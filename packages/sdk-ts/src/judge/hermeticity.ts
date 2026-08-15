@@ -169,11 +169,22 @@ async function git(dir: string, args: string[]): Promise<string> {
 
 export async function snapshotWorkspace(dir: string): Promise<Map<string, GitDirtyEntry>> {
   await clearStaleIndexLock(dir);
-  const statusOutput = await git(dir, ["status", "--porcelain"]);
+
+  const [statusOutput, ignoredOutput] = await Promise.all([
+    git(dir, ["status", "--porcelain"]),
+    git(dir, [
+      "ls-files",
+      "-z",
+      "--others",
+      "--ignored",
+      "--exclude-standard",
+    ]).catch(() => undefined),
+  ]);
+
   const basicMap = parseDirtySnapshot(statusOutput);
   const snapshotMap = new Map<string, GitDirtyEntry>();
 
-  for (const [relPath, entry] of basicMap.entries()) {
+  const filePromises = Array.from(basicMap.entries()).map(async ([relPath, entry]) => {
     const fullPath = join(dir, relPath);
     let hash: string | undefined;
     let content: string | undefined;
@@ -184,28 +195,22 @@ export async function snapshotWorkspace(dir: string): Promise<Map<string, GitDir
     } catch {
       // File may have been deleted or be unreadable
     }
-    snapshotMap.set(relPath, { path: relPath, status: entry.status, hash, content });
+    return { path: relPath, status: entry.status, hash, content };
+  });
+
+  const fileEntries = await Promise.all(filePromises);
+  for (const entry of fileEntries) {
+    snapshotMap.set(entry.path, entry);
   }
 
-  try {
-    const ignoredOutput = await git(dir, [
-      "ls-files",
-      "-z",
-      "--others",
-      "--ignored",
-      "--exclude-standard",
-    ]);
-    if (ignoredOutput) {
-      const ignoredPaths = ignoredOutput.split("\0");
-      for (const relPath of ignoredPaths) {
-        if (!relPath || relPath.trim() === "") continue;
-        if (!snapshotMap.has(relPath)) {
-          snapshotMap.set(relPath, { path: relPath, status: "!!" });
-        }
+  if (ignoredOutput) {
+    const ignoredPaths = ignoredOutput.split("\0");
+    for (const relPath of ignoredPaths) {
+      if (!relPath || relPath.trim() === "") continue;
+      if (!snapshotMap.has(relPath)) {
+        snapshotMap.set(relPath, { path: relPath, status: "!!" });
       }
     }
-  } catch {
-    // If git ls-files fails, proceed with porcelain status
   }
 
   return snapshotMap;
