@@ -396,14 +396,18 @@ export async function agentLoop(spec: TaskSpec): Promise<RunStatus> {
    */
   async function regressionGateBeforeSuccess(
     sealingDiffBase: string,
+    escalationConcerns: string[] = [],
   ): Promise<RunStatus | undefined> {
-    if (spec.regressionSuite === undefined) return undefined;
+    const hasConcerns = escalationConcerns.length > 0;
+    const hasRegressionSuite = Boolean(spec.regressionSuite);
+    if (!hasRegressionSuite && !hasConcerns) return undefined;
     const review = decideCompletionReview({
       sealingDiffBase,
       baseCommit,
       reviewAttemptsUsed: completionReviewAttempts,
       sealingVerdictHasRubricFailures: false,
-      hasRegressionSuite: true,
+      hasRegressionSuite,
+      hasEscalationConcerns: hasConcerns,
     });
     if (review.action !== "review") return undefined;
     completionReviewAttempts += 1;
@@ -415,18 +419,20 @@ export async function agentLoop(spec: TaskSpec): Promise<RunStatus> {
       sinceCommit: baseCommit,
       completionReview: true,
       lastGoodCheckpointId,
+      ...(hasConcerns ? { escalationConcerns } : {}),
     });
     spentUsd += reviewVerdict.costUsd;
     const fails = reviewVerdict.form.rubricResults.filter((r) => !r.pass);
     const condemned = await sealFromRubricFails(fails);
     if (condemned !== undefined) return condemned;
 
-    // F-334 (dogfood-139): `sealFromRubricFails` condemns only
+    // F-334 (dogfood-139) / WP-619: `sealFromRubricFails` condemns only
     // `DETERMINISTIC_RUBRIC_IDS` and returns `undefined` for everything else.
     // On the PROCEED path that is correct — the caller answers `undefined` by
     // handing the executor a bounded design-fix brief. Here `undefined` means
     // "the caller's SUCCESS seal stands", so a completion review answering
-    // `design_serves_overall_goal: ✗` on a converged step sealed 🟢 SUCCESS with
+    // `design_serves_overall_goal: ✗` or upholding an escalation concern
+    // (`escalation_concerns_adjudicated: ✗`) on a converged step sealed 🟢 SUCCESS with
     // the finding discarded: judge-detects-but-does-not-gate (F-180/WP-537) at
     // the one altitude WP-537 never reached.
     //
@@ -1182,6 +1188,7 @@ export async function agentLoop(spec: TaskSpec): Promise<RunStatus> {
             reviewAttemptsUsed: completionReviewAttempts,
             sealingVerdictHasRubricFailures,
             hasRegressionSuite: Boolean(spec.regressionSuite),
+            hasEscalationConcerns: verdict.form.concerns.length > 0,
           });
           if (review.action === "review") {
             completionReviewAttempts += 1;
@@ -1193,6 +1200,7 @@ export async function agentLoop(spec: TaskSpec): Promise<RunStatus> {
               sinceCommit: baseCommit,
               completionReview: true,
               lastGoodCheckpointId,
+              ...(verdict.form.concerns.length > 0 ? { escalationConcerns: verdict.form.concerns } : {}),
             });
             spentUsd += reviewVerdict.costUsd;
             // The objection the SEALING verdict raised is carried into the brief
@@ -1322,10 +1330,12 @@ export async function agentLoop(spec: TaskSpec): Promise<RunStatus> {
           allCriteriaPass(verdict) &&
           allRubricPass(verdict)
         ) {
-          // F-331: converged is not the same as verified. A spec that declared a
-          // regression suite has not had it run yet — the suite lives in the
-          // completion review, and this seal is upstream of it.
-          const gated = await regressionGateBeforeSuccess(sealingDiffBase);
+          // F-331 / WP-619: converged is not the same as verified. A spec that declared a
+          // regression suite or has out-of-rubric concerns has not had them adjudicated yet.
+          const gated = await regressionGateBeforeSuccess(
+            sealingDiffBase,
+            verdict.form.concerns,
+          );
           if (gated !== undefined) return gated;
           return seal(
             "SUCCESS",
@@ -1361,9 +1371,12 @@ export async function agentLoop(spec: TaskSpec): Promise<RunStatus> {
         // to. A judge-drift (Rule 5 flip-flop) escalate, or one where criteria are
         // not all passing, still resumes to re-judge.
         if (verdict.escalateClass === "out_of_rubric" && allCriteriaPass(verdict)) {
-          // F-331: the operator adjudicated the CONCERN, not the test suite.
+          // F-331 / WP-619: the operator adjudicated the CONCERN, not the test suite.
           // Same hole as the unattended seal above, same gate.
-          const gated = await regressionGateBeforeSuccess(sealingDiffBase);
+          const gated = await regressionGateBeforeSuccess(
+            sealingDiffBase,
+            verdict.form.concerns,
+          );
           if (gated !== undefined) return gated;
           return seal(
             "SUCCESS",

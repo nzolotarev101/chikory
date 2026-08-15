@@ -51,6 +51,7 @@ describe("AC-1: Deterministic rubric classification & non-destructive oracle", (
       { id: "no_architecture_violations", deterministic: true },
       { id: "design_serves_overall_goal", deterministic: false },
       { id: "cumulative_design_coherent", deterministic: false },
+      { id: "escalation_concerns_adjudicated", deterministic: false },
     ]);
 
     // Verify RUBRIC_PRE_EXISTING_SUITE_GREEN_ITEM properties

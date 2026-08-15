@@ -18,6 +18,7 @@ import {
   createTemporalRunner,
   Journal,
   journalPath,
+  RUBRIC_ESCALATION_CONCERNS_ADJUDICATED,
   RUBRIC_PRE_EXISTING_SUITE_GREEN,
   type RunHandle,
   type RunStatusReport,
@@ -471,7 +472,7 @@ describe.skipIf(address === null)("AC-2: live regression suite repair brief & ru
     }
   }, 180_000);
 
-  test("F-331 Scenario 7: a converged ESCALATE on a run that declares NO suite buys no judge pass and keeps today's wording", async () => {
+  test("F-331/WP-619 Scenario 7: a converged ESCALATE on a run that declares NO suite still adjudicates its concerns (1 review pass) and keeps today's wording", async () => {
     const wire = await startFakeJudgeWire([escalatingForm(), escalatingForm()]);
     cleanups.push(() => wire.close());
 
@@ -488,8 +489,9 @@ describe.skipIf(address === null)("AC-2: live regression suite repair brief & ru
 
     expect(report.status).toBe("SUCCESS");
     expect(report.inconclusiveCheck).toBeUndefined();
-    // The gate is opt-in: no `regression_suite`, no extra pass, no cost.
-    expect(wire.reviewHits).toBe(0);
+    // WP-619: a converged escalation with concerns buys exactly 1 completion review
+    // pass to adjudicate the concerns, even without a declared regression_suite.
+    expect(wire.reviewHits).toBe(1);
 
     const journal = new Journal(journalPath(dataDir, handle.runId));
     try {
@@ -504,4 +506,64 @@ describe.skipIf(address === null)("AC-2: live regression suite repair brief & ru
       journal.close();
     }
   }, 180_000);
+
+  test("F-340 Scenario 9: the adjudication row is asked ONLY when concerns exist — a concern-less completion review is never handed a vacuous question", async () => {
+    // WITHOUT concerns: an ordinary run that declares a suite and converges on a
+    // PROCEED. Its completion review must not carry the adjudication row, and its
+    // scope text must not claim it adjudicates anything — a ✗ on a row with no
+    // subject condemns a correct SUCCESS through the F-334 catch-all.
+    const cleanWire = await startFakeJudgeWire(
+      [judgeForm({ criteria: { "AC-1": false } }), judgeForm({ criteria: { "AC-1": true } })],
+      { reviewForms: [completionReviewForm({ hasRegressionSuite: true })] },
+    );
+    cleanups.push(() => cleanWire.close());
+
+    const clean = await setup(cleanWire);
+    const cleanReport = await awaitTerminal(
+      await clean.runner.start(
+        makeJudgedSpec({
+          repoUrl: clean.repoUrl,
+          cadence: 1,
+          maxSteps: 4,
+          regressionSuite: "exit 0",
+        }),
+      ),
+    );
+    expect(cleanReport.status).toBe("SUCCESS");
+
+    const cleanReviews = cleanWire.requests.filter((b) =>
+      b.includes("run-completion architecture review"),
+    );
+    expect(cleanReviews).toHaveLength(1);
+    expect(cleanReviews[0]).not.toContain(RUBRIC_ESCALATION_CONCERNS_ADJUDICATED);
+    expect(cleanReviews[0]).not.toContain("adjudicates the out-of-rubric concerns");
+
+    // WITH concerns: the same review DOES carry the row. Both directions in one
+    // test so the row cannot be dropped everywhere to make the first half pass.
+    const escalateWire = await startFakeJudgeWire([escalatingForm(), escalatingForm()], {
+      reviewForms: [completionReviewForm({ hasRegressionSuite: true })],
+    });
+    cleanups.push(() => escalateWire.close());
+
+    const esc = await setup(escalateWire, { claimsCompleteSteps: [1] });
+    const escReport = await awaitTerminal(
+      await esc.runner.start(
+        makeJudgedSpec({
+          repoUrl: esc.repoUrl,
+          cadence: 1,
+          maxSteps: 4,
+          regressionSuite: "exit 0",
+          unattended: { escalation: "seal_resumable_failed" },
+        }),
+      ),
+    );
+    expect(escReport.status).toBe("SUCCESS");
+
+    const escReviews = escalateWire.requests.filter((b) =>
+      b.includes("run-completion architecture review"),
+    );
+    expect(escReviews).toHaveLength(1);
+    expect(escReviews[0]).toContain(RUBRIC_ESCALATION_CONCERNS_ADJUDICATED);
+    expect(escReviews[0]).toContain("adjudicates the out-of-rubric concerns");
+  }, 300_000);
 });

@@ -192,6 +192,31 @@ describe("decideCompletionReview — 2x2x3 input matrix", () => {
       }).action,
     ).toBe("skip");
   });
+
+  // ─── Escalation concerns (WP-619) ──────────────────────────────────────────
+  it("first-verdict seal + clean rubric + hasEscalationConcerns => review", () => {
+    expect(
+      decideCompletionReview({
+        sealingDiffBase: BASE,
+        baseCommit: BASE,
+        reviewAttemptsUsed: 0,
+        sealingVerdictHasRubricFailures: false,
+        hasEscalationConcerns: true,
+      }).action,
+    ).toBe("review");
+  });
+
+  it("first-verdict seal + clean rubric + hasEscalationConcerns + exhausted => skip", () => {
+    expect(
+      decideCompletionReview({
+        sealingDiffBase: BASE,
+        baseCommit: BASE,
+        reviewAttemptsUsed: MAX_COMPLETION_REVIEWS,
+        sealingVerdictHasRubricFailures: false,
+        hasEscalationConcerns: true,
+      }).action,
+    ).toBe("skip");
+  });
 });
 
 describe("mergeDesignFindings (trap C: the sealing objection must survive a clean review)", () => {

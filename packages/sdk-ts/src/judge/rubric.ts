@@ -83,6 +83,9 @@ export const STANDING_RUBRIC: RubricItem[] = [
 /** Rubric id for the run-completion cumulative-design judgment. */
 export const RUBRIC_CUMULATIVE_DESIGN_COHERENT = "cumulative_design_coherent";
 
+/** Rubric id for the run-completion adjudication of out-of-rubric escalation concerns (WP-619). */
+export const RUBRIC_ESCALATION_CONCERNS_ADJUDICATED = "escalation_concerns_adjudicated";
+
 /**
  * Rubric for the run-completion holistic review — one pass over the CUMULATIVE
  * diff after every acceptance criterion has already been confirmed. Every item
@@ -100,6 +103,14 @@ export const COMPLETION_REVIEW_RUBRIC: RubricItem[] = [
       "the goal: consistent placement and naming across steps, no leftover scaffolding or " +
       "dead code from intermediate steps, no logic duplicated across steps that should have " +
       "been consolidated, and abstractions that compose rather than contradict each other.",
+    destructive: false,
+  },
+  {
+    id: RUBRIC_ESCALATION_CONCERNS_ADJUDICATED,
+    description:
+      "Any free-text concerns or objections raised outside the rubric during previous passes " +
+      "are cleared by the cumulative diff: they do not identify real defects, regressions, or " +
+      "unfulfilled requirements in the delivered code.",
     destructive: false,
   },
 ];

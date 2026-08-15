@@ -44,6 +44,12 @@ export interface CompletionReviewState {
    * the command, since the command never runs on per-step passes.
    */
   hasRegressionSuite?: boolean;
+  /**
+   * Whether the run has out-of-rubric escalation concerns that must be adjudicated (WP-619).
+   * When true on a first-verdict seal, the completion review MUST run to adjudicate
+   * the concerns, even if no regression suite was declared.
+   */
+  hasEscalationConcerns?: boolean;
 }
 
 export type CompletionReviewDecision =
@@ -72,7 +78,12 @@ export function decideCompletionReview(
   const isFirstVerdictSeal = state.sealingDiffBase === state.baseCommit;
   const failingRubric = extractHasRubricFailures(state);
 
-  if (isFirstVerdictSeal && !failingRubric && !state.hasRegressionSuite) {
+  if (
+    isFirstVerdictSeal &&
+    !failingRubric &&
+    !state.hasRegressionSuite &&
+    !state.hasEscalationConcerns
+  ) {
     return {
       action: "skip",
       reason: "sealing verdict already judged the cumulative diff (first-verdict seal)",

@@ -29,6 +29,7 @@ import {
   COMPLETION_REVIEW_RUBRIC,
   enforceFamilyDiversity,
   renderOverallGoalContext,
+  RUBRIC_ESCALATION_CONCERNS_ADJUDICATED,
   RUBRIC_PRE_EXISTING_SUITE_GREEN_ITEM,
   runCriteriaChecks,
   runJudgePass,
@@ -1634,6 +1635,8 @@ export function createRunnerActivities(deps: RunnerActivityDeps) {
       completionReview?: boolean;
       /** ROLLBACK target; absent → `<runId>@base`. */
       lastGoodCheckpointId?: CheckpointId;
+      /** Out-of-rubric concerns to adjudicate during completion review (WP-619). */
+      escalationConcerns?: string[];
     }): Promise<JudgeVerdict> {
       return withHeartbeat(async () => {
         // Read phase — the journal handle is NOT held across the judge pass
@@ -1686,10 +1689,23 @@ export function createRunnerActivities(deps: RunnerActivityDeps) {
           reader.close();
         }
 
+        // F-340 (dogfood-140): the adjudication item has a SUBJECT only when a
+        // previous pass actually raised out-of-rubric concerns. Asking it on the
+        // far more common concern-less completion review (any run declaring a
+        // `regression_suite`) is a vacuous question — and a ✗ on it now CONDEMNS
+        // a converged run via the F-334 catch-all, so a judge answering "cannot
+        // determine" flips a correct SUCCESS to FAILED with no defect present.
+        // Drop the row when there is nothing to adjudicate.
+        const completionRubric =
+          (input.escalationConcerns?.length ?? 0) > 0
+            ? COMPLETION_REVIEW_RUBRIC
+            : COMPLETION_REVIEW_RUBRIC.filter(
+                (item) => item.id !== RUBRIC_ESCALATION_CONCERNS_ADJUDICATED,
+              );
         const effectiveRubric = input.completionReview
           ? spec.regressionSuite
-            ? [...COMPLETION_REVIEW_RUBRIC, RUBRIC_PRE_EXISTING_SUITE_GREEN_ITEM]
-            : COMPLETION_REVIEW_RUBRIC
+            ? [...completionRubric, RUBRIC_PRE_EXISTING_SUITE_GREEN_ITEM]
+            : completionRubric
           : spec.judge.rubricExtra && spec.judge.rubricExtra.length > 0
             ? [...STANDING_RUBRIC, ...spec.judge.rubricExtra]
             : STANDING_RUBRIC;
@@ -1784,6 +1800,9 @@ export function createRunnerActivities(deps: RunnerActivityDeps) {
             rubric: effectiveRubric,
             ...(input.completionReview ? { reviewScope: "cumulative" as const } : {}),
             ...(input.completionReview && spec.regressionSuite ? { regressionSuite: spec.regressionSuite } : {}),
+            ...(input.escalationConcerns !== undefined
+              ? { escalationConcerns: input.escalationConcerns }
+              : {}),
             ...(spec.checkTimeoutMs !== undefined ? { checkTimeoutMs: spec.checkTimeoutMs } : {}),
             lastGoodCheckpointId: input.lastGoodCheckpointId,
           });

@@ -11,16 +11,18 @@ import {
   computeVerdict,
   RUBRIC_CUMULATIVE_DESIGN_COHERENT,
   RUBRIC_DESIGN_SERVES_OVERALL_GOAL,
+  RUBRIC_ESCALATION_CONCERNS_ADJUDICATED,
 } from "../../src/judge/index.js";
 import { buildJudgeMessages, type JudgePromptInput } from "../../src/judge/prompt.js";
 import type { JudgeForm } from "../../src/types.js";
 
 describe("COMPLETION_REVIEW_RUBRIC", () => {
-  it("contains the architecture scan, the design item, and the cumulative item — all non-destructive", () => {
+  it("contains the architecture scan, the design item, the cumulative item, and the escalation adjudication item — all non-destructive", () => {
     expect(COMPLETION_REVIEW_RUBRIC.map((r) => r.id)).toEqual([
       "no_architecture_violations",
       RUBRIC_DESIGN_SERVES_OVERALL_GOAL,
       RUBRIC_CUMULATIVE_DESIGN_COHERENT,
+      RUBRIC_ESCALATION_CONCERNS_ADJUDICATED,
     ]);
     expect(COMPLETION_REVIEW_RUBRIC.every((r) => !r.destructive)).toBe(true);
   });

@@ -273,6 +273,8 @@ export interface RunJudgePassInput {
   reviewScope?: "incremental" | "cumulative";
   checkTimeoutMs?: number;
   regressionSuite?: string;
+  /** Out-of-rubric concerns to adjudicate during completion review. */
+  escalationConcerns?: string[];
 }
 
 export interface JudgePassResult {
@@ -315,6 +317,9 @@ export async function runJudgePass(input: RunJudgePassInput): Promise<JudgePassR
         ? { activeWorkChunkDirective: input.activeWorkChunkDirective }
         : {}),
       ...(input.reviewScope !== undefined ? { reviewScope: input.reviewScope } : {}),
+      ...(input.escalationConcerns !== undefined
+        ? { escalationConcerns: input.escalationConcerns }
+        : {}),
     }),
     temperature: 0,
     responseSchema: JUDGE_FORM_RESPONSE_SCHEMA,

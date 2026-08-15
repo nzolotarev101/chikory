@@ -11,13 +11,13 @@ displaced prose moves verbatim to [`PLAN-HISTORY.md`](PLAN-HISTORY.md); per-run 
 **Status (2026-08-14, bounded — update discipline: REPLACE this block, ≤15 lines;
 displaced prose moves verbatim to [`PLAN-HISTORY.md`](PLAN-HISTORY.md); per-run detail:
 `docs/reports/`; queue + course correction: `plan.md` §6/§7).**
-🟢 **dogfood-139 / WP-303 (leaderboard site + methodology) DELIVERED — WP-303 IS COMPLETE** — `run-ab72b901-4f3f-4b98-b6e1-ca00324ff0a6`, SUCCESS 1 step, $0.1048/$20.00, 4m 40s, 2/2 criteria, harvest byte-IDENTICAL 5/5, `docs/reports/dogfood-139.md`.
+🟢 **dogfood-140 / WP-619 (adjudicate escalation concerns before the converged seal) DELIVERED — WP-619 IS COMPLETE** — `run-cd11c095-754c-42b5-b57c-d712710d9612`, SUCCESS 1 step, $0.1326/$20.00, 9m 40s, 2/2 criteria, harvest byte-IDENTICAL 11/11, `docs/reports/dogfood-140.md`.
 
-**The benchmark result is now a page a skeptic can open.** `chikory-bench leaderboard` writes a self-contained `index.html` beside the JSON and Markdown, published at `benchmarks/publications/leaderboard/index.html`: both arms as 95% intervals, *"Overlap at 95% confidence; the arms are not separated"*, methodology read from the bundle, zero network assets, regenerable from the data it publishes. All 8 designed traps rejected. **The ladder does NOT advance (`rung=4`)** — rung 5 also needs WP-304's arm, and a rung is satisfied only when its proof is whole.
+**A judge concern raised outside the checklist now has to be answered before a run may finish green.** A converged out-of-rubric escalation buys exactly ONE completion-review pass, shown the concern text verbatim, answering through a named rubric row; cleared → SUCCESS with the F-229/F-271 wording, upheld → resumable FAILED naming the item — with or without a declared `regression_suite`, still terminal-or-nothing. Nothing reads the concern string. All 8 designed traps rejected. **This closes the fifth altitude of judge-detects-but-does-not-gate**; WP-601 (F-295) is the last open member and the next headline. **Ladder unchanged (`rung=4`)** — off-ladder; the P3 exit gate needs WP-304's arm, which the operator runs by hand.
 
-**🔴 The judge PROVED two defects and the run shipped them anyway (F-335 → WP-619, the next headline).** Judge pass #1 ESCALATEd with 3 concerns; pass #2 ran a smaller rubric over the **byte-identical diff**, never re-tested them, and sealed 🟢 SUCCESS. Two named real defects the ACs did not test for. **🔴 F-334 hand-fixed (WP-621):** `regressionGateBeforeSuccess` returned `undefined` for any non-deterministic finding, and on the converged-escalate path `undefined` means "SUCCESS stands" — so `design_serves_overall_goal: ✗` sealed green. Now condemns FAILED + resumable, still terminal-or-nothing; sdk 1379 → **1380**. **F-331 is LIVE-PROVEN this run** — judge pass #2 carried `✓ pre_existing_suite_still_green`.
+**🔴 F-340 hand-fixed — every new gate is a new way to fail a correct run.** The adjudication row (and a scope sentence claiming the pass adjudicates concerns) was rendered on **every** completion review, including the concern-LESS one that any `regression_suite` run buys; a ✗ on that subject-less question condemns a correct SUCCESS through this delivery's own catch-all. Proven from the RAW wire request, fixed at `src/runner/activities.ts:1699` + `src/judge/prompt.ts:189`; Scenario 9 RED→GREEN, sdk 1454 → **1455**. **Neither AC could see it — both directions were driven by a SCRIPTED judge.** 🟢 F-341 hand-fixed (unreachable second rendering path).
 
-**Still standing.** ① Three page defects the ACs missed were hand-fixed (🟠 F-336 fabricated corpus counts on empty data · 🟠 F-337 bundle data could inject a remote `<script>` · 🟠 F-338 evidence links depended on the CLI's cwd) — bench suite 210 → **213**; §8 carries the note. ② 🟡 F-339 → WP-620 — the stale-spec guard refused this very spec at $0 and is wrong on **7 plan rows in both directions**; launch with `CHIKORY_ALLOW_STALE_SPEC=1` when you have re-measured the WP by hand. ③ 🟠 F-328 → WP-616 · 🟠 F-332 → WP-618 still open. ④ Keep `unattended: escalation: seal_resumable_failed` in every headline spec (F-322).
+**Still standing.** ① 🟡 **F-342 → WP-622** — this spec's *"timed at HEAD"* suite premise was **95 tests stale** (claimed 175 files/1380, HEAD was 185/1475) because PRs #19–#30 landed 10 test files between the review and the launch; **re-measure a declared `regression_suite` before writing it into a spec**, never transcribe it. ② **F-343 / F-197** — the run reproduced the defect it fixes (its own concern sealed unadjudicated); the next run is the proof, signature = a `completion-review` verdict carrying an `escalation_concerns_adjudicated` row. ③ 🟡 F-339 → WP-620 — launch with `CHIKORY_ALLOW_STALE_SPEC=1` when you have re-measured the WP by hand. ④ 🟠 F-306 → WP-606 recurred (7 lines of CLI narration opened the step summary) · 🟠 F-328 → WP-616 · 🟠 F-332 → WP-618 still open. ⑤ Keep `unattended: escalation: seal_resumable_failed` in every headline spec (F-322).
 
 Related docs: [`docs/spec/task-spec.md`](spec/task-spec.md) (schema
 reference) · [`docs/TASK-PROTOCOL.md`](TASK-PROTOCOL.md) (WP etiquette, §7 is
@@ -746,6 +746,7 @@ broken (a false-green, not a follow-on fix).
 
 | Symptom | Cause → fix |
 |---|---|
+| A spec's "timed at HEAD" suite baseline disagrees with what the executor reports | **You transcribed it instead of measuring it — 🟡 F-342, dogfood-140.** The dogfood-140 spec asserted `175 files / 1380 tests`; HEAD was `185 files / 1475`, because PRs #19–#30 landed 10 test files in `packages/sdk-ts/test/` between the previous review and the launch. The `1376 → 1379 → 1380` figure carried across reports is a hand-incremented counter, not a measurement. **Run the spec's declared `regression_suite` yourself at the commit you are about to launch from, and paste ITS counts.** The premise is fed to the executor AND used to sanity-check its claims, so a stale one reads as fabrication. → WP-622. |
 | `Invalid task spec: provider 'x' … missing env var Y` | Parse-time key validation. Export the key, or use the §3.8 routing workaround for keyless CLI runs. |
 | `Is the Temporal dev server up?` | It isn't. `devbox run temporal-dev`. |
 | A step summary says the FULL TEST SUITE passed, and the judge's `tests_pass` is ✓ | **Neither is evidence the repo builds green — 🔴 F-316, dogfood-134.** `tests_pass` is JD-4-overridden from the JUDGE-EXECUTED acceptance checks; it literally records *"all N judge-executed checks exited 0"*. And the judge reads the ADDED DIFF, so it cannot see a test the delivery broke in a file it never touched. dogfood-134's summary claimed a clean full suite while 6 tests across 3 files were red — including its own new file. Run `devbox run test` in the review, every time; `dogfood-close.sh` blocks the commit but does not tell you why. Durable fix queued as WP-609. |
@@ -929,17 +930,22 @@ broken (a false-green, not a follow-on fix).
 
 ## 8. Known P1 limitations (so you don't fight them)
 
-- **🔴 A judge's out-of-rubric CONCERN is recorded, never acted on** (F-335 →
-  WP-619, dogfood-139). When a converged step escalates with free-text concerns,
-  the seal carries them verbatim into the terminal reason and ships. In
-  dogfood-139 two of three concerns named **real, reproducible defects in the
-  delivered code** — and the run sealed 🟢 SUCCESS with both in the diff. The
-  completion-review pass that follows runs a *different, smaller* rubric over the
-  byte-identical diff and never re-tests them. **Until WP-619 lands: read the
-  `concern:` lines of every ESCALATE pass in `chikory trace` before trusting a
-  converged SUCCESS** — a green seal is not evidence the concerns were wrong.
-  (F-334/WP-621 closed the sibling hole where a non-deterministic *rubric* finding
-  on the same path was discarded; that one now condemns.)
+- **✅ CLOSED — a judge's out-of-rubric CONCERN is now adjudicated before the
+  converged seal** (F-335 → WP-619, landed in the dogfood-140 review). A converged
+  out-of-rubric escalation buys exactly ONE completion-review pass, shown the
+  concern text verbatim, answering through the `escalation_concerns_adjudicated`
+  rubric row: cleared → SUCCESS with the F-229/F-271 wording, upheld → **resumable
+  FAILED naming the item**, with or without a declared `regression_suite`.
+  Terminal-or-nothing — it never re-enters the loop. **What to look for in
+  `chikory trace`:** the `completion-review` verdict carries an
+  `escalation_concerns_adjudicated` row *only when a concern was raised*; a
+  converged SUCCESS without one means nobody objected, not that an objection was
+  waved through. (F-334/WP-621 closed the sibling hole where a non-deterministic
+  *rubric* finding on the same path was discarded; F-340 closed this gate's own
+  false-positive surface — the row is no longer asked when there is nothing to
+  adjudicate.) **Still open in this family: WP-601 (F-295)** — an objection raised
+  at step N is not in the judge's incremental diff evidence at step N+2, so a run
+  can still outrun a design concern by committing more steps.
 
 - **🟡 The stale-spec launch guard can refuse a legitimate spec** (F-339 →
   WP-620, dogfood-139). `chikory run` reads WP completion out of `plan.md` Notes

@@ -184,14 +184,39 @@ function renderHistory(history: Record<string, boolean[]>): string {
     .join("\n");
 }
 
-const COMPLETION_REVIEW_SCOPE = [
-  "## REVIEW SCOPE — run-completion architecture review",
-  "Every acceptance criterion has already been confirmed by a previous pass.",
-  "This pass judges ONLY whether the run's cumulative changes form a coherent",
-  "design in service of the goal. Express every finding through the rubric",
-  "items; leave `concerns` empty — process concerns were already handled by",
-  "the per-step passes.",
-].join("\n");
+function renderCompletionReviewScope(escalationConcerns?: string[]): string {
+  const hasConcerns = escalationConcerns !== undefined && escalationConcerns.length > 0;
+  // F-340 (dogfood-140): the adjudication sentence and its rubric row appear
+  // TOGETHER or not at all. A concern-less review that is told it "adjudicates
+  // out-of-rubric concerns" is being asked a question with no subject and no
+  // row to answer in, and a ✗ on that row condemns a converged run.
+  const charter = hasConcerns
+    ? [
+        "This pass judges whether the run's cumulative changes form a coherent",
+        "design in service of the goal, and adjudicates the out-of-rubric concerns",
+        "listed below.",
+      ]
+    : [
+        "This pass judges ONLY whether the run's cumulative changes form a coherent",
+        "design in service of the goal.",
+      ];
+  const lines = [
+    "## REVIEW SCOPE — run-completion architecture review",
+    "Every acceptance criterion has already been confirmed by a previous pass.",
+    ...charter,
+    "Express every finding through the rubric",
+    "items; leave `concerns` empty — process concerns were already handled by",
+    "the per-step passes.",
+  ];
+  if (hasConcerns) {
+    lines.push(
+      "",
+      "### Out-of-rubric concerns to adjudicate against the cumulative diff:",
+      ...escalationConcerns.map((c) => `- ${c}`),
+    );
+  }
+  return lines.join("\n");
+}
 
 function renderDiffEvidence(
   diffText: string,
@@ -239,6 +264,8 @@ export interface JudgePromptInput {
   activeWorkChunkDirective?: string;
   /** "cumulative" marks the run-completion review over the whole-run diff. */
   reviewScope?: "incremental" | "cumulative";
+  /** Out-of-rubric concerns raised by earlier passes to adjudicate in completion review. */
+  escalationConcerns?: string[];
 }
 
 export function buildJudgeMessages(input: JudgePromptInput): Message[] {
@@ -251,7 +278,14 @@ export function buildJudgeMessages(input: JudgePromptInput): Message[] {
     ...(overallGoal.length > 0 ? ["", overallGoal] : []),
     ...(activeWorkChunkScope.length > 0 ? ["", activeWorkChunkScope] : []),
     ...(writeBoundaryScope.length > 0 ? ["", writeBoundaryScope] : []),
-    ...(input.reviewScope === "cumulative" ? ["", COMPLETION_REVIEW_SCOPE] : []),
+    ...(input.reviewScope === "cumulative"
+      ? ["", renderCompletionReviewScope(input.escalationConcerns)]
+      : []),
+    // F-341 (dogfood-140): a per-step branch rendering these concerns used to sit
+    // here. No caller can reach it — `escalationConcerns` is only ever set on a
+    // `completionReview: true` judge pass, and that always sets
+    // `reviewScope: "cumulative"` (activities.ts). Removed rather than left as an
+    // untested second rendering path.
     "",
     "## ACCEPTANCE CRITERIA (fill `criterionResults`, one entry per id)",
     renderCriteria(input.evidence.criteria),
