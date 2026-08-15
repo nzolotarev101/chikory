@@ -253,7 +253,7 @@ export function loadTargetEngineSource(task: BenchmarkTask, workspaceDir: string
         "ls-tree",
         "--name-only",
         "FETCH_HEAD",
-        "package.json"
+        "package.json",
       ], { encoding: "utf8", timeout: 15000 }).trim();
       if (!listed) {
         return { type: "success", content: "{}" };
