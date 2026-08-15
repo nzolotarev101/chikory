@@ -91,3 +91,47 @@ def test_build_digest_messages_empty_and_whitespace_only_strings() -> None:
     assert "2.    " in user_content
     assert "3. \n\t" in user_content
     assert "4. actual content" in user_content
+
+
+def test_build_digest_messages_single_item() -> None:
+    # Test with a sequence containing exactly one item
+    messages = build_digest_messages(["Single step summary"])
+
+    assert len(messages) == 2
+    assert messages[0] == Message(role="system", content=DIGEST_SYSTEM_PROMPT)
+    assert messages[1] == Message(
+        role="user",
+        content="## Older step summaries to fold (oldest to newest)\n1. Single step summary",
+    )
+
+
+def test_build_digest_messages_non_list_sequence() -> None:
+    # Test with non-list Sequence implementations like tuple
+    tuple_input: tuple[str, ...] = ("First tuple item", "Second tuple item")
+    messages = build_digest_messages(tuple_input)
+
+    assert len(messages) == 2
+    assert messages[0] == Message(role="system", content=DIGEST_SYSTEM_PROMPT)
+    assert "1. First tuple item" in messages[1].content
+    assert "2. Second tuple item" in messages[1].content
+
+
+def test_build_digest_messages_multiline_summaries() -> None:
+    # Test summaries containing embedded newline characters
+    multiline_input = ["Line 1\nLine 2", "Another summary\nwith multiple\nlines"]
+    messages = build_digest_messages(multiline_input)
+
+    assert len(messages) == 2
+    user_content = messages[1].content
+    assert "1. Line 1\nLine 2" in user_content
+    assert "2. Another summary\nwith multiple\nlines" in user_content
+
+
+def test_build_digest_messages_system_prompt_content() -> None:
+    # Verify that the system prompt contains expected compaction rules
+    messages = build_digest_messages(["summary"])
+    system_content = messages[0].content
+
+    assert "You compact older execution memory for a durable agent run." in system_content
+    assert "Output prose only. Do not return JSON or wrap the digest in a schema." in system_content
+    assert "The goal is to rehydrate the gist" in system_content
