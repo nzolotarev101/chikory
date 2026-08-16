@@ -1,0 +1,537 @@
+# Plain: when Chikory's reviewer writes down what it found, nothing it writes has a size limit.
+# A failing test suite dumps its entire output into the note, and every separate complaint under
+# a heading is kept forever - so the very prompt whose job is to weigh the whole delivery can be
+# buried under kilobytes of its own earlier notes and raw logs. After this run, every one of
+# those strings is bounded before anything renders it, the oldest and newest complaints survive
+# intact, and whatever is left out is stated out loud instead of vanishing.
+# WP: WP-616 (unbounding an excerpt for ONE consumer must not unbound the consumers that were
+#   never budgeted, F-328) + WP-631 (per-rubric-id standing-finding accumulation must be
+#   BOUNDED, F-365)
+# Ladder-rung: 0 (off-ladder - the remaining rung-5 half is WP-304, not agent-runnable; see WHY)
+# Thesis-KPI: context-rot mitigation (CLAUDE.md: "context rot: model perf degrades over long
+#   sessions; first-class mitigation required"), measured as the CM-3 discipline holding on the
+#   judge's OWN inputs. Both premises RE-MEASURED on this tree 2026-08-16, both still live:
+#   * WP-616/F-328: `src/judge/harness.ts:205-208` appends the raw regression-suite output to the
+#     `pre_existing_suite_still_green` justification; the only cap is `bound(output, 64 * 1024)`
+#     at `src/judge/evidence.ts:203`. `describe()` (`src/judge/verdict.ts:43-44`) then inlines
+#     every failing rubric justification VERBATIM into the verdict rationale (`:166`, and the
+#     ROLLBACK branch at `:84`) - a durable journal string printed in full by `chikory trace`.
+#     A string bounded at 1000 chars before WP-614 is now bounded at 64 KB: a 44x regression.
+#   * WP-631/F-365: WP-630 (dogfood-148, landed) turned `standingRubricFindings` into
+#     `Map<string, string[]>` (`src/workflow/agent-loop.ts:272`) that appends every DISTINCT
+#     justification per rubric id (`:1149`, `:1154`). Only `tests_pass` is ever cleared
+#     (`isRubricItemSettledAgainstWholeDelivery`, `src/judge/rubric.ts:134-147`, returns false
+#     for the other 5 `STANDING_RUBRIC` rows), and every entry renders one-to-one as its own
+#     bullet with no cap and no near-duplicate collapse (`src/judge/prompt.ts:227`; the only
+#     narrowing is an exact-set dedup at `src/workflow/agent-loop.ts:416`).
+# Format: loose - the outcome and the named observables are fixed, the mechanism is the executor.
+#
+# Launch mode: RUN (single node - one design principle, two sites, one deliverable).
+#   CHIKORY_PREFLIGHT_ONLY=1 devbox run run-dogfood
+#   devbox run run-dogfood
+#
+# WHY THIS AND NOT THE LADDER RUNG (dogfood-148 review, 2026-08-16):
+#   `scripts/dogfood-progression.sh` reads STALLED (no thesis axis moved dogfood-146..148), so
+#   the binding rule wants the current phase ladder rung (P3-rung-5, WP-530 section 7) as the
+#   next headline. Unchanged since dogfood-139: rung-5's remaining half (WP-304's OpenHands arm
+#   plus a corpus wide enough to separate 19 requirements at 95 percent confidence) is a
+#   quota-bound, multi-hour suite the OPERATOR runs by hand (dogfood-122's lesson: an LLM
+#   executor may not supervise it). No spec can headline it.
+#
+#   Among runnable candidates this pairing wins on three counts. (1) It is the SAME defect at two
+#   sites - an unbounded string handed to a consumer nobody budgeted for - so one design decision
+#   discharges two open plan.md rows instead of one. (2) One of the two sites was created by the
+#   run this spec follows: dogfood-148 fixed F-364 by making the finding channel unbounded, and
+#   leaving that in place trades one judge failure mode for another. (3) It stresses the pillar
+#   dogfood-148 did NOT - context-rot mitigation rather than judge reliability - and it stresses
+#   it where it is least visible: inside the judge's own prompt and journal, the two places the
+#   loop trusts most. WP-589 (F-264, tracked-files write boundary) remains the single
+#   highest-billed open seam but is still a two-part design call needing an operator decision on
+#   `chikory-bench compare` inputs; WP-610 (F-317) is smaller and unchanged.
+#
+# THE MEASURED PREMISE (measured on this tree 2026-08-16; do not re-litigate):
+#   * A run CAN accumulate many objections on one model-judged rubric id before sealing. Rule 3
+#     HALT (`src/judge/verdict.ts:106-121`) fires on 3 consecutive fails of the SAME criterion,
+#     and Rule 5 ESCALATE (`:127-138`) needs a literal pass-fail-pass triple - so criteria failing
+#     in ROTATING contiguous blocks keep a run alive indefinitely while `design_serves_overall_goal`
+#     fails every pass with different text. That is what a real long run looks like, and AC-1
+#     drives exactly it.
+#   * The brief is the ONE budgeted consumer and must stay budgeted: `buildCompletionReviewBrief`
+#     (`src/workflow/completion-review.ts:130`) splits the suite justification at the first `:\n`
+#     (`:167-172`) into a status prefix plus the raw log, then fits an excerpt of that log into
+#     `COMPLETION_BRIEF_MAX_CHARS`. WP-614 exists to give it that raw log. Taking the log away
+#     from the brief is not a fix, it is a revert (trap A).
+#   * The suite this run must not break, MEASURED at the launch commit (F-342, dogfood-140 - run
+#     `pnpm --filter @chikory/sdk exec vitest run` yourself and read its own tail): at this review
+#     it stood at 191 files / 1,526 tests (1,503 passed | 23 skipped) in 62.14s, and
+#     `test/runner/` alone stood at 56 files / 397 tests. BOTH numbers were measured in the same
+#     sitting at the same commit (F-367, dogfood-148: the previous spec mixed two measurement
+#     points and its full-suite figure was 6 tests stale).
+#   * The `unattended:` block below is not decoration (F-322).
+#
+# Designed traps - the plausible-but-wrong deliveries the acceptance criteria exist to reject:
+#   A. **Bound the suite output at the SOURCE** - shrink `bound(output, 64 * 1024)` at
+#      `src/judge/evidence.ts:203`, or stop appending the log to the justification in
+#      `src/judge/harness.ts:205-208`. That bounds the rationale by taking the raw log away from
+#      the brief, which is a revert of WP-614, not a fix of WP-616. AC-2 asserts the brief still
+#      carries text from the log after the change.
+#   B. **Fix the brief-facing consumer only, and leave `describe()` alone.** The rationale is the
+#      durable journal string; the brief is already budgeted and was never the problem. AC-2
+#      drives `computeVerdict` itself, the real entry point, not a helper.
+#   C. **Bound the standing accumulation by silently dropping entries.** That re-creates F-364,
+#      the exact defect dogfood-148 just closed - an objection disappearing before anything
+#      adjudicates it. AC-1 requires an explicit elision notice naming HOW MANY were left out.
+#   D. **Bound it by truncating every entry's text** so each id keeps its prefix and loses its
+#      substance. A mangled objection is not adjudicable. AC-1 plants a HEAD and a TAIL marker in
+#      each justification and requires BOTH ends of the oldest and the newest to survive intact.
+#   E. **Touch the free-text `standingConcerns` array** (`src/workflow/agent-loop.ts:1159-1163`)
+#      or fold it into the rubric channel. Out of scope - WP-601/WP-619/WP-630 guarantees. AC-3
+#      greps for its exact `standingConcerns.includes(concern)` guard line, byte-unchanged.
+#   F. **Change which rubric ids settle, or when.** `isRubricItemSettledAgainstWholeDelivery` and
+#      its clearing rule are out of scope; a settled id must still clear COMPLETELY. AC-3 runs the
+#      whole committed `test/runner/` tree, whose `standing-findings-overwrite-live.test.ts` and
+#      `standing-findings-settled-live.test.ts` (7 tests) pin exactly that.
+#
+# NOT IN SCOPE: which rubric ids exist or settle; `mergeDesignFindings` / `decideCompletionReview`
+#   (WHEN a review fires, not WHAT it is shown); the free-text concerns channel; the judge charter
+#   text; the TaskSpec contract; chain semantics; the 2000-char brief cap itself.
+
+name: dogfood-149-wp616-wp631-bounded-judge-strings
+wp: WP-616+WP-631
+goal: >
+  No string on the judge evidence path may be unbounded at the point something renders it.
+  Two sites are unbounded today and both must be fixed as one design decision, not two patches.
+
+  Site 1 (WP-616 / F-328). A failing regression suite puts its RAW output into the
+  `pre_existing_suite_still_green` rubric justification (`src/judge/harness.ts:205-208`), capped
+  only at 64 KB (`src/judge/evidence.ts:203`). `describe()` (`src/judge/verdict.ts:43-44`) then
+  inlines every failing rubric justification VERBATIM into the verdict rationale (`:84`, `:166`) -
+  a durable journal string that `chikory trace` prints in full. Make this true: the rationale
+  `computeVerdict` returns is BOUNDED regardless of how large a justification it was handed, and
+  still names the failing rubric id. Hold this line: `buildCompletionReviewBrief`
+  (`src/workflow/completion-review.ts:130`) must STILL be able to reach the suite's raw output and
+  budget its own excerpt from it - that access is what WP-614 exists to provide, and removing it
+  is a revert, not a fix.
+
+  Site 2 (WP-631 / F-365). `standingRubricFindings` (`src/workflow/agent-loop.ts:272`) accumulates
+  every distinct justification per rubric id, and only `tests_pass` is ever cleared, so a
+  model-judged id grows without limit over a run and each entry renders as its own bullet into the
+  completion-review prompt (`src/judge/prompt.ts:227`). Make this true: the accumulation handed to
+  the completion review is BOUNDED. When entries are left out, the oldest and the newest findings
+  survive INTACT - both, in full, not truncated - and the prompt says plainly HOW MANY were left
+  out. A finding that disappears without a trace is F-364 again, which dogfood-148 just closed.
+
+  How you do it is yours: bound at the render site, bound at the accumulator, add a dedicated
+  raw-output field to the evidence row, or something else - pick one coherent mechanism and say in
+  your step summary which consumers you re-verified. Do not solve the same problem twice with two
+  unrelated mechanisms, and do not invent a parallel second accumulator alongside
+  `standingRubricFindings` - there is exactly one channel for rubric findings and there must still
+  be exactly one when you are done.
+
+  Nothing else changes. `isRubricItemSettledAgainstWholeDelivery` and its clearing rule (a settled
+  id still clears COMPLETELY, every accumulated justification), the free-text `standingConcerns`
+  array and its dedup guard, `mergeDesignFindings`, `decideCompletionReview`, the rubric item set,
+  the judge charter text, the 2000-char brief cap, and the TaskSpec contract are untouched.
+  TypeScript stays strict ESM with named exports and no `any`. The workflow side stays
+  deterministic - no clocks, no randomness, no I/O outside activities.
+
+  Pin your work with tests that live in the repo, under `test/runner/` and/or `test/judge/`,
+  beside the files they cover. A behaviour proved only by the acceptance checks that grade this
+  run is not pinned at all (F-356), and a repo test copied verbatim from a grading check inherits
+  its blind spots (F-360) - cover something the grading checks do not. Two candidates the checks
+  below deliberately leave open: (1) a run that accumulates FEWER findings than the bound keeps
+  every one of them and emits NO elision notice; (2) a rubric id that settles still clears every
+  accumulated justification AFTER the bound is applied.
+
+  If an existing test pins a shape this change must alter, update its expectation and say plainly
+  in the step summary that you did - do not delete it, and do not weaken it into a tautology.
+
+  Verify your work with FAST checks only: the package typecheck (tsc with noEmit), eslint over the
+  files you touched, and vitest over only the test files you touched. Do NOT run the full vitest
+  suite inside a step - it does not fit the step time cap (F-345) - this run's declared regression
+  suite plus the judge-executed checks are the trusted full-suite verification whatever your
+  summary says.
+
+repos:
+  - url: /Users/nikitazolotarev/repos/chikory
+    writable: true
+
+# The SDK suite is both the surface this run edits and the gate it must not break.
+# MEASURE it at the launch commit rather than trusting this line (F-342, dogfood-140).
+regression_suite: pnpm --filter @chikory/sdk exec vitest run
+check_timeout_ms: 180000
+
+acceptance_criteria:
+  - id: AC-1
+    description: >
+      THIS CHECK OWNS ITS ORACLE (WP-631 / F-365). It drives the REAL agent loop end to end - real
+      Temporal dev server, real workflow bundle, real judge pass sequencing, scripted executor,
+      fake judge wire - over a 7-pass run whose three acceptance criteria fail in ROTATING
+      contiguous blocks (so neither Rule 3 HALT nor Rule 5 ESCALATE fires) while
+      `design_serves_overall_goal` fails at passes 1..6 with six DIFFERENT justifications, each
+      ~950 chars and each carrying a distinct HEAD and TAIL marker; pass 7 is clean and seals the
+      run. On HEAD all six accumulate and render one bullet each, so the completion review's
+      out-of-rubric concerns section is ~5.7 KB. After the fix that section must be at most 3072
+      chars, must still carry BOTH ends of the OLDEST finding (`OBJ-1-HEAD` and `OBJ-1-TAIL`) and
+      BOTH ends of the NEWEST (`OBJ-6-HEAD` and `OBJ-6-TAIL`) - trap D, a per-entry truncation
+      that keeps prefixes and drops substance, is rejected here - and, if any of findings 2..5 is
+      absent, must carry an explicit elision notice containing the COUNT left out (trap C, a
+      silent drop, is F-364 again).
+    check: |
+      cd packages/sdk-ts || exit 1
+      TARGET=test/runner/ac1-bounded-standing-findings.generated.test.ts
+      rm -f "$TARGET"
+      cat > "$TARGET" <<'GENEOF'
+      import { randomUUID } from "node:crypto";
+      import { mkdtemp, rm } from "node:fs/promises";
+      import { tmpdir } from "node:os";
+      import { join } from "node:path";
+
+      import { afterEach, describe, expect, inject, test } from "vitest";
+
+      import {
+        createRunnerWorker,
+        createTemporalRunner,
+        RUBRIC_DESIGN_SERVES_OVERALL_GOAL,
+        STANDING_RUBRIC,
+        type JudgeForm,
+        type RunStatusReport,
+      } from "../../src/index.js";
+      import {
+        completionReviewForm,
+        initSourceRepo,
+        makeJudgedSpec,
+        scriptedRegistry,
+        startFakeJudgeWire,
+        TERMINAL_STATUSES,
+        waitFor,
+      } from "./helpers.js";
+
+      const address = inject("temporalAddress");
+      const bundlePath = inject("workflowBundlePath");
+
+      const REVIEW_MARKER = "## REVIEW SCOPE — run-completion architecture review";
+      const CONCERNS_HEADER =
+        "### Out-of-rubric concerns to adjudicate against the cumulative diff:";
+      const SECTION_CAP = 3072;
+
+      // Six distinct objections, each ~950 chars, each with a HEAD and a TAIL marker so a
+      // per-entry truncation (trap D) is distinguishable from a whole-entry elision (trap C).
+      const FILLER = "abcdefghij".repeat(90);
+      function objection(k: number): string {
+        return `OBJ-${k}-HEAD the ${k}th distinct design objection ${FILLER} OBJ-${k}-TAIL`;
+      }
+
+      // Rotating contiguous fail blocks: no criterion ever trails 3 fails (Rule 3 HALT) and
+      // none ever forms a pass-fail-pass triple (Rule 5 ESCALATE).
+      const CRITERIA_BY_PASS: Array<Record<string, boolean>> = [
+        { "AC-A": false, "AC-B": true, "AC-C": true },
+        { "AC-A": false, "AC-B": true, "AC-C": true },
+        { "AC-A": true, "AC-B": false, "AC-C": true },
+        { "AC-A": true, "AC-B": false, "AC-C": true },
+        { "AC-A": true, "AC-B": true, "AC-C": false },
+        { "AC-A": true, "AC-B": true, "AC-C": false },
+        { "AC-A": true, "AC-B": true, "AC-C": true },
+      ];
+
+      function formFor(passIndex: number): JudgeForm {
+        const designPasses = passIndex === 6;
+        return {
+          criterionResults: Object.entries(CRITERIA_BY_PASS[passIndex]).map(([id, pass]) => ({
+            id,
+            pass,
+            justification: pass ? "scripted judge: confirmed" : "scripted judge: not met yet",
+          })),
+          rubricResults: STANDING_RUBRIC.map((r) =>
+            r.id === RUBRIC_DESIGN_SERVES_OVERALL_GOAL && !designPasses
+              ? { id: r.id, pass: false, justification: objection(passIndex + 1) }
+              : { id: r.id, pass: true, justification: "scripted judge: confirmed" },
+          ),
+          concerns: [],
+        };
+      }
+
+      describe.skipIf(address === null)(
+        "AC-1 WP-631/F-365: the standing-finding accumulation handed to the completion review is BOUNDED",
+        () => {
+          const cleanups: Array<() => Promise<void>> = [];
+          afterEach(async () => {
+            while (cleanups.length > 0) await cleanups.pop()!();
+          });
+
+          test("the Temporal substrate is present — this AC must never pass vacuously", () => {
+            expect(address, "temporalAddress was not provided").not.toBeNull();
+            expect(bundlePath, "workflowBundlePath was not provided").not.toBeNull();
+          });
+
+          test("six distinct objections on one rubric id are bounded, oldest+newest survive intact, elision is stated", async () => {
+            const tmp = await mkdtemp(join(tmpdir(), "chikory-wp631-"));
+            cleanups.push(() => rm(tmp, { recursive: true, force: true }));
+            const repoUrl = await initSourceRepo(join(tmp, "src"));
+            const dataDir = join(tmp, "data");
+            const taskQueue = "tq-" + randomUUID();
+
+            const wire = await startFakeJudgeWire(
+              CRITERIA_BY_PASS.map((_, i) => formFor(i)),
+              { reviewForms: [completionReviewForm()] },
+            );
+            cleanups.push(() => wire.close());
+
+            const worker = await createRunnerWorker({
+              adapters: scriptedRegistry,
+              address: address!,
+              taskQueue,
+              dataDir,
+              workflowBundlePath: bundlePath!,
+              routerOptions: { baseUrls: { "openai-compat": wire.url } },
+            });
+            const workerDone = worker.run();
+            const runner = createTemporalRunner({ address: address!, taskQueue, dataDir });
+            cleanups.push(async () => {
+              worker.shutdown();
+              await workerDone;
+              await runner.close();
+            });
+
+            const spec = makeJudgedSpec({
+              repoUrl,
+              cadence: 1,
+              maxSteps: 8,
+              acceptanceCriteria: [
+                { id: "AC-A", description: "scripted criterion A" },
+                { id: "AC-B", description: "scripted criterion B" },
+                { id: "AC-C", description: "scripted criterion C" },
+              ],
+            });
+
+            const handle = await runner.start(spec);
+            const report = await waitFor<RunStatusReport>(
+              async () => {
+                const r = await handle.status();
+                return TERMINAL_STATUSES.includes(r.status) ? r : undefined;
+              },
+              {
+                what: "7-pass rotating-criteria run to reach a terminal status",
+                timeoutMs: 180_000,
+              },
+            );
+            expect(
+              report.status,
+              "the clean 7th pass must seal SUCCESS via the completion review, not HALT or park — " +
+                "if this failed, the rotating criteria pattern tripped Rule 3 or Rule 5",
+            ).toBe("SUCCESS");
+
+            const reviewRequest = wire.requests.find((r) => r.includes(REVIEW_MARKER));
+            expect(reviewRequest, "no completion review pass fired at all").toBeDefined();
+            const headerAt = reviewRequest!.indexOf(CONCERNS_HEADER);
+            expect(
+              headerAt,
+              "the completion review prompt carried no out-of-rubric concerns section",
+            ).toBeGreaterThan(-1);
+
+            const rest = reviewRequest!.slice(headerAt + CONCERNS_HEADER.length);
+            const nextHeaderAt = rest.indexOf("## ");
+            const section = nextHeaderAt === -1 ? rest : rest.slice(0, nextHeaderAt);
+
+            expect(
+              section.length,
+              "the out-of-rubric concerns section is UNBOUNDED — six accumulated findings " +
+                "rendered one bullet each is " + section.length + " chars (F-365)",
+            ).toBeLessThanOrEqual(SECTION_CAP);
+
+            for (const marker of ["OBJ-1-HEAD", "OBJ-1-TAIL"]) {
+              expect(
+                section.includes(marker),
+                "the OLDEST finding must survive INTACT (" + marker + " missing) — dropping or " +
+                  "truncating it is F-364 again: an objection nothing adjudicated",
+              ).toBe(true);
+            }
+            for (const marker of ["OBJ-6-HEAD", "OBJ-6-TAIL"]) {
+              expect(
+                section.includes(marker),
+                "the NEWEST finding must survive INTACT (" + marker + " missing)",
+              ).toBe(true);
+            }
+
+            const middleKept = [2, 3, 4, 5].filter((k) =>
+              section.includes("OBJ-" + k + "-HEAD"),
+            ).length;
+            if (middleKept < 4) {
+              expect(
+                /\d+/.test(section.replace(/OBJ-\d+-(HEAD|TAIL)/g, "")),
+                "findings were left out with no count stated — an elision notice must name HOW " +
+                  "MANY were omitted (trap C: a silent drop is F-364 again)",
+              ).toBe(true);
+            }
+          }, 300_000);
+        },
+      );
+      GENEOF
+      pnpm exec vitest run "$TARGET"
+      ST=$?
+      rm -f "$TARGET"
+      if [ "$ST" -ne 0 ]; then
+        echo "AC-1 FAIL: the standing-finding accumulation handed to the completion review is not bounded, or a bound was applied by dropping/truncating the oldest or newest finding without saying so. vitest exited $ST"
+        exit 1
+      fi
+      echo "AC-1 OK: six distinct objections on one rubric id render bounded, oldest and newest intact, elision stated"
+
+  - id: AC-2
+    description: >
+      THIS CHECK OWNS ITS ORACLE (WP-616 / F-328). It drives the REAL entry points, not helpers:
+      `computeVerdict` (`src/judge/verdict.ts:67`) is handed a `JudgeForm` whose
+      `pre_existing_suite_still_green` row carries a 44 KB justification shaped exactly as
+      `src/judge/harness.ts:205-208` builds it (status prefix, then `:\n`, then the raw log with a
+      LOG-HEAD marker at the top), and the rationale it returns must be at most 4096 chars while
+      still naming the failing rubric id — on HEAD `describe()` inlines all 44 KB. The SAME form
+      then goes through the real `buildCompletionReviewBrief`
+      (`src/workflow/completion-review.ts:130`), which must still reach the raw log and carry text
+      from it inside the 2000-char brief: trap A (bounding the output at
+      `src/judge/evidence.ts:203` or dropping it in `harness.ts`) is a revert of WP-614 and is
+      rejected here.
+    check: |
+      cd packages/sdk-ts || exit 1
+      TARGET=test/judge/ac2-bounded-rationale.generated.test.ts
+      rm -f "$TARGET"
+      cat > "$TARGET" <<'GENEOF'
+      import { describe, expect, test } from "vitest";
+
+      import {
+        computeVerdict,
+        RUBRIC_PRE_EXISTING_SUITE_GREEN,
+        RUBRIC_PRE_EXISTING_SUITE_GREEN_ITEM,
+        STANDING_RUBRIC,
+        type JudgeForm,
+      } from "../../src/judge/index.js";
+      import { buildCompletionReviewBrief } from "../../src/workflow/completion-review.js";
+
+      const RATIONALE_CAP = 4096;
+      const BRIEF_CAP = 2000;
+      // The brief fits an EXCERPT of the log into its 2000-char budget, so the marker has to
+      // be text the excerpt cannot miss whichever end it takes — a line repeated throughout.
+      const LOG_LINE = "FAIL some/spec.test.ts > case";
+      const RAW_LOG = (LOG_LINE + "\n").repeat(1500);
+
+      function suiteFailForm(): JudgeForm {
+        return {
+          criterionResults: [
+            { id: "AC-1", pass: true, justification: "confirmed" },
+          ],
+          rubricResults: [
+            ...STANDING_RUBRIC.map((r) => ({
+              id: r.id,
+              pass: true,
+              justification: "confirmed",
+            })),
+            {
+              id: RUBRIC_PRE_EXISTING_SUITE_GREEN,
+              pass: false,
+              justification:
+                "regression suite command `pnpm exec vitest run` exited 1:\n" + RAW_LOG,
+            },
+          ],
+          concerns: [],
+        };
+      }
+
+      describe("AC-2 WP-616/F-328: an unbounded justification must not become an unbounded rationale", () => {
+        test("the fixture really is huge — this AC must never pass vacuously", () => {
+          expect(RAW_LOG.length).toBeGreaterThan(40_000);
+        });
+
+        test("computeVerdict bounds the rationale it returns, and still names the failing rubric id", () => {
+          const form = suiteFailForm();
+          const decision = computeVerdict(form, {}, [
+            ...STANDING_RUBRIC,
+            RUBRIC_PRE_EXISTING_SUITE_GREEN_ITEM,
+          ]);
+          expect(
+            decision.rationale.length,
+            "the verdict rationale is UNBOUNDED — describe() inlined the raw suite log " +
+              "verbatim (" + decision.rationale.length + " chars). This string is journaled " +
+              "durably and printed in full by `chikory trace` (F-328).",
+          ).toBeLessThanOrEqual(RATIONALE_CAP);
+          expect(
+            decision.rationale.includes(RUBRIC_PRE_EXISTING_SUITE_GREEN),
+            "bounding the rationale must not cost it the id of the item that failed",
+          ).toBe(true);
+        });
+
+        test("the remediation brief can STILL reach the raw suite log (trap A: bounding at the source is a WP-614 revert)", () => {
+          const brief = buildCompletionReviewBrief(suiteFailForm());
+          expect(brief.length).toBeLessThanOrEqual(BRIEF_CAP);
+          expect(
+            brief.includes(LOG_LINE),
+            "the brief no longer carries any of the suite output — the raw log was removed " +
+              "from the surface the brief budgets from, which reverts WP-614 instead of " +
+              "fixing WP-616. THIS ASSERTION IS GREEN ON HEAD and must STAY green.",
+          ).toBe(true);
+        });
+      });
+      GENEOF
+      pnpm exec vitest run "$TARGET"
+      ST=$?
+      rm -f "$TARGET"
+      if [ "$ST" -ne 0 ]; then
+        echo "AC-2 FAIL: computeVerdict still returns an unbounded rationale, or the fix took the raw suite log away from the brief (trap A, a WP-614 revert). vitest exited $ST"
+        exit 1
+      fi
+      echo "AC-2 OK: bounded verdict rationale, failing rubric id preserved, brief still reaches the raw suite log"
+
+  - id: AC-3
+    description: >
+      The delivery compiles as strict TypeScript, the modules it is expected to change are
+      lint-clean, the out-of-scope guarantees are byte-intact (trap E: the free-text
+      `standingConcerns` dedup guard; trap F: the settled-clear call), the WHOLE committed
+      `test/runner/` tree passes — including `standing-findings-live.test.ts` (6),
+      `standing-findings-settled-live.test.ts` (4) and `standing-findings-overwrite-live.test.ts`
+      (3), which together pin WP-601's never-outrun guarantee, WP-629's settling rule and
+      WP-630's accumulation — and that tree has GROWN by at least 2 tests covering the cases the
+      grading checks leave open. MEASURED baseline at the launch commit: 56 files / 397 tests in
+      `test/runner/`, and 191 files / 1,526 tests (1,503 passed | 23 skipped) for the whole SDK
+      suite, both measured in one sitting at the same commit.
+    check: |
+      cd packages/sdk-ts || exit 1
+      pnpm run typecheck || { echo "AC-3 FAIL: strict typecheck is red"; exit 1; }
+      pnpm exec eslint src/workflow/agent-loop.ts src/judge/verdict.ts src/judge/harness.ts src/judge/prompt.ts src/workflow/completion-review.ts || { echo "AC-3 FAIL: eslint is red on the modules this WP touches"; exit 1; }
+      if ! grep -q "standingConcerns.includes(concern)" src/workflow/agent-loop.ts; then
+        echo "AC-3 FAIL: the free-text concerns dedup guard changed — trap E (out of scope)"
+        exit 1
+      fi
+      if ! grep -q "isRubricItemSettledAgainstWholeDelivery" src/workflow/agent-loop.ts; then
+        echo "AC-3 FAIL: the settled-clear call is gone — trap F (the settling rule is out of scope and a settled id must still clear completely)"
+        exit 1
+      fi
+      OUT=$(pnpm exec vitest run test/runner/ 2>&1)
+      ST=$?
+      echo "$OUT" | tail -30
+      if [ "$ST" -ne 0 ]; then
+        echo "AC-3 FAIL: the committed test/runner tree is RED (vitest exited $ST). If a standing-findings test failed, you likely broke the settling rule, the never-outrun guarantee, or WP-630's accumulation."
+        exit 1
+      fi
+      N=$(echo "$OUT" | grep -oE "Tests +[0-9]+ passed" | grep -oE "[0-9]+" | head -1)
+      echo "committed test/runner tests: ${N:-UNPARSEABLE} (floor 399, measured baseline 397)"
+      if [ -z "$N" ]; then
+        echo "AC-3 FAIL: could not read a test count out of the vitest summary"
+        exit 1
+      fi
+      if [ "$N" -lt 399 ]; then
+        echo "AC-3 FAIL: durability floor not met — the committed runner tree did not grow by at least 2 tests. A behaviour proved only by the generated grading checks is not pinned at all (F-356), and a repo test transcribed from one inherits its blind spots (F-360)."
+        exit 1
+      fi
+      echo "AC-3 OK: strict TS, lint clean, out-of-scope guarantees byte-intact, the committed runner tree is green AND larger"
+
+budget_usd: 20
+max_steps: 6
+
+agent_classes:
+  executor: executor-default
+  judge: judge-default
+
+judge:
+  cadence: 1
+
+# F-322 (dogfood-135): without this, a converged out-of-rubric escalation parks overnight for a
+# human instead of auto-sealing.
+unattended:
+  escalation: seal_resumable_failed

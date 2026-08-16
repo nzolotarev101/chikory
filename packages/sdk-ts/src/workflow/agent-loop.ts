@@ -266,11 +266,13 @@ export async function agentLoop(spec: TaskSpec): Promise<RunStatus> {
   // Standing findings from earlier passes (both rubric failures and free-text concerns)
   // that survive across intervening clean passes until adjudicated at completion review.
   // Rubric findings are keyed by rubric ID so whole-delivery machine-settled items can be cleared,
-  // while model-judged findings and free-text concerns persist until completion review.
-  const standingRubricFindings = new Map<string, string>();
+  // while model-judged findings and free-text concerns persist until completion review. Each ID
+  // holds the DISTINCT justifications it accumulated (WP-630/F-364): a second, different objection
+  // on the same ID appends rather than replacing, and settlement deletes the whole ID at once.
+  const standingRubricFindings = new Map<string, string[]>();
   const standingConcerns: string[] = [];
   const getStandingFindings = (): string[] => [
-    ...standingRubricFindings.values(),
+    ...Array.from(standingRubricFindings.values()).flat(),
     ...standingConcerns,
   ];
 
@@ -1144,7 +1146,13 @@ export async function agentLoop(spec: TaskSpec): Promise<RunStatus> {
       // free-text concerns persist.
       for (const fail of verdict.form.rubricResults) {
         if (!fail.pass) {
-          standingRubricFindings.set(fail.id, `${fail.id}: ${fail.justification}`);
+          const finding = `${fail.id}: ${fail.justification}`;
+          const existing = standingRubricFindings.get(fail.id);
+          if (!existing) {
+            standingRubricFindings.set(fail.id, [finding]);
+          } else if (!existing.includes(finding)) {
+            existing.push(finding);
+          }
         } else if (isRubricItemSettledAgainstWholeDelivery(fail.id, spec)) {
           standingRubricFindings.delete(fail.id);
         }

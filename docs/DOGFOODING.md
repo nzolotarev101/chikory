@@ -8,11 +8,11 @@ recover a run, and how to land the result as a normal PR.
 **Status (2026-08-16, bounded — update discipline: REPLACE this block, ≤15 lines;
 displaced prose moves verbatim to [`PLAN-HISTORY.md`](PLAN-HISTORY.md); per-run detail:
 `docs/reports/`; queue + course correction: `plan.md` §6/§7).**
-✅ **dogfood-147 / WP-594 (a run under sustained token-window pressure must fold below the default `keepLastN` verbatim floor) DELIVERED — sealed SUCCESS, landed** — `run-a26d41eb-0d41-466a-9614-41b6dd8246c0`, terminal **SUCCESS**, 2 steps, $0.1229/$20.00, 7m 02s, AC 2/2 re-run green, harvest byte-IDENTICAL 3/3 (`docs/reports/dogfood-147.md`). `compactContext`'s `underPressure` branch now builds `{ triggerAfterSteps: 1, keepLastN: 1 }` (`activities.ts:2284-2289`) instead of reusing the default `keepLastN` (5) for both fields; unpressured default, `planCompaction`, and `compactAtFraction` byte-unchanged; all 5 designed traps rejected. +6 `test/runner/` tests (388 → 394). No new friction.
-**F-197's opening live datum landed**: `tests_pass` FAILED at step 1, PASSED at step 2, and the completion review carried no stale row — WP-629's prune fires correctly in production. F-364/WP-630 below was not exercised (only one objection that run).
-🟠 **F-364 → WP-630, ARMED as the dogfood-148 headline**: `standingRubricFindings.set(fail.id, …)` (`agent-loop.ts:1147`) overwrites a second, DIFFERENT objection on the same rubric id; the array it replaced kept both, and nothing settles a model-judged row, so that objection disappears before the review sees it.
-🟡 **F-363**: plan.md's queued WP-599 (F-288) RE-MEASURED STALE — its correctness harm is already closed as a side effect of WP-601 + WP-627; do not headline it as literally scoped.
-**NEXT HEADLINE = WP-630 (dogfood-148): a second, DIFFERENT objection on the same rubric id must not silently replace the first**, seeded into a live run per its own queued condition (`examples/dogfood/dogfood-148-wp630-standing-finding-overwrite.yaml`). Ladder unchanged at `rung=4` — rung-5's remaining half (`brownfield-001` gold-patch, operator-by-hand) still cannot headline.
+✅ **dogfood-148 / WP-630 (a second, DIFFERENT objection on the same rubric id must not silently replace the first) DELIVERED — sealed SUCCESS, landed** — `run-2213aec1-9683-4c6a-a496-b74f968975c1`, terminal **SUCCESS**, 1 step, $0.0808/$20.00, 6m 15s, AC 2/2 re-run green, harvest byte-IDENTICAL 2/2 (`docs/reports/dogfood-148.md`). `standingRubricFindings` is now `Map<string, string[]>` (`agent-loop.ts:272`): the fail branch appends a justification the id does not already hold (`:1149`, `:1154`), the accessor flattens (`:274`), settlement still deletes the whole id (`:1157`). All 5 traps rejected; settling rule, free-text concerns and both consumers byte-unchanged. Suite re-measured by hand: **191 files / 1,526 tests**; `test/runner/` 394 → **397**.
+⚠️ **The judge caught nothing and the run still shipped 2 defects** — both found by human review, neither by its 10 rubric evaluations. The rubric reads the diff; nothing in it asks "is this claim tested?" or "what is the growth bound of this structure?".
+🟠 **F-365 → WP-631, ARMED as half the dogfood-149 headline**: WP-630's accumulator is UNBOUNDED — only `tests_pass` is ever cleared, and every distinct justification renders as its own uncapped completion-review bullet (`src/judge/prompt.ts:227`). One model-judged id can contribute ~30 bullets (8–12 KB) over a 30-step run.
+🟡 **F-366 HAND-FIXED**: the delivery's own test file advertised settlement-clears-all coverage that no test in the repo provided — closed at `test/runner/standing-findings-overwrite-live.test.ts:213`, probe-verified RED against a clear-only-the-latest mutation. 🟢 F-368 hand-fixed (2 rationale comment lines restored, `agent-loop.ts:268`); 🟢 F-367 track-B (the spec's full-suite baseline was 6 tests stale — it came from the previous review's HEAD, not the launch commit).
+**NEXT HEADLINE = WP-616 + WP-631 (dogfood-149): no string on the judge evidence path is unbounded at the point something renders it** (F-328 + F-365) — one design principle, two sites, both premises re-measured live on this tree (`examples/dogfood/dogfood-149-wp616-wp631-bounded-judge-strings.yaml`). Ladder unchanged at `rung=4` — rung-5's remaining half (`brownfield-001` gold-patch, operator-by-hand) still cannot headline.
 
 Related docs: [`docs/spec/task-spec.md`](spec/task-spec.md) (schema
 reference) · [`docs/TASK-PROTOCOL.md`](TASK-PROTOCOL.md) (WP etiquette, §7 is
@@ -941,22 +941,32 @@ broken (a false-green, not a follow-on fix).
 
 ## 8. Known P1 limitations (so you don't fight them)
 
-- **🟠 A second, DIFFERENT objection on the same rubric id silently replaces the
-  first** (F-364 → WP-630, ARMED as the dogfood-148 headline, 2026-08-16 — found
-  in the 2026-08-15 audit of the dogfood-146 review, not by that review). WP-629
-  keyed standing rubric findings by rubric id: `standingRubricFindings.set(fail.id, …)`
-  (`packages/sdk-ts/src/workflow/agent-loop.ts:1147`). The array it replaced
-  deduped by the full `id: justification` text, so two different objections on the
-  same id BOTH reached the completion review; the map keeps only the latest. A
-  model-judged row is never settled by a later pass (that is the WP-629 rule), so
-  the overwritten objection is not cleared by anything — it simply disappears.
-  **Shape that hits it:** `design_serves_overall_goal` fails at pass #1 naming X
-  and again at pass #3 naming Y → the review adjudicates Y alone, and clearing Y
-  seals SUCCESS with X never answered. Same family as F-288/F-295 — an objection
-  dying without adjudication. **Fix shape:** key by rubric id but hold the list of
-  distinct justifications, and delete the whole id only when it is machine-settled.
-  **What to do until WP-630 lands:** on a run with more than one failing pass, read
-  every pass's rubric text in `chikory trace --step n`, not just the review's.
+- **✅ CLOSED — a second, DIFFERENT objection on the same rubric id no longer
+  silently replaces the first** (F-364 → WP-630, landed in the dogfood-148 review,
+  `run-2213aec1-9683-4c6a-a496-b74f968975c1`). `standingRubricFindings` is now
+  `Map<string, string[]>` (`packages/sdk-ts/src/workflow/agent-loop.ts:272`): the fail
+  branch reads before writing and appends only a justification the id does not already
+  hold (`:1149`, `:1154`), so two different objections on one id both reach the
+  completion review as separate bullet lines while an exact repeat still collapses to
+  one. Settlement deletes the whole id at once (`:1157`) — pinned live at
+  `packages/sdk-ts/test/runner/standing-findings-overwrite-live.test.ts:213`. This closes
+  the last member of the objection-dies-without-adjudication family (F-288, F-295, F-361).
+
+- **🟠 Standing findings accumulate WITHOUT A BOUND, and every entry becomes its own
+  completion-review bullet** (F-365 → WP-631, ARMED as half the dogfood-149 headline,
+  2026-08-16 — introduced by WP-630 above). Only `tests_pass` is ever cleared
+  (`isRubricItemSettledAgainstWholeDelivery`, `packages/sdk-ts/src/judge/rubric.ts:134-147`
+  returns `false` for the other 5 `STANDING_RUBRIC` rows), and each accumulated string is
+  rendered one-to-one with no cap and no near-duplicate collapse
+  (`packages/sdk-ts/src/judge/prompt.ts:227`; the only narrowing is an exact-set dedup at
+  `packages/sdk-ts/src/workflow/agent-loop.ts:416`). An LLM judge rarely repeats itself
+  byte-for-byte, so two passes objecting to the same thing in different words are two
+  entries: at cadence 1 over a 30-step run one model-judged id can contribute ~30 bullets
+  of justification prose — **8–12 KB from a single rubric row**, growing linearly with
+  horizon, into the one prompt whose job is holistic judgement. Same family as F-328/WP-616.
+  **What to do until WP-631 lands:** on a long run, check the completion-review prompt size
+  in `chikory trace` before trusting the review's judgement — a flooded prompt is a degraded
+  one, and this is the CM-3 context discipline failing inside the judge itself.
 
 - **✅ CLOSED — a run whose acceptance check goes RED then GREEN is no longer
   condemned at the seal** (F-361 → WP-629, landed in the dogfood-146 review,
