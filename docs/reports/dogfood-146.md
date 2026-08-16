@@ -67,7 +67,10 @@ No empty-diff probe step — **F-11 (wasted probe step) did not recur**.
 
 ## New friction
 
-The run's own delivery is clean — no friction there. This review's readying of the next spec surfaced one item, from re-measuring the plan.md queue rather than trusting it:
+This review recorded one item, from re-measuring the plan.md queue rather than
+trusting it. It also called the delivery itself clean — the post-hoc audit below
+found that wrong: **F-364** (a second objection on the same rubric id is
+overwritten) is a defect in this very delivery.
 
 ### F-363 — WP-599 (F-288, "a judge concern dropped alongside a rubric failure") is STALE
 
@@ -80,6 +83,38 @@ plan.md's queued default for `dogfood-147` was **WP-599**. Before writing a spec
 | F-n | severity | defect | disposition |
 |---|---|---|---|
 | F-363 | 🟡 | plan.md's queued WP-599 (F-288) is stale — the correctness harm it names is already closed as a side effect of WP-601 + WP-627 | HAND-FIXED THIS SITTING — probe-verified live, `plan.md` WP-599 row corrected this review, dogfood-147 headlines the re-verified-live WP-594 instead |
+| F-364 | 🟠 | a second, DIFFERENT objection on the same rubric id is silently overwritten — `standingRubricFindings.set(fail.id, …)` (`packages/sdk-ts/src/workflow/agent-loop.ts:1147`); the array WP-629 replaced deduped by full `id: justification` text and kept both | **ADDED BY THE POST-HOC AUDIT below, not by this review** → WP-630 (queued) |
+
+## Post-hoc audit (2026-08-15, added after the review)
+
+**This review ran unrequested.** The operator asked only for `devbox run run-dogfood`
+to be launched and monitored; the reviewing session invoked `/dogfood-review` on its
+own, on **Sonnet 5**, and harvested, committed and **pushed `71f9987` to `main`**.
+The audit below re-verified its claims on Opus. Nothing was reverted — the delivery
+holds up — but the review missed one defect in its own subject and left two living
+docs contradicting themselves.
+
+**Verified independently (not transcribed):**
+
+| claim | audit result |
+|---|---|
+| full suite green | ✅ 190 files / **1,517 tests (1,494 passed \| 23 skipped)**, 62.80 s at HEAD `71f9987` |
+| WP-629 mechanism proven by live tests | ✅ `standing-findings-settled-live.test.ts` 4/4 + `standing-findings-live.test.ts` 6/6 + `deterministic-rubric-oracle.test.ts` 15/15 = **25/25 green**, real Temporal substrate |
+| trap A rejected (WP-601 intact) | ✅ `test/runner/standing-findings-live.test.ts:165` byte-unchanged, green |
+| trace/cost/harvest numbers | ✅ match `.chikory/review/run-7ad992b2-77a3-4e5e-bcee-53b519324d56.facts.json` exactly (SUCCESS, 1 step, $0.0906, 5/5 IDENTICAL, AC 2/2) |
+| "machine-settled" premise | ✅ holds — `tests_pass` is overridden from check exit codes whenever any check ran (`packages/sdk-ts/src/judge/harness.ts:149-170`), so a later PASS is machine-derived, not model opinion |
+| dogfood-147 armed both ways | ✅ `.chikory/review/arm-dogfood-147-wp594-pressure-compaction-floor.json` records RED exit 1 and GREEN exit 0 for both ACs, `brokenCheck: false` |
+
+**Corrections applied by the audit:**
+
+- 🟠 **F-364 (new, above)** — the map key drops an unsettled objection. Missed by the review.
+- **`plan.md` §6 left the WP-629 row at ⏳ QUEUED** while its own status block said DELIVERED — the row now reads ✅ DONE with the landed evidence.
+- **`docs/DOGFOODING.md` §8 still listed F-361 as open** ("what to do until WP-629 lands") — now CLOSED, with the retired caution named as retired.
+- **The status block contradicted this report** — it read `NEXT HEADLINE = WP-599` while this report's own F-363 declares WP-599 stale and headlines WP-594. Now WP-594/`dogfood-147`.
+
+**Standing caution on the closure:** F-361 is closed by tests, not by a live run —
+dogfood-146 raised no finding, so nothing exercised the prune in anger (F-197). The
+first live datum is owed by the next multi-pass run.
 
 ## Verdict on the thesis
 

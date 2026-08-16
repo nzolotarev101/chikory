@@ -8,10 +8,12 @@ recover a run, and how to land the result as a normal PR.
 **Status (2026-08-15, bounded — update discipline: REPLACE this block, ≤15 lines;
 displaced prose moves verbatim to [`PLAN-HISTORY.md`](PLAN-HISTORY.md); per-run detail:
 `docs/reports/`; queue + course correction: `plan.md` §6/§7).**
-✅ **dogfood-146 / WP-629 (a rubric finding a later judge pass RE-SETTLES against the whole delivery must not condemn the seal) DELIVERED — sealed SUCCESS, landed** — `run-7ad992b2-77a3-4e5e-bcee-53b519324d56`, terminal **SUCCESS**, 1 step, $0.0906/$20.00, 9m 36s, AC 2/2 re-run green, harvest byte-IDENTICAL 5/5 (`docs/reports/dogfood-146.md`). `standingFindings: string[]` is now `standingRubricFindings: Map<string,string>` + `standingConcerns: string[]`; a rubric row settled against the whole delivery (`isRubricItemSettledAgainstWholeDelivery`, `src/judge/rubric.ts:129-147`) clears when a later pass re-derives it green; both `regressionGateBeforeSuccess` and the completion review read the same `getStandingFindings()`. The one designed trap (`standing-findings-live.test.ts:165`, WP-601) rejected — untouched, still green.
-**F-361 CLOSED** — the seal-fidelity family (F-344 → F-359 → F-361) is now closed at all three altitudes. Mechanism proven by 4 new live tests (`test/runner/standing-findings-settled-live.test.ts`), not by this run's own judge (F-197 pattern — nothing was raised to clear). No new friction in the delivery this review.
-**Standing caution retired**: prior reviews told the operator to treat an `escalation_concerns_adjudicated` seal as unproven until WP-629 landed — superseded, a red-then-green run should now seal SUCCESS cleanly.
-🟡 **F-363**: plan.md's queued WP-599 (F-288) RE-MEASURED STALE this review — its correctness harm is already closed as a side effect of WP-601 + WP-627; do not headline it as literally scoped.
+✅ **dogfood-146 / WP-629 (a rubric finding a later judge pass RE-SETTLES against the whole delivery must not condemn the seal) DELIVERED — sealed SUCCESS, landed `71f9987`** — `run-7ad992b2-77a3-4e5e-bcee-53b519324d56`, terminal **SUCCESS**, 1 step, $0.0906/$20.00, 9m 36s, AC 2/2 re-run green, harvest byte-IDENTICAL 5/5 (`docs/reports/dogfood-146.md`). `standingFindings: string[]` is now `standingRubricFindings: Map<string,string>` + `standingConcerns: string[]`; a rubric row settled against the whole delivery (`isRubricItemSettledAgainstWholeDelivery`, `src/judge/rubric.ts:134-147`) clears when a later pass re-derives it green; both `regressionGateBeforeSuccess` and the completion review read the same `getStandingFindings()`. The one designed trap (`standing-findings-live.test.ts:165`, WP-601) rejected — untouched, still green.
+**F-361 CLOSED** — the seal-fidelity family (F-344 → F-359 → F-361) is closed at all three altitudes. Proven by 4 live tests (`test/runner/standing-findings-settled-live.test.ts`), **not by a live run** — dogfood-146 raised nothing to clear (F-197 pattern), so the first live datum is still owed.
+**Standing caution retired, with a caveat**: prior reviews told the operator to treat an `escalation_concerns_adjudicated` seal as unproven until WP-629 landed — superseded, a red-then-green run should now seal SUCCESS; until a live run shows it, read the pass rubrics before believing either terminal state.
+🟠 **F-364 → WP-630 (new, from the post-hoc audit — NOT found by the review)**: `standingRubricFindings.set(fail.id, …)` (`src/workflow/agent-loop.ts:1147`) overwrites a second, DIFFERENT objection on the same rubric id; the array it replaced kept both, and nothing settles a model-judged row, so that objection disappears before the review sees it.
+🟡 **F-363**: plan.md's queued WP-599 (F-288) RE-MEASURED STALE — its correctness harm is already closed as a side effect of WP-601 + WP-627; do not headline it as literally scoped.
+⚠ **The dogfood-146 review ran unrequested** (operator asked only for the run) on Sonnet 5 and pushed to `main`. Post-hoc audit 2026-08-15: delivery re-verified green (190 files / 1,517 tests, **1,494 passed | 23 skipped**, 62.80 s; WP-629 + WP-601 tests 25/25), and its `plan.md` §6 row (left ⏳) plus this §8 F-361 entry (left open) were corrected.
 **NEXT HEADLINE = WP-594 (dogfood-147): a run under sustained context-window pressure must fold below the default `keepLastN` verbatim floor**, not just report pressure with no fold available (F-272, dogfood-125). Ladder unchanged at `rung=4` — rung-5's remaining half (`brownfield-001` gold-patch, operator-by-hand) still cannot headline.
 
 Related docs: [`docs/spec/task-spec.md`](spec/task-spec.md) (schema
@@ -941,28 +943,48 @@ broken (a false-green, not a follow-on fix).
 
 ## 8. Known P1 limitations (so you don't fight them)
 
-- **🔴 A run whose acceptance check goes RED then GREEN is condemned at the
-  seal** (F-361 → WP-629, open — found in the dogfood-145 review).
-  `standingFindings` (`packages/sdk-ts/src/workflow/agent-loop.ts:268`) is
-  **append-only**: `:1134-1146` pushes every failing rubric row's
-  `id: justification` and nothing anywhere removes an entry when a later pass
-  passes that same id. The stale text rides into the seal as `escalationConcerns`
-  (`:1273`), which also forces the `escalation_concerns_adjudicated` row to exist
-  at all (`packages/sdk-ts/src/runner/activities.ts:1699`). The completion review
-  is dispatched with `criteria: []` (`:1269`), so that pass runs **zero**
-  acceptance checks and carries no `test_results` evidence — F-344's charter
-  ("when the judge-executed checks and the declared regression suite are green,
-  that concern is CLEARED", `packages/sdk-ts/src/judge/prompt.ts:206-209`) names
-  evidence the pass does not hold, and a careful judge says so and upholds.
-  **MEASURED** (`run-1f2a02e0-4615-47fa-8847-ea37c4164cfb`): `tests_pass` ✗ at
-  pass #1 → ✓ at pass #2 → pass #3 sealed **FAILED** quoting pass #1, with both
-  ACs green on disk and the full suite green.
-  **What to do until WP-629 lands:** red-then-green is the normal shape of a
-  multi-step run, so treat a `completion review: unresolved finding on a converged
-  step — escalation_concerns_adjudicated` seal as **unproven, not disproven**.
-  Re-run the ACs against the harvested tree (`scripts/dogfood-open.sh` §3 does
-  this) and read judge pass #2's rubric before believing the terminal state.
-  A one-step run with a clean first pass is unaffected.
+- **🟠 A second, DIFFERENT objection on the same rubric id silently replaces the
+  first** (F-364 → WP-630, open — found in the 2026-08-15 audit of the dogfood-146
+  review, not by that review). WP-629 keyed standing rubric findings by rubric id:
+  `standingRubricFindings.set(fail.id, …)`
+  (`packages/sdk-ts/src/workflow/agent-loop.ts:1147`). The array it replaced
+  deduped by the full `id: justification` text, so two different objections on the
+  same id BOTH reached the completion review; the map keeps only the latest. A
+  model-judged row is never settled by a later pass (that is the WP-629 rule), so
+  the overwritten objection is not cleared by anything — it simply disappears.
+  **Shape that hits it:** `design_serves_overall_goal` fails at pass #1 naming X
+  and again at pass #3 naming Y → the review adjudicates Y alone, and clearing Y
+  seals SUCCESS with X never answered. Same family as F-288/F-295 — an objection
+  dying without adjudication. **Fix shape:** key by rubric id but hold the list of
+  distinct justifications, and delete the whole id only when it is machine-settled.
+  **What to do until WP-630 lands:** on a run with more than one failing pass, read
+  every pass's rubric text in `chikory trace --step n`, not just the review's.
+
+- **✅ CLOSED — a run whose acceptance check goes RED then GREEN is no longer
+  condemned at the seal** (F-361 → WP-629, landed in the dogfood-146 review,
+  `71f9987`). `standingFindings` is now `standingRubricFindings: Map<string, string>`
+  plus `standingConcerns: string[]` behind one `getStandingFindings()` accessor
+  (`packages/sdk-ts/src/workflow/agent-loop.ts:270-274`) that both
+  `regressionGateBeforeSuccess` (`:413`) and the completion review (`:1261`) read.
+  A rubric row settled against the WHOLE delivery — `tests_pass` when the spec
+  declares at least one non-empty `check`, decided by
+  `isRubricItemSettledAgainstWholeDelivery`
+  (`packages/sdk-ts/src/judge/rubric.ts:134-147`) — is deleted when a later pass
+  re-derives it green (`:1147-1149`); the row is machine-derived, not model-authored
+  (`packages/sdk-ts/src/judge/harness.ts:149-170` overrides `tests_pass` from check
+  exit codes whenever any check ran). Model-judged rows and free-text concerns still
+  survive every clean pass to the review, so WP-601's guarantee holds
+  (`test/runner/standing-findings-live.test.ts:165`, untouched and green).
+  _History:_ the append-only array quoted a stale failure at the seal — **MEASURED**
+  (`run-1f2a02e0-4615-47fa-8847-ea37c4164cfb`): `tests_pass` ✗ at pass #1 → ✓ at
+  pass #2 → pass #3 sealed **FAILED** quoting pass #1, with both ACs green on disk
+  and the full suite green. **The standing "unproven, not disproven" caution for an
+  `escalation_concerns_adjudicated` seal is retired** — but the fix is proven by 4
+  live tests (`test/runner/standing-findings-settled-live.test.ts`), NOT by a live
+  run: dogfood-146 raised no finding at all (F-197 shape), so the first live datum
+  is still owed. The second half of F-361 stays open by design: the review is still
+  dispatched with `criteria: []` (`:1280`) and holds no `test_results` evidence —
+  correct now that a settled row is pruned before it gets there.
 
 - **✅ CLOSED — a judge's out-of-rubric CONCERN is now adjudicated before the
   converged seal** (F-335 → WP-619, landed in the dogfood-140 review). A converged
