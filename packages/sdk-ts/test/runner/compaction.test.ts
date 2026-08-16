@@ -53,4 +53,40 @@ describe("planCompaction (WP-203, ADR-006)", () => {
     expect(plan.toDigest).toEqual(["1", "2", "3"]);
     expect(plan.keepVerbatim).toEqual(["4", "5", "6"]);
   });
+
+  it("folds older summaries under pressure policy (keepLastN 1) with fewer than 5 summaries", () => {
+    const s = ["step0", "step1", "step2"];
+    const plan = planCompaction(s, { triggerAfterSteps: 1, keepLastN: 1 });
+    expect(plan.keepVerbatim).toEqual(["step2"]);
+    expect(plan.toDigest).toEqual(["step0", "step1"]);
+  });
+
+  it("under pressure policy (keepLastN 1), leaves a 1-step history untouched so recent context is never lost", () => {
+    const s = ["step0"];
+    const plan = planCompaction(s, { triggerAfterSteps: 1, keepLastN: 1 });
+    expect(plan.keepVerbatim).toEqual(["step0"]);
+    expect(plan.toDigest).toEqual([]);
+  });
+
+  it("under pressure policy (keepLastN 1), folds on a 2-step history preserving exactly the most recent step", () => {
+    const s = ["step0", "step1"];
+    const plan = planCompaction(s, { triggerAfterSteps: 1, keepLastN: 1 });
+    expect(plan.keepVerbatim).toEqual(["step1"]);
+    expect(plan.toDigest).toEqual(["step0"]);
+  });
+
+  it("unpressured default policy (triggerAfterSteps 8, keepLastN 5) does not fold at 7 steps", () => {
+    const s = ["s0", "s1", "s2", "s3", "s4", "s5", "s6"];
+    const plan = planCompaction(s, { triggerAfterSteps: 8, keepLastN: 5 });
+    expect(plan.keepVerbatim).toEqual(["s0", "s1", "s2", "s3", "s4", "s5", "s6"]);
+    expect(plan.toDigest).toEqual([]);
+  });
+
+  it("unpressured default policy (triggerAfterSteps 8, keepLastN 5) folds 4 oldest steps at 9 steps", () => {
+    const s = ["s0", "s1", "s2", "s3", "s4", "s5", "s6", "s7", "s8"];
+    const plan = planCompaction(s, { triggerAfterSteps: 8, keepLastN: 5 });
+    expect(plan.keepVerbatim).toEqual(["s4", "s5", "s6", "s7", "s8"]);
+    expect(plan.toDigest).toEqual(["s0", "s1", "s2", "s3"]);
+  });
 });
+

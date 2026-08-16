@@ -1,0 +1,440 @@
+# Plain: the judge sometimes raises the same kind of design concern twice in a row, with
+# different specifics each time - first it worries about one thing, then a later pass worries
+# about something else entirely, but files it under the same category. Today the second worry
+# silently replaces the first before a human, or the final review pass, ever sees it. After this
+# run, two different worries filed under the same category must both survive to the pass that
+# adjudicates them - nothing the judge said gets erased just because it said something else
+# afterward under the same heading.
+# WP: WP-630 (a second, DIFFERENT objection on the same rubric id must not silently replace the
+#   first, F-364)
+# Ladder-rung: 0 (off-ladder - the remaining rung-5 half is WP-304, not agent-runnable; see WHY)
+# Thesis-KPI: Agent-as-a-Judge reliability (CLAUDE.md: "real-time Agent-as-a-Judge quality gates").
+#   MEASURED harm (2026-08-15 audit of the dogfood-146 review, not the review itself): reading
+#   `standingRubricFindings.set(fail.id, ...)` at `src/workflow/agent-loop.ts:1147` shows a second
+#   judge pass that fails the SAME rubric id with a DIFFERENT justification overwrites the first
+#   entry outright - the array WP-629 replaced deduped by the full `id: justification` string and
+#   kept both.
+# Format: loose - the outcome and the named observables are fixed, the mechanism is the executor.
+#
+# Launch mode: RUN (single node - one deliverable, one seam).
+#   CHIKORY_PREFLIGHT_ONLY=1 devbox run run-dogfood
+#   devbox run run-dogfood
+#
+# WHY THIS AND NOT THE LADDER RUNG (dogfood-147 review, 2026-08-16):
+#   `scripts/dogfood-progression.sh` still reads STALLED (no thesis axis moved dogfood-145..147),
+#   so the binding rule wants the current phase ladder rung (P3-rung-5, WP-530 section 7) as the
+#   next headline. Unchanged since dogfood-139/143/146/147: rung-5's remaining half (WP-304's
+#   OpenHands arm plus a corpus wide enough to separate 19 requirements at 95 percent confidence)
+#   is a quota-bound, multi-hour suite the OPERATOR runs by hand (dogfood-122's lesson: an LLM
+#   executor may not supervise it). No spec can headline it.
+#
+#   Among runnable candidates, WP-630 is not the only real option. WP-589 (a write boundary that
+#   only binds tracked files, F-264) is the single highest-value open seam by its own plan.md
+#   billing, but it is a two-part design call (ignored-path scope PLUS an operator-input path for
+#   `chikory-bench compare`) that needs a decision this sitting should not make unreviewed. WP-610
+#   (a machine-settled override defaults its evidence to clean, F-317) and WP-616 (an unbounded
+#   raw-output field regresses the CM-3 context discipline it exists to protect, F-328) are both
+#   real and similarly sized.
+#
+#   WP-630 wins: it sits on the SAME judge machinery dogfood-147 just live-proved correct for the
+#   FIRST time (F-197's opening datum - `tests_pass` failed at step 1, passed at step 2, and the
+#   completion review carried no stale row, live, not only in the 25 unit/live tests WP-629
+#   shipped with). A defect one line away in that exact mechanism is the highest signal-to-noise
+#   pick available: same file, same data structure, same live-run muscle already proven to work
+#   for this run's harness. It also diversifies thesis coverage - dogfood-147 stressed context-rot
+#   mitigation (CM-1); WP-630 stresses the OTHER named pillar, Agent-as-a-Judge reliability -
+#   rather than a third consecutive run on the same pillar. And it directly satisfies the
+#   condition its own plan.md row set for itself: "not headline-worthy on its own unless it can be
+#   seeded into a real run" - AC-1 below is exactly that seeding: a live Temporal run that forces
+#   two distinct objections onto the same rubric id and reads what the completion review actually
+#   received, not a mocked judge and not a unit test of a function in isolation.
+#
+# THE MEASURED PREMISE (measured on this tree 2026-08-16; do not re-litigate):
+#   * `standingRubricFindings` is a `Map<string, string>` keyed by rubric id
+#     (`src/workflow/agent-loop.ts:270`), read through `getStandingFindings()` (`:272-275`), which
+#     both `regressionGateBeforeSuccess` (`:413`) and the completion review (`:1261`) call - a
+#     single accumulation point feeding two consumers.
+#   * On a judge-pass FAIL, the loop does `standingRubricFindings.set(fail.id, \`${fail.id}:
+#     ${fail.justification}\`)` (`:1147`) - a `Map.set` on an existing key REPLACES the value.
+#     There is no read-before-write, no append, no distinct-text check.
+#   * On a judge-pass PASS, the loop clears the id ONLY when
+#     `isRubricItemSettledAgainstWholeDelivery(fail.id, spec)` returns true (`:1148-1150`,
+#     `src/judge/rubric.ts:134-147`) - true only for `tests_pass` when the spec declares at least
+#     one AC `check`. Every other rubric id, including `design_serves_overall_goal`, is
+#     MODEL-JUDGED and is never cleared by a later pass (WP-601's guarantee - a run must not
+#     outrun a design concern by committing more steps).
+#   * Consequence: a MODEL-JUDGED rubric id that fails twice with different justifications loses
+#     the first one for good. Nothing clears it (it is not machine-settled) and nothing preserves
+#     it (the map has already overwritten it) - it is simply gone before the completion review's
+#     `escalationConcerns` is built from `getStandingFindings()` (`:1261`) and rendered into the
+#     review prompt one bullet per string (`src/judge/prompt.ts:215-228`,
+#     `renderCompletionReviewScope`).
+#   * The suite this run must not break, MEASURED at the launch commit (F-342, dogfood-140 - run
+#     `pnpm --filter @chikory/sdk exec vitest run` yourself and read its own tail): at this review
+#     it stood at 190 files / 1,517 tests (1,494 passed | 23 skipped) in 62.80s, and
+#     `test/runner/` alone stood at 55 files / 394 tests.
+#   * The `unattended:` block below is not decoration (F-322).
+#
+# Designed traps - the plausible-but-wrong deliveries the acceptance criteria exist to reject:
+#   A. **Never clear anything - turn the map into a permanent accumulator.** This "fixes" the
+#      overwrite by regressing F-361 (WP-629's whole point): a `tests_pass` row that fails once
+#      and passes forever after would condemn every later PASS. AC-2 runs the WHOLE committed
+#      `test/runner/` tree, including the pre-existing `standing-findings-settled-live.test.ts`
+#      suite (4 tests, all must stay green UNMODIFIED) - a fix that stops clearing anything fails
+#      AC-2 by breaking that file, not by a new check written for this WP.
+#   B. **Coalesce two distinct objections into ONE combined string** (e.g. concatenate them with a
+#      separator) instead of keeping them as two separately adjudicable findings. This can pass a
+#      shallow "the text contains both substrings" check while still being ONE line the review
+#      might adjudicate as a single (garbled) concern. AC-1 counts the number of times the
+#      accumulation format `design_serves_overall_goal: ` appears as its own bullet line in the
+#      completion review's rendered prompt, not just whether two substrings appear anywhere in it.
+#   C. **Fix only one consumer.** `regressionGateBeforeSuccess` (`:413`) and the completion review
+#      (`:1261`) both call `getStandingFindings()` - fix the shared accumulator and function, not a
+#      single call site. Not directly probed by an AC (both consumers already share one function by
+#      construction), but the goal states it as a hard constraint and the judge's
+#      `design_serves_overall_goal` / `scope_matches_instruction` rubric plus this review's own
+#      human read of the diff are the backstop.
+#   D. **Change the CLEARING granularity** - e.g. clear only the most recent justification on a
+#      settled id and leave older ones. `isRubricItemSettledAgainstWholeDelivery` returning true
+#      means the WHOLE delivery re-passed that check on the FULL tree - every prior justification
+#      for that id is stale, not just the latest. AC-2's full `test/runner/` run is again the
+#      backstop: the existing settled-live tests assert the id is gone entirely after settlement,
+#      not merely shrunk.
+#   E. **Touch the free-text `standingConcerns` array** (`:1152-1156`) while fixing the rubric map.
+#      It already does the right thing (push if not already present) and is out of scope. AC-2
+#      greps for its exact `standingConcerns.includes(concern)` guard line, byte-unchanged.
+#
+# NOT IN SCOPE: `isRubricItemSettledAgainstWholeDelivery`'s existing settling RULE (which ids are
+#   machine-settled, and under what condition) - only how ALREADY-standing entries for the SAME
+#   unsettled id accumulate before settlement; `mergeDesignFindings` and `decideCompletionReview`
+#   (`src/workflow/completion-review.ts`) - those already correctly decide WHEN to review, this WP
+#   is only about WHAT gets shown once a review is decided; the free-text `concerns` channel
+#   (WP-601/WP-619) - already correct, see trap E; the rubric item set itself; the TaskSpec
+#   contract; chain semantics.
+
+name: dogfood-148-wp630-standing-finding-overwrite
+wp: WP-630
+goal: >
+  When a MODEL-JUDGED rubric item (one `isRubricItemSettledAgainstWholeDelivery` never clears,
+  e.g. `design_serves_overall_goal`) fails at one judge pass, and then fails AGAIN at a later pass
+  with a DIFFERENT justification, both objections must survive to whatever pass adjudicates them
+  (the completion review, or an earlier converging PROCEED) - not only the most recent one. Today
+  the second failure silently replaces the first in `standingRubricFindings`
+  (`src/workflow/agent-loop.ts:1147`, a plain `Map.set` on an existing key) because there is no
+  read-before-write and no distinct-text accumulation.
+
+  Make this true: given a run whose judge fails the same rubric id at two different passes with
+  two different justification strings, and then recovers (passes it) at a later pass without
+  triggering that id's whole-delivery settling rule, the completion review's rendered prompt (or
+  wherever `getStandingFindings()`'s output ultimately lands - do not relocate that sink) must
+  carry BOTH justification strings as separately identifiable findings, not one, and not a
+  combined/garbled string standing in for both.
+
+  Hold this line: `isRubricItemSettledAgainstWholeDelivery`'s existing clearing rule is untouched
+  and still fires on the SAME condition it does today (a `tests_pass` row backed by a declared AC
+  `check`, re-verified against the whole tree). When a rubric id DOES settle, clear it completely -
+  every accumulated justification for that id, not just the latest one. This WP is about
+  accumulation before settlement, not about which ids settle or when.
+
+  Hold this line too: the free-text `standingConcerns` array (`agent-loop.ts:1152-1156`) is
+  already correct - it pushes a concern only if an identical one is not already present - and nothing
+  about it changes. Do not fold rubric findings and concerns into one data structure; keep them
+  separate exactly as today, only fix how a SINGLE rubric id accumulates multiple distinct
+  justifications over time.
+
+  Also hold this line: an IDENTICAL justification string repeated for the same rubric id across
+  two different passes (the judge saying the exact same thing twice) must NOT produce two
+  duplicate findings - collapse it to one, the same dedup discipline `standingConcerns` already
+  uses for free-text concerns. Only genuinely DIFFERENT justification text on the same id should
+  grow the accumulation.
+
+  How you do it is yours: change the map's value type to a collection, key by
+  `id + normalized-justification`, or something else - pick one, and say in your step summary
+  which consumer(s) you re-verified still compile against the new shape
+  (`regressionGateBeforeSuccess` at `:413`, the completion review at `:1261`). Do not invent a
+  parallel second accumulator alongside `standingRubricFindings` - there is exactly one channel for
+  rubric findings today and there must still be exactly one when you are done.
+
+  Nothing else changes. `isRubricItemSettledAgainstWholeDelivery`, `mergeDesignFindings`,
+  `decideCompletionReview`, the free-text concerns channel, the rubric item set, the judge charter,
+  and the TaskSpec contract are untouched. TypeScript stays strict ESM with named exports and no
+  `any`. This code runs inside the Temporal workflow: keep the workflow side deterministic - no
+  clocks, no randomness, no I/O outside activities.
+
+  Pin your work with a test that lives in the repo, under `test/runner/`, beside
+  `standing-findings-live.test.ts` and `standing-findings-settled-live.test.ts`. A behaviour proved
+  only by the acceptance check that grades this run is not pinned at all (F-356), and a repo test
+  copied verbatim from that check inherits its blind spots (F-360) - cover something the grading
+  check does not: an IDENTICAL justification repeated on the same rubric id across two passes must
+  collapse to ONE finding, not two (AC-1 only proves that two DIFFERENT justifications both
+  survive).
+
+  If an existing test pins a shape this change must alter, update its expectation and say plainly
+  in the step summary that you did - do not delete it, and do not weaken it into a tautology. Every
+  existing test in `standing-findings-live.test.ts` and `standing-findings-settled-live.test.ts`
+  (8 tests total) must stay green, ideally unmodified; if one legitimately needs updating because
+  it asserted the OLD overwrite behavior as correct, name exactly which one and why.
+
+  Verify your work with FAST checks only: the package typecheck (tsc with noEmit), eslint over the
+  files you touched, and vitest over only the test files you touched. Do NOT run the full vitest
+  suite inside a step - it does not fit the step time cap (F-345) - this run's declared regression
+  suite plus the judge-executed checks are the trusted full-suite verification whatever your
+  summary says.
+
+repos:
+  - url: /Users/nikitazolotarev/repos/chikory
+    writable: true
+
+# The SDK suite is both the surface this run edits and the gate it must not break.
+# MEASURE it at the launch commit rather than trusting this line (F-342, dogfood-140).
+regression_suite: pnpm --filter @chikory/sdk exec vitest run
+check_timeout_ms: 180000
+
+acceptance_criteria:
+  - id: AC-1
+    description: >
+      THIS CHECK OWNS ITS ORACLE. It drives the REAL agent loop end to end - real Temporal dev
+      server, real workflow bundle, real judge pass sequencing, scripted executor, fake judge wire
+      - over a 3-step run where pass 1 fails `design_serves_overall_goal` with justification
+      OBJECTION-ALPHA, pass 2 fails the SAME id with a DIFFERENT justification OBJECTION-BETA, and
+      pass 3 recovers (passes everything, including the AC-1 criterion, so the run seals). On HEAD
+      this run reaches SUCCESS via exactly one completion review pass, but that pass's rendered
+      prompt carries ONLY OBJECTION-BETA - OBJECTION-ALPHA was silently overwritten by the pass 2
+      `Map.set` before the review ever ran (F-364, MEASURED on this tree). The fix must show BOTH
+      OBJECTION-ALPHA and OBJECTION-BETA in the completion review's request, each as its own
+      `design_serves_overall_goal: ` bullet line (trap B: a combined/garbled single line is
+      rejected here even if both substrings happen to appear in it).
+    check: |
+      cd packages/sdk-ts && node --input-type=module -e '
+      import {writeFileSync,rmSync} from "node:fs";
+      import {spawnSync} from "node:child_process";
+      import {join} from "node:path";
+      const A=(c,m)=>{if(!c){console.error("FAIL: "+m);process.exit(1);}};
+      const target=join(process.cwd(),"test/runner/ac1-standing-overwrite.generated.test.ts");
+      rmSync(target,{force:true});
+      const SRC=[
+      "import { randomUUID } from \"node:crypto\";",
+      "import { mkdtemp, rm } from \"node:fs/promises\";",
+      "import { tmpdir } from \"node:os\";",
+      "import { join } from \"node:path\";",
+      "",
+      "import { afterEach, describe, expect, inject, test } from \"vitest\";",
+      "",
+      "import {",
+      "  createRunnerWorker,",
+      "  createTemporalRunner,",
+      "  STANDING_RUBRIC,",
+      "  type JudgeForm,",
+      "  type RunStatusReport,",
+      "} from \"../../src/index.js\";",
+      "import {",
+      "  initSourceRepo,",
+      "  makeJudgedSpec,",
+      "  scriptedRegistry,",
+      "  startFakeJudgeWire,",
+      "  TERMINAL_STATUSES,",
+      "  waitFor,",
+      "} from \"./helpers.js\";",
+      "",
+      "const address = inject(\"temporalAddress\");",
+      "const bundlePath = inject(\"workflowBundlePath\");",
+      "",
+      "const DESIGN_RUBRIC_ID = \"design_serves_overall_goal\";",
+      "const REVIEW_MARKER = \"## REVIEW SCOPE — run-completion architecture review\";",
+      "const CONCERNS_HEADER =",
+      "  \"### Out-of-rubric concerns to adjudicate against the cumulative diff:\";",
+      "const OBJECTION_ALPHA =",
+      "  \"OBJECTION-ALPHA-7f3a: the digest step drops referenced file paths\";",
+      "const OBJECTION_BETA =",
+      "  \"OBJECTION-BETA-9c1d: the retry loop can double-apply a patch\";",
+      "",
+      "function designFailForm(justification: string): JudgeForm {",
+      "  return {",
+      "    criterionResults: [",
+      "      { id: \"AC-1\", pass: false, justification: \"scripted judge: not met yet\" },",
+      "    ],",
+      "    rubricResults: STANDING_RUBRIC.map((r) =>",
+      "      r.id === DESIGN_RUBRIC_ID",
+      "        ? { id: r.id, pass: false, justification }",
+      "        : { id: r.id, pass: true, justification: \"scripted judge: confirmed\" },",
+      "    ),",
+      "    concerns: [],",
+      "  };",
+      "}",
+      "",
+      "const passForm: JudgeForm = {",
+      "  criterionResults: [",
+      "    { id: \"AC-1\", pass: true, justification: \"scripted judge: confirmed\" },",
+      "  ],",
+      "  rubricResults: STANDING_RUBRIC.map((r) => ({",
+      "    id: r.id,",
+      "    pass: true,",
+      "    justification: \"scripted judge: confirmed\",",
+      "  })),",
+      "  concerns: [],",
+      "};",
+      "",
+      "describe(\"AC-1 WP-630/F-364: two distinct objections on the same rubric id must both reach the completion review\", () => {",
+      "  const cleanups: Array<() => Promise<void>> = [];",
+      "  afterEach(async () => {",
+      "    while (cleanups.length > 0) await cleanups.pop()!();",
+      "  });",
+      "",
+      "  test(\"the Temporal substrate is present — this AC must never pass vacuously\", () => {",
+      "    expect(address, \"temporalAddress was not provided\").not.toBeNull();",
+      "    expect(bundlePath, \"workflowBundlePath was not provided\").not.toBeNull();",
+      "  });",
+      "",
+      "  test(\"pass 1 and pass 2 fail design_serves_overall_goal with different justifications; the completion review must see both\", async () => {",
+      "    const tmp = await mkdtemp(join(tmpdir(), \"chikory-wp630-\"));",
+      "    cleanups.push(() => rm(tmp, { recursive: true, force: true }));",
+      "    const repoUrl = await initSourceRepo(join(tmp, \"src\"));",
+      "    const dataDir = join(tmp, \"data\");",
+      "    const taskQueue = \"tq-\" + randomUUID();",
+      "",
+      "    const wire = await startFakeJudgeWire([",
+      "      designFailForm(OBJECTION_ALPHA),",
+      "      designFailForm(OBJECTION_BETA),",
+      "      passForm,",
+      "    ]);",
+      "    cleanups.push(() => wire.close());",
+      "",
+      "    const worker = await createRunnerWorker({",
+      "      adapters: scriptedRegistry,",
+      "      address: address!,",
+      "      taskQueue,",
+      "      dataDir,",
+      "      workflowBundlePath: bundlePath!,",
+      "      routerOptions: { baseUrls: { \"openai-compat\": wire.url } },",
+      "    });",
+      "    const workerDone = worker.run();",
+      "    const runner = createTemporalRunner({ address: address!, taskQueue, dataDir });",
+      "    cleanups.push(async () => {",
+      "      worker.shutdown();",
+      "      await workerDone;",
+      "      await runner.close();",
+      "    });",
+      "",
+      "    const spec = makeJudgedSpec({ repoUrl, cadence: 1, maxSteps: 3 });",
+      "",
+      "    const handle = await runner.start(spec);",
+      "    const report = await waitFor<RunStatusReport>(",
+      "      async () => {",
+      "        const r = await handle.status();",
+      "        return TERMINAL_STATUSES.includes(r.status) ? r : undefined;",
+      "      },",
+      "      { what: \"3-step standing-finding-overwrite run to reach a terminal status\" },",
+      "    );",
+      "    expect(",
+      "      report.status,",
+      "      \"the recovered design pass must seal SUCCESS via the completion review, not park\",",
+      "    ).toBe(\"SUCCESS\");",
+      "",
+      "    const reviewRequest = wire.requests.find((r) => r.includes(REVIEW_MARKER));",
+      "    expect(",
+      "      reviewRequest,",
+      "      \"no completion review pass fired at all\",",
+      "    ).toBeDefined();",
+      "    expect(",
+      "      reviewRequest!.includes(CONCERNS_HEADER),",
+      "      \"the completion review prompt carried no out-of-rubric concerns section\",",
+      "    ).toBe(true);",
+      "    expect(",
+      "      reviewRequest!.includes(OBJECTION_ALPHA),",
+      "      \"pass 1 objection is missing from the completion review — a second, different \" +",
+      "        \"objection on the same rubric id overwrote it (F-364)\",",
+      "    ).toBe(true);",
+      "    expect(",
+      "      reviewRequest!.includes(OBJECTION_BETA),",
+      "      \"pass 2 objection is missing from the completion review\",",
+      "    ).toBe(true);",
+      "    // Split on the JSON-escaped newline (a real newline in the prompt survives",
+      "    // request-body serialization as the two characters backslash and n) so each",
+      "    // \"line\" is one rendered prompt line — the rubric HISTORY section also renders",
+      "    // a \"- design_serves_overall_goal: \" prefix (pass/fail trail, not the",
+      "    // justification text), so this checks the OBJECTION marker lands on one line",
+      "    // each, not the shared id prefix.",
+      "    const jsonLines = reviewRequest!.split(\"\\\\n\");",
+      "    const alphaLines = jsonLines.filter((l) => l.includes(OBJECTION_ALPHA));",
+      "    const betaLines = jsonLines.filter((l) => l.includes(OBJECTION_BETA));",
+      "    expect(",
+      "      alphaLines.length,",
+      "      \"pass 1 objection must appear on exactly one line\",",
+      "    ).toBe(1);",
+      "    expect(",
+      "      betaLines.length,",
+      "      \"pass 2 objection must appear on exactly one line\",",
+      "    ).toBe(1);",
+      "    expect(",
+      "      alphaLines[0],",
+      "      \"the two objections were not rendered as two separate lines — a \" +",
+      "        \"combined/garbled single finding is not adjudicable as two distinct concerns\",",
+      "    ).not.toBe(betaLines[0]);",
+      "  }, 300_000);",
+      "});",
+      ""].join("\n");
+      writeFileSync(target, SRC);
+      const res=spawnSync("pnpm",["exec","vitest","run",
+        "test/runner/ac1-standing-overwrite.generated.test.ts"],{stdio:"inherit"});
+      rmSync(target,{force:true});
+      A(res.status===0,
+        "two DIFFERENT objections on the same rubric id must both reach the completion review "+
+        "as two separate findings, not one overwriting the other. vitest exited "+res.status);
+      console.log("AC-1 OK: a second, different objection on the same rubric id no longer overwrites the first");
+      '
+
+  - id: AC-2
+    description: >
+      The delivery compiles as strict TypeScript, the modules it is expected to change are
+      lint-clean, the WHOLE committed `test/runner/` tree passes — including the pre-existing
+      `standing-findings-live.test.ts` (4 tests) and `standing-findings-settled-live.test.ts`
+      (4 tests), which must stay green to prove the settling/clearing rule and the WP-601
+      never-outrun guarantee are both intact — and that tree has GROWN by at least 1 test covering
+      the dedup case AC-1 does not (an identical justification repeated on the same id must not
+      duplicate). The free-text `standingConcerns` dedup guard must be byte-unchanged (trap E).
+      MEASURED baseline at the launch commit: 55 files / 394 tests in `test/runner/`.
+    check: |
+      cd packages/sdk-ts || exit 1
+      pnpm run typecheck || { echo "AC-2 FAIL: strict typecheck is red"; exit 1; }
+      pnpm exec eslint src/workflow/agent-loop.ts src/judge/rubric.ts || { echo "AC-2 FAIL: eslint is red on the modules this WP touches"; exit 1; }
+      if ! grep -q "isRubricItemSettledAgainstWholeDelivery" src/workflow/agent-loop.ts; then
+        echo "AC-2 FAIL: the settled-clear call is gone — trap A (never clearing anything regresses F-361)"
+        exit 1
+      fi
+      if ! grep -q "standingConcerns.includes(concern)" src/workflow/agent-loop.ts; then
+        echo "AC-2 FAIL: the free-text concerns dedup guard changed — trap E (out of scope)"
+        exit 1
+      fi
+      OUT=$(pnpm exec vitest run test/runner/ 2>&1)
+      ST=$?
+      echo "$OUT" | tail -30
+      if [ "$ST" -ne 0 ]; then
+        echo "AC-2 FAIL: the committed test/runner tree is RED (vitest exited $ST). If standing-findings-live.test.ts or standing-findings-settled-live.test.ts failed, you likely broke the settling rule or the never-outrun guarantee."
+        exit 1
+      fi
+      N=$(echo "$OUT" | grep -oE "Tests +[0-9]+ passed" | grep -oE "[0-9]+" | head -1)
+      echo "committed test/runner tests: ${N:-UNPARSEABLE} (floor 395, measured baseline 394)"
+      if [ -z "$N" ]; then
+        echo "AC-2 FAIL: could not read a test count out of the vitest summary"
+        exit 1
+      fi
+      if [ "$N" -lt 395 ]; then
+        echo "AC-2 FAIL: durability floor not met — the committed runner tree did not grow by at least 1 test. A behaviour proved only by the generated grading check is not pinned at all (F-356), and a repo test transcribed from it inherits its blind spots (F-360)."
+        exit 1
+      fi
+      echo "AC-2 OK: strict TS, lint clean, settling rule + concerns dedup untouched, the committed runner tree is green AND larger"
+
+budget_usd: 20
+max_steps: 6
+
+agent_classes:
+  executor: executor-default
+  judge: judge-default
+
+judge:
+  cadence: 1
+
+# F-322 (dogfood-135): without this, a converged out-of-rubric escalation parks overnight for a
+# human instead of auto-sealing.
+unattended:
+  escalation: seal_resumable_failed

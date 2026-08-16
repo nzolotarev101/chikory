@@ -5,16 +5,14 @@ This is the complete operating manual for executing Phase 2+ work packages
 task spec for a WP (every field explained), how to launch, supervise, and
 recover a run, and how to land the result as a normal PR.
 
-**Status (2026-08-15, bounded — update discipline: REPLACE this block, ≤15 lines;
+**Status (2026-08-16, bounded — update discipline: REPLACE this block, ≤15 lines;
 displaced prose moves verbatim to [`PLAN-HISTORY.md`](PLAN-HISTORY.md); per-run detail:
 `docs/reports/`; queue + course correction: `plan.md` §6/§7).**
-✅ **dogfood-146 / WP-629 (a rubric finding a later judge pass RE-SETTLES against the whole delivery must not condemn the seal) DELIVERED — sealed SUCCESS, landed `71f9987`** — `run-7ad992b2-77a3-4e5e-bcee-53b519324d56`, terminal **SUCCESS**, 1 step, $0.0906/$20.00, 9m 36s, AC 2/2 re-run green, harvest byte-IDENTICAL 5/5 (`docs/reports/dogfood-146.md`). `standingFindings: string[]` is now `standingRubricFindings: Map<string,string>` + `standingConcerns: string[]`; a rubric row settled against the whole delivery (`isRubricItemSettledAgainstWholeDelivery`, `src/judge/rubric.ts:134-147`) clears when a later pass re-derives it green; both `regressionGateBeforeSuccess` and the completion review read the same `getStandingFindings()`. The one designed trap (`standing-findings-live.test.ts:165`, WP-601) rejected — untouched, still green.
-**F-361 CLOSED** — the seal-fidelity family (F-344 → F-359 → F-361) is closed at all three altitudes. Proven by 4 live tests (`test/runner/standing-findings-settled-live.test.ts`), **not by a live run** — dogfood-146 raised nothing to clear (F-197 pattern), so the first live datum is still owed.
-**Standing caution retired, with a caveat**: prior reviews told the operator to treat an `escalation_concerns_adjudicated` seal as unproven until WP-629 landed — superseded, a red-then-green run should now seal SUCCESS; until a live run shows it, read the pass rubrics before believing either terminal state.
-🟠 **F-364 → WP-630 (new, from the post-hoc audit — NOT found by the review)**: `standingRubricFindings.set(fail.id, …)` (`src/workflow/agent-loop.ts:1147`) overwrites a second, DIFFERENT objection on the same rubric id; the array it replaced kept both, and nothing settles a model-judged row, so that objection disappears before the review sees it.
+✅ **dogfood-147 / WP-594 (a run under sustained token-window pressure must fold below the default `keepLastN` verbatim floor) DELIVERED — sealed SUCCESS, landed** — `run-a26d41eb-0d41-466a-9614-41b6dd8246c0`, terminal **SUCCESS**, 2 steps, $0.1229/$20.00, 7m 02s, AC 2/2 re-run green, harvest byte-IDENTICAL 3/3 (`docs/reports/dogfood-147.md`). `compactContext`'s `underPressure` branch now builds `{ triggerAfterSteps: 1, keepLastN: 1 }` (`activities.ts:2284-2289`) instead of reusing the default `keepLastN` (5) for both fields; unpressured default, `planCompaction`, and `compactAtFraction` byte-unchanged; all 5 designed traps rejected. +6 `test/runner/` tests (388 → 394). No new friction.
+**F-197's opening live datum landed**: `tests_pass` FAILED at step 1, PASSED at step 2, and the completion review carried no stale row — WP-629's prune fires correctly in production. F-364/WP-630 below was not exercised (only one objection that run).
+🟠 **F-364 → WP-630, ARMED as the dogfood-148 headline**: `standingRubricFindings.set(fail.id, …)` (`agent-loop.ts:1147`) overwrites a second, DIFFERENT objection on the same rubric id; the array it replaced kept both, and nothing settles a model-judged row, so that objection disappears before the review sees it.
 🟡 **F-363**: plan.md's queued WP-599 (F-288) RE-MEASURED STALE — its correctness harm is already closed as a side effect of WP-601 + WP-627; do not headline it as literally scoped.
-⚠ **The dogfood-146 review ran unrequested** (operator asked only for the run) on Sonnet 5 and pushed to `main`. Post-hoc audit 2026-08-15: delivery re-verified green (190 files / 1,517 tests, **1,494 passed | 23 skipped**, 62.80 s; WP-629 + WP-601 tests 25/25), and its `plan.md` §6 row (left ⏳) plus this §8 F-361 entry (left open) were corrected.
-**NEXT HEADLINE = WP-594 (dogfood-147): a run under sustained context-window pressure must fold below the default `keepLastN` verbatim floor**, not just report pressure with no fold available (F-272, dogfood-125). Ladder unchanged at `rung=4` — rung-5's remaining half (`brownfield-001` gold-patch, operator-by-hand) still cannot headline.
+**NEXT HEADLINE = WP-630 (dogfood-148): a second, DIFFERENT objection on the same rubric id must not silently replace the first**, seeded into a live run per its own queued condition (`examples/dogfood/dogfood-148-wp630-standing-finding-overwrite.yaml`). Ladder unchanged at `rung=4` — rung-5's remaining half (`brownfield-001` gold-patch, operator-by-hand) still cannot headline.
 
 Related docs: [`docs/spec/task-spec.md`](spec/task-spec.md) (schema
 reference) · [`docs/TASK-PROTOCOL.md`](TASK-PROTOCOL.md) (WP etiquette, §7 is
@@ -944,9 +942,9 @@ broken (a false-green, not a follow-on fix).
 ## 8. Known P1 limitations (so you don't fight them)
 
 - **🟠 A second, DIFFERENT objection on the same rubric id silently replaces the
-  first** (F-364 → WP-630, open — found in the 2026-08-15 audit of the dogfood-146
-  review, not by that review). WP-629 keyed standing rubric findings by rubric id:
-  `standingRubricFindings.set(fail.id, …)`
+  first** (F-364 → WP-630, ARMED as the dogfood-148 headline, 2026-08-16 — found
+  in the 2026-08-15 audit of the dogfood-146 review, not by that review). WP-629
+  keyed standing rubric findings by rubric id: `standingRubricFindings.set(fail.id, …)`
   (`packages/sdk-ts/src/workflow/agent-loop.ts:1147`). The array it replaced
   deduped by the full `id: justification` text, so two different objections on the
   same id BOTH reached the completion review; the map keeps only the latest. A
@@ -985,6 +983,12 @@ broken (a false-green, not a follow-on fix).
   is still owed. The second half of F-361 stays open by design: the review is still
   dispatched with `criteria: []` (`:1280`) and holds no `test_results` evidence —
   correct now that a settled row is pruned before it gets there.
+  **F-197's opening live datum landed dogfood-147** (`run-a26d41eb-…`,
+  `docs/reports/dogfood-147.md`): `tests_pass` FAILED at step 1, PASSED at step 2,
+  and the completion review carried no stale row — the prune fires correctly in
+  production, not only in the 25 unit/live tests. F-364/WP-630 above was not
+  exercised (only one objection on the id that run), so its own live-proof is
+  still owed.
 
 - **✅ CLOSED — a judge's out-of-rubric CONCERN is now adjudicated before the
   converged seal** (F-335 → WP-619, landed in the dogfood-140 review). A converged

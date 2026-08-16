@@ -2268,11 +2268,12 @@ export function createRunnerActivities(deps: RunnerActivityDeps) {
       runId: string;
       stepIndex: number;
       summaries: string[];
-      // WP-207 act half: when the live pacing decision is `compact`/`park`, fold
-      // history beyond the verbatim window NOW instead of waiting for the
-      // count-based trigger. The pressure path lowers the effective trigger to
-      // `keepLastN` — `planCompaction` is unchanged, it just receives a different
-      // policy. Optional so legacy callers default to the count cadence.
+      // WP-207 act half / WP-612: when the live pacing decision is `compact`/`park`,
+      // fold history beyond the verbatim window NOW instead of waiting for the
+      // count-based trigger. Under context-window pressure, the policy folds down
+      // to keepLastN: 1 so short runs under sustained pressure fold older summaries
+      // while keeping the single most-recent step verbatim. Optional so legacy callers
+      // default to the count cadence.
       underPressure?: boolean;
     }): Promise<CompactionResult | undefined> {
       return withHeartbeat(async () => {
@@ -2283,8 +2284,8 @@ export function createRunnerActivities(deps: RunnerActivityDeps) {
 
           const policy: CompactionPolicy = input.underPressure
             ? {
-                triggerAfterSteps: DEFAULT_COMPACTION_POLICY.keepLastN,
-                keepLastN: DEFAULT_COMPACTION_POLICY.keepLastN,
+                triggerAfterSteps: 1,
+                keepLastN: 1,
               }
             : DEFAULT_COMPACTION_POLICY;
           const plan = planCompaction(input.summaries, policy);

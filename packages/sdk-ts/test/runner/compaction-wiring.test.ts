@@ -255,4 +255,134 @@ describe.skipIf(address === null)("compaction digest wiring (WP-203 S2)", () => 
       journal.close();
     }
   });
+
+  // WP-612: a short run under sustained window pressure folds even below the keepLastN=5 floor.
+  test("sustained context-window pressure folds below the keepLastN=5 floor while keeping the most recent step verbatim", async () => {
+    const tmp = await mkdtemp(join(tmpdir(), "chikory-pressure-short-"));
+    cleanups.push(() => rm(tmp, { recursive: true, force: true }));
+    const repoUrl = await initSourceRepo(join(tmp, "src"));
+    const dataDir = join(tmp, "data");
+    const taskQueue = `tq-${randomUUID()}`;
+
+    const wire = await startFakeJudgeWire([judgeForm({ criteria: { "AC-1": true } })], {
+      digestContent: "FOLDED DIGEST: short run pressure fold below keepLastN=5 floor.",
+    });
+    cleanups.push(() => wire.close());
+
+    const worker = await createRunnerWorker({
+      adapters: scriptedRegistry,
+      address: address!,
+      taskQueue,
+      dataDir,
+      workflowBundlePath: bundlePath!,
+      routerOptions: { baseUrls: { "openai-compat": wire.url } },
+    });
+    const workerDone = worker.run();
+    const runner = createTemporalRunner({ address: address!, taskQueue, dataDir });
+    cleanups.push(async () => {
+      worker.shutdown();
+      await workerDone;
+      await runner.close();
+    });
+
+    // 4-step run: recall tier tops out at 4 summaries (strictly below default keepLastN=5).
+    // debug.contextWindowTokens: 40 triggers pacing `compact` on steps 1..3.
+    // Under pressure, compaction folds older summaries into digest starting at step 1
+    // (foldedCount=1, keeping the step 1 summary verbatim).
+    const spec = makeJudgedSpec({
+      repoUrl,
+      cadence: 4,
+      maxSteps: 4,
+      pacing: { mode: "auto" },
+      debug: { contextWindowTokens: 40 },
+      routing: {
+        stages: {
+          plan: { provider: "anthropic", model: "claude-fable-5" },
+          code: { provider: "anthropic", model: "claude-fable-5" },
+          review: { provider: "openai-compat", model: "fake-review" },
+          judge: { provider: "openai-compat", model: "fake-judge" },
+        },
+      },
+    });
+
+    const handle = await runner.start(spec);
+    const report = await waitFor<RunStatusReport>(
+      async () => {
+        const r = await handle.status();
+        return TERMINAL_STATUSES.includes(r.status) ? r : undefined;
+      },
+      { what: "short pressure-compaction run to reach a terminal status" },
+    );
+    expect(report.status).toBe("SUCCESS");
+
+    expect(wire.digestHits).toBeGreaterThan(0);
+
+    const store = createLocalArtifactStore(artifactsDir(dataDir, handle.runId));
+    const journal = new Journal(journalPath(dataDir, handle.runId));
+    try {
+      const entries = journal.entries();
+      const steps = journal.entries("step");
+      expect(steps.length).toBe(4);
+
+      // Pacing decisions: step 0 is continue (nothing accumulated yet), steps 1..3 report compact.
+      const pacingActions = journal
+        .entries("pacing")
+        .map((e) => (e.payload as { action: string }).action);
+      expect(pacingActions).toContain("compact");
+      expect(pacingActions).not.toContain("park");
+      expect(pacingActions.filter((a) => a === "compact").length).toBeGreaterThanOrEqual(3);
+
+      const compactions = journal.entries("compaction");
+      expect(compactions.length).toBeGreaterThanOrEqual(1);
+
+      // All compactions are pacing-triggered, carry digest references and valid token stats.
+      for (const e of compactions) {
+        const payload = e.payload as CompactionResult & {
+          trigger?: string;
+          foldedCount?: number;
+          stepIndex?: number;
+        };
+        expect(payload.trigger).toBe("pacing");
+        expect(payload.stepIndex).toBeTypeOf("number");
+        expect(payload.foldedCount).toBeGreaterThan(0);
+        expect(payload.digestRef).toBeDefined();
+        expect(payload.tokensBefore).toBeGreaterThan(0);
+        expect(payload.tokensAfter).toBeGreaterThan(0);
+      }
+
+      // First fold occurred at stepIndex 1 (folding step 0 summary, keeping step 1 verbatim).
+      const firstFold = compactions[0]!.payload as CompactionResult & {
+        foldedCount?: number;
+        stepIndex?: number;
+      };
+      expect(firstFold.stepIndex).toBe(1);
+      expect(firstFold.foldedCount).toBe(1);
+
+      // Digest artifact is recoverable and contains the mock prose.
+      const digest = new TextDecoder().decode(await store.get(firstFold.digestRef!));
+      expect(digest).toContain("FOLDED DIGEST");
+
+      // Verify that later checkpoints carry the digest snapshot reference.
+      const snapshots = await Promise.all(
+        journal.entries("checkpoint").map(async (e) => {
+          const ref = (e.payload as Checkpoint).contextSnapshotRef;
+          return JSON.parse(new TextDecoder().decode(await store.get(ref))) as ContextBundle;
+        }),
+      );
+      const carriesDigest = snapshots.some((ctx) =>
+        ctx.memoryRefs.some(
+          (r) => r.kind === "context_snapshot" && r.summary.startsWith("digest of"),
+        ),
+      );
+      expect(carriesDigest).toBe(true);
+
+      const pressure = describeCompactionPressure(entries);
+      expect(pressure.pacingFolds).toBeGreaterThanOrEqual(1);
+      expect(pressure.firstPacingFoldStep).toBe(1);
+      expect(pressureFoldGapWarning(pressure)).toBeNull();
+    } finally {
+      journal.close();
+    }
+  });
 });
+
