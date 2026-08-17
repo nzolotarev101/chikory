@@ -440,7 +440,7 @@ describe("applyCheckOverrides infra classification (WP-263(b))", () => {
       },
       criteria,
       STANDING_RUBRIC,
-      [{ ...checkRun, exitCode: 0 }],
+      [{ ...checkRun, exitCode: 0, infraFailed: false }],
     );
     if ("error" in result) throw new Error(result.error);
     expect(result.form.concerns).toEqual(["cosmetic nit", "real defect"]);
@@ -452,7 +452,7 @@ describe("applyCheckOverrides infra classification (WP-263(b))", () => {
       { ...llmForm, concerns: ["unannotated"] },
       criteria,
       STANDING_RUBRIC,
-      [{ ...checkRun, exitCode: 0 }],
+      [{ ...checkRun, exitCode: 0, infraFailed: false }],
     );
     if ("error" in result) throw new Error(result.error);
     expect("concernSeverities" in result.form).toBe(false);

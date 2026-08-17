@@ -354,11 +354,12 @@ acceptance_criteria:
 
   - id: AC-2
     description: >
-      The no-regression check at the OTHER end. Telling the executor must not stop the seal from
-      adjudicating: `accumulateStandingConcerns` must still collect blocking concerns and still
-      drop minor ones. Drives the REAL accumulation function — the trap it rejects is "fixing"
-      the executor's blindness by moving the concern out of standingConcerns instead of adding a
-      second consumer.
+      BOTH consumers, over ONE form, in ONE assertion set. Telling the executor must not stop the
+      seal from adjudicating: the same blocking concern must reach the per-pass executor feedback
+      (false on HEAD) AND `accumulateStandingConcerns` (true on HEAD, and must stay true). Drives
+      both real functions — the trap it rejects is "fixing" the executor's blindness by MOVING the
+      concern out of standingConcerns instead of adding a second consumer, which a check that only
+      asserted the new half would happily pass.
     check: |
       cd packages/sdk-ts || exit 1
       TARGET=test/workflow/ac2-seal-still-adjudicates.generated.test.ts
@@ -367,6 +368,7 @@ acceptance_criteria:
       import { describe, expect, test } from "vitest";
 
       import { accumulateStandingConcerns } from "../../src/workflow/standing-concerns.js";
+      import * as remediation from "../../src/workflow/remediation.js";
       import type { JudgeForm } from "../../src/types.js";
 
       const BLOCKING = "the retry wrapper swallows the AbortError";
@@ -381,37 +383,55 @@ acceptance_criteria:
         } as JudgeForm;
       }
 
-      describe("AC-2 WP-599: the seal must still adjudicate what the executor now hears", () => {
-        test("a blocking concern beside a rubric failure still becomes a standing finding", () => {
-          const standing: string[] = [];
-          accumulateStandingConcerns(
-            standing,
-            form({ concerns: [BLOCKING], concernSeverities: ["blocking"] } as Partial<JudgeForm>),
+      function feedbackOf(f: JudgeForm): string | undefined {
+        const producer = (remediation as unknown as Record<string, unknown>)["buildCriterionFeedback"];
+        if (typeof producer !== "function") {
+          throw new Error(
+            "buildCriterionFeedback is no longer exported from src/workflow/remediation.ts — " +
+              "the per-pass executor feedback must stay a named, testable export.",
           );
+        }
+        return (producer as (x: JudgeForm) => string | undefined)(f);
+      }
+
+      describe("AC-2 WP-599: one concern, BOTH consumers — the executor and the seal", () => {
+        test("a blocking concern beside a rubric failure reaches the executor AND the seal", () => {
+          const f = form({ concerns: [BLOCKING], concernSeverities: ["blocking"] } as Partial<JudgeForm>);
+          const standing: string[] = [];
+          accumulateStandingConcerns(standing, f);
+          const fb = feedbackOf(f);
+          expect(
+            fb !== undefined && fb.includes(BLOCKING),
+            "the executor half: on HEAD this is undefined, so the agent is never told about a " +
+              "concern the seal will later condemn the run over.",
+          ).toBe(true);
           expect(
             standing,
-            "handing the concern to the executor must ADD a consumer, not move it. Removing it " +
-              "from standingConcerns trades one lost diagnosis for another: the completion " +
-              "review would no longer adjudicate a defect the judge named.",
+            "the seal half: handing the concern to the executor must ADD a consumer, not move " +
+              "it. Removing it from standingConcerns trades one lost diagnosis for another — " +
+              "the completion review would no longer adjudicate a defect the judge named.",
           ).toEqual([BLOCKING]);
         });
 
-        test("a minor concern still does not become a standing finding", () => {
+        test("a minor concern reaches NEITHER consumer", () => {
+          const f = form({ concerns: [COSMETIC], concernSeverities: ["minor"] } as Partial<JudgeForm>);
           const standing: string[] = [];
-          accumulateStandingConcerns(
-            standing,
-            form({ concerns: [COSMETIC], concernSeverities: ["minor"] } as Partial<JudgeForm>),
-          );
+          accumulateStandingConcerns(standing, f);
+          const fb = feedbackOf(f);
           expect(standing, "WP-548's floor at the seal is unchanged by this run").toEqual([]);
+          expect(fb === undefined || !fb.includes(COSMETIC)).toBe(true);
         });
 
-        test("an unmarked concern still fails safe to blocking at the seal", () => {
+        test("an unmarked concern fails safe to blocking at BOTH consumers", () => {
+          const f = form({ concerns: [BLOCKING] });
           const standing: string[] = [];
-          accumulateStandingConcerns(standing, form({ concerns: [BLOCKING] }));
+          accumulateStandingConcerns(standing, f);
+          const fb = feedbackOf(f);
           expect(standing).toEqual([BLOCKING]);
+          expect(fb !== undefined && fb.includes(BLOCKING)).toBe(true);
         });
 
-        test("accumulation is still de-duplicated across passes", () => {
+        test("seal-side accumulation is still de-duplicated across passes", () => {
           const standing: string[] = [];
           const f = form({ concerns: [BLOCKING], concernSeverities: ["blocking"] } as Partial<JudgeForm>);
           accumulateStandingConcerns(standing, f);
