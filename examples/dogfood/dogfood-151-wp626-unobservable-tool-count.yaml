@@ -21,25 +21,30 @@
 #     - there is no way to say "unknown". The contract has been extended ADDITIVELY three times
 #     for exactly this kind of case: `infraFailed?` (F-210), `claimsComplete?` (WP-221),
 #     `limitSignal?` (F-228). That is the precedent this run follows.
-#   * MEASURED HARM - the rate basis, and it is not limited to the gemini step itself.
-#     `estimateKilledStepUsage` (`src/runner/killed-step-usage.ts:56,61`) needs a PRIOR step with
-#     `toolCalls > 0` to build a per-tool-call rate. No gemini step can ever be that basis. So in
-#     a MIXED-agent run - which is the normal shape since the WP-566…576 agent classes landed,
-#     where a quota wall rotates the executor to a peer - a `claude-code` step killed at its cap
-#     after gemini steps gets `null` and no compensation, and the CG-2 budget undercounts real
-#     spend. The call site is `src/runner/activities.ts:1554-1568`.
-#   * MEASURED HARM - a conjunct that carries no information. F-355 cited `toolCalls: 0` as
+#   * MEASURED HARM 1 - the reporting surfaces, wrong TODAY. `chikory trace` prints
+#     `${record.toolCalls} tool calls` (`src/cli/trace.ts:473`) and `src/executors/step.ts:82`
+#     writes the same number as the `tool.calls` OTel span attribute. Both publish a constant as
+#     a measurement, on every gemini step, in every trace an operator reads. This is what AC-2
+#     gates - it is RED on HEAD because `renderStepDetail` has no notion of an unobserved count.
+#   * MEASURED HARM 2 - a conjunct that carries no information. F-355 cited `toolCalls: 0` as
 #     evidence of an executor stall; a classifier written as "no diff AND no tool calls" silently
 #     degrades to "no diff" under the production executor. WP-632 (dogfood-150) had to classify
 #     stalls on the diff alone for exactly this reason.
-#   * `chikory trace` prints `${record.toolCalls} tool calls` (`src/cli/trace.ts:473`) and
-#     `src/executors/step.ts:82` writes it as the `tool.calls` OTel span attribute. Both publish
-#     a constant as a measurement.
+#   * NOT A HARM TODAY, and the arming pass is what proved it - do NOT claim otherwise in the
+#     report. `estimateKilledStepUsage` (`src/runner/killed-step-usage.ts:56,61`) admits a prior
+#     step as a rate basis on `toolCalls > 0`. That value-based rule AGREES with the correct
+#     mark-based rule for every count today's adapters can produce, because the one adapter that
+#     cannot count writes 0 and is therefore excluded anyway - by accident, not by decision. A
+#     first draft of AC-2 drove this site and came back GREEN-on-HEAD, which is exactly why it is
+#     not the gating criterion. It is still in scope: the rule must be made explicit, because it
+#     becomes wrong the moment an unobservable adapter reports a NONZERO placeholder, and that
+#     case is the delivery's own repo test (below), not a grading check. The call site is
+#     `src/runner/activities.ts:1554-1568`.
 #   * NOT A HARM, and do not "fix" it: `isBlindMeteredStep` (`killed-step-usage.ts:42-48`) also
 #     requires zero metered tokens, and `parseAgyOutput` always estimates non-zero tokens from
 #     the prompt (`gemini-cli.ts:70-73`). A gemini step is token-ESTIMATED, not token-blind, so
-#     it correctly is not a blind-metered step. The defect is the RATE BASIS and the readers,
-#     not the blind-metered predicate's token half.
+#     it correctly is not a blind-metered step. The defect is the READERS and the reporting
+#     surfaces, not the blind-metered predicate's token half.
 #   * PRE-EXISTING DRIFT, explicitly out of scope: `packages/sdk-py/src/chikory/types.py:279-290`
 #     already lacks `infra_failed` and `limit_signal`, so TS→Python parity is not maintained for
 #     the additive optional fields. Do not widen this run to close that.
@@ -74,8 +79,8 @@
 #   (dogfood-122's lesson: an LLM executor may not supervise it). No spec can headline it.
 #   Among runnable candidates WP-626 wins on three counts. (1) Its premise was re-measured live
 #   THIS review on the run under review, not transcribed. (2) The harm is durable-execution
-#   accounting - a compensation mechanism WP-544 built that is dead in the mixed-agent runs the
-#   agent-class work made normal - which is a thesis pillar, not cosmetics. (3) It removes a
+#   accounting and observability - the trace an operator reads to judge a run publishes a
+#   constant where it promises a measurement - which is a thesis pillar, not cosmetics. (3) It removes a
 #   conjunct that WP-632 had to work around one review ago. WP-599 (F-288) was RE-MEASURED STALE
 #   (F-363, dogfood-146) and may not headline as scoped; WP-610 (F-317) is a one-file signature
 #   change, track-B by section 1.1; WP-606 (F-306) did not recur on this run's summary.
@@ -84,11 +89,10 @@
 #   A. **Fabricate a count.** Grep the transcript for tool-shaped lines, or report 1 because the
 #      diff is non-empty. An invented number is strictly worse than an honest absence: the rate
 #      basis would then scale REAL spend off a guess, which is the F-9 cost-telemetry failure
-#      with extra steps. AC-1 asserts the gemini path reports NO count at all, and AC-2 asserts
-#      an unknown-count step is never admitted as a rate basis.
+#      with extra steps. AC-1 asserts the gemini path reports NO count at all.
 #   B. **Widen the readers to treat 0 as unknown.** Then every honestly-metered step that made
-#      no tool calls reads as unobservable, and `isBlindMeteredStep` fires on steps that are not
-#      blind. AC-2 drives a KNOWN zero and requires it to still behave exactly as it does today.
+#      no tool calls reads as unobservable. AC-2 drives a KNOWN zero AND an unmarked historical
+#      record, and requires both to render byte-identically to today.
 #   C. **Change `toolCalls` to `number | null`.** That breaks the frozen contract and every
 #      existing reader; the precedent (`infraFailed?`, `claimsComplete?`, `limitSignal?`) is an
 #      additive OPTIONAL field. AC-3 asserts `toolCalls` is still declared `number` in both
@@ -125,17 +129,25 @@ goal: >
   flags).
   `toolCalls` itself stays declared `number`; do NOT change its type. Carry the same mark through
   `ParsedCliResult` (src/executors/step.ts:36) so the adapter can state it and
-  `runCliStep` can put it on the record.
+  `runCliStep` can put it on the record. The contract has a runtime mirror that REJECTS unknown
+  keys — `StepRecordSchema` (src/schemas.ts:416) — and the executor conformance suite parses every
+  record an adapter produces through it, so the field is not landed until that mirror accepts it
+  too. `docs/components/executors.md` carries a THIRD copy of the interface, and
+  `test/executors/contract.test.ts` asserts the doc lists exactly the schema's fields. All three
+  mirrors are entailed by the contract change, not a scope widening — and the committed suite,
+  not the grading checks, is what tells you so.
 
   Then make the readers branch on the mark rather than the value, at these three sites:
 
-  1. The rate basis. `estimateKilledStepUsage` (src/runner/killed-step-usage.ts:56-61) builds a
-     per-tool-call rate from prior steps that reported a positive count. A step whose count is unobserved
-     must never be admitted as a basis — not because its count is 0, but because it is unknown.
-     A step that genuinely made zero tool calls must keep behaving exactly as it does today.
-     This is the harm that bites: in a mixed-agent run (the normal shape since agent classes
-     landed, where a quota wall rotates the executor to a peer) a `claude-code` step killed at
-     its cap after gemini steps gets no compensation at all, and the run ledger undercounts.
+  1. The rate basis. `estimateKilledStepUsage` (src/runner/killed-step-usage.ts:56-61) admits a
+     prior step as a per-tool-call rate basis when its count is positive. Make the rule explicit:
+     a step whose count is UNOBSERVED must never be admitted — not because its count is 0, but
+     because it is unknown — while a step that genuinely made zero tool calls keeps behaving
+     exactly as it does today. Be honest about what this changes: nothing, for any count today's
+     adapters produce, because the one adapter that cannot count writes 0 and is excluded anyway.
+     It stops being an accident here, and it stops being WRONG the moment an unobservable adapter
+     reports a nonzero placeholder. That case is yours to pin in a repo test — no grading check
+     below covers it.
 
   2. The trace. `chikory trace` prints the raw count
      (src/cli/trace.ts:473). An unobserved count must not be rendered as the number 0; render
@@ -144,7 +156,7 @@ goal: >
   3. The span. src/executors/step.ts:82 writes the count as an OTel attribute. An unobserved
      count must not publish a constant as a measurement.
 
-  `parseClaudeCodeOutput` (src/executors/claude-code.ts:98) and `parseCodexOutput`
+  `parseClaudeCodeOutput` (src/executors/claude-code.ts:98) and the codex parser
   (src/executors/codex.ts:60) DO count, and must keep reporting their real counts, unmarked.
   Marking every adapter unknown to make the branch uniform destroys real information.
 
@@ -166,7 +178,10 @@ goal: >
   grading checks do not. Two candidates the checks below deliberately leave open: (1) a run whose
   every step comes from a COUNTING adapter must journal byte-identical step records and estimates
   to today; (2) `runCliStep`'s cap-kill path (src/executors/step.ts:163-180) must carry the mark
-  onto the killed record, since that is the record the compensation reads.
+  onto the killed record, since that is the record the compensation reads. And the case named
+  above that no grading check covers: an UNOBSERVED prior whose count is NONZERO must still be
+  refused as a rate basis — the one input on which the old value-based rule and the new
+  mark-based rule actually disagree.
 
   If an existing test pins a shape this change must alter, update its expectation and say plainly
   in the step summary that you did — do not delete it, and do not weaken it into a tautology.
@@ -193,9 +208,8 @@ acceptance_criteria:
       re-implementation — and requires the two cases to differ. `parseAgyOutput` must report a
       count that is marked UNOBSERVED, and must not have invented a number (trap A).
       `parseClaudeCodeOutput` over a stream-json fixture carrying exactly 3 `tool_use` blocks
-      must report 3, unmarked (trap D). `parseCodexOutput` over a fixture with 2 tool events
-      must report 2, unmarked. The expected values are written into this check, not read from a
-      test file the executor authors.
+      must report 3, unmarked (trap D). The expected values are written into this check, not read
+      from a test file the executor authors.
     check: |
       cd packages/sdk-ts || exit 1
       TARGET=test/executors/ac1-tool-count-observability.generated.test.ts
@@ -205,7 +219,6 @@ acceptance_criteria:
 
       import { parseAgyOutput } from "../../src/executors/gemini-cli.js";
       import { parseClaudeCodeOutput } from "../../src/executors/claude-code.js";
-      import { parseCodexOutput } from "../../src/executors/codex.js";
 
       describe("AC-1 WP-626/F-358: an executor that cannot count is marked, one that can is not", () => {
         test("the gemini path reports its count as UNOBSERVED and invents no number", () => {
@@ -250,7 +263,7 @@ acceptance_criteria:
               usage: { input_tokens: 100, output_tokens: 50 },
             }),
           ].join("\n");
-          const parsed = parseClaudeCodeOutput(stream);
+          const parsed = parseClaudeCodeOutput("claude-sonnet-5")(stream);
           const marked = parsed as { toolCalls: number; toolCallsObserved?: boolean };
           expect(
             marked.toolCalls,
@@ -276,76 +289,79 @@ acceptance_criteria:
 
   - id: AC-2
     description: >
-      THIS CHECK OWNS ITS ORACLE (the rate basis — the measured harm). It drives the REAL
-      `estimateKilledStepUsage` with inputs and expected outputs written into the check, and
-      requires the mark to decide admission, not the value. Three families collide here.
-      (a) Prior steps whose counts are UNOBSERVED must not form a basis — the estimate is `null`,
-      even though their `toolCalls` field reads 0 and even though they metered real tokens.
-      (b) A prior step that genuinely made ZERO tool calls, observed, must behave exactly as it
-      does today (still no basis) — trap B, which would otherwise make every honest zero read as
-      unknown. (c) A mixed history — one unobserved gemini step, one observed counting step —
-      must build the rate from the OBSERVED step ALONE, with the exact arithmetic asserted.
+      THIS CHECK OWNS ITS ORACLE (the reporting surface — the harm that is live TODAY). It drives
+      the REAL `renderStepDetail` (src/cli/trace.ts:452) over two synthetic journals that differ
+      in exactly one thing: whether the step's tool count was observed. Both carry
+      `toolCalls: 0`. The unobserved one must NOT render the string `0 tool calls` — publishing a
+      constant as a measurement is the defect — and the observed one must render the step line
+      BYTE-IDENTICALLY to today, which is trap B: widening the renderer to treat every 0 as
+      unknown would erase a real measurement. The expected strings are written into this check,
+      not read from a test file the executor authors.
     check: |
       cd packages/sdk-ts || exit 1
-      TARGET=test/runner/ac2-rate-basis-observability.generated.test.ts
+      TARGET=test/cli/ac2-trace-unobserved-count.generated.test.ts
       rm -f "$TARGET"
       cat > "$TARGET" <<'GENEOF'
       import { describe, expect, test } from "vitest";
 
-      import { estimateKilledStepUsage } from "../../src/runner/killed-step-usage.js";
+      import { renderStepDetail } from "../../src/cli/trace.js";
+      import type { JournalEntry } from "../../src/types.js";
 
-      interface Prior {
-        toolCalls: number;
-        tokens: { input: number; output: number };
-        costUsd: number;
-        toolCallsObserved?: boolean;
+      const ref = { id: "a".repeat(64), kind: "diff" as const, bytes: 12, summary: "s" };
+
+      function journal(observed: boolean | undefined): JournalEntry[] {
+        const record = {
+          status: "SUCCESS" as const,
+          diffRef: ref,
+          summary: "did the work",
+          toolCalls: 0,
+          tokens: { input: 1000, output: 500 },
+          costUsd: 0.5,
+          costEstimated: false,
+          durationMs: 60_000,
+          transcriptRef: { ...ref, kind: "transcript" as const },
+          ...(observed === undefined ? {} : { toolCallsObserved: observed }),
+        };
+        return [
+          {
+            idx: 0,
+            ts: "2026-08-17T00:00:00.000Z",
+            kind: "step",
+            payload: { stepIndex: 0, instruction: "do it", planItem: "do it", record },
+            costDeltaUsd: 0.5,
+            artifactRefs: [],
+          },
+        ];
       }
 
-      describe("AC-2 WP-626/F-358: the rate basis admits on the MARK, not the value", () => {
-        test("family (a): unobserved priors are not a basis, even with real metered tokens", () => {
-          const priors: Prior[] = [
-            { toolCalls: 0, tokens: { input: 4000, output: 900 }, costUsd: 0.4, toolCallsObserved: false },
-            { toolCalls: 0, tokens: { input: 3000, output: 700 }, costUsd: 0.3, toolCallsObserved: false },
-          ];
+      describe("AC-2 WP-626/F-358: the trace must not publish an unobservable count as a measurement", () => {
+        test("an UNOBSERVED count is not rendered as the number 0", () => {
+          const out = renderStepDetail(journal(false), 1);
           expect(
-            estimateKilledStepUsage(20, priors),
-            "an unobserved count is not a zero. A rate built from steps whose tool counts " +
-              "nobody measured is a fabricated basis (trap A at the consumer end).",
-          ).toBeNull();
+            out.includes("0 tool calls"),
+            "the step line still reads `0 tool calls` for a step whose executor cannot " +
+              "enumerate them. That is a constant printed as a measurement — the exact shape " +
+              "F-358 names, and the reason an operator reading dogfood-150's trace saw " +
+              "`0 tool calls` beside a 23,379-byte diff.",
+          ).toBe(false);
         });
 
-        test("family (b): an OBSERVED zero still behaves exactly as it does today", () => {
-          const priors: Prior[] = [
-            { toolCalls: 0, tokens: { input: 4000, output: 900 }, costUsd: 0.4, toolCallsObserved: true },
-          ];
+        test("an OBSERVED zero still renders byte-identically to today (trap B)", () => {
+          const out = renderStepDetail(journal(true), 1);
           expect(
-            estimateKilledStepUsage(20, priors),
-            "trap B: widening the reader to treat 0 as unknown would change nothing here, but " +
-              "it would make every honestly-metered zero-tool step read as unobservable. A " +
-              "measured zero is still a measurement.",
-          ).toBeNull();
+            out.split("\n")[0],
+            "trap B: a measured zero is a measurement. Rendering every 0 as unknown erases " +
+              "real information to make the two cases uniform.",
+          ).toBe("step 1 · SUCCESS · $0.5000 · 1.0k/500 tokens · 1m 0s · 0 tool calls");
         });
 
-        test("family (c): a mixed history builds the rate from the OBSERVED step alone", () => {
-          const priors: Prior[] = [
-            // unobserved: real tokens, real cost, but no usable count — must not enter the rate
-            { toolCalls: 0, tokens: { input: 8000, output: 4000 }, costUsd: 4.0, toolCallsObserved: false },
-            // observed: 10 calls, 1000 in / 500 out, $1.00 → 100 in, 50 out, $0.10 per call
-            { toolCalls: 10, tokens: { input: 1000, output: 500 }, costUsd: 1.0, toolCallsObserved: true },
-          ];
-          const estimate = estimateKilledStepUsage(20, priors);
-          expect(estimate, "the observed step is a valid basis; the estimate must not be null").not.toBeNull();
+        test("a record with NO mark at all is treated as observed (back-compat)", () => {
+          const out = renderStepDetail(journal(undefined), 1);
           expect(
-            estimate!.tokens.input,
-            "20 calls at the OBSERVED step's rate of 1000/10 = 100 input tokens per call. " +
-              "Folding the unobserved step in would give (8000+1000)/10 = 900 per call and a " +
-              "wildly inflated 18000 — a ledger corrected with a number nobody measured.",
-          ).toBe(2000);
-          expect(estimate!.tokens.output, "20 calls at 500/10 = 50 output tokens per call").toBe(1000);
-          expect(
-            Math.round(estimate!.costUsd * 100) / 100,
-            "20 calls at $1.00/10 = $0.10 per call",
-          ).toBe(2.0);
+            out.split("\n")[0],
+            "every journal written before this WP has no mark; absent must mean observed, or " +
+              "every historical trace re-renders as unknown.",
+          ).toBe("step 1 · SUCCESS · $0.5000 · 1.0k/500 tokens · 1m 0s · 0 tool calls");
         });
       });
       GENEOF
@@ -353,10 +369,10 @@ acceptance_criteria:
       ST=$?
       rm -f "$TARGET"
       if [ "$ST" -ne 0 ]; then
-        echo "AC-2 FAIL: the rate basis still admits on the tool-call VALUE rather than the observation mark, or an observed zero changed behaviour, or an unobserved step polluted the rate. vitest exited $ST"
+        echo "AC-2 FAIL: the trace still renders an unobservable count as the number 0, or it changed the rendering of an observed zero / an unmarked historical record. vitest exited $ST"
         exit 1
       fi
-      echo "AC-2 OK: unobserved priors excluded, observed zero unchanged, mixed history builds the rate from the observed step alone"
+      echo "AC-2 OK: unobserved renders as unknown; observed zero and unmarked historical records render byte-identically"
 
   - id: AC-3
     description: >
