@@ -8,12 +8,11 @@ recover a run, and how to land the result as a normal PR.
 **Status (2026-08-17, bounded — update discipline: REPLACE this block, ≤15 lines;
 displaced prose moves verbatim to [`PLAN-HISTORY.md`](PLAN-HISTORY.md); per-run detail:
 `docs/reports/`; queue + course correction: `plan.md` §6/§7).**
-🔴 **dogfood-149 / WP-616 + WP-631 (no string on the judge evidence path is unbounded where something renders it) DELIVERED and LANDED — but the run sealed FAILED** — `branch-run-f57c3f17-a3d7-4273-b62f-82beb8c63a03-step-5-770afe4b` (a `chikory branch` fork of `run-f57c3f17-…` at checkpoint `@5`), terminal **FAILED**, 3 steps, $0.2759/$20.00, 10m 48s, AC **3/3** re-run green, harvest byte-IDENTICAL 6/6 (`docs/reports/dogfood-149.md`). Verdict rationale bounded at all five `computeVerdict` branches (`verdict.ts:62`, ≤4096) with per-item summaries ≤512 (`:48`); completion-review concerns bounded at the render site (`prompt.ts:243`, cap 3072) keeping oldest+newest in full plus `- … [N findings omitted]`. Suite re-measured by hand: **191 files / 1,540 tests**; `test/runner/` 397 → **400**.
-✅ **The judge worked, and the gate held** — 1 genuine true-positive pre-land (step 0 left two input shapes unbounded; the executor's own step-2 diff confirms it), and an unresolved objection on a converged step produced a FAILED seal instead of a green one. `unattended: seal_resumable_failed` turned that into a terminal state rather than an overnight park (F-322 honoured).
-🔴 **F-370 — the run failed on its own goal, not on the code.** The goal demanded an absolute character bound AND untruncated endpoints; those collide when the two endpoints alone exceed the cap, and no AC ever built that input. **Authoring rule (§8): a goal that asserts an absolute invariant AND a preservation invariant must say which wins at their boundary, and one AC must drive an input where they actually collide.** Precedence settled in-code (`prompt.ts:236-241`): **bounded wins**.
-🔴 **F-369 → WP-632**: an empty-diff step scored `design_serves_overall_goal` vacuously **PASS** (*"no design changes in the supplied diff"*) between two real FAILs, and bought 2 judge passes for **36.2% of run spend**. 🟠 **F-371 HAND-FIXED**: a clamped finding was truncated silently — `clampFinding` (`prompt.ts:210-224`) now states the chars removed; tests 13 → **15**, probe-verified RED.
-🟡 **F-372 — two launch-discipline defects (§7):** the spec was **edited and launched uncommitted** (`wp:` narrowed one minute before launch), so the run is not reproducible from any commit; and `chikory branch` leaves the parent journal — plus any abandoned child — at `RUNNING` forever, so `chikory status` showed **2 phantom live runs**.
-**NEXT HEADLINE = WP-632 (dogfood-150): a step that changed nothing must not hand the reviewer a fresh clean bill of health** (F-369, absorbs WP-608's residue F-355). Ladder unchanged at `rung=0` — P3 rung-5's remaining half (`brownfield-001`/WP-304) is operator-by-hand and still cannot headline.
+🟢 **dogfood-150 / WP-632 (a step that changed nothing must not hand the judge's record a clean bill of health, nor spend a repair grant) DELIVERED and LANDED** — `run-17010886-9ade-4937-8d9f-db0a67b143a7`, terminal **SUCCESS**, 1 step, $0.1019/$20.00, 12m 16s, AC **3/3** re-run green, harvest byte-IDENTICAL 5/5 (`docs/reports/dogfood-150.md`). An empty-diff judge pass now carries the previous answer for model-judged rubric rows (`judge/rubric.ts:158`) while machine-settled rows stay fresh, and the reconciled form is rebuilt through `buildVerdict` before the journal writes, so verdict / `standingRubricFindings` / `computeVerdict` / `chikory trace` read ONE form.
+🔴 **The judge scored 0 true-positives and shipped 3 defects human review found — all HAND-FIXED this sitting, all probe-verified both ways.** F-373: the stall branch briefed the executor with a `DESIGN REVIEW BRIEF` naming **zero** findings and skipped the WP-619 adjudication review. F-374: the repair grant was bounded only by `maxSteps` — **5 consecutive 0-byte stalls all granted, 8 judge passes**, where `MAX_COMPLETION_REVIEWS` is 2. F-375: at `cadence: 2` a pass that had just READ and cleared an objection against earlier REAL diffs had its fresh answer overwritten by a stale one.
+⚠️ **The pattern behind all three (§8):** every one lives in an **input family the delivered tests never instantiate** — a clean sealing rubric with a standing finding, a *second* consecutive stall, `cadence: 2`. A judge reading a diff plus the tests the executor wrote for it inherits that suite's blind spots exactly. Suite re-measured by hand: launch 1,540 → as-landed **1,547** → after hand-fix **1,551 tests / 193 files (1,528 passed | 23 skipped), 65.60s**.
+⚠️ **A WP that REMOVES a spend is a budget change — ask what the new ceiling is (§8).** Twice now the answer has been "there isn't one": F-365 (a retention fix with no growth bound) and F-374 (a "must not spend a grant" fix that removed the grant limit).
+**NEXT HEADLINE = WP-626 (dogfood-151): a telemetry field the loop reasons about must not be structurally unobservable.** `gemini-cli.ts:79` hardcodes `toolCalls: 0` and this run's own step reports `0 tool calls` beside a 23,379-byte diff, so WP-544's blind-metered-step compensation (`runner/killed-step-usage.ts:45,56,61`) can never fire under the executor we dogfood and benchmark with. Ladder unchanged at `rung=0` — P3 rung-5's remaining half (`brownfield-001`/WP-304) is operator-by-hand and still cannot headline.
 
 Related docs: [`docs/spec/task-spec.md`](spec/task-spec.md) (schema
 reference) · [`docs/TASK-PROTOCOL.md`](TASK-PROTOCOL.md) (WP etiquette, §7 is
@@ -993,6 +992,44 @@ broken (a false-green, not a follow-on fix).
   announces the characters it removed (`clampFinding`, `:210-224`) so a shortened
   finding is never silent.
 
+- **🔴 A WP THAT REMOVES A SPEND IS A BUDGET CHANGE — ASK WHAT THE NEW CEILING
+  IS** (F-374, dogfood-150; the same shape as F-365, dogfood-148). WP-632's site 2
+  said *"a zero-byte step must not spend a completion-review grant"*. The delivery
+  read that as "the stall path spends nothing", and the stall path then had no
+  ceiling at all — bounded only by `max_steps`. MEASURED at the dogfood-150 review:
+  **5 consecutive 0-byte stalls were all granted a repair, journaling 8 judge
+  passes**, where `MAX_COMPLETION_REVIEWS` is 2 and each pass cost ~$0.05 on that
+  run's own meter. F-365 was the same mistake in the other direction: a *"stop
+  dropping findings"* fix added retention with no growth bound. **Authoring rule:
+  when a goal removes or exempts a spend, the goal must name the bound that
+  replaces it, and one AC must drive the input that exhausts it** — a *second*
+  offence, not just the first.
+
+- **🔴 AN AC THAT OWNS ITS ORACLE STILL ONLY PROBES THE INPUT VALUES IT WRITES
+  DOWN** (F-373/F-375, dogfood-150). All three defects that shipped in WP-632's
+  delivery lived in input families the ACs and the delivered tests never
+  instantiated: a **clean sealing rubric with a standing finding still open**
+  (F-373), a **second consecutive stall** (F-374), and **`cadence: 2`** (F-375 —
+  the goal's own trap C, armed at cadence 1 only, so the trap was set at the wrong
+  altitude). The judge answered `design_serves_overall_goal` **PASS** with an
+  accurate, specific justification; it was answering a different question. **When
+  a goal names a scalar the loop reads (`cadence`, a retry count, a repeat), at
+  least one AC must drive a value of it OTHER than the default.** See also
+  `[[ac-must-enumerate-input-families]]`.
+
+- **✅ CLOSED — an empty-diff step no longer scores model-judged rubric rows
+  vacuously green** (F-369 → WP-632, landed in the dogfood-150 review,
+  `run-17010886-9ade-4937-8d9f-db0a67b143a7`). A judge pass whose whole window
+  delivered nothing carries the previous pass's answer for every row
+  `isRubricItemSettledAgainstWholeDelivery` does NOT call settled, keeps the fresh
+  machine answer for every row it does, and invents nothing when there is no
+  previous answer (`reconcileEmptyStepRubric`,
+  `packages/sdk-ts/src/judge/rubric.ts:158`). "Whole window", not "last step" —
+  at `cadence` ≥ 2 the pass still spans earlier real diffs
+  (`everyStepSinceLastVerdictIsEmpty`,
+  `packages/sdk-ts/src/runner/activities.ts:853`). The description below is the
+  defect as it stood.
+
 - **🔴 An empty-diff step is judged as if it were a delivery, and scores
   model-judged rubric rows vacuously green** (F-369 → WP-632, dogfood-149).
   `decideQuestionStep` (`packages/sdk-ts/src/workflow/question-step.ts:55-65`)
@@ -1007,6 +1044,9 @@ broken (a false-green, not a follow-on fix).
   diff as carrying no information about the model-judged rows**, and check the
   passes either side of it before believing an objection was resolved. Nothing is
   lost today only because `standingRubricFindings` never clears a model-judged id.
+  (Superseded by the CLOSED entry above for every run after
+  `run-17010886-9ade-4937-8d9f-db0a67b143a7`; kept because every earlier trace in
+  `docs/reports/` still has to be read this way.)
 
 - **✅ CLOSED — a second, DIFFERENT objection on the same rubric id no longer
   silently replaces the first** (F-364 → WP-630, landed in the dogfood-148 review,

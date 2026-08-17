@@ -28,6 +28,7 @@ import {
   buildVerdict,
   COMPLETION_REVIEW_RUBRIC,
   enforceFamilyDiversity,
+  reconcileEmptyStepRubric,
   renderOverallGoalContext,
   RUBRIC_ESCALATION_CONCERNS_ADJUDICATED,
   RUBRIC_PRE_EXISTING_SUITE_GREEN_ITEM,
@@ -835,6 +836,32 @@ function repoDiffBasesSinceLastVerdict(
         return [repo.name, checkpoint?.gitCommits[key] ?? BASE_TAG];
       }),
   );
+}
+
+/**
+ * Did EVERY step this judge pass covers deliver nothing? (F-375, dogfood-150 review.)
+ *
+ * WP-632's carry-forward is scoped to a pass with no delivered work to judge. The
+ * window is the same one `repoDiffBasesSinceLastVerdict` bases the diff on — every
+ * step after the previous verdict, up to and including `atStep` — because that is
+ * exactly what the judge READ. Keying on `atStep`'s own byte count alone misclassified
+ * a cadence-≥2 milestone pass that still spanned earlier REAL diffs, and discarded the
+ * judge's fresh answer about work it had examined.
+ *
+ * An empty window returns false: with no step to characterise, nothing is carried.
+ */
+function everyStepSinceLastVerdictIsEmpty(journal: Journal, atStep: number): boolean {
+  let lastJudgedStep = -1;
+  for (const entry of journal.entries("verdict")) {
+    const payload = entry.payload as VerdictPayload & { source?: string };
+    if (payload.source === "runner") continue;
+    if (payload.atStep < atStep) lastJudgedStep = Math.max(lastJudgedStep, payload.atStep);
+  }
+  const window = journal
+    .entries("step")
+    .map((e) => e.payload as StepPayload)
+    .filter((p) => p.stepIndex > lastJudgedStep && p.stepIndex <= atStep);
+  return window.length > 0 && window.every((p) => p.record.diffRef.bytes === 0);
 }
 
 function repoDiffBasesAtRunBase(workspaceRepos: WorkspaceRepo[]): Record<string, string> {
@@ -1650,6 +1677,8 @@ export function createRunnerActivities(deps: RunnerActivityDeps) {
         let stepSummaries: string[];
         let journaledForm: JudgePayload | undefined;
         let judgeClass: AgentClass | undefined;
+        let judgedWindowAllEmpty = false;
+        const previousRubricMap = new Map<string, JudgeForm["rubricResults"][number]>();
         try {
           const existing = reader.findByKey("verdict", "judgeIndex", input.judgeIndex);
           if (existing) return (existing.payload as VerdictPayload).verdict;
@@ -1681,6 +1710,14 @@ export function createRunnerActivities(deps: RunnerActivityDeps) {
                 (entry.payload as StepPayload).stepIndex === input.atStep &&
                 isInfraStepFailure((entry.payload as StepPayload).record),
             );
+          judgedWindowAllEmpty = everyStepSinceLastVerdictIsEmpty(reader, input.atStep);
+          for (const entry of reader.entries("verdict")) {
+            const payload = entry.payload as VerdictPayload & { source?: string };
+            if (payload.source === "runner" || payload.source === "completion-review") continue;
+            for (const r of payload.verdict?.form?.rubricResults ?? []) {
+              previousRubricMap.set(r.id, r);
+            }
+          }
           stepSummaries = summariesSinceLastVerdict(reader, input.atStep);
           journaledForm = reader.findByKey("judge", "judgeIndex", input.judgeIndex)?.payload as
             | JudgePayload
@@ -1807,6 +1844,31 @@ export function createRunnerActivities(deps: RunnerActivityDeps) {
             lastGoodCheckpointId: input.lastGoodCheckpointId,
           });
           verdict = pass.verdict;
+          // F-375 (dogfood-150 review): the carry-forward is scoped to a pass with no
+          // delivered work in its WHOLE window, not to `atStep`'s byte count alone. At
+          // cadence ≥ 2 an empty step fires an off-cadence milestone pass whose evidence
+          // still spans the REAL diffs of the steps before it, and treating that pass as
+          // empty discarded the judge's fresh assessment of work it had just read.
+          if (!input.completionReview && judgedWindowAllEmpty) {
+            const reconciledRubric = reconcileEmptyStepRubric(
+              verdict.form.rubricResults,
+              previousRubricMap,
+              spec,
+            );
+            const reconciledForm: JudgeForm = {
+              ...verdict.form,
+              rubricResults: reconciledRubric,
+            };
+            verdict = buildVerdict(reconciledForm, criteriaHistory, {
+              runId: input.runId,
+              judgeModel,
+              costUsd: verdict.costUsd,
+              tokens: verdict.tokens,
+              lastGoodCheckpointId: input.lastGoodCheckpointId,
+              rubric: effectiveRubric,
+              workChunkInProgress: input.workChunkInProgress ?? false,
+            });
+          }
           const testRef = pass.collected.evidence.testResults?.ref;
           artifactRefs = [...pass.collected.evidence.diffRefs, ...(testRef ? [testRef] : [])];
           judgePayload = {

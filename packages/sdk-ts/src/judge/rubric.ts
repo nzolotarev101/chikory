@@ -146,3 +146,35 @@ export function isRubricItemSettledAgainstWholeDelivery(
   return false;
 }
 
+/**
+ * Reconciles rubric row answers on an empty-diff judge pass (WP-632 / F-369).
+ *
+ * Precedence rule:
+ * 1. A row isRubricItemSettledAgainstWholeDelivery calls settled keeps THIS pass's freshly
+ *    derived answer (machine evidence beats a remembered answer).
+ * 2. Otherwise the previous pass's answer for that row wins on an empty-diff pass.
+ * 3. If there is NO previous answer for that row, this pass's answer stands. Nothing is invented.
+ */
+export function reconcileEmptyStepRubric<
+  T extends { id: string; pass: boolean; justification: string },
+>(
+  currentRubricResults: ReadonlyArray<T>,
+  previousRubricMap: ReadonlyMap<string, { pass: boolean; justification: string }> | undefined,
+  spec: { acceptanceCriteria?: ReadonlyArray<{ check?: string }> },
+): T[] {
+  return currentRubricResults.map((current) => {
+    if (isRubricItemSettledAgainstWholeDelivery(current.id, spec)) {
+      return current;
+    }
+    const prev = previousRubricMap?.get(current.id);
+    if (prev !== undefined) {
+      return {
+        ...current,
+        pass: prev.pass,
+        justification: prev.justification,
+      };
+    }
+    return current;
+  });
+}
+

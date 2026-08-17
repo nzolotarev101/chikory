@@ -81,6 +81,7 @@ import { DETERMINISTIC_RUBRIC_IDS, isRubricItemSettledAgainstWholeDelivery } fro
 import {
   buildCompletionReviewBrief,
   decideCompletionReview,
+  MAX_COMPLETION_REVIEWS,
   mergeDesignFindings,
 } from "./completion-review.js";
 import { decideSoakDelay } from "./soak.js";
@@ -263,6 +264,11 @@ export async function agentLoop(spec: TaskSpec): Promise<RunStatus> {
   // Run-completion holistic review: cumulative-diff design passes already
   // taken (bounded — initial review + one re-review after the design fix).
   let completionReviewAttempts = 0;
+  // F-374: bounded repair grants handed to an executor that STALLED (0-byte diff) at a
+  // completion milestone. Separate from `completionReviewAttempts` — WP-632 requires a
+  // stall to spend no completion-review grant — but capped at the same ceiling so the
+  // stall path can never outlast the budget it stands in for.
+  let stallRepairGrants = 0;
   // Standing findings from earlier passes (both rubric failures and free-text concerns)
   // that survive across intervening clean passes until adjudicated at completion review.
   // Rubric findings are keyed by rubric ID so whole-delivery machine-settled items can be cleared,
@@ -1270,6 +1276,61 @@ export async function agentLoop(spec: TaskSpec): Promise<RunStatus> {
           const sealingRubricFails = verdict.form.rubricResults.filter((r) => !r.pass);
           const sealingVerdictHasRubricFailures = sealingRubricFails.length > 0;
           const hasStanding = currentStandingFindings.length > 0;
+
+          // Site 2 / WP-632 (F-369): a zero-byte step must not spend a completion-review grant.
+          // When the executor stalls (0-byte diff) while the sealing verdict still carries a
+          // failing rubric row, grant the repair without spending a completion review or
+          // incrementing completionReviewAttempts.
+          //
+          // F-373 (dogfood-150 review): the gate is the FAILING RUBRIC, not `hasStanding`.
+          // A standing finding with a clean sealing rubric has nothing to put in the brief —
+          // `buildCompletionReviewBrief` over zero failing rows emits a DESIGN REVIEW BRIEF
+          // that names no finding and claims a completion review ran when none did — and
+          // bypassing the review is what SKIPS the adjudication that standing findings exist
+          // for. That case falls through to the normal completion review below. Site 1's
+          // carry-forward is what makes this gate sufficient: the empty-step shape F-369
+          // measured now re-raises the previous pass's failing row here.
+          //
+          // F-374 (dogfood-150 review): the grant is BOUNDED. Without a cap the stall path
+          // is limited only by `maxSteps`, so a persistently stalling executor re-enters it
+          // every step and buys a judge pass each time (5 consecutive stalls, probe-measured)
+          // in place of the two grants `MAX_COMPLETION_REVIEWS` allows. The counter is a
+          // workflow local and resets on `chikory resume`; that is deliberate — a resume is
+          // operator-initiated, and its worst case is two further stall grants.
+          if (record.diffRef.bytes === 0 && sealingVerdictHasRubricFailures) {
+            const canRetry =
+              stallRepairGrants < MAX_COMPLETION_REVIEWS &&
+              decideCompletionReview({
+                sealingDiffBase,
+                baseCommit,
+                reviewAttemptsUsed: completionReviewAttempts,
+                sealingVerdictHasRubricFailures: true,
+                hasRegressionSuite: Boolean(spec.regressionSuite),
+                hasEscalationConcerns: hasStanding,
+                hasStandingFindings: hasStanding,
+              }).action === "review" && stepIndex < maxSteps;
+            if (canRetry) {
+              stallRepairGrants += 1;
+              judgeFeedback = buildCompletionReviewBrief({
+                ...verdict.form,
+                rubricResults: sealingRubricFails,
+              });
+              remediationPending = true; // re-judge the fix off-cadence
+              const soakTerminal = await soakBeforeNextStep();
+              if (soakTerminal !== undefined) return soakTerminal;
+              continue;
+            }
+            const condemned = await sealFromRubricFails(sealingRubricFails);
+            if (condemned !== undefined) return condemned;
+            return seal(
+              "FAILED",
+              `completion review: unresolved finding on a converged step — ${sealingRubricFails
+                .map((fail) => fail.id)
+                .join(", ")}`,
+              { resumable: true },
+            );
+          }
+
           const review = decideCompletionReview({
             sealingDiffBase,
             baseCommit,
