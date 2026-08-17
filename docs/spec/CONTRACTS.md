@@ -198,6 +198,7 @@ export interface JudgeForm {
   criterionResults: Array<{ id: string; pass: boolean; justification: string; infraFailed?: boolean }>;
   rubricResults: Array<{ id: string; pass: boolean; justification: string; infraFailed?: boolean }>;
   concerns: string[];
+  concernSeverities?: Array<"minor" | "blocking">; // additive (WP-548): index-aligned with concerns; absent → blocking
 }
 
 export interface JudgeVerdict {

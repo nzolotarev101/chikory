@@ -826,6 +826,60 @@ describe("renderStepDetail (--step)", () => {
     expect(text).toContain("0 tool calls");
     expect(text).not.toContain("unknown tool calls");
   });
+
+  test("minor concern renders with (minor) marker while blocking concern is unchanged (WP-548)", () => {
+    const concernEntries: JournalEntry[] = [
+      {
+        idx: 0,
+        ts: "2026-08-18T00:00:00.000Z",
+        kind: "step",
+        payload: {
+          stepIndex: 0,
+          instruction: "implement feature",
+          planItem: "implement feature",
+          record: {
+            status: "SUCCESS",
+            diffRef: ref("diff", "diff"),
+            transcriptRef: ref("transcript", "transcript"),
+            summary: "implemented feature",
+            toolCalls: 1,
+            tokens: { input: 100, output: 50 },
+            costUsd: 0.1,
+            costEstimated: false,
+            durationMs: 1000,
+          },
+        },
+        costDeltaUsd: 0.1,
+        artifactRefs: [],
+      },
+      {
+        idx: 1,
+        ts: "2026-08-18T00:01:00.000Z",
+        kind: "judge",
+        payload: {
+          judgeIndex: 0,
+          atStep: 0,
+          form: {
+            criterionResults: [{ id: "AC-1", pass: true, justification: "ok" }],
+            rubricResults: [{ id: "tests_pass", pass: true, justification: "ok" }],
+            concerns: ["minor cosmetic formatting", "critical missing validation"],
+            concernSeverities: ["minor", "blocking"],
+          },
+          judgeModel: { provider: "openai-compat", model: "model" },
+          evidenceRefs: [],
+          costUsd: 0.01,
+          durationMs: 500,
+          evidenceBytes: 100,
+        },
+        costDeltaUsd: 0.01,
+        artifactRefs: [],
+      },
+    ];
+
+    const out = renderStepDetail(concernEntries, 1);
+    expect(out).toContain("  concern (minor): minor cosmetic formatting");
+    expect(out).toContain("  concern: critical missing validation");
+  });
 });
 
 describe("traceJson (--json)", () => {

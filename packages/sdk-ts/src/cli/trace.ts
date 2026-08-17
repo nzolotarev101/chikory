@@ -509,7 +509,15 @@ export function renderStepDetail(entries: JournalEntry[], displayStep: number): 
       for (const r of judge.form.rubricResults) {
         lines.push(`    ${r.pass ? "✓" : "✗"} ${r.id} — ${r.justification}`);
       }
-      for (const concern of judge.form.concerns) lines.push(`  concern: ${concern}`);
+      for (let i = 0; i < judge.form.concerns.length; i++) {
+        const concern = judge.form.concerns[i];
+        const severity = judge.form.concernSeverities?.[i];
+        if (severity === "minor") {
+          lines.push(`  concern (minor): ${concern}`);
+        } else {
+          lines.push(`  concern: ${concern}`);
+        }
+      }
       for (const ref of judge.evidenceRefs) lines.push(`  evidence: ${describeRef(ref)}`);
     }
     if (entry.kind === "verdict") {

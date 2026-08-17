@@ -30,6 +30,10 @@ export const JUDGE_FORM_RESPONSE_SCHEMA = {
     criterionResults: { type: "array", items: FORM_ITEM_SCHEMA },
     rubricResults: { type: "array", items: FORM_ITEM_SCHEMA },
     concerns: { type: "array", items: { type: "string" } },
+    concernSeverities: {
+      type: "array",
+      items: { type: "string", enum: ["minor", "blocking"] },
+    },
   },
 } as const;
 
@@ -48,7 +52,10 @@ export const JUDGE_SYSTEM_PROMPT = [
   "  only from the diff and the check results.",
   "- `concerns` is for problems the rubric does not cover (suspicious but not",
   "  rubric-violating changes, ambiguous instructions). Leave it empty when",
-  "  the rubric covers everything you found.",
+  "  the rubric covers everything you found. When non-empty, provide",
+  "  `concernSeverities` with an index-aligned array of 'minor' (cosmetic /",
+  "  advisory, does not stop the run) or 'blocking' (defect / unmet goal",
+  "  requirement, stops the run).",
   "- You do not choose what happens next; you only fill the form.",
   "",
   "Respond with a single JSON object matching the requested schema.",

@@ -52,6 +52,7 @@ export {
   type RubricItem,
 } from "./rubric.js";
 export {
+  blockingConcerns,
   computeVerdict,
   FLIP_FLOPS_TO_ESCALATE,
   HALT_CONSECUTIVE_FAILS,

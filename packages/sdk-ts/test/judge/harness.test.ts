@@ -426,4 +426,35 @@ describe("applyCheckOverrides infra classification (WP-263(b))", () => {
     const testsPass = result.form.rubricResults.find((r) => r.id === "tests_pass");
     expect(testsPass?.infraFailed).toBeUndefined();
   });
+
+  // F-380: this reconstruction names its fields explicitly, so any additive
+  // JudgeForm field it forgets is dropped on EVERY real judge pass — the
+  // WP-548 severity floor shipped inert because `concernSeverities` died here
+  // while every unit test built the form by hand and never crossed this seam.
+  it("carries additive JudgeForm fields (concernSeverities) through the merge", () => {
+    const result = applyCheckOverrides(
+      {
+        ...llmForm,
+        concerns: ["cosmetic nit", "real defect"],
+        concernSeverities: ["minor", "blocking"],
+      },
+      criteria,
+      STANDING_RUBRIC,
+      [{ ...checkRun, exitCode: 0 }],
+    );
+    if ("error" in result) throw new Error(result.error);
+    expect(result.form.concerns).toEqual(["cosmetic nit", "real defect"]);
+    expect(result.form.concernSeverities).toEqual(["minor", "blocking"]);
+  });
+
+  it("omits concernSeverities entirely when the judge supplied none (legacy form)", () => {
+    const result = applyCheckOverrides(
+      { ...llmForm, concerns: ["unannotated"] },
+      criteria,
+      STANDING_RUBRIC,
+      [{ ...checkRun, exitCode: 0 }],
+    );
+    if ("error" in result) throw new Error(result.error);
+    expect("concernSeverities" in result.form).toBe(false);
+  });
 });

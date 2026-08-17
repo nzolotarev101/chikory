@@ -471,6 +471,7 @@ export const JudgeFormSchema = z
     criterionResults: z.array(JudgeFormItemSchema),
     rubricResults: z.array(JudgeFormItemSchema),
     concerns: z.array(z.string()),
+    concernSeverities: z.array(z.enum(["minor", "blocking"])).optional(),
   })
   .strict();
 

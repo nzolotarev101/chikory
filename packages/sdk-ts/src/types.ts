@@ -477,6 +477,11 @@ export interface JudgeForm {
   criterionResults: Array<{ id: string; pass: boolean; justification: string; infraFailed?: boolean }>;
   rubricResults: Array<{ id: string; pass: boolean; justification: string; infraFailed?: boolean }>;
   concerns: string[];
+  /**
+   * Additive (WP-548): index-aligned with `concerns`. When absent or shorter
+   * than `concerns`, an unmapped concern defaults to blocking.
+   */
+  concernSeverities?: Array<"minor" | "blocking">;
 }
 
 export interface JudgeVerdict {

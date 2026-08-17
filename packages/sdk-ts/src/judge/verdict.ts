@@ -65,6 +65,23 @@ function clampRationale(rationale: string, maxChars: number = MAX_VERDICT_RATION
 }
 
 /**
+ * Returns the concern texts at or above the severity floor, in `concerns` order (WP-548).
+ * A concern marked "minor" is below the floor.
+ * An unmapped concern (no matching entry in `concernSeverities` or array absent) is BLOCKING (safe default).
+ */
+export function blockingConcerns(form: JudgeForm): string[] {
+  const result: string[] = [];
+  const severities = form.concernSeverities;
+  for (let i = 0; i < form.concerns.length; i++) {
+    const severity = severities?.[i];
+    if (severity !== "minor") {
+      result.push(form.concerns[i]);
+    }
+  }
+  return result;
+}
+
+/**
  * Checks whether a judge verdict includes any failing destructive rubric item.
  */
 export function hasDestructiveRubricFailure(
@@ -164,9 +181,10 @@ export function computeVerdict(
   }
 
   // Rule 4 — concerns with no rubric basis → ESCALATE (ambiguity belongs to humans).
-  if (form.concerns.length > 0 && rubricFails.length === 0) {
+  const blocking = blockingConcerns(form);
+  if (blocking.length > 0 && rubricFails.length === 0) {
     const reason = clampRationale(
-      `judge raised concerns outside the rubric: ${form.concerns.join(" | ")}`,
+      `judge raised concerns outside the rubric: ${blocking.join(" | ")}`,
     );
     return { kind: "ESCALATE", rationale: reason, escalateReason: reason, escalateClass: "out_of_rubric" };
   }

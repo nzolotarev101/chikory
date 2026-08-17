@@ -379,6 +379,7 @@ export {
   type EscalationWaitDecision,
   type EscalationWaitState,
 } from "./workflow/escalation-wait.js";
+export { accumulateStandingConcerns } from "./workflow/standing-concerns.js";
 export {
   buildCriterionFeedback,
   buildRemediationBrief,

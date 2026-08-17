@@ -403,4 +403,187 @@ describe.skipIf(address === null)("standing findings across incremental windows 
       "This pass judges ONLY whether the run's cumulative changes form a coherent",
     );
   }, 180_000);
+
+  // ─── [WP-548] Live Severity Floor Standing Concerns ──────────────────────────
+  test("WP-548 Minor concern: concern with severity 'minor' at pass #1 does NOT accumulate into standingConcerns and is NOT adjudicated at completion review", async () => {
+    const marker = `MINOR_CONCERN_${randomUUID().slice(0, 8)}`;
+    const minorConcernText = `${marker}: cosmetic whitespace nit in docstring`;
+
+    // Pass 1: raises a MINOR-only concern with the whole rubric passing. AC-1 is still
+    // false, so the run continues; rule 4 does not fire because the floor leaves no
+    // blocking concern. The rubric is deliberately all-green so the ONLY thing that
+    // could put a standing finding to the completion review is the concern itself —
+    // a rubric fail here would seed `escalation_concerns_adjudicated` on its own and
+    // make the assertion below vacuous (F-383).
+    // Pass 2: clean, no concerns (AC-1 true)
+    const wire = await startFakeJudgeWire(
+      [
+        {
+          criterionResults: [{ id: "AC-1", pass: false, justification: "not yet" }],
+          rubricResults: [
+            { id: "tests_pass", pass: true, justification: "ok" },
+            { id: "no_unrelated_deletions", pass: true, justification: "ok" },
+            { id: "no_secrets_introduced", pass: true, justification: "ok" },
+            { id: "no_architecture_violations", pass: true, justification: "ok" },
+            { id: "scope_matches_instruction", pass: true, justification: "ok" },
+            { id: RUBRIC_DESIGN_SERVES_OVERALL_GOAL, pass: true, justification: "ok" },
+          ],
+          concerns: [minorConcernText],
+          concernSeverities: ["minor"],
+        },
+        judgeForm({ criteria: { "AC-1": true } }),
+      ],
+      {
+        reviewForms: [completionReviewForm({ hasRegressionSuite: true })],
+      },
+    );
+    cleanups.push(() => wire.close());
+
+    const { repoUrl, dataDir, runner } = await setup(wire);
+    const spec = makeJudgedSpec({
+      repoUrl,
+      cadence: 1,
+      maxSteps: 4,
+      regressionSuite: "exit 0",
+    });
+
+    const handle = await runner.start(spec);
+    const report = await awaitTerminal(handle);
+
+    expect(report.status).toBe("SUCCESS");
+    expect(wire.reviewHits).toBe(1);
+
+    const reviewRequest = wire.requests.find((body) =>
+      body.includes("run-completion architecture review"),
+    );
+    expect(reviewRequest).toBeDefined();
+    // Minor concern must NOT reach completion review or adjudication rubric
+    expect(reviewRequest!).not.toContain(marker);
+    expect(reviewRequest!).not.toContain(RUBRIC_ESCALATION_CONCERNS_ADJUDICATED);
+
+    const journal = new Journal(journalPath(dataDir, handle.runId));
+    try {
+      expect(journal.entries("terminal").at(-1)!.payload).toMatchObject({ status: "SUCCESS" });
+    } finally {
+      journal.close();
+    }
+  }, 180_000);
+
+  test("WP-548 Blocking concern: concern with explicit severity 'blocking' at pass #1 DOES accumulate into standingConcerns and reaches review", async () => {
+    const marker = `BLOCKING_CONCERN_${randomUUID().slice(0, 8)}`;
+    const blockingConcernText = `${marker}: critical unhandled exception in core loop`;
+
+    const wire = await startFakeJudgeWire(
+      [
+        {
+          criterionResults: [{ id: "AC-1", pass: false, justification: "not yet" }],
+          rubricResults: [
+            { id: "tests_pass", pass: true, justification: "ok" },
+            { id: "no_unrelated_deletions", pass: true, justification: "ok" },
+            { id: "no_secrets_introduced", pass: true, justification: "ok" },
+            { id: "no_architecture_violations", pass: true, justification: "ok" },
+            { id: "scope_matches_instruction", pass: false, justification: "minor scope drift" },
+            { id: RUBRIC_DESIGN_SERVES_OVERALL_GOAL, pass: true, justification: "ok" },
+          ],
+          concerns: [blockingConcernText],
+          concernSeverities: ["blocking"],
+        },
+        judgeForm({ criteria: { "AC-1": true } }),
+      ],
+      {
+        reviewForms: [completionReviewForm()],
+      },
+    );
+    cleanups.push(() => wire.close());
+
+    const { repoUrl, dataDir, runner } = await setup(wire);
+    const spec = makeJudgedSpec({ repoUrl, cadence: 1, maxSteps: 4 });
+
+    const handle = await runner.start(spec);
+    const report = await awaitTerminal(handle);
+
+    expect(report.status).toBe("SUCCESS");
+    expect(wire.reviewHits).toBe(1);
+
+    const reviewRequest = wire.requests.find((body) =>
+      body.includes("run-completion architecture review"),
+    );
+    expect(reviewRequest).toBeDefined();
+    expect(reviewRequest!).toContain(marker);
+    expect(reviewRequest!).toContain(RUBRIC_ESCALATION_CONCERNS_ADJUDICATED);
+
+    const journal = new Journal(journalPath(dataDir, handle.runId));
+    try {
+      expect(journal.entries("terminal").at(-1)!.payload).toMatchObject({ status: "SUCCESS" });
+    } finally {
+      journal.close();
+    }
+  }, 180_000);
+
+  // F-381: the converged out-of-rubric seal hands the completion review the RAW
+  // `verdict.form.concerns`, not the floored list. A form carrying BOTH a blocking
+  // and a minor concern still ESCALATEs (on the blocking one), so this path is the
+  // one way a minor concern re-enters adjudication after the floor filtered it out
+  // of standingConcerns. Both concerns must reach the seal; only the blocking one
+  // may reach the review.
+  test("WP-548 Mixed severities: the converged out-of-rubric seal puts ONLY the blocking concern to completion review", async () => {
+    const blockingMarker = `MIXED_BLOCKING_${randomUUID().slice(0, 8)}`;
+    const minorMarker = `MIXED_MINOR_${randomUUID().slice(0, 8)}`;
+
+    const wire = await startFakeJudgeWire(
+      [
+        {
+          // Every criterion and every rubric row passes, so rule 4 fires on the
+          // blocking concern alone and the unattended converged seal is reached.
+          criterionResults: [{ id: "AC-1", pass: true, justification: "done" }],
+          rubricResults: [
+            { id: "tests_pass", pass: true, justification: "ok" },
+            { id: "no_unrelated_deletions", pass: true, justification: "ok" },
+            { id: "no_secrets_introduced", pass: true, justification: "ok" },
+            { id: "no_architecture_violations", pass: true, justification: "ok" },
+            { id: "scope_matches_instruction", pass: true, justification: "ok" },
+            { id: RUBRIC_DESIGN_SERVES_OVERALL_GOAL, pass: true, justification: "ok" },
+          ],
+          concerns: [
+            `${blockingMarker}: unhandled rejection on the resume path`,
+            `${minorMarker}: trailing whitespace in a comment`,
+          ],
+          concernSeverities: ["blocking", "minor"],
+        },
+      ],
+      {
+        reviewForms: [completionReviewForm()],
+      },
+    );
+    cleanups.push(() => wire.close());
+
+    const { repoUrl, dataDir, runner } = await setup(wire);
+    const spec = makeJudgedSpec({
+      repoUrl,
+      cadence: 1,
+      maxSteps: 4,
+      unattended: { escalation: "seal_resumable_failed" },
+    });
+
+    const handle = await runner.start(spec);
+    const report = await awaitTerminal(handle);
+
+    expect(report.status).toBe("SUCCESS");
+    expect(wire.reviewHits).toBe(1);
+
+    const reviewRequest = wire.requests.find((body) =>
+      body.includes("run-completion architecture review"),
+    );
+    expect(reviewRequest).toBeDefined();
+    expect(reviewRequest!).toContain(blockingMarker);
+    expect(reviewRequest!).not.toContain(minorMarker);
+    expect(reviewRequest!).toContain(RUBRIC_ESCALATION_CONCERNS_ADJUDICATED);
+
+    const journal = new Journal(journalPath(dataDir, handle.runId));
+    try {
+      expect(journal.entries("terminal").at(-1)!.payload).toMatchObject({ status: "SUCCESS" });
+    } finally {
+      journal.close();
+    }
+  }, 180_000);
 });

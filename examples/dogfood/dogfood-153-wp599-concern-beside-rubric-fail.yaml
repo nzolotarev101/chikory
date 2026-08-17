@@ -1,0 +1,496 @@
+# Plain: when the judge spots a real problem that its checklist has no row for, AND the checklist
+# also has a failing row, the agent doing the work is never told about the problem. It stays on
+# file, and at the end of the run it can be the thing that fails the whole run. After this run the
+# agent hears about it while it still has steps left to fix it.
+# WP: WP-599 (a judge concern raised alongside a rubric failure never reaches the executor, F-288)
+# Ladder-rung: 0 (off-ladder - the remaining rung-5 half is WP-304, not agent-runnable; see WHY)
+# Thesis-KPI: judge precision and self-correction (CLAUDE.md Agent-as-a-Judge in the inner loop,
+#   REQUIREMENTS JD-7), measured as the share of judge diagnoses the executor gets a chance to act on.
+#
+# THE MEASURED PREMISE - re-measured against HEAD at the dogfood-152 review (2026-08-17) by
+#   RUNNING the code, not by reading the plan.md row, which is STALE (F-203/F-342). Probe: drive
+#   the built `computeVerdict` and `buildCriterionFeedback` over a form with ONE blocking
+#   out-of-rubric concern beside ONE non-destructive rubric failure and all criteria passing.
+#   Measured output, verbatim:
+#     verdict.kind      : PROCEED
+#     escalateClass     : (none)
+#     rationale         : work in progress, no regressions - all 1 acceptance criteria pass;
+#                         non-destructive rubric failures: scope_matches_instruction: ...
+#     rationale names concern?  false
+#     criterionFeedback : (undefined - nothing rides to the executor)
+#     remediation brief names concern? true (HALT path only)
+#
+#   * WHAT THE plan.md ROW GETS WRONG, and this matters because a wrong premise buys a wasted run:
+#     the row says the concern is "dropped entirely". It is NOT. `standingConcerns`
+#     (`src/workflow/agent-loop.ts:1168`) accumulates every blocking concern on EVERY judge pass,
+#     independent of the verdict kind, and hands it to the completion review as an
+#     `escalationConcerns` entry adjudicated by the `escalation_concerns_adjudicated` rubric row.
+#     WP-619/WP-630 landed that after WP-599 was written. The concern survives. It just never
+#     goes anywhere the EXECUTOR can see it.
+#   * SO THE REAL DEFECT IS SHARPER AND WORSE: the loop holds a diagnosis it is willing to
+#     CONDEMN the run over at the seal, and refuses to hand it to the only agent that could fix
+#     it while steps remain. That is judge-detects-but-does-not-heal (the F-359 family, closed at
+#     one altitude by WP-627) reopening at a new one. dogfood-151 is the shape: the run sealed
+#     FAILED over a concern naming a ~30-line test gap, having spent 0 steps on it.
+#   * WHY THE `rubricFails.length === 0` GUARD IS NOT THE THING TO DELETE, and this is the whole
+#     design problem: rule 4 (`src/judge/verdict.ts:184`) returns
+#     `escalateClass: "out_of_rubric"`, and that class carries F-154's semantics - an operator
+#     approving an out-of-rubric escalate with all criteria passing FORCE-SEALS SUCCESS
+#     (`src/workflow/agent-loop.ts:1526-1537`), and unattended it seals SUCCESS on convergence
+#     (`:1483-1497`). Handing those semantics to a run with a RED rubric row lets one keystroke
+#     approve past a failing rubric item. The guard stays. The concern has to reach the executor
+#     by a different road.
+#   * THE ROAD THAT EXISTS: `judgeFeedback` (`src/workflow/agent-loop.ts:1411`) is the string
+#     that rides into the next step on EVERY judge pass (WP-519 slice (a), ADR-009 D3). It is set
+#     from `buildCriterionFeedback(verdict.form)` (`src/workflow/remediation.ts:90`), which reads
+#     ONLY `form.criterionResults` and returns `undefined` when no criterion failed - which is
+#     exactly the measured case above. `buildRemediationBrief` (`:58`) already lists
+#     `form.concerns`, but only fires on the HALT path.
+#   * WP-548 (landed dogfood-152) SUPPLIES THE VOCABULARY THIS NEEDS: `blockingConcerns(form)`
+#     (`src/judge/verdict.ts:72`) already separates a nit from a defect, with unmapped concerns
+#     failing safe to blocking. Without it this WP could not tell which concerns are worth
+#     spending an executor's attention on. Use it; do not invent a second severity notion.
+#   * EVERY WRITER AND EVERY READER, enumerated by running BOTH greps and not from memory - the
+#     F-380 rule (dogfood-152, DOGFOODING section 8): `grep -rn "\.concerns\b" src` for readers,
+#     AND a sweep for RE-CONSTRUCTORS (a function that rebuilds a contract object from a
+#     hand-written field list drops any field it does not name, never appears in a diff, and is
+#     what made WP-548 ship inert). Readers of `form.concerns` on HEAD: `verdict.ts:125` (branch
+#     rule, text match) - `verdict.ts:72` (`blockingConcerns`) - `harness.ts:91` (escalate
+#     fallback form) - `harness.ts:236-243` (THE re-constructor; it now names `concernSeverities`
+#     explicitly, and anything you add to the form must be named there too) - `cli/trace.ts:308`
+#     (`issuesFound` count) - `cli/trace.ts:512` (render) - `remediation.ts:73` (repair brief) -
+#     `agent-loop.ts:1168` (accumulation, via `blockingConcerns`).
+#   * The suite this run must not break, MEASURED at the launch commit (F-342 - run
+#     `pnpm --filter @chikory/sdk exec vitest run` yourself and read its own tail): at this
+#     review it stood at 193 files / 1,586 tests (1,563 passed | 23 skipped).
+#   * The `unattended:` block below is not decoration (F-322).
+#
+# PRECEDENCE - stated because dogfood-149 died for want of it (F-370). Two rules below can
+#   disagree about one form. When they do:
+#   1. The VERDICT is unchanged. A blocking concern beside a rubric failure still yields the same
+#      verdict kind and the same (absent) `escalateClass` it does today. This run changes what the
+#      executor is TOLD, not what the loop DECIDES.
+#   2. The concern must still reach the completion review exactly as it does today. "The executor
+#      now hears it" must not become "the seal no longer adjudicates it" - that would trade one
+#      lost diagnosis for another.
+#   3. Silence stays cheap. A pass with no failing criterion and no blocking concern must still
+#      produce NO feedback string, so the executor's prompt does not grow a constant new block.
+#   AC-1 drives rules 1 and 3; AC-2 drives rule 2.
+#
+# Format: loose - the outcome and the one named policy input (`blockingConcerns`) are fixed;
+#   where the feedback text is assembled is the executor's call.
+#
+# Launch mode: RUN (single node - one feedback path, one call site).
+#   CHIKORY_PREFLIGHT_ONLY=1 devbox run run-dogfood
+#   devbox run run-dogfood
+#
+# WHY THIS AND NOT THE LADDER RUNG (dogfood-152 review, 2026-08-17):
+#   `scripts/dogfood-progression.sh` reads PROGRESSING, so the default candidate is the current
+#   phase ladder rung (P3-rung-5, WP-530 section 7). Unchanged since dogfood-139: rung-5's
+#   remaining half (WP-304's OpenHands arm plus a corpus wide enough to separate 19 requirements
+#   at 95 percent confidence) is a quota-bound, multi-hour suite the OPERATOR runs by hand
+#   (dogfood-122's lesson: an LLM executor may not supervise it). No spec can headline it.
+#   Among runnable candidates WP-599 wins on three counts. (1) It is the judge pillar and the
+#   self-correction pillar at once - a control plane whose thesis is agents that fix themselves
+#   is currently withholding a diagnosis from the agent. (2) Its premise was RE-MEASURED this
+#   review and the measurement corrected the backlog row, which is the strongest possible
+#   footing. (3) It composes directly on WP-548, landed one run ago, and the next run's trace
+#   re-measures WP-548's own live behaviour for free (F-197): whether the real judge populates
+#   `concernSeverities` at all now that the prompt asks for it and the harness carries it.
+#   Rejected: WP-634 (F-382, harness-meta and only 🟠 - section 1.5 VETO, tracked as track-B);
+#   WP-633 (F-378, one latent line behind an unreachable predicate - not plausibly failable);
+#   WP-606 (F-306 - measured down to 3.8% of summary bytes, no longer headline-sized).
+
+name: dogfood-153-wp599-concern-beside-rubric-fail
+wp: WP-599
+
+goal: |
+  When the judge raises a concern its rubric has no row for, and the rubric ALSO has a failing
+  row, the executor must be told about the concern while it still has steps left to act on it.
+
+  Today it is not. Measured on HEAD by running the code: a form with all acceptance criteria
+  passing, one non-destructive rubric failure, and one BLOCKING out-of-rubric concern yields
+  `computeVerdict` → PROCEED with no `escalateClass`, a rationale that names the rubric failure
+  and not the concern, and `buildCriterionFeedback` returning `undefined` — so `judgeFeedback`
+  (src/workflow/agent-loop.ts:1411) is empty and nothing about the concern reaches the next step.
+  The concern is not lost: `standingConcerns` (src/workflow/agent-loop.ts:1168) still accumulates
+  it and the completion review still adjudicates it, which means the loop will CONDEMN the run at
+  the seal over a diagnosis it never handed to the agent that could have fixed it.
+
+  Make this true. On every judge pass, the blocking out-of-rubric concerns — and only those —
+  must ride into the executor's next-step feedback alongside the failing-criterion evidence that
+  rides there today. Read them from the existing policy: `blockingConcerns` (src/judge/verdict.ts:72),
+  which WP-548 landed one run ago and which already fails safe (a concern with no severity mark
+  is BLOCKING). Do NOT invent a second severity notion, a keyword scan, or a numeric score.
+
+  Three things must NOT change, and each is a trap this run is graded on:
+
+  1. **The verdict is untouched.** That same form must still compute PROCEED with `escalateClass`
+     absent. In particular rule 4's `rubricFails.length === 0` guard (src/judge/verdict.ts:184)
+     stays exactly as it is. Deleting or widening it is the obvious "fix" and it is wrong:
+     `escalateClass: "out_of_rubric"` carries F-154's force-seal semantics, so an operator
+     approving that escalation with all criteria passing would seal SUCCESS **over a red rubric
+     row**, in one keystroke. This run changes what the executor is TOLD, never what the loop
+     DECIDES.
+  2. **The seal still adjudicates the concern.** `standingConcerns` must keep accumulating
+     blocking concerns and the completion review must keep receiving them. Solving "the executor
+     never hears it" by removing it from the seal trades one lost diagnosis for another.
+  3. **Silence stays cheap.** A judge pass with no failing criterion and no blocking concern must
+     still produce NO feedback string at all — `undefined`, exactly as today. The executor's
+     prompt must not grow a constant new section that is empty on the healthy path, and a MINOR
+     concern must not put anything there either.
+
+  Where the assembly lives is your call — `buildCriterionFeedback` (src/workflow/remediation.ts:90)
+  is the function that produces today's string and the natural home, but a sibling helper it
+  composes with is equally acceptable. What is not acceptable is a second copy of the severity
+  rule, or building the string inline at the call site so nothing can test it. Note that
+  `buildRemediationBrief` (src/workflow/remediation.ts:58) already lists `form.concerns`
+  unfiltered on the HALT path; if you touch it, it must move to `blockingConcerns` too, and if
+  you leave it alone, say so in your step summary.
+
+  If you add a field to any contract object, remember the F-380 lesson from the run before this
+  one: `applyCheckOverrides` (src/judge/harness.ts:236) rebuilds `JudgeForm` from a hand-written
+  field list and silently deletes anything it does not name. This WP should not need a new field
+  at all — if you find yourself adding one, that is a signal to re-read the goal.
+
+  TypeScript stays strict ESM with named exports and no `any`. Do not touch the rubric list, the
+  completion-review budget, the pacing governor, the TaskSpec contract, or the Python mirror.
+
+  Pin your work with tests that live in the repo, beside the files they cover. A behaviour proved
+  only by the acceptance checks that grade this run is not pinned at all (F-356), and a repo test
+  copied verbatim from a grading check inherits its blind spots (F-360). Two cases the grading
+  checks below deliberately leave open, and you must cover both: **the live loop** — that the
+  string actually reaching the next step's prompt carries the blocking concern — and **the
+  minor-concern negative on that same live path**. Watch out for an assertion confounded by its
+  own fixture (F-383): if your fixture seeds a rubric failure to keep a pass from sealing, that
+  failure produces standing findings on its own, so assert on something only the behaviour under
+  test can produce.
+
+  Verify your work with FAST checks only: the package typecheck (tsc with noEmit), eslint over the
+  files you touched, and vitest over only the test files you touched. Do NOT run the full vitest
+  suite inside a step — it does not fit the step time cap (F-345). **But note where your new tests
+  LIVE**: dogfood-152 failed because the executor put a new test in `test/runner/` and then
+  verified with a scope covering only `test/judge/` and `test/workflow/` (F-382). Run the
+  directories you actually wrote into.
+
+repos:
+  - url: /Users/nikitazolotarev/repos/chikory
+    writable: true
+
+# The SDK suite is both the surface this run edits and the gate it must not break.
+# MEASURE it at the launch commit rather than trusting this line (F-342, dogfood-140).
+regression_suite: pnpm --filter @chikory/sdk exec vitest run
+check_timeout_ms: 180000
+
+acceptance_criteria:
+  - id: AC-1
+    description: >
+      THIS CHECK OWNS ITS ORACLE (the feedback policy AND the verdict that must not move). It
+      drives the REAL feedback path and the REAL `computeVerdict` over the exact form the premise
+      probe measured — no mocks, no re-implementation — and asserts the blocking concern now
+      reaches the executor while the verdict, the escalate class and the healthy-path silence are
+      all unchanged. It also drives the input families a naive fix gets wrong: a MINOR concern
+      beside the same rubric failure, an UNMARKED concern (which must count as blocking), and a
+      wholly clean pass. Expected values are written into this check, not read from a test file
+      the executor authors.
+    check: |
+      cd packages/sdk-ts || exit 1
+      TARGET=test/workflow/ac1-concern-beside-rubric-fail.generated.test.ts
+      rm -f "$TARGET"
+      cat > "$TARGET" <<'GENEOF'
+      import { describe, expect, test } from "vitest";
+
+      import { computeVerdict } from "../../src/judge/verdict.js";
+      import * as remediation from "../../src/workflow/remediation.js";
+      import type { JudgeForm, RubricItem } from "../../src/types.js";
+
+      const BLOCKING =
+        "the new retry wrapper swallows the AbortError, so a cancelled run can never stop";
+      const COSMETIC = "trailing whitespace in the docstring above the wrapper";
+
+      const RUBRIC: RubricItem[] = [
+        { id: "tests_pass", description: "tests pass", destructive: false },
+        { id: "scope_matches_instruction", description: "in scope", destructive: false },
+        { id: "no_unrelated_deletions", description: "no deletions", destructive: true },
+      ];
+
+      function form(over: Partial<JudgeForm>): JudgeForm {
+        return {
+          criterionResults: [{ id: "AC-1", pass: true, justification: "check exited 0" }],
+          rubricResults: [
+            { id: "tests_pass", pass: true, justification: "ok" },
+            { id: "scope_matches_instruction", pass: false, justification: "touched an unrelated module" },
+            { id: "no_unrelated_deletions", pass: true, justification: "ok" },
+          ],
+          concerns: [],
+          ...over,
+        } as JudgeForm;
+      }
+
+      // The string the loop hands to the next step. The executor may assemble it in
+      // buildCriterionFeedback or in a sibling it composes with; both are acceptable, so this
+      // check asks the module for whichever exported function produces it and requires that
+      // exactly one such producer exists.
+      function feedbackOf(f: JudgeForm): string | undefined {
+        const mod = remediation as unknown as Record<string, unknown>;
+        const producer = mod["buildCriterionFeedback"];
+        if (typeof producer !== "function") {
+          throw new Error(
+            "buildCriterionFeedback is no longer exported from src/workflow/remediation.ts — " +
+              "the per-pass executor feedback must stay a named, testable export, not an " +
+              "expression inlined at the agent-loop call site.",
+          );
+        }
+        return (producer as (x: JudgeForm) => string | undefined)(f);
+      }
+
+      describe("AC-1 WP-599/F-288: a blocking concern beside a rubric failure reaches the executor", () => {
+        test("the blocking concern rides into the next step's feedback", () => {
+          const fb = feedbackOf(form({ concerns: [BLOCKING], concernSeverities: ["blocking"] } as Partial<JudgeForm>));
+          expect(
+            fb,
+            "with all criteria passing this returns undefined on HEAD, so judgeFeedback is empty " +
+              "and the executor is never told. That same concern is accumulated into " +
+              "standingConcerns and can CONDEMN the run at the seal.",
+          ).toBeDefined();
+          expect(fb!).toContain(BLOCKING);
+        });
+
+        test("a MINOR concern beside the same rubric failure puts nothing there", () => {
+          const fb = feedbackOf(form({ concerns: [COSMETIC], concernSeverities: ["minor"] } as Partial<JudgeForm>));
+          expect(
+            fb === undefined || !fb.includes(COSMETIC),
+            "WP-548's floor is the whole point of routing this through blockingConcerns: a nit " +
+              "must not spend a step of the executor's attention.",
+          ).toBe(true);
+        });
+
+        test("an UNMARKED concern counts as blocking (every legacy judge output)", () => {
+          const fb = feedbackOf(form({ concerns: [BLOCKING] }));
+          expect(
+            fb,
+            "blockingConcerns treats an absent severity as blocking so a judge cannot silence " +
+              "itself by saying nothing; reading the severities array directly re-introduces " +
+              "exactly the hole WP-548 closed.",
+          ).toBeDefined();
+          expect(fb!).toContain(BLOCKING);
+        });
+
+        test("silence stays cheap: a clean pass still produces NO feedback at all", () => {
+          expect(
+            feedbackOf(form({})),
+            "a healthy pass must add nothing to the executor's prompt. A helper that always " +
+              "returns a header with an empty list grows every step's context for nothing.",
+          ).toBeUndefined();
+        });
+
+        test("failing-criterion evidence is still carried, not replaced", () => {
+          const fb = feedbackOf(
+            form({
+              criterionResults: [{ id: "AC-2", pass: false, justification: "the marker is absent" }],
+              concerns: [BLOCKING],
+              concernSeverities: ["blocking"],
+            } as Partial<JudgeForm>),
+          );
+          expect(fb).toBeDefined();
+          expect(fb!, "the WP-519 per-pass criterion feedback must survive").toContain("AC-2");
+          expect(fb!).toContain("the marker is absent");
+          expect(fb!).toContain(BLOCKING);
+        });
+
+        test("TRAP: the verdict does not move — PROCEED, and escalateClass stays absent", () => {
+          const v = computeVerdict(
+            form({ concerns: [BLOCKING], concernSeverities: ["blocking"] } as Partial<JudgeForm>),
+            {},
+            RUBRIC,
+          );
+          expect(
+            v.kind,
+            "widening rule 4 by deleting its rubricFails.length === 0 guard hands F-154's " +
+              "force-seal-on-approve semantics to a run with a RED rubric row: one approval " +
+              "would seal SUCCESS past a failing rubric item.",
+          ).toBe("PROCEED");
+          expect(v.escalateClass).toBeUndefined();
+        });
+
+        test("TRAP: rule ordering is unchanged — a destructive rubric fail still ROLLBACKs first", () => {
+          const v = computeVerdict(
+            form({
+              rubricResults: [
+                { id: "tests_pass", pass: true, justification: "ok" },
+                { id: "scope_matches_instruction", pass: false, justification: "drift" },
+                { id: "no_unrelated_deletions", pass: false, justification: "deleted a module" },
+              ],
+              concerns: [BLOCKING],
+              concernSeverities: ["blocking"],
+            } as Partial<JudgeForm>),
+            {},
+            RUBRIC,
+          );
+          expect(v.kind).toBe("ROLLBACK");
+        });
+
+        test("TRAP: the BRANCH rule still reads every concern's text, minor included", () => {
+          const v = computeVerdict(
+            form({
+              concerns: ["consider a branch to explore the alternative layout"],
+              concernSeverities: ["minor"],
+            } as Partial<JudgeForm>),
+            {},
+            RUBRIC,
+          );
+          expect(v.kind).toBe("BRANCH");
+        });
+      });
+      GENEOF
+      pnpm exec vitest run "$TARGET"
+      ST=$?
+      rm -f "$TARGET"
+      if [ "$ST" -ne 0 ]; then
+        echo "AC-1 FAIL: the blocking concern does not reach the executor feedback, or a minor/unmarked concern is handled wrong, or the healthy path grew a string, or the verdict/rule ordering moved. vitest exited $ST"
+        exit 1
+      fi
+      echo "AC-1 OK: blocking rides, minor does not, unmarked fails safe, silence stays cheap, verdict and rule ordering unchanged"
+
+  - id: AC-2
+    description: >
+      The no-regression check at the OTHER end. Telling the executor must not stop the seal from
+      adjudicating: `accumulateStandingConcerns` must still collect blocking concerns and still
+      drop minor ones. Drives the REAL accumulation function — the trap it rejects is "fixing"
+      the executor's blindness by moving the concern out of standingConcerns instead of adding a
+      second consumer.
+    check: |
+      cd packages/sdk-ts || exit 1
+      TARGET=test/workflow/ac2-seal-still-adjudicates.generated.test.ts
+      rm -f "$TARGET"
+      cat > "$TARGET" <<'GENEOF'
+      import { describe, expect, test } from "vitest";
+
+      import { accumulateStandingConcerns } from "../../src/workflow/standing-concerns.js";
+      import type { JudgeForm } from "../../src/types.js";
+
+      const BLOCKING = "the retry wrapper swallows the AbortError";
+      const COSMETIC = "trailing whitespace in the docstring";
+
+      function form(over: Partial<JudgeForm>): JudgeForm {
+        return {
+          criterionResults: [{ id: "AC-1", pass: true, justification: "ok" }],
+          rubricResults: [{ id: "scope_matches_instruction", pass: false, justification: "drift" }],
+          concerns: [],
+          ...over,
+        } as JudgeForm;
+      }
+
+      describe("AC-2 WP-599: the seal must still adjudicate what the executor now hears", () => {
+        test("a blocking concern beside a rubric failure still becomes a standing finding", () => {
+          const standing: string[] = [];
+          accumulateStandingConcerns(
+            standing,
+            form({ concerns: [BLOCKING], concernSeverities: ["blocking"] } as Partial<JudgeForm>),
+          );
+          expect(
+            standing,
+            "handing the concern to the executor must ADD a consumer, not move it. Removing it " +
+              "from standingConcerns trades one lost diagnosis for another: the completion " +
+              "review would no longer adjudicate a defect the judge named.",
+          ).toEqual([BLOCKING]);
+        });
+
+        test("a minor concern still does not become a standing finding", () => {
+          const standing: string[] = [];
+          accumulateStandingConcerns(
+            standing,
+            form({ concerns: [COSMETIC], concernSeverities: ["minor"] } as Partial<JudgeForm>),
+          );
+          expect(standing, "WP-548's floor at the seal is unchanged by this run").toEqual([]);
+        });
+
+        test("an unmarked concern still fails safe to blocking at the seal", () => {
+          const standing: string[] = [];
+          accumulateStandingConcerns(standing, form({ concerns: [BLOCKING] }));
+          expect(standing).toEqual([BLOCKING]);
+        });
+
+        test("accumulation is still de-duplicated across passes", () => {
+          const standing: string[] = [];
+          const f = form({ concerns: [BLOCKING], concernSeverities: ["blocking"] } as Partial<JudgeForm>);
+          accumulateStandingConcerns(standing, f);
+          accumulateStandingConcerns(standing, f);
+          expect(standing).toHaveLength(1);
+        });
+      });
+      GENEOF
+      pnpm exec vitest run "$TARGET"
+      ST=$?
+      rm -f "$TARGET"
+      if [ "$ST" -ne 0 ]; then
+        echo "AC-2 FAIL: the seal-side accumulation regressed — a blocking concern no longer reaches the completion review, a minor one now does, or dedup broke. vitest exited $ST"
+        exit 1
+      fi
+      echo "AC-2 OK: the completion review still adjudicates blocking concerns and still ignores minor ones"
+
+  - id: AC-3
+    description: >
+      Wiring and durability, graded against the DECLARED regression suite rather than a
+      hand-picked subdirectory list — this is the F-382 fix from dogfood-152 applied to this
+      spec's own oracle. One shared severity policy at the new call site, the live loop actually
+      wired to it, and the whole committed suite green AND larger.
+    check: |
+      cd packages/sdk-ts || exit 1
+      pnpm run typecheck || { echo "AC-3 FAIL: strict typecheck is red"; exit 1; }
+      pnpm exec eslint src/judge/verdict.ts src/workflow/remediation.ts src/workflow/agent-loop.ts src/workflow/standing-concerns.ts || { echo "AC-3 FAIL: eslint is red on the modules this WP touches"; exit 1; }
+
+      grep -qE 'rubricFails\.length === 0' src/judge/verdict.ts || {
+        echo "AC-3 FAIL: trap — rule 4's guard rubricFails.length === 0 was deleted or rewritten. That guard is load-bearing: escalateClass out_of_rubric carries F-154's force-seal-on-approve semantics, and handing them to a run with a red rubric row lets one approval seal SUCCESS past a failing rubric item."
+        exit 1
+      }
+      grep -qE 'export function blockingConcerns' src/judge/verdict.ts || {
+        echo "AC-3 FAIL: blockingConcerns is no longer the single exported severity policy (WP-548)"
+        exit 1
+      }
+      grep -q 'blockingConcerns' src/workflow/remediation.ts || {
+        echo "AC-3 FAIL: the per-pass executor feedback in src/workflow/remediation.ts does not read blockingConcerns. A second copy of the severity rule drifts from the first (the decideHealRollback precedent), and reading concernSeverities directly re-opens the unmarked-concern hole WP-548 closed."
+        exit 1
+      }
+      grep -q 'blockingConcerns' src/workflow/standing-concerns.ts || {
+        echo "AC-3 FAIL: the seal-side accumulation no longer routes through blockingConcerns — WP-548 regressed"
+        exit 1
+      }
+      grep -qE 'buildCriterionFeedback\(verdict\.form\)' src/workflow/agent-loop.ts || {
+        echo "AC-3 FAIL: the live loop no longer feeds the per-pass judgeFeedback from buildCriterionFeedback(verdict.form) (agent-loop.ts:1411). A helper nothing calls changes nothing on a real run (F-283)."
+        exit 1
+      }
+
+      OUT=$(pnpm --filter @chikory/sdk exec vitest run 2>&1)
+      ST=$?
+      echo "$OUT" | tail -25
+      if [ "$ST" -ne 0 ]; then
+        echo "AC-3 FAIL: the DECLARED regression suite is RED (vitest exited $ST). This check runs the whole suite on purpose: dogfood-152 passed 3/3 acceptance criteria on a delivery whose own new test was failing in a directory the checks did not name (F-382)."
+        exit 1
+      fi
+      N=$(echo "$OUT" | grep -oE "Tests +[0-9]+ passed" | grep -oE "[0-9]+" | head -1)
+      echo "committed suite tests passing: ${N:-UNPARSEABLE} (floor 1567, measured baseline 1563)"
+      if [ -z "$N" ]; then
+        echo "AC-3 FAIL: could not read a test count out of the vitest summary"
+        exit 1
+      fi
+      if [ "$N" -lt 1567 ]; then
+        echo "AC-3 FAIL: durability floor not met — the committed suite did not grow by at least 4 tests. A behaviour proved only by the generated grading checks is not pinned at all (F-356), and the LIVE loop path plus its minor-concern negative are covered by no check above."
+        exit 1
+      fi
+      echo "AC-3 OK: one shared policy at the new call site, the live loop wired to it, traps intact, DECLARED suite green AND larger"
+
+budget_usd: 20
+max_steps: 6
+
+agent_classes:
+  executor: executor-default
+  judge: judge-default
+
+judge:
+  cadence: 1
+
+# F-322 (dogfood-135): without this, a converged out-of-rubric escalation parks overnight for a
+# human instead of auto-sealing.
+unattended:
+  escalation: seal_resumable_failed

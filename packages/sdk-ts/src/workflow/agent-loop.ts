@@ -75,7 +75,8 @@ import {
 } from "./remediation.js";
 import { decideRejection, DEFAULT_MAX_REJECTION_STRIKES } from "./rejection.js";
 import { decideHealRollback } from "./heal-rollback.js";
-import { hasDestructiveRubricFailure } from "../judge/verdict.js";
+import { accumulateStandingConcerns } from "./standing-concerns.js";
+import { blockingConcerns, hasDestructiveRubricFailure } from "../judge/verdict.js";
 import { DETERMINISTIC_RUBRIC_IDS, isRubricItemSettledAgainstWholeDelivery } from "../judge/rubric.js";
 
 import {
@@ -1163,11 +1164,8 @@ export async function agentLoop(spec: TaskSpec): Promise<RunStatus> {
           standingRubricFindings.delete(fail.id);
         }
       }
-      for (const concern of verdict.form.concerns) {
-        if (concern && !standingConcerns.includes(concern)) {
-          standingConcerns.push(concern);
-        }
-      }
+      // Accumulate only concerns at or above the floor (blockingConcerns) into standingConcerns (WP-548).
+      accumulateStandingConcerns(standingConcerns, verdict.form);
 
       // ROLLBACK restores BEFORE the covering checkpoint commits, so the
       // checkpoint captures the restored tree and the run resumes from a
@@ -1489,7 +1487,7 @@ export async function agentLoop(spec: TaskSpec): Promise<RunStatus> {
           // regression suite or has out-of-rubric concerns has not had them adjudicated yet.
           const gated = await regressionGateBeforeSuccess(
             sealingDiffBase,
-            verdict.form.concerns,
+            blockingConcerns(verdict.form),
           );
           if (gated !== undefined) return gated;
           return seal(
@@ -1530,7 +1528,7 @@ export async function agentLoop(spec: TaskSpec): Promise<RunStatus> {
           // Same hole as the unattended seal above, same gate.
           const gated = await regressionGateBeforeSuccess(
             sealingDiffBase,
-            verdict.form.concerns,
+            blockingConcerns(verdict.form),
           );
           if (gated !== undefined) return gated;
           return seal(

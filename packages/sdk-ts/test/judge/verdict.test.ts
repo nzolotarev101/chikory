@@ -6,6 +6,7 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  blockingConcerns,
   computeVerdict,
   MAX_VERDICT_RATIONALE_CHARS,
   RUBRIC_DESIGN_SERVES_OVERALL_GOAL,
@@ -184,6 +185,58 @@ describe("computeVerdict (CONTRACTS.md §4)", () => {
     expect(decision.escalateReason).toContain("diff rewrites CI config");
   });
 
+  it("rule 4: cosmetic concern marked minor does NOT escalate (PROCEED)", () => {
+    const decision = computeVerdict(
+      form({
+        concerns: ["minor cosmetic formatting nit"],
+        concernSeverities: ["minor"],
+      }),
+      {},
+    );
+    expect(decision.kind).toBe("PROCEED");
+  });
+
+  it("rule 4: real defect marked blocking DOES escalate", () => {
+    const decision = computeVerdict(
+      form({
+        concerns: ["missing critical authentication check"],
+        concernSeverities: ["blocking"],
+      }),
+      {},
+    );
+    expect(decision.kind).toBe("ESCALATE");
+    expect(decision.escalateClass).toBe("out_of_rubric");
+    expect(decision.escalateReason).toContain("missing critical authentication check");
+  });
+
+  it("rule 4: mixed minor and blocking concerns escalates naming only blocking concerns", () => {
+    const decision = computeVerdict(
+      form({
+        concerns: ["formatting nit", "critical data loss risk", "spelling error"],
+        concernSeverities: ["minor", "blocking", "minor"],
+      }),
+      {},
+    );
+    expect(decision.kind).toBe("ESCALATE");
+    expect(decision.escalateClass).toBe("out_of_rubric");
+    expect(decision.escalateReason).toContain("critical data loss risk");
+    expect(decision.escalateReason).not.toContain("formatting nit");
+    expect(decision.escalateReason).not.toContain("spelling error");
+  });
+
+  it("rule 4: ragged concernSeverities array defaults missing indices to blocking", () => {
+    const decision = computeVerdict(
+      form({
+        concerns: ["cosmetic typo", "unannotated defect"],
+        concernSeverities: ["minor"],
+      }),
+      {},
+    );
+    expect(decision.kind).toBe("ESCALATE");
+    expect(decision.escalateReason).toContain("unannotated defect");
+    expect(decision.escalateReason).not.toContain("cosmetic typo");
+  });
+
   it("rule 4: concerns WITH a rubric failure do not ESCALATE (rubric handles it)", () => {
     const rubric = STANDING_RUBRIC.map((r) => (r.id === "tests_pass" ? fail(r.id) : pass(r.id)));
     const decision = computeVerdict(
@@ -285,5 +338,43 @@ describe("computeVerdict (CONTRACTS.md §4)", () => {
     expect(decision.kind).toBe("PROCEED");
     expect(decision.rationale.length).toBeLessThanOrEqual(MAX_VERDICT_RATIONALE_CHARS);
     expect(decision.rationale).toContain(RUBRIC_DESIGN_SERVES_OVERALL_GOAL);
+  });
+});
+
+describe("blockingConcerns (WP-548)", () => {
+  it("returns empty array when concerns is empty", () => {
+    expect(blockingConcerns(form({ concerns: [] }))).toEqual([]);
+    expect(blockingConcerns(form({ concerns: [], concernSeverities: [] }))).toEqual([]);
+  });
+
+  it("filters out minor concerns and preserves blocking concerns", () => {
+    const f = form({
+      concerns: ["minor concern 1", "blocking concern 1", "minor concern 2", "blocking concern 2"],
+      concernSeverities: ["minor", "blocking", "minor", "blocking"],
+    });
+    expect(blockingConcerns(f)).toEqual(["blocking concern 1", "blocking concern 2"]);
+  });
+
+  it("treats unannotated concerns as blocking by default (safe legacy default)", () => {
+    const f = form({
+      concerns: ["legacy concern 1", "legacy concern 2"],
+    });
+    expect(blockingConcerns(f)).toEqual(["legacy concern 1", "legacy concern 2"]);
+  });
+
+  it("treats missing indices in ragged concernSeverities as blocking", () => {
+    const f = form({
+      concerns: ["minor concern", "unannotated concern 1", "unannotated concern 2"],
+      concernSeverities: ["minor"],
+    });
+    expect(blockingConcerns(f)).toEqual(["unannotated concern 1", "unannotated concern 2"]);
+  });
+
+  it("preserves original concerns order for all retained blocking concerns", () => {
+    const f = form({
+      concerns: ["b1", "m1", "b2", "m2", "b3"],
+      concernSeverities: ["blocking", "minor", "blocking", "minor", "blocking"],
+    });
+    expect(blockingConcerns(f)).toEqual(["b1", "b2", "b3"]);
   });
 });

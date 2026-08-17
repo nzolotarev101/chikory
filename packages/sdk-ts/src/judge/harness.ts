@@ -228,7 +228,19 @@ export function applyCheckOverrides(
   }
   // Unknown ids are dropped: the verdict is computed only over declared
   // criteria and rubric items (the model cannot smuggle in new ones).
-  return { form: { criterionResults, rubricResults, concerns: form.concerns } };
+  // `concernSeverities` rides the merged form (WP-548/F-380): this reconstruction
+  // lists fields explicitly, so an additive field that is not named here is dropped
+  // on EVERY real judge pass and the severity floor is inert end-to-end.
+  return {
+    form: {
+      criterionResults,
+      rubricResults,
+      concerns: form.concerns,
+      ...(form.concernSeverities !== undefined
+        ? { concernSeverities: form.concernSeverities }
+        : {}),
+    },
+  };
 }
 
 export interface RunJudgePassInput {

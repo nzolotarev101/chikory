@@ -8,12 +8,13 @@ recover a run, and how to land the result as a normal PR.
 **Status (2026-08-17, bounded — update discipline: REPLACE this block, ≤15 lines;
 displaced prose moves verbatim to [`PLAN-HISTORY.md`](PLAN-HISTORY.md); per-run detail:
 `docs/reports/`; queue + course correction: `plan.md` §6/§7).**
-🟢 **dogfood-151 / WP-626 (a telemetry field the loop reasons about must not be structurally unobservable) DELIVERED and LANDED from a FAILED run** — `run-7faebdb5-7164-4931-9b9e-056b0d175091`, terminal **FAILED**, 1 step, $0.0958/$20.00, 8m 56s, AC **3/3** re-run green, harvest byte-IDENTICAL 12/12 (`docs/reports/dogfood-151.md`). A step whose executor cannot enumerate its tool calls is now marked (`toolCallsObserved?: boolean`, `src/types.ts:422`, three mirrors in sync) instead of reporting a bare `0`, and every reader branches on the mark, not the value.
-🟡 **The judge scored 1 true positive, and it is what condemned the run** — F-377: the executor-level OTel span was changed with no repo test, which the goal explicitly required (F-356). Correct call on a correct delivery.
-🔴 **Human review found the bigger version of that same gap one file away (§8): F-376** — `recordRunStepSpan` (`src/otel.ts:238`), the `chikory.run.step` span EVERY durable step emits, still published `tool.calls: 0` for an unobserved count. The judge asked *"is the changed reader tested?"* and never *"are these all the readers?"* — **an UNCHANGED file cannot appear in a diff**, so no diff-scoped judge can see it. Probe-proven RED, hand-fixed, pinned (`test/executors/step-span-observability.test.ts`).
-⚠️ **Enumerate reader sites with a grep, not with a memory (§8).** The spec's measured premise named one of two span writers, and AC-3's grep-set inherited exactly that blind spot. Grep the symbol across `src/` before writing the AC list — the contract-mirror rule applies to READER mirrors too.
-⚠️ **The completion-review gate condemns, it never repairs** (`src/workflow/agent-loop.ts:462-475`, dogfood-121's lesson). A ~30-line test gap cost a run seal at $0.096. The seal is resumable; the delivery still needs human verification before landing. Suite re-measured by hand: launch 1,551 → **1,560 tests / 194 files (1,537 passed | 23 skipped), 66.29s**.
-**NEXT HEADLINE = WP-548 (dogfood-152): an out-of-rubric judge concern needs a severity floor.** Every concern outside the rubric weighs the same today, and any one that survives adjudication condemns a converged step. Two live concerns from this campaign's own journals sit on opposite sides of the line: dogfood-120's stray-`开启`-in-a-markdown-file (parked a node 3h 47m) and dogfood-151's untested-reader (a real goal requirement). Ladder unchanged at `rung=0` — P3 rung-5's remaining half (`brownfield-001`/WP-304) is operator-by-hand and still cannot headline.
+🟢 **dogfood-152 / WP-548 (an out-of-rubric judge concern needs a severity floor) DELIVERED and LANDED from a FAILED run** — `run-ac06b2bf-f6bb-4489-9c18-8da7d963075a`, 2 steps, $0.1994/$20.00, 11m 44s, AC 3/3 re-run green, harvest byte-IDENTICAL 13/13 (`docs/reports/dogfood-152.md`). `concernSeverities?: Array<"minor" | "blocking">` is additive on all three mirrors and requested in the judge prompt; one pure `blockingConcerns` policy (`src/judge/verdict.ts:72`, unmapped ⇒ BLOCKING) drives rule 4 and the standing-concerns accumulation; `chikory trace` marks minor concerns without changing the blocking rendering.
+🟡 **The judge scored 1 true positive and it is what condemned the run** — the deterministic `pre_existing_suite_still_green` row (WP-609/WP-619) ran the declared suite and found it RED, over an executor that had just reported four green check tables. The gate condemns; it does not diagnose, and it spent 0 steps on the cause.
+🔴 **The feature was built correctly and shipped INERT; human review found why (§8): F-380** — `applyCheckOverrides` (`src/judge/harness.ts:240`) rebuilds `JudgeForm` from a hand-written field list, so `concernSeverities` was deleted on EVERY real judge pass. Hand-fixed + pinned (`test/judge/harness.test.ts:434,450`; reverting turns 3 tests RED).
+🔴 **F-381, the same shape one altitude up** — the converged and approved out-of-rubric seals passed RAW `verdict.form.concerns` into the completion review (`src/workflow/agent-loop.ts:1490,1531`), re-injecting a minor concern the floor had just filtered. Hand-fixed + pinned (`test/runner/standing-findings-live.test.ts:529`).
+⚠️ **Sweep for RE-CONSTRUCTORS, not just readers (§8).** The F-376 reader grep was performed correctly and still missed both defects: a function that rebuilds a contract object from a field list never appears in the diff, and a `.strict()` schema does not protect you because the rebuild happens after the parse.
+⚠️ **An AC that asserts "the suite is green" must not pick its own scope (§8, F-382 → WP-634).** AC-3 ran `test/judge/ test/workflow/` while the delivery's own new test sat RED in `test/runner/` — 3/3 ACs green on a red declared suite.
+**NEXT HEADLINE = WP-599 (dogfood-153): a judge concern raised alongside a rubric failure must not be silently dropped.** Rule 4's `rubricFails.length === 0` guard means the concern vanishes exactly when the judge is most alarmed; WP-548's floor now supplies the vocabulary to route a BLOCKING one without handing out_of_rubric's approve-seals-SUCCESS semantics to a red rubric.
 
 Related docs: [`docs/spec/task-spec.md`](spec/task-spec.md) (schema
 reference) · [`docs/TASK-PROTOCOL.md`](TASK-PROTOCOL.md) (WP etiquette, §7 is
@@ -967,6 +968,52 @@ broken (a false-green, not a follow-on fix).
   and launch with `CHIKORY_ALLOW_STALE_SPEC=1`, do not quietly reshape the spec.
 
 ## 8. Known P1 limitations (so you don't fight them)
+
+- **🔴 AN ADDITIVE CONTRACT FIELD DIES IN THE PLACES THAT REBUILD THE OBJECT, NOT
+  IN THE PLACES THAT READ IT** (F-380, dogfood-152). The F-376 rule — grep every
+  reader of the symbol before writing the AC's reader list — was followed to the
+  letter in dogfood-152's spec, which enumerated all seven readers of
+  `form.concerns` including `harness.ts:231` and recorded it as *"still parses and
+  carries the whole list"*. It does carry the *list*. It does not carry the
+  *form*: `applyCheckOverrides` (`packages/sdk-ts/src/judge/harness.ts`) returns
+  `{ form: { criterionResults, rubricResults, concerns } }` — a hand-written field
+  list — so the new `concernSeverities` was deleted on **every real judge pass**
+  and the whole WP-548 severity floor was a no-op end-to-end on the day it landed.
+  A re-constructor never appears in the diff, because nobody has to touch it to
+  break it. Three rules follow. (1) For any additive-field WP, sweep for
+  **re-constructors** as well as readers: `grep -n "{ *<TypeName-ish field list>"`,
+  or more reliably grep the sibling field that IS carried (here, `concerns:`) and
+  read every hit that assigns rather than reads. (2) A `.strict()` schema mirror
+  does NOT protect you — the object is rebuilt after parsing, so the parse
+  succeeds and the field is dropped downstream. (3) At least one AC must drive the
+  field through the **real production seam** (the harness, the activity, the
+  serializer), never a `JudgeForm` literal built inside the test; every one of
+  dogfood-152's 38 hand-built-form unit tests was green while the feature did
+  nothing.
+
+- **🟠 AN AC THAT ASSERTS "THE SUITE IS GREEN" MUST NOT PICK ITS OWN SCOPE**
+  (F-382, dogfood-152 → WP-634). AC-3's durability clause ran `vitest run
+  test/judge/ test/workflow/` and counted 192 passing; the delivery's own new live
+  test was in `test/runner/` and was RED, so **all 3 ACs passed on a delivery whose
+  declared `regression_suite` was failing**. The executor made the same mistake in
+  its self-check, and correctly so — the goal tells it not to run the full suite
+  inside a step (F-345, the step time cap) and to trust the declared suite. The AC
+  is the half that must change: assert against the spec's declared
+  `regression_suite`, or assert the scope is a superset of the paths the delivery
+  touched. A subdirectory list frozen when the spec was written cannot see work the
+  executor puts anywhere else — and "write a test beside the file it covers" is an
+  instruction that actively moves work outside it.
+
+- **🟡 AN ASSERTION CONFOUNDED BY ITS OWN FIXTURE PROVES NOTHING IN EITHER
+  DIRECTION** (F-383, dogfood-152). The executor's live test seeded a rubric
+  **fail** in pass 1 (to stop the pass sealing), then asserted the completion
+  review carries no `escalation_concerns_adjudicated` row — but a standing rubric
+  finding puts that row there on its own, so the assertion could never pass
+  regardless of the behaviour under test. Its sibling had the mirror-image flaw:
+  `toContain(...)` satisfied by the seeded rubric fail rather than by the concern.
+  Before writing a presence/absence assertion, ask which **other** element of your
+  own fixture can produce the same observation — and if one can, remove it or move
+  the assertion onto something only the behaviour under test controls.
 
 - **🔴 A GOAL THAT ASSERTS TWO INVARIANTS MUST SAY WHICH ONE WINS AT THEIR
   BOUNDARY — and one AC must drive an input where they actually collide**
