@@ -108,39 +108,39 @@ goal: >
   A step that changed nothing must not hand the judge's record a fresh clean bill of health, and
   must not spend one of the run's two chances to repair a finding.
 
-  Site 1 - the vacuous green. `isCompletionMilestone` (`src/workflow/judge-trigger.ts:4-9`) fires a
+  Site 1 - the vacuous green. isCompletionMilestone (src/workflow/judge-trigger.ts:4-9) fires a
   judge pass on any SUCCESS step with a zero-byte diff, and that pass answers every rubric row from
   an absent diff: on `branch-run-f57c3f17-a3d7-4273-b62f-82beb8c63a03-step-5-770afe4b` it scored
   `design_serves_overall_goal` PASS with "There are no design changes in the supplied diff to judge
   adversely", between two passes that FAILED the same row for the same defect. Make this true: on a
   judge pass whose step diff is zero bytes, a rubric row that `isRubricItemSettledAgainstWholeDelivery`
-  (`src/judge/rubric.ts:134-147`) does NOT call settled is recorded with the previous pass's answer
+  (src/judge/rubric.ts:134-147) does NOT call settled is recorded with the previous pass's answer
   for that row - the same pass/fail AND the same justification text - while a row it DOES call
   settled keeps the answer derived at this pass. A row with no previous answer keeps this pass's
   answer. Whatever the loop records must be what everything downstream sees: the journaled verdict,
-  `standingRubricFindings`, `computeVerdict`, and `chikory trace` read one form, not two.
+  standingRubricFindings, computeVerdict, and chikory trace read one form, not two.
 
   Site 2 - the spent repair grant. That same empty step had all acceptance criteria passing, so it
-  entered the completion-review branch (`src/workflow/agent-loop.ts:1266`) and incremented
-  `completionReviewAttempts` (`:1283`), consuming one of the two grants `MAX_COMPLETION_REVIEWS`
-  (`src/workflow/completion-review.ts:16`) allows. The next step's `canRetry` (`:1305-1313`) then
+  entered the completion-review branch (src/workflow/agent-loop.ts:1266) and incremented
+  completionReviewAttempts (:1283), consuming one of the two grants `MAX_COMPLETION_REVIEWS`
+  (src/workflow/completion-review.ts:16) allows. The next step's `canRetry` (:1305-1313) then
   refused the second repair and the run sealed FAILED. Make this true: a zero-byte step does not
   consume a completion-review grant, so a run whose executor stalls once still gets the repair it
   was promised. Do not buy this by raising `MAX_COMPLETION_REVIEWS` and do not buy it by preventing
   the empty step from being judged - the criteria answered at that pass are real.
 
-  How you do it is yours - a pure decision beside `decideQuestionStep`/`decideRemediation`, a
+  How you do it is yours - a pure decision beside decideQuestionStep/decideRemediation, a
   reconciliation inside the judge activity, or something else - pick ONE mechanism and say in your
   step summary which consumers you re-verified. The workflow side stays deterministic: no clocks,
   no randomness, no I/O outside activities, and the decision must be replay-safe.
 
-  Nothing else changes. `decideQuestionStep` and `STANDING_APPROVAL_ANSWER` (WP-608's ask path),
+  Nothing else changes. decideQuestionStep and STANDING_APPROVAL_ANSWER (WP-608's ask path),
   `isRubricItemSettledAgainstWholeDelivery`'s own settling rule, `MAX_COMPLETION_REVIEWS`, the
-  free-text `standingConcerns` array, the rubric item set, the judge charter text, the TaskSpec
+  free-text standingConcerns array, the rubric item set, the judge charter text, the TaskSpec
   contract, and the WP-616/WP-631 render caps are untouched. TypeScript stays strict ESM with named
   exports and no `any`.
 
-  Pin your work with tests that live in the repo, under `test/runner/` and/or `test/workflow/`,
+  Pin your work with tests that live in the repo, under `test/runner/` and/or test/workflow/,
   beside the files they cover. A behaviour proved only by the acceptance checks that grade this run
   is not pinned at all (F-356), and a repo test copied verbatim from a grading check inherits its
   blind spots (F-360) - cover something the grading checks do not. Two candidates the checks below

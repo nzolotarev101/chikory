@@ -273,62 +273,83 @@ run spent proving that a sentence I wrote could not be satisfied.
 
 **Make the loop stop scoring a step that changed nothing as if it had proved
 something — a step with no diff must not hand the reviewer a fresh clean bill of
-health on questions it never looked at, and must not spend the run's repair
-attempt.**
+health on questions it never looked at, and must not cost the run one of its two
+chances to repair what the reviewer already objected to.**
 
 - **Spec:** `examples/dogfood/dogfood-150-wp632-empty-step-rubric-carryover.yaml`
-- **WP:** WP-632 (an empty-diff step must not vacuously green a rubric row) —
-  new row, opened by this review; absorbs the residue of WP-608 (question-step
-  classifier) tracked as F-355.
-- **Why THIS and not the ladder rung:** §0 reads ⛔ **STALLED**, which binds the
-  next headline to the current phase ladder rung. P3's ladder (WP-530) is at
-  rung 4; **rung 5's remaining half is `brownfield-001`/WP-304 — a quota-bound,
-  multi-hour OpenHands suite the operator runs by hand** (dogfood-122: an LLM
-  executor may not supervise it). No spec can headline it, unchanged since
-  dogfood-139. Among runnable candidates WP-632 wins because it is 🔴
-  loop-integrity found live this run, it sits on the judge-reliability pillar,
-  and its two halves (rubric carry-over + not spending the repair attempt) are
-  one design decision.
+- **WP:** WP-632 (an empty-diff step must not vacuously green a model-judged
+  rubric row, nor spend a repair grant) — new row, opened by this review;
+  closes the residue WP-608 explicitly queued as F-355 (the STALL half of
+  executor passivity, as against the ASK half WP-608 fixed).
+- **Why THIS and not the ladder rung:** §0 reads ✅ **PROGRESSING** once this
+  run's ledger row lands (max steps 3 vs 2 over the prior 3), so the default
+  candidate is the P3 ladder's next rung — and a non-ladder candidate must beat
+  it. **P3 rung-5's remaining half is `brownfield-001`/WP-304: a quota-bound,
+  multi-hour OpenHands suite the OPERATOR runs by hand** (dogfood-122 — an LLM
+  executor may not supervise it), so it cannot be a spec at all; unchanged since
+  dogfood-139. WP-632 is the strongest runnable candidate: 🔴 loop-integrity
+  found live this run with both harms measured on this run's own journal, and its
+  second half **changes a terminal state** — dogfood-149 would have had a second
+  repair step — which makes it worth a run rather than a hand-fix.
 - **The designed trap:** the plausible-but-wrong delivery is *"skip the judge
-  pass entirely when the diff is empty."* That silently drops the ACs too — the
-  acceptance criteria are re-derived from check exit codes against the **whole
-  tree**, not the step diff, so they are still meaningful on an empty step, and
-  suppressing them would hide a criterion that went red for reasons outside the
-  step. The ACs must be built to reject a delivery that skips the pass, and to
-  reject one that carries forward a *machine-settled* row (`tests_pass`) instead
-  of only the model-judged ones.
+  pass entirely when the diff is empty."* The acceptance criteria are re-derived
+  from check exit codes against the **whole tree**, so they stay meaningful on an
+  empty step, and suppressing the pass would hide a criterion that went red for
+  reasons outside the step. Five more are named in the spec header; **trap B
+  (carry everything forward, freezing the machine-derived `tests_pass` at a stale
+  answer) is the one AC-1 is built around** — the two rows must disagree about
+  which pass they came from. Arming found a sixth by accident: a reference that
+  skipped the review outright on an empty step turned
+  `test/runner/agent-loop.test.ts`'s WP-217 guarantee RED — an empty confirming
+  step must still be able to SEAL a finished run. That is now in the goal.
+- **The precedence line dogfood-149 died for want of (F-370) is written into
+  this goal:** a row `isRubricItemSettledAgainstWholeDelivery` calls settled
+  keeps this pass's fresh answer; otherwise the previous answer wins on an
+  empty-diff pass; with no previous answer, this pass's answer stands. AC-1 and
+  AC-3 drive inputs where those rules actually collide.
 
-**Gate verdicts** — these are provisional; the spec is not yet written and is
-the first task of the next sitting.
+**Gate verdicts:**
 
 | gate | verdict | one line |
 |---|---|---|
-| §0 progression | ⛔ **STALLED** → 🟡 **ALLOW** | The rung cannot run (operator-by-hand); the candidate is 🔴 loop-integrity found live this run, which §0 permits as the alternative to the rung. |
-| §1.1 failure surface | ✅ | 2–4 steps, judge-reliability pillar, cross-file (`agent-loop.ts` + `verdict.ts` + the judge pass dispatch); an agent can plausibly get the carry-over rule backwards. |
-| §1.2 product progress | ✅ | Lands in real judge/workflow code on an open plan.md row (WP-632), not scaffolding. |
-| §1.3 mission-critical | ✅ **PROCEED** | Not busy work, not scaffold-hosted; hosted by a real WP. |
-| §1.5 friction budget | ✅ | `class=product` (primary surface is `packages/sdk-ts/src/`), harness-meta 0/3 over the trailing window — cap not busted. |
+| §0 progression | ✅ **PROGRESSING** | Max steps moved 2 → 3. Default candidate is the P3 ladder rung; rung-5's remainder is operator-by-hand and cannot be specced, so the runnable 🔴 loop-integrity candidate takes the headline. `--spec` format lint 🟢 (LOOSE, `# Ladder-rung:` + `# Thesis-KPI:` present, `wp: WP-632` declared). |
+| §1.1 failure surface | ✅ | 2–4 steps, judge-reliability pillar, cross-file (`activities.ts` judge pass + `agent-loop.ts` review branch); an agent can plausibly get the row-class precedence backwards, and arming proved a plausible fix breaks WP-217. |
+| §1.2 product progress | ✅ | Lands in real judge/workflow code on an open plan.md §6 row (WP-632). No scaffolding; the §1.2 fallback carve-out is not needed. |
+| §1.3 mission-critical | ✅ **PROCEED** | Not busy work, not scaffold-hosted; hosted by a real WP whose second half flips a terminal state. |
+| §1.5 friction budget | ✅ | `class=product` (primary surface `packages/sdk-ts/src/`); harness-meta 0/3 over the trailing window — the ≤1/3 cap is not busted. |
 
-**AC arming evidence:** none yet — dogfood-150's spec has not been written, so
-no AC has been dry-run in either direction. Arming is the first action of the
-next sitting and no launch may precede it. For the record, **dogfood-149's own
-arming was clean and is not the reason it failed**: AC-1 RED 7s / GREEN 4s
-(genuine RED — it printed its own assertion `5932 > 3072`, and its
-anti-vacuity Temporal-substrate test ran and passed, so no dogfood-133-class
-dead check), AC-2 RED 1s / GREEN 1s, AC-3 RED 49s / GREEN 49s. **Worst case 49s
-= 41% of the 120s judge cap.** All three re-ran green against the harvested
-tree during this review. What the arming could not catch was F-370: an AC
-verified in both directions still proves nothing about an input family it never
-constructs.
+**AC arming evidence — all 3 verified in BOTH directions against clean HEAD
+`6e94532`:**
+
+| AC | RED on HEAD | GREEN vs reference | % of 120 s cap |
+|---|---|---|---|
+| AC-1 | ✅ exit **1**, **4s** | ✅ exit 0, **5s** | 4 % |
+| AC-2 | ✅ exit **1**, **3s** | ✅ exit 0, **4s** | 3 % |
+| AC-3 | ✅ exit **1**, **56s** | ✅ exit 0, **58s** | 48 % |
+
+**Worst case 58s = 48% of the 120s judge cap.** The launch preflight classes all
+three as **VERIFY-SUITE** and does NOT dry-run them — it prints *"the challenge
+is UNVERIFIABLE pre-launch"* — so the hand-verification above IS the arming, and
+every RED was read, not just its exit code: each printed its own assertion text
+(AC-1 `expected true to be false` on the design row, AC-2 `expected 'FAILED' to
+be 'SUCCESS'`, AC-3 `committed test/runner tests: 400 (floor 403)`), and each
+check's anti-vacuity *"the Temporal substrate is present"* test ran and passed,
+so none was a skipped-describe or a dead import.
+
+**Three arming defects were found and fixed before launch, not after:** (1)
+AC-3's trap-C run drove its criterion through a declared `check`, which makes the
+criterion machine-derived from the exit code and overrides the scripted wire, so
+the run never reached step 3 and the AC exited 1 for the wrong reason; (2) AC-2
+supplied three completion-review forms when only `MAX_COMPLETION_REVIEWS` (2)
+ever fire, so review #2 upheld the finding no matter what the fix did; (3) the
+first reference implementation read the journal handle the activity closes across
+the judge pass (`ERR_INVALID_STATE`) and blew the 120 s cap. Both spec fixes
+landed in `6e94532`; the reference was reverted by name, never with `--discard`.
+
+**Launch preflight:** green at $0 — spec lint, env contract, window sizing, and
+all 6 agent-class member probes answered; the spec-pick glob resolves to
+`dogfood-150-wp632-empty-step-rubric-carryover.yaml`.
 
 ```sh
-# 1. write examples/dogfood/dogfood-150-wp632-empty-step-rubric-carryover.yaml
-# 2. arm it BOTH ways (commit first — a dirty tree makes RED-on-HEAD meaningless):
-devbox run -- bash scripts/dogfood-arm.sh examples/dogfood/dogfood-150-wp632-empty-step-rubric-carryover.yaml
-devbox run -- bash scripts/dogfood-arm.sh examples/dogfood/dogfood-150-wp632-empty-step-rubric-carryover.yaml --green
-devbox run -- bash scripts/dogfood-arm.sh examples/dogfood/dogfood-150-wp632-empty-step-rubric-carryover.yaml --table
-# 3. preflight at $0, and confirm the glob resolves to THAT file:
-devbox run -- bash -c 'CHIKORY_PREFLIGHT_ONLY=1 bash scripts/dogfood.sh --run'
-# 4. launch:
 devbox run run-dogfood
 ```
