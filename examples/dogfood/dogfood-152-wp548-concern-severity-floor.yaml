@@ -100,29 +100,27 @@ goal: |
   A judge concern that cannot stop the run must still be written down, and a judge concern that
   should stop the run must still stop it — the loop has to be able to tell those apart.
 
-  Today it cannot. `computeVerdict` rule 4 (`src/judge/verdict.ts:167`) escalates on
-  `form.concerns.length > 0 && rubricFails.length === 0`, and `JudgeForm.concerns` is a bare
-  `string[]` (`src/types.ts:479`), so a cosmetic nit and a shipped defect are the same input.
-  Measured on this campaign's own runs: dogfood-120's `N-2` step 4 escalated — and with
-  `unattended` dropped, parked a node 3h 47m — over *"stray text `开启` before `PASS`; this is a
+  Today it cannot. `computeVerdict` rule 4 (src/judge/verdict.ts:167) escalates on
+  form.concerns.length > 0 && rubricFails.length === 0, and `JudgeForm.concerns` is a bare
+  `string[]` (src/types.ts:479), so a cosmetic nit and a shipped defect are the same input.
+  Measured on this campaign's own runs: dogfood-120's N-2 step 4 escalated — and with
+  unattended dropped, parked a node 3h 47m — over *"stray text `开启` before PASS; this is a
   minor documentation-quality defect but does not obscure the recorded result."*, while
   dogfood-151's step 1 escalated over a real unmet goal requirement and was right to.
 
   Make this true. Add ONE additive optional field to `JudgeForm` — name it
-  `concernSeverities?: Array<"minor" | "blocking">`, INDEX-ALIGNED with `concerns` — in
+  concernSeverities?: Array<"minor" | "blocking">, INDEX-ALIGNED with `concerns` — in
   `src/types.ts` and `docs/spec/CONTRACTS.md`, alongside the additive optionals already there.
   `concerns` itself stays declared `string[]`; do NOT change its type and do NOT replace it with
   a list of objects. The contract has a runtime mirror that REJECTS unknown keys —
-  `JudgeFormSchema` (`src/schemas.ts:469`) — so the field is not landed until that mirror accepts
+  `JudgeFormSchema` (src/schemas.ts:469) — so the field is not landed until that mirror accepts
   it. The judge must also be ASKED for it: `src/judge/prompt.ts` declares the response schema the
-  judge fills (`:28-32`) and the instruction text that explains `concerns` (`:49`); a field no
+  judge fills (:28-32) and the instruction text that explains `concerns` (:49); a field no
   prompt requests is a field no judge ever sets, and the feature would be inert on every real run.
 
-  Then write the floor ONCE, as a pure exported function in `src/judge/verdict.ts`:
-
-      export function blockingConcerns(form: JudgeForm): string[]
-
-  It returns, in `concerns` order, the texts at or above the floor. A concern whose severity is
+  Then write the floor ONCE: a pure function named `blockingConcerns`, exported from
+  `src/judge/verdict.ts`, taking a `JudgeForm` and returning the concern texts at or above the
+  floor — in `concerns` order. A concern whose severity is
   `"minor"` is below it. **A concern with no matching severity — the array absent, or shorter
   than `concerns` — is BLOCKING.** That default is the whole safety property: every judge output
   written before this WP carries no mark, and a judge that ignores the new field must not be able
@@ -130,21 +128,21 @@ goal: |
 
   Both call sites read that one function, and nothing else changes:
 
-  1. `computeVerdict` rule 4 (`src/judge/verdict.ts:167`) escalates only when
-     `blockingConcerns(form)` is non-empty, keeping `escalateClass: "out_of_rubric"` and naming
+  1. `computeVerdict` rule 4 (src/judge/verdict.ts:167) escalates only when
+     blockingConcerns(form) is non-empty, keeping escalateClass: "out_of_rubric" and naming
      only the blocking texts in the rationale. Its `rubricFails.length === 0` guard is UNCHANGED
      — a concern raised alongside a rubric failure is F-288/WP-599's problem, not this run's.
-  2. `standingConcerns` (`src/workflow/agent-loop.ts:1166`) accumulates only
-     `blockingConcerns(verdict.form)`. This is not optional polish: that list becomes the
-     completion review's `escalationConcerns` (`:1492`, `:1533`) and the WP-619 adjudication
-     rubric row `escalation_concerns_adjudicated`, which is precisely what sealed dogfood-151
+  2. `standingConcerns` (src/workflow/agent-loop.ts:1166) accumulates only
+     blockingConcerns(verdict.form). This is not optional polish: that list becomes the
+     completion review's escalationConcerns (:1492, :1533) and the WP-619 adjudication
+     rubric row escalation_concerns_adjudicated, which is precisely what sealed dogfood-151
      FAILED. A minor concern filtered at rule 4 but still adjudicated at the seal has not been
      fixed, it has been moved.
 
-  The other five readers of `form.concerns` keep today's behaviour, deliberately:
-  the BRANCH rule (`verdict.ts:108`) still scans every concern's text; `harness.ts:91,231` still
-  parses and carries the whole list; `cli/trace.ts:308` still counts every concern in
-  `issuesFound`; `cli/trace.ts:512` still renders every concern; `workflow/remediation.ts:73-75`
+  The other five readers of form.concerns keep today's behaviour, deliberately:
+  the BRANCH rule (verdict.ts:108) still scans every concern's text; harness.ts:91,231 still
+  parses and carries the whole list; cli/trace.ts:308 still counts every concern in
+  issuesFound; cli/trace.ts:512 still renders every concern; workflow/remediation.ts:73-75
   still lists every concern in the repair brief. Of these, `chikory trace` is the one an operator
   reads: a concern below the floor must remain visible there and must be identifiable AS minor —
   a filter that makes small findings disappear is F-180 (judge detects, does not gate) turned
@@ -200,6 +198,7 @@ acceptance_criteria:
       import { describe, expect, test } from "vitest";
 
       import { blockingConcerns, computeVerdict } from "../../src/judge/verdict.js";
+      import { JudgeFormSchema } from "../../src/schemas.js";
       import type { JudgeForm } from "../../src/types.js";
 
       // Verbatim from this campaign's journals. dogfood-120 N-2 step 4 (parked a node 3h 47m):
@@ -282,6 +281,26 @@ acceptance_criteria:
           ).toBe("BRANCH");
         });
 
+        test("the runtime mirror accepts the new field and is still strict", () => {
+          const parsed = JudgeFormSchema.safeParse(
+            form({ concerns: ["a"], concernSeverities: ["minor"] } as Partial<JudgeForm>),
+          );
+          expect(
+            parsed.success,
+            "JudgeFormSchema rejects unknown keys, and the executor conformance path parses " +
+              "every form through it — the field is not landed until this mirror accepts it.",
+          ).toBe(true);
+          const strict = JudgeFormSchema.safeParse({
+            ...form({ concerns: [] }),
+            somethingElse: 1,
+          });
+          expect(
+            strict.success,
+            "trap: relaxing the mirror to .passthrough() would 'fix' the parse by removing the " +
+              "guard that makes contract drift visible at all.",
+          ).toBe(false);
+        });
+
         test("trap: rule 4's rubric guard is UNCHANGED (that is WP-599, not this run)", () => {
           const f = form({
             rubricResults: [{ id: "tests_pass", pass: false, justification: "red" }],
@@ -323,7 +342,10 @@ acceptance_criteria:
       import type { JournalEntry } from "../../src/types.js";
 
       const ref = { id: "a".repeat(64), kind: "diff" as const, bytes: 12, summary: "s" };
-      const COSMETIC = "stray text 开启 before PASS; a minor documentation-quality defect.";
+      // Deliberately free of the words this check greps for: a concern whose own TEXT
+      // contains "minor" would satisfy the marker assertion on HEAD, with the renderer
+      // doing nothing (the F-114 self-satisfying-assertion family).
+      const COSMETIC = "stray text 开启 before PASS in the report; it does not obscure the result.";
       const REAL_DEFECT = "the committed test changes do not assert the tool.calls attribute is absent.";
 
       function entries(): JournalEntry[] {
@@ -381,9 +403,15 @@ acceptance_criteria:
           ).toBe(true);
           const line = out.split("\n").find((l) => l.includes(COSMETIC)) ?? "";
           expect(
-            /minor/i.test(line),
-            "the operator must be able to tell WHY this one did not stop the run, on the line " +
-              "that carries it.",
+            line === `  concern: ${COSMETIC}`,
+            "the minor concern renders exactly as a blocking one does, so the operator " +
+              "reading the trace cannot tell why this one did not stop the run. The renderer " +
+              "must mark it — the concern's own text is not evidence of anything.",
+          ).toBe(false);
+          expect(
+            /minor|advisory|below the floor|non-blocking/i.test(line),
+            "the marker must name the severity in words an operator can read, on the line " +
+              "that carries the concern.",
           ).toBe(true);
         });
 
@@ -444,7 +472,7 @@ acceptance_criteria:
         exit 1
       }
       grep -qE 'rubricFails\.length === 0' src/judge/verdict.ts || {
-        echo "AC-3 FAIL: trap — rule 4's rubric guard was changed; that is F-288/WP-599, out of scope here"
+        echo "AC-3 FAIL: trap — rule 4's guard rubricFails.length === 0 was changed; widening it is F-288/WP-599, out of scope here"
         exit 1
       }
 
