@@ -231,7 +231,12 @@ export function recordRunStepSpan(input: RunStepSpanInput): void {
   span.setAttribute("cost.usd", input.record.costUsd);
   span.setAttribute("cost.estimated", input.record.costEstimated);
   span.setAttribute("duration.ms", input.record.durationMs);
-  span.setAttribute("tool.calls", input.record.toolCalls);
+  // WP-626 (F-376): an unobserved count is not a measurement. The executor-level
+  // span in `executors/step.ts` guards this; so must the runner-level span, which
+  // is the one every durable step emits.
+  if (input.record.toolCallsObserved !== false) {
+    span.setAttribute("tool.calls", input.record.toolCalls);
+  }
   span.setAttribute("artifact.diff.id", input.record.diffRef.id);
   span.setAttribute("artifact.transcript.id", input.record.transcriptRef.id);
   if (input.agent !== undefined) {

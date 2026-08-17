@@ -1554,7 +1554,14 @@ export function createRunnerActivities(deps: RunnerActivityDeps) {
           if (isBlindMeteredStep(record)) {
             const priorSteps = journal.entries("step").map((entry) => {
               const prior = (entry.payload as StepPayload).record;
-              return { toolCalls: prior.toolCalls, tokens: prior.tokens, costUsd: prior.costUsd };
+              return {
+                toolCalls: prior.toolCalls,
+                tokens: prior.tokens,
+                costUsd: prior.costUsd,
+                ...(prior.toolCallsObserved !== undefined
+                  ? { toolCallsObserved: prior.toolCallsObserved }
+                  : {}),
+              };
             });
             usageEstimate = estimateKilledStepUsage(record.toolCalls, priorSteps);
             if (usageEstimate !== null) {

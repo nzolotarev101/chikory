@@ -762,6 +762,70 @@ describe("renderStepDetail (--step)", () => {
   test("unknown step is a readable error, not a throw", () => {
     expect(renderStepDetail(entries, 99)).toContain("no step 99 in this run (3 steps journaled)");
   });
+
+  test("unobserved tool calls renders as unknown tool calls (WP-626)", () => {
+    const unobservedEntries: JournalEntry[] = [
+      {
+        idx: 0,
+        ts: "2026-06-11T10:00:00.000Z",
+        kind: "step",
+        payload: {
+          stepIndex: 0,
+          instruction: "do it",
+          planItem: "do it",
+          record: {
+            status: "SUCCESS",
+            diffRef: ref("diff", "diff"),
+            transcriptRef: ref("transcript", "transcript"),
+            summary: "did it",
+            toolCalls: 0,
+            toolCallsObserved: false,
+            tokens: { input: 1000, output: 500 },
+            costUsd: 0.5,
+            costEstimated: false,
+            durationMs: 60_000,
+          },
+        },
+        costDeltaUsd: 0.5,
+        artifactRefs: [],
+      },
+    ];
+    const text = renderStepDetail(unobservedEntries, 1);
+    expect(text).toContain("unknown tool calls");
+    expect(text).not.toContain("0 tool calls");
+  });
+
+  test("observed zero tool calls renders as 0 tool calls", () => {
+    const observedZeroEntries: JournalEntry[] = [
+      {
+        idx: 0,
+        ts: "2026-06-11T10:00:00.000Z",
+        kind: "step",
+        payload: {
+          stepIndex: 0,
+          instruction: "do it",
+          planItem: "do it",
+          record: {
+            status: "SUCCESS",
+            diffRef: ref("diff", "diff"),
+            transcriptRef: ref("transcript", "transcript"),
+            summary: "did it",
+            toolCalls: 0,
+            toolCallsObserved: true,
+            tokens: { input: 1000, output: 500 },
+            costUsd: 0.5,
+            costEstimated: false,
+            durationMs: 60_000,
+          },
+        },
+        costDeltaUsd: 0.5,
+        artifactRefs: [],
+      },
+    ];
+    const text = renderStepDetail(observedZeroEntries, 1);
+    expect(text).toContain("0 tool calls");
+    expect(text).not.toContain("unknown tool calls");
+  });
 });
 
 describe("traceJson (--json)", () => {

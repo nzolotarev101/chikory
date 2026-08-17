@@ -25,6 +25,8 @@ export interface ObservedStepUsage {
   toolCalls: number;
   tokens: TokenUsage;
   costUsd: number;
+  /** WP-626: false when the executor could not enumerate tool calls. */
+  toolCallsObserved?: boolean;
 }
 
 export interface KilledStepUsageEstimate {
@@ -58,7 +60,10 @@ export function estimateKilledStepUsage(
 ): KilledStepUsageEstimate | null {
   if (killedToolCalls <= 0) return null;
   const basis = priorSteps.filter(
-    (step) => step.toolCalls > 0 && step.tokens.input + step.tokens.output > 0,
+    (step) =>
+      step.toolCallsObserved !== false &&
+      step.toolCalls > 0 &&
+      step.tokens.input + step.tokens.output > 0,
   );
   if (basis.length === 0) return null;
 

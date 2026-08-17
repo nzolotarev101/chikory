@@ -152,6 +152,7 @@ export interface StepRecord {
   infraFailed?: boolean;           // F-210 — killed at its maxSeconds cap; inconclusive, spends no rule-3 strike
   claimsComplete?: boolean;        // P2 (WP-221) — explicit "task done"; OR'd into the WP-217 trigger (kills F-11 probe)
   limitSignal?: RawLimitSignal;    // F-228 (WP-553) — raw quota/rate evidence, routed to classifyLimitSignal
+  toolCallsObserved?: boolean;     // WP-626 — false when unobservable (e.g. agy); absent or true = observed count
 }
 
 /** F-228 — raw provider-limit evidence, before classification. */

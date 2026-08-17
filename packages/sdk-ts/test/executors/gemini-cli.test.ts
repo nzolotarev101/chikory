@@ -41,11 +41,12 @@ executorConformanceSuite({
 });
 
 describe("parseAgyOutput", () => {
-  it("takes trimmed stdout as the summary; tokens estimated, cost zero", () => {
+  it("takes trimmed stdout as the summary; tokens estimated, cost zero, toolCalls unobserved", () => {
     const parsed = parseAgyOutput("do the thing")("  wrote foo.txt\n");
     expect(parsed.ok).toBe(true);
     expect(parsed.summary).toBe("wrote foo.txt");
     expect(parsed.toolCalls).toBe(0);
+    expect(parsed.toolCallsObserved).toBe(false);
     expect(parsed.costUsd).toBe(0);
     expect(parsed.costEstimated).toBe(true);
     // ~4 chars/token estimate over prompt + output.
@@ -173,6 +174,24 @@ describe("quota wall (F-228)", () => {
         signal: record.limitSignal,
       }),
     ).toMatchObject({ source: "cli-usage-limit", retryAfterMs: 3_608_000 });
+  });
+});
+
+describe("unobservable tool count (WP-626)", () => {
+  it("carries toolCallsObserved: false onto cap-killed records", async () => {
+    const ws = await makeWorkspace();
+    const adapter = createGeminiCliAdapter({
+      store: ws.store,
+      binPath: FAKE_BIN,
+      env: fakeEnv("hang"),
+      killGraceMs: 100,
+    });
+    const record = await adapter.runStep(makeStepInput(ws, "irrelevant", 1));
+    expect(record.status).toBe("FAILED");
+    expect(record.infraFailed).toBe(true);
+    expect(record.toolCalls).toBe(0);
+    expect(record.toolCallsObserved).toBe(false);
+    StepRecordSchema.parse(record);
   });
 });
 

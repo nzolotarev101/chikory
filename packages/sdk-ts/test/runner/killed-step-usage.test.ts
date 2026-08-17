@@ -70,6 +70,41 @@ describe("estimateKilledStepUsage (per-tool-call rate)", () => {
   test("zero killed tool calls → null", () => {
     expect(estimateKilledStepUsage(0, prior)).toBeNull();
   });
+
+  test("unobserved prior step with NONZERO tool calls is refused as a rate basis (WP-626)", () => {
+    // The key differentiator between the old value-based rule (> 0) and the mark-based rule:
+    // an unobserved adapter that reports a nonzero placeholder must not be admitted as a basis.
+    const unobservedPrior = [
+      { toolCalls: 10, tokens: { input: 1000, output: 100 }, costUsd: 0.5, toolCallsObserved: false },
+    ];
+    expect(estimateKilledStepUsage(20, unobservedPrior)).toBeNull();
+
+    // Mixed prior: unobserved prior is excluded, only observed prior contributes to rate basis.
+    const mixedPrior = [
+      { toolCalls: 10, tokens: { input: 1000, output: 100 }, costUsd: 0.5, toolCallsObserved: false },
+      { toolCalls: 5, tokens: { input: 500, output: 50 }, costUsd: 0.25, toolCallsObserved: true },
+    ];
+    const estimate = estimateKilledStepUsage(20, mixedPrior);
+    expect(estimate).toEqual({
+      tokens: { input: 2000, output: 200 },
+      costUsd: 1,
+      perToolCallTokens: 110,
+      basis: "per_tool_call_rate",
+    });
+  });
+
+  test("observed prior step with explicit toolCallsObserved=true is admitted", () => {
+    const explicitObserved = [
+      { toolCalls: 10, tokens: { input: 1000, output: 100 }, costUsd: 0.5, toolCallsObserved: true },
+    ];
+    const estimate = estimateKilledStepUsage(20, explicitObserved);
+    expect(estimate).toEqual({
+      tokens: { input: 2000, output: 200 },
+      costUsd: 1,
+      perToolCallTokens: 110,
+      basis: "per_tool_call_rate",
+    });
+  });
 });
 
 describe("executeStep folds the estimate into the ledger (WP-515)", () => {

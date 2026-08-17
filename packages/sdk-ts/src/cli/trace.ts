@@ -466,11 +466,13 @@ export function renderStepDetail(entries: JournalEntry[], displayStep: number): 
     : record.costEstimated
       ? " (estimated)"
       : "";
+  const toolCallsLabel =
+    record.toolCallsObserved === false ? "unknown tool calls" : `${record.toolCalls} tool calls`;
   lines.push(
     `step ${displayStep} · ${record.status} · $${record.costUsd.toFixed(4)}` +
       `${costAnnotation} · ` +
       `${formatTokens(record.tokens.input)}/${formatTokens(record.tokens.output)} tokens · ` +
-      `${formatDuration(record.durationMs)} · ${record.toolCalls} tool calls`,
+      `${formatDuration(record.durationMs)} · ${toolCallsLabel}`,
   );
   lines.push(`instruction: ${payload.instruction}`);
   lines.push(`plan item:   ${payload.planItem}`);

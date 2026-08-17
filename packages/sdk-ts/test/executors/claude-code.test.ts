@@ -66,7 +66,7 @@ describe("parseClaudeCodeOutput", () => {
     expect(parsed.tokens).toEqual({ input: 10 + 6355 + 12122, output: 58 });
   });
 
-  it("counts tool_use blocks across assistant events", () => {
+  it("counts tool_use blocks across assistant events (and remains unmarked)", () => {
     const lines = [
       JSON.stringify({
         type: "assistant",
@@ -75,7 +75,9 @@ describe("parseClaudeCodeOutput", () => {
       JSON.stringify({ type: "assistant", message: { content: [{ type: "tool_use" }] } }),
       REAL_RESULT_LINE,
     ].join("\n");
-    expect(parseClaudeCodeOutput(undefined)(lines).toolCalls).toBe(3);
+    const parsed = parseClaudeCodeOutput(undefined)(lines);
+    expect(parsed.toolCalls).toBe(3);
+    expect(parsed.toolCallsObserved).toBeUndefined();
   });
 
   it("treats error_max_turns as a successful bounded invocation", () => {

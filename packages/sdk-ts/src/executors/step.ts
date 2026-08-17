@@ -38,6 +38,8 @@ export interface ParsedCliResult {
   /** Executor's own account of what it did. */
   summary: string;
   toolCalls: number;
+  /** WP-626: false when the executor cannot enumerate its tool calls. */
+  toolCallsObserved?: boolean;
   tokens: TokenUsage;
   costUsd: number;
   /** True when the CLI reports no exact cost and we estimated (or zeroed) it. */
@@ -79,7 +81,9 @@ function recordStepSpan(opts: {
   span.setAttribute("tokens.output", opts.record.tokens.output);
   span.setAttribute("cost.usd", opts.record.costUsd);
   span.setAttribute("duration.ms", opts.record.durationMs);
-  span.setAttribute("tool.calls", opts.record.toolCalls);
+  if (opts.record.toolCallsObserved !== false) {
+    span.setAttribute("tool.calls", opts.record.toolCalls);
+  }
   if (opts.record.status === "FAILED") {
     span.setStatus({
       code: SpanStatusCode.ERROR,
@@ -153,6 +157,9 @@ export async function runCliStep(opts: CliStepOptions): Promise<StepRecord> {
     costUsd: parsed.costUsd,
     costEstimated: parsed.costEstimated,
     durationMs: proc.durationMs,
+    ...(parsed.toolCallsObserved !== undefined
+      ? { toolCallsObserved: parsed.toolCallsObserved }
+      : {}),
   };
 
   let record: StepRecord;

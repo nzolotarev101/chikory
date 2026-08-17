@@ -8,11 +8,12 @@ recover a run, and how to land the result as a normal PR.
 **Status (2026-08-17, bounded — update discipline: REPLACE this block, ≤15 lines;
 displaced prose moves verbatim to [`PLAN-HISTORY.md`](PLAN-HISTORY.md); per-run detail:
 `docs/reports/`; queue + course correction: `plan.md` §6/§7).**
-🟢 **dogfood-150 / WP-632 (a step that changed nothing must not hand the judge's record a clean bill of health, nor spend a repair grant) DELIVERED and LANDED** — `run-17010886-9ade-4937-8d9f-db0a67b143a7`, terminal **SUCCESS**, 1 step, $0.1019/$20.00, 12m 16s, AC **3/3** re-run green, harvest byte-IDENTICAL 5/5 (`docs/reports/dogfood-150.md`). An empty-diff judge pass now carries the previous answer for model-judged rubric rows (`judge/rubric.ts:158`) while machine-settled rows stay fresh, and the reconciled form is rebuilt through `buildVerdict` before the journal writes, so verdict / `standingRubricFindings` / `computeVerdict` / `chikory trace` read ONE form.
-🔴 **The judge scored 0 true-positives and shipped 3 defects human review found — all HAND-FIXED this sitting, all probe-verified both ways.** F-373: the stall branch briefed the executor with a `DESIGN REVIEW BRIEF` naming **zero** findings and skipped the WP-619 adjudication review. F-374: the repair grant was bounded only by `maxSteps` — **5 consecutive 0-byte stalls all granted, 8 judge passes**, where `MAX_COMPLETION_REVIEWS` is 2. F-375: at `cadence: 2` a pass that had just READ and cleared an objection against earlier REAL diffs had its fresh answer overwritten by a stale one.
-⚠️ **The pattern behind all three (§8):** every one lives in an **input family the delivered tests never instantiate** — a clean sealing rubric with a standing finding, a *second* consecutive stall, `cadence: 2`. A judge reading a diff plus the tests the executor wrote for it inherits that suite's blind spots exactly. Suite re-measured by hand: launch 1,540 → as-landed **1,547** → after hand-fix **1,551 tests / 193 files (1,528 passed | 23 skipped), 65.60s**.
-⚠️ **A WP that REMOVES a spend is a budget change — ask what the new ceiling is (§8).** Twice now the answer has been "there isn't one": F-365 (a retention fix with no growth bound) and F-374 (a "must not spend a grant" fix that removed the grant limit).
-**NEXT HEADLINE = WP-626 (dogfood-151): a telemetry field the loop reasons about must not be structurally unobservable.** `gemini-cli.ts:79` hardcodes `toolCalls: 0` and this run's own step reports `0 tool calls` beside a 23,379-byte diff, so WP-544's blind-metered-step compensation (`runner/killed-step-usage.ts:45,56,61`) can never fire under the executor we dogfood and benchmark with. Ladder unchanged at `rung=0` — P3 rung-5's remaining half (`brownfield-001`/WP-304) is operator-by-hand and still cannot headline.
+🟢 **dogfood-151 / WP-626 (a telemetry field the loop reasons about must not be structurally unobservable) DELIVERED and LANDED from a FAILED run** — `run-7faebdb5-7164-4931-9b9e-056b0d175091`, terminal **FAILED**, 1 step, $0.0958/$20.00, 8m 56s, AC **3/3** re-run green, harvest byte-IDENTICAL 12/12 (`docs/reports/dogfood-151.md`). A step whose executor cannot enumerate its tool calls is now marked (`toolCallsObserved?: boolean`, `src/types.ts:422`, three mirrors in sync) instead of reporting a bare `0`, and every reader branches on the mark, not the value.
+🟡 **The judge scored 1 true positive, and it is what condemned the run** — F-377: the executor-level OTel span was changed with no repo test, which the goal explicitly required (F-356). Correct call on a correct delivery.
+🔴 **Human review found the bigger version of that same gap one file away (§8): F-376** — `recordRunStepSpan` (`src/otel.ts:238`), the `chikory.run.step` span EVERY durable step emits, still published `tool.calls: 0` for an unobserved count. The judge asked *"is the changed reader tested?"* and never *"are these all the readers?"* — **an UNCHANGED file cannot appear in a diff**, so no diff-scoped judge can see it. Probe-proven RED, hand-fixed, pinned (`test/executors/step-span-observability.test.ts`).
+⚠️ **Enumerate reader sites with a grep, not with a memory (§8).** The spec's measured premise named one of two span writers, and AC-3's grep-set inherited exactly that blind spot. Grep the symbol across `src/` before writing the AC list — the contract-mirror rule applies to READER mirrors too.
+⚠️ **The completion-review gate condemns, it never repairs** (`src/workflow/agent-loop.ts:462-475`, dogfood-121's lesson). A ~30-line test gap cost a run seal at $0.096. The seal is resumable; the delivery still needs human verification before landing. Suite re-measured by hand: launch 1,551 → **1,560 tests / 194 files (1,537 passed | 23 skipped), 66.29s**.
+**NEXT HEADLINE = WP-548 (dogfood-152): an out-of-rubric judge concern needs a severity floor.** Every concern outside the rubric weighs the same today, and any one that survives adjudication condemns a converged step. Two live concerns from this campaign's own journals sit on opposite sides of the line: dogfood-120's stray-`开启`-in-a-markdown-file (parked a node 3h 47m) and dogfood-151's untested-reader (a real goal requirement). Ladder unchanged at `rung=0` — P3 rung-5's remaining half (`brownfield-001`/WP-304) is operator-by-hand and still cannot headline.
 
 Related docs: [`docs/spec/task-spec.md`](spec/task-spec.md) (schema
 reference) · [`docs/TASK-PROTOCOL.md`](TASK-PROTOCOL.md) (WP etiquette, §7 is
@@ -1830,3 +1831,22 @@ broken (a false-green, not a follow-on fix).
   or input families the goal's own wording implies and put a row for each in
   the AC, plus a negative; (2) make the durability AC demand coverage the
   grading check does NOT have, so copy-paste cannot satisfy it.
+
+- **A diff-scoped judge cannot see an UNCHANGED file, so it can never ask "are
+  these all the readers?" (🔴 F-376, dogfood-151).** WP-626 added one optional
+  field and had to make four readers branch on it. The delivery fixed three and
+  the executor-level OTel span; the judge escalated — correctly — that the span
+  it DID fix carried no repo test (F-377), and never noticed that
+  `recordRunStepSpan` (`packages/sdk-ts/src/otel.ts:238`), the
+  `chikory.run.step` span every durable step emits from four call sites in
+  `runner/activities.ts`, still published `tool.calls: 0` as a measurement.
+  It could not: that file is absent from the diff, and the judge reasons over
+  the diff it is shown plus the tests the executor wrote. **The spec had the
+  same blind spot** — its measured premise named `src/executors/step.ts:82` as
+  "the span", and AC-3's grep-set asserted the new field appears in
+  `src/cli/trace.ts` and `src/executors/step.ts` and never looked at
+  `src/otel.ts`. **Rule for the next spec you write:** before listing reader
+  sites in the goal or in an AC, run the grep — `grep -rn <symbol> src` — and
+  put every hit in the enumeration or say in writing why it is out of scope.
+  The contract-mirror discipline (types + CONTRACTS.md + zod + component doc)
+  already exists for the WRITE side; this is the same rule for the READ side.

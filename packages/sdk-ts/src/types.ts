@@ -415,6 +415,11 @@ export interface StepRecord {
    * not spent a node's whole replan budget on. Absent = no limit evidence.
    */
   limitSignal?: RawLimitSignal;
+  /**
+   * WP-626 (additive): false when the executor cannot enumerate its tool calls
+   * (e.g. Antigravity print mode). Absent or true = count is a genuine measurement.
+   */
+  toolCallsObserved?: boolean;
 }
 
 export interface TokenUsage {

@@ -56,7 +56,7 @@ describe("parseCodexOutput", () => {
     expect(parsed.costUsd).toBe(0); // no model given → no estimate possible
   });
 
-  it("counts non-message items as tool calls", () => {
+  it("counts non-message items as tool calls (and remains unmarked)", () => {
     const lines = [
       '{"type":"item.completed","item":{"id":"i0","type":"command_execution"}}',
       '{"type":"item.completed","item":{"id":"i1","type":"reasoning"}}',
@@ -64,7 +64,9 @@ describe("parseCodexOutput", () => {
       '{"type":"item.completed","item":{"id":"i3","type":"agent_message","text":"done"}}',
       '{"type":"turn.completed","usage":{"input_tokens":1,"output_tokens":1}}',
     ].join("\n");
-    expect(parseCodexOutput(undefined)(lines).toolCalls).toBe(2);
+    const parsed = parseCodexOutput(undefined)(lines);
+    expect(parsed.toolCalls).toBe(2);
+    expect(parsed.toolCallsObserved).toBeUndefined();
   });
 
   it("fails on turn.failed and on missing turn.completed", () => {

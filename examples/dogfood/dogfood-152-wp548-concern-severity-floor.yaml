@@ -1,0 +1,483 @@
+# Plain: when the judge notices something the rubric cannot express, it says so as a "concern",
+# and today ANY concern stops the run and waits for a human - a typo in a markdown file weighs
+# exactly as much as a shipped defect. After this run the judge states how much each concern
+# matters, only the ones that matter stop the run, and the small ones are still written down
+# where an operator can read them.
+# WP: WP-548 (an out-of-rubric judge concern needs a severity floor, F-219)
+# Ladder-rung: 0 (off-ladder - the remaining rung-5 half is WP-304, not agent-runnable; see WHY)
+# Thesis-KPI: judge precision (CLAUDE.md Agent-as-a-Judge in the inner loop, REQUIREMENTS JD-7
+#   judge guardrails), measured as the share of run-stopping escalations that name a real defect.
+#
+# THE MEASURED PREMISE (re-measured against HEAD at the dogfood-151 review, 2026-08-17, with
+#   `grep -n` over each cited file - not transcribed from the plan.md row, F-342/F-129):
+#   * `computeVerdict` rule 4 (`src/judge/verdict.ts:167`) reads
+#     `form.concerns.length > 0 && rubricFails.length === 0` and returns ESCALATE with
+#     `escalateClass: "out_of_rubric"`. `JudgeForm.concerns` is `string[]` (`src/types.ts:479`,
+#     mirrored `docs/spec/CONTRACTS.md:200` and the `.strict()` `JudgeFormSchema`,
+#     `src/schemas.ts:473`) - a concern carries TEXT and nothing else. There is no severity
+#     anywhere in the contract, so rule 4 cannot weigh one.
+#   * MEASURED HARM 1 - dogfood-120, `N-2` step 4: the judge form marked `N2-AC-1 pass: true`
+#     and 6/6 rubric items pass, and the verdict was ESCALATE over *"stray text `开启` before
+#     `PASS`; this is a minor documentation-quality defect but does not obscure the recorded
+#     result."* With `unattended` dropped by F-220 that typo parked a node for **3h 47m**.
+#     (`docs/reports/dogfood-120.md:146-156`.)
+#   * MEASURED HARM 2, and it is the OPPOSITE case - dogfood-151, `run-7faebdb5-…` step 1: the
+#     concern was *"The OpenTelemetry omission for unobserved counts is implemented in
+#     recordStepSpan, but the shown committed test changes do not include a focused assertion
+#     that the tool.calls attribute is absent."* That is a real goal requirement unmet, the run
+#     sealed FAILED for it, and human review agreed. A floor that silences this one is WORSE
+#     than no floor. (`docs/reports/dogfood-151.md`.)
+#   * These two strings are the whole design problem, and both are in this repo's own journals.
+#     AC-1 replays BOTH, verbatim, and demands opposite verdicts.
+#   * EVERY READER of `form.concerns` on HEAD, enumerated by `grep -rn "\.concerns\b" src` and
+#     not from memory (the F-376 rule, DOGFOODING section 8 - the dogfood-151 defect was an
+#     UNCHANGED reader the diff-scoped judge could not see). There are seven, and the goal below
+#     states a decision for each: `verdict.ts:108` (branch rule, text match) - `verdict.ts:167`
+#     (rule 4, THE site) - `harness.ts:91,231` (parse + carry) - `cli/trace.ts:308`
+#     (`issuesFound` count) - `cli/trace.ts:512` (`concern:` render) -
+#     `workflow/remediation.ts:73-75` (repair brief) - `workflow/agent-loop.ts:1166`
+#     (`standingConcerns` accumulation).
+#   * THE TRAP THAT MAKES THIS HARD, and it is a real path, not a hypothetical: filtering ONLY at
+#     rule 4 leaves the defect alive one altitude up. `standingConcerns` (`agent-loop.ts:1166`)
+#     accumulates every concern text and is handed to the completion review as
+#     `escalationConcerns` (`agent-loop.ts:1492,1533` and the WP-619 adjudication rubric row
+#     `escalation_concerns_adjudicated`, `src/judge/rubric.ts:87`). A minor concern that no
+#     longer escalates at rule 4 would still be adjudicated at the seal and CONDEMN the run
+#     there - which is exactly the path that sealed dogfood-151 FAILED. One policy, both sites.
+#   * PRECEDENT for the shape: `decideHealRollback` (`src/workflow/heal-rollback.ts`) is one pure
+#     exported decision shared by three heal triggers, and the dogfood-131 judge's
+#     `design_serves_overall_goal` explicitly approved that consolidation. Follow it.
+#   * PRE-EXISTING and explicitly out of scope: a concern raised ALONGSIDE a rubric failure is
+#     dropped today (rule 4 requires `rubricFails.length === 0`) - that is F-288/WP-599, a
+#     different WP. Do not widen rule 4's rubric guard here. The Python contract mirror
+#     (`packages/sdk-py/src/chikory/types.py`) is already drifted for other optional fields; do
+#     not widen this run to close it.
+#   * The suite this run must not break, MEASURED at the launch commit (F-342 - run
+#     `pnpm --filter @chikory/sdk exec vitest run` yourself and read its own tail): at this
+#     review it stood at 194 files / 1,560 tests (1,537 passed | 23 skipped) in 66.29s, and
+#     `test/judge/` + `test/workflow/` together stood at 25 files / 172 passed | 12 skipped
+#     (184) in 13.70s. BOTH measured in the same sitting.
+#   * The `unattended:` block below is not decoration (F-322).
+#
+# PRECEDENCE - stated because dogfood-149 died for want of this line (F-370). Two rules below
+#   can disagree about one concern. When they do:
+#   1. A concern the judge did NOT mark is BLOCKING. Every judge output written before this WP
+#      carries no mark, and so does any judge that ignores the new field. Silence is never
+#      permission.
+#   2. A concern below the floor must still be RECORDED and RENDERED. "Does not stop the run" is
+#      not "did not happen" - dropping it is judge-detects-but-does-not-gate (F-180) inverted.
+#   3. Where 1 and 2 collide with brevity, correctness wins: `concerns` stays `string[]` and the
+#      severity rides an ADDITIVE OPTIONAL sibling, never a retyping of the existing field.
+#   AC-1 drives rules 1 and 3 against inputs where they collide; AC-2 drives rule 2.
+#
+# Format: loose - the outcome, the one named field and the one named policy function are fixed,
+#   everything else is the executor's.
+#
+# Launch mode: RUN (single node - one contract addition, one policy, two call sites).
+#   CHIKORY_PREFLIGHT_ONLY=1 devbox run run-dogfood
+#   devbox run run-dogfood
+#
+# WHY THIS AND NOT THE LADDER RUNG (dogfood-151 review, 2026-08-17):
+#   `scripts/dogfood-progression.sh` reads ✅ PROGRESSING, so the default candidate is the current
+#   phase ladder rung (P3-rung-5, WP-530 section 7). Unchanged since dogfood-139: rung-5's
+#   remaining half (WP-304's OpenHands arm plus a corpus wide enough to separate 19 requirements
+#   at 95 percent confidence) is a quota-bound, multi-hour suite the OPERATOR runs by hand
+#   (dogfood-122's lesson: an LLM executor may not supervise it). No spec can headline it.
+#   Among runnable candidates WP-548 wins on three counts. (1) It is the judge pillar itself -
+#   Agent-as-a-Judge in the INNER loop is the thesis, and a gate that cannot tell a typo from a
+#   defect is a gate with one setting. (2) Its premise is not argued, it is two measured events
+#   from this campaign's own journals, on opposite sides of the line, which is the strongest AC
+#   oracle available anywhere in the backlog. (3) The mechanism it fixes is the one that
+#   condemned the run being reviewed, so the next run's own trace re-measures it (F-197).
+#   Rejected: WP-633 (F-378, one latent line - track-B, not plausibly failable); WP-606 (F-306 -
+#   re-measured live this review at 383 of 10,105 summary bytes = 3.8%, down from 16.2% and
+#   48.0% once the envelope strips landed, so the harm no longer carries a headline).
+
+name: dogfood-152-wp548-concern-severity-floor
+wp: WP-548
+
+goal: |
+  A judge concern that cannot stop the run must still be written down, and a judge concern that
+  should stop the run must still stop it — the loop has to be able to tell those apart.
+
+  Today it cannot. `computeVerdict` rule 4 (`src/judge/verdict.ts:167`) escalates on
+  `form.concerns.length > 0 && rubricFails.length === 0`, and `JudgeForm.concerns` is a bare
+  `string[]` (`src/types.ts:479`), so a cosmetic nit and a shipped defect are the same input.
+  Measured on this campaign's own runs: dogfood-120's `N-2` step 4 escalated — and with
+  `unattended` dropped, parked a node 3h 47m — over *"stray text `开启` before `PASS`; this is a
+  minor documentation-quality defect but does not obscure the recorded result."*, while
+  dogfood-151's step 1 escalated over a real unmet goal requirement and was right to.
+
+  Make this true. Add ONE additive optional field to `JudgeForm` — name it
+  `concernSeverities?: Array<"minor" | "blocking">`, INDEX-ALIGNED with `concerns` — in
+  `src/types.ts` and `docs/spec/CONTRACTS.md`, alongside the additive optionals already there.
+  `concerns` itself stays declared `string[]`; do NOT change its type and do NOT replace it with
+  a list of objects. The contract has a runtime mirror that REJECTS unknown keys —
+  `JudgeFormSchema` (`src/schemas.ts:469`) — so the field is not landed until that mirror accepts
+  it. The judge must also be ASKED for it: `src/judge/prompt.ts` declares the response schema the
+  judge fills (`:28-32`) and the instruction text that explains `concerns` (`:49`); a field no
+  prompt requests is a field no judge ever sets, and the feature would be inert on every real run.
+
+  Then write the floor ONCE, as a pure exported function in `src/judge/verdict.ts`:
+
+      export function blockingConcerns(form: JudgeForm): string[]
+
+  It returns, in `concerns` order, the texts at or above the floor. A concern whose severity is
+  `"minor"` is below it. **A concern with no matching severity — the array absent, or shorter
+  than `concerns` — is BLOCKING.** That default is the whole safety property: every judge output
+  written before this WP carries no mark, and a judge that ignores the new field must not be able
+  to silence itself.
+
+  Both call sites read that one function, and nothing else changes:
+
+  1. `computeVerdict` rule 4 (`src/judge/verdict.ts:167`) escalates only when
+     `blockingConcerns(form)` is non-empty, keeping `escalateClass: "out_of_rubric"` and naming
+     only the blocking texts in the rationale. Its `rubricFails.length === 0` guard is UNCHANGED
+     — a concern raised alongside a rubric failure is F-288/WP-599's problem, not this run's.
+  2. `standingConcerns` (`src/workflow/agent-loop.ts:1166`) accumulates only
+     `blockingConcerns(verdict.form)`. This is not optional polish: that list becomes the
+     completion review's `escalationConcerns` (`:1492`, `:1533`) and the WP-619 adjudication
+     rubric row `escalation_concerns_adjudicated`, which is precisely what sealed dogfood-151
+     FAILED. A minor concern filtered at rule 4 but still adjudicated at the seal has not been
+     fixed, it has been moved.
+
+  The other five readers of `form.concerns` keep today's behaviour, deliberately:
+  the BRANCH rule (`verdict.ts:108`) still scans every concern's text; `harness.ts:91,231` still
+  parses and carries the whole list; `cli/trace.ts:308` still counts every concern in
+  `issuesFound`; `cli/trace.ts:512` still renders every concern; `workflow/remediation.ts:73-75`
+  still lists every concern in the repair brief. Of these, `chikory trace` is the one an operator
+  reads: a concern below the floor must remain visible there and must be identifiable AS minor —
+  a filter that makes small findings disappear is F-180 (judge detects, does not gate) turned
+  inside out. The blocking rendering stays byte-identical.
+
+  Do not invent a third severity, a numeric score, or a per-rubric-item threshold — two levels
+  and one floor. Do not make the severity a function of the concern's text (a keyword scan over
+  "minor"/"typo"/"cosmetic" is a guess dressed as a policy, and the judge is the one who knows).
+  Do not touch the rubric list, the completion-review budget, the pacing governor, the CG-2
+  budget thresholds, the TaskSpec contract, or the Python mirror. TypeScript stays strict ESM
+  with named exports and no `any`.
+
+  Pin your work with tests that live in the repo, beside the files they cover. A behaviour proved
+  only by the acceptance checks that grade this run is not pinned at all (F-356), and a repo test
+  copied verbatim from a grading check inherits its blind spots (F-360) — cover something the
+  grading checks do not. The case the checks below deliberately leave open, and the one that
+  matters most: **the `standingConcerns` accumulation itself** — a minor concern must not reach
+  the completion review's adjudication list, and a blocking one must. Pin that against the real
+  accumulation path, not against a copy of it.
+
+  If an existing test pins a shape this change must alter, update its expectation and say plainly
+  in the step summary that you did — do not delete it, and do not weaken it into a tautology.
+
+  Verify your work with FAST checks only: the package typecheck (tsc with noEmit), eslint over the
+  files you touched, and vitest over only the test files you touched. Do NOT run the full vitest
+  suite inside a step — it does not fit the step time cap (F-345) — this run's declared regression
+  suite plus the judge-executed checks are the trusted full-suite verification whatever your
+  summary says.
+
+repos:
+  - url: /Users/nikitazolotarev/repos/chikory
+    writable: true
+
+# The SDK suite is both the surface this run edits and the gate it must not break.
+# MEASURE it at the launch commit rather than trusting this line (F-342, dogfood-140).
+regression_suite: pnpm --filter @chikory/sdk exec vitest run
+check_timeout_ms: 180000
+
+acceptance_criteria:
+  - id: AC-1
+    description: >
+      THIS CHECK OWNS ITS ORACLE (the verdict policy). It drives the REAL `blockingConcerns` and
+      the REAL `computeVerdict` — no mocks, no re-implementation — and replays the two concern
+      texts this campaign actually produced, verbatim, demanding OPPOSITE verdicts. It also
+      drives the two input families a naive floor gets wrong: a legacy form with no severities at
+      all, and a severities array SHORTER than `concerns`. Expected values are written into this
+      check, not read from a test file the executor authors.
+    check: |
+      cd packages/sdk-ts || exit 1
+      TARGET=test/judge/ac1-concern-severity-floor.generated.test.ts
+      rm -f "$TARGET"
+      cat > "$TARGET" <<'GENEOF'
+      import { describe, expect, test } from "vitest";
+
+      import { blockingConcerns, computeVerdict } from "../../src/judge/verdict.js";
+      import type { JudgeForm } from "../../src/types.js";
+
+      // Verbatim from this campaign's journals. dogfood-120 N-2 step 4 (parked a node 3h 47m):
+      const COSMETIC =
+        "stray text 开启 before PASS; this is a minor documentation-quality defect but does not " +
+        "obscure the recorded result.";
+      // dogfood-151 run-7faebdb5 step 1 (sealed the run FAILED, correctly):
+      const REAL_DEFECT =
+        "The OpenTelemetry omission for unobserved counts is implemented in recordStepSpan, but " +
+        "the shown committed test changes do not include a focused assertion that the tool.calls " +
+        "attribute is absent.";
+
+      function form(over: Partial<JudgeForm>): JudgeForm {
+        return {
+          criterionResults: [{ id: "AC-1", pass: true, justification: "ok" }],
+          rubricResults: [{ id: "tests_pass", pass: true, justification: "ok" }],
+          concerns: [],
+          ...over,
+        } as JudgeForm;
+      }
+
+      describe("AC-1 WP-548/F-219: the floor weighs a concern, and silence is never permission", () => {
+        test("the cosmetic concern, marked minor, does NOT stop the run", () => {
+          const f = form({ concerns: [COSMETIC], concernSeverities: ["minor"] } as Partial<JudgeForm>);
+          expect(
+            blockingConcerns(f),
+            "a concern the judge marked minor is below the floor; blockingConcerns must not " +
+              "return it. This is the dogfood-120 input that parked a node 3h 47m over a typo.",
+          ).toEqual([]);
+          expect(
+            computeVerdict(f, {}).kind,
+            "rule 4 must not escalate when every concern is below the floor",
+          ).toBe("PROCEED");
+        });
+
+        test("the real defect, marked blocking, still stops the run exactly as today", () => {
+          const f = form({ concerns: [REAL_DEFECT], concernSeverities: ["blocking"] } as Partial<JudgeForm>);
+          expect(blockingConcerns(f)).toEqual([REAL_DEFECT]);
+          const v = computeVerdict(f, {});
+          expect(
+            v.kind,
+            "a floor that silences dogfood-151's concern is worse than no floor: that concern " +
+              "named a real unmet goal requirement and human review upheld it.",
+          ).toBe("ESCALATE");
+          expect(v.escalateClass).toBe("out_of_rubric");
+        });
+
+        test("a concern with NO severity mark at all is blocking (every legacy judge output)", () => {
+          const f = form({ concerns: [COSMETIC] });
+          expect(
+            blockingConcerns(f),
+            "concernSeverities is absent on every judge output written before this WP and on " +
+              "any judge that ignores the field. Defaulting an unmarked concern to minor lets a " +
+              "judge silence itself by saying nothing.",
+          ).toEqual([COSMETIC]);
+          expect(computeVerdict(f, {}).kind).toBe("ESCALATE");
+        });
+
+        test("a severities array SHORTER than concerns fails safe per index", () => {
+          const f = form({
+            concerns: [COSMETIC, REAL_DEFECT],
+            concernSeverities: ["minor"],
+          } as Partial<JudgeForm>);
+          expect(
+            blockingConcerns(f),
+            "index 1 has no severity, so it is blocking; index 0 is marked minor and is not. " +
+              "Reading a ragged array as all-minor, or throwing on it, are both wrong.",
+          ).toEqual([REAL_DEFECT]);
+          expect(computeVerdict(f, {}).kind).toBe("ESCALATE");
+        });
+
+        test("trap: the BRANCH rule still reads every concern's text, minor included", () => {
+          const f = form({
+            concerns: ["consider a branch to explore the alternative layout"],
+            concernSeverities: ["blocking"],
+          } as Partial<JudgeForm>);
+          expect(
+            computeVerdict(f, {}).kind,
+            "rule ordering is unchanged: the branch rule runs before rule 4 and matches on text.",
+          ).toBe("BRANCH");
+        });
+
+        test("trap: rule 4's rubric guard is UNCHANGED (that is WP-599, not this run)", () => {
+          const f = form({
+            rubricResults: [{ id: "tests_pass", pass: false, justification: "red" }],
+            concerns: [REAL_DEFECT],
+            concernSeverities: ["blocking"],
+          } as Partial<JudgeForm>);
+          expect(
+            computeVerdict(f, {}).kind,
+            "a blocking concern alongside a rubric failure still does not reach rule 4. " +
+              "Widening that guard is F-288/WP-599's job and would silently change three " +
+              "other paths.",
+          ).not.toBe("ESCALATE");
+        });
+      });
+      GENEOF
+      pnpm exec vitest run "$TARGET"
+      ST=$?
+      rm -f "$TARGET"
+      if [ "$ST" -ne 0 ]; then
+        echo "AC-1 FAIL: the severity floor is missing, inverted, or unsafe on an unmarked/ragged input; or rule ordering / the rubric guard moved. vitest exited $ST"
+        exit 1
+      fi
+      echo "AC-1 OK: minor does not escalate, blocking does, unmarked and ragged fail safe, branch and rubric guard unchanged"
+
+  - id: AC-2
+    description: >
+      The anti-suppression check. A concern below the floor must still be VISIBLE to the operator
+      in `chikory trace`, identifiable as minor, and a blocking concern must render byte-identically
+      to today. Drives the REAL `renderStepDetail` over a real journal shape — the trap it rejects
+      is implementing the floor by deleting minor concerns from the form.
+    check: |
+      cd packages/sdk-ts || exit 1
+      TARGET=test/cli/ac2-minor-concern-visible.generated.test.ts
+      rm -f "$TARGET"
+      cat > "$TARGET" <<'GENEOF'
+      import { describe, expect, test } from "vitest";
+
+      import { renderStepDetail } from "../../src/cli/trace.js";
+      import type { JournalEntry } from "../../src/types.js";
+
+      const ref = { id: "a".repeat(64), kind: "diff" as const, bytes: 12, summary: "s" };
+      const COSMETIC = "stray text 开启 before PASS; a minor documentation-quality defect.";
+      const REAL_DEFECT = "the committed test changes do not assert the tool.calls attribute is absent.";
+
+      function entries(): JournalEntry[] {
+        const record = {
+          status: "SUCCESS" as const,
+          diffRef: ref,
+          summary: "did the work",
+          toolCalls: 2,
+          tokens: { input: 1000, output: 500 },
+          costUsd: 0.5,
+          costEstimated: false,
+          durationMs: 60_000,
+          transcriptRef: { ...ref, kind: "transcript" as const },
+        };
+        return [
+          {
+            idx: 0,
+            ts: "2026-08-18T00:00:00.000Z",
+            kind: "step",
+            payload: { stepIndex: 0, instruction: "do it", planItem: "do it", record },
+            costDeltaUsd: 0.5,
+            artifactRefs: [],
+          },
+          {
+            idx: 1,
+            ts: "2026-08-18T00:01:00.000Z",
+            kind: "judge",
+            payload: {
+              judgeIndex: 0,
+              atStep: 0,
+              form: {
+                criterionResults: [{ id: "AC-1", pass: true, justification: "ok" }],
+                rubricResults: [{ id: "tests_pass", pass: true, justification: "ok" }],
+                concerns: [COSMETIC, REAL_DEFECT],
+                concernSeverities: ["minor", "blocking"],
+              },
+              judgeModel: { provider: "openai-compat", model: "m" },
+              evidenceRefs: [],
+              costUsd: 0.01,
+            },
+            costDeltaUsd: 0.01,
+            artifactRefs: [],
+          },
+        ] as unknown as JournalEntry[];
+      }
+
+      describe("AC-2 WP-548/F-219: below the floor is not invisible", () => {
+        test("the minor concern is still rendered, and is identifiable as minor", () => {
+          const out = renderStepDetail(entries(), 1);
+          expect(
+            out.includes(COSMETIC),
+            "implementing the floor by dropping minor concerns from the form makes the judge's " +
+              "own observation unreadable to the operator. 'Does not stop the run' is not " +
+              "'did not happen' — that is F-180 inverted.",
+          ).toBe(true);
+          const line = out.split("\n").find((l) => l.includes(COSMETIC)) ?? "";
+          expect(
+            /minor/i.test(line),
+            "the operator must be able to tell WHY this one did not stop the run, on the line " +
+              "that carries it.",
+          ).toBe(true);
+        });
+
+        test("the blocking concern still renders byte-identically to today", () => {
+          const out = renderStepDetail(entries(), 1);
+          expect(
+            out.split("\n").some((l) => l === `  concern: ${REAL_DEFECT}`),
+            "a blocking concern's rendering is unchanged; only the minor case gains a marker.",
+          ).toBe(true);
+        });
+      });
+      GENEOF
+      pnpm exec vitest run "$TARGET"
+      ST=$?
+      rm -f "$TARGET"
+      if [ "$ST" -ne 0 ]; then
+        echo "AC-2 FAIL: a minor concern is invisible in chikory trace, is not identifiable as minor, or the blocking rendering changed. vitest exited $ST"
+        exit 1
+      fi
+      echo "AC-2 OK: minor concerns stay visible and marked; blocking rendering unchanged"
+
+  - id: AC-3
+    description: >
+      Contract, wiring and durability. The additive optional field exists on all three mirrors and
+      is actually REQUESTED of the judge; `concerns` is still `string[]`; the ONE policy function
+      is exported from `src/judge/verdict.ts` and is used at BOTH call sites — including the
+      `standingConcerns` accumulation, without which a minor concern still condemns at the seal;
+      and the committed `test/judge/` + `test/workflow/` trees are green AND larger.
+    check: |
+      cd packages/sdk-ts || exit 1
+      pnpm run typecheck || { echo "AC-3 FAIL: strict typecheck is red"; exit 1; }
+      pnpm exec eslint src/types.ts src/schemas.ts src/judge/verdict.ts src/judge/prompt.ts src/cli/trace.ts src/workflow/agent-loop.ts || { echo "AC-3 FAIL: eslint is red on the modules this WP touches"; exit 1; }
+
+      grep -qE '^[[:space:]]*concerns: string\[\];' src/types.ts || {
+        echo "AC-3 FAIL: trap — JudgeForm.concerns is no longer declared 'string[]' in src/types.ts. Severity belongs in an ADDITIVE OPTIONAL sibling, not in a retyping of this field."
+        exit 1
+      }
+      grep -qE 'concerns: string\[\];' ../../docs/spec/CONTRACTS.md || {
+        echo "AC-3 FAIL: trap — CONTRACTS.md no longer declares concerns as 'string[]'"
+        exit 1
+      }
+      for f in src/types.ts ../../docs/spec/CONTRACTS.md src/schemas.ts src/judge/prompt.ts; do
+        grep -q 'concernSeverities' "$f" || {
+          echo "AC-3 FAIL: $f does not carry concernSeverities. All three contract mirrors are entailed, and the PROMPT most of all — a field no prompt requests is a field no judge ever sets, and the floor would be inert on every real run."
+          exit 1
+        }
+      done
+      grep -qE 'export function blockingConcerns' src/judge/verdict.ts || {
+        echo "AC-3 FAIL: the floor is not a single exported policy in src/judge/verdict.ts. Two copies of a rule drift (the decideHealRollback precedent)."
+        exit 1
+      }
+      grep -q 'blockingConcerns' src/workflow/agent-loop.ts || {
+        echo "AC-3 FAIL: standingConcerns (agent-loop.ts:1166) does not go through blockingConcerns, so a minor concern still becomes an escalationConcern and still CONDEMNS at the completion review — the defect was moved, not fixed."
+        exit 1
+      }
+      grep -qE 'const branchConcern = form\.concerns\.find' src/judge/verdict.ts || {
+        echo "AC-3 FAIL: trap — the BRANCH rule no longer scans the full concerns list"
+        exit 1
+      }
+      grep -qE 'rubricFails\.length === 0' src/judge/verdict.ts || {
+        echo "AC-3 FAIL: trap — rule 4's rubric guard was changed; that is F-288/WP-599, out of scope here"
+        exit 1
+      }
+
+      OUT=$(pnpm exec vitest run test/judge/ test/workflow/ 2>&1)
+      ST=$?
+      echo "$OUT" | tail -30
+      if [ "$ST" -ne 0 ]; then
+        echo "AC-3 FAIL: the committed test/judge + test/workflow trees are RED (vitest exited $ST)"
+        exit 1
+      fi
+      N=$(echo "$OUT" | grep -oE "Tests +[0-9]+ passed" | grep -oE "[0-9]+" | head -1)
+      echo "committed test/judge + test/workflow tests: ${N:-UNPARSEABLE} (floor 175, measured baseline 172)"
+      if [ -z "$N" ]; then
+        echo "AC-3 FAIL: could not read a test count out of the vitest summary"
+        exit 1
+      fi
+      if [ "$N" -lt 175 ]; then
+        echo "AC-3 FAIL: durability floor not met — the committed trees did not grow by at least 3 tests. A behaviour proved only by the generated grading checks is not pinned at all (F-356), and the standingConcerns case is not covered by any check above."
+        exit 1
+      fi
+      echo "AC-3 OK: contract additive on all three mirrors + the prompt, one shared policy at both call sites, traps intact, committed trees green AND larger"
+
+budget_usd: 20
+max_steps: 6
+
+agent_classes:
+  executor: executor-default
+  judge: judge-default
+
+judge:
+  cadence: 1
+
+# F-322 (dogfood-135): without this, a converged out-of-rubric escalation parks overnight for a
+# human instead of auto-sealing.
+unattended:
+  escalation: seal_resumable_failed

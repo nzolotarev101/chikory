@@ -436,6 +436,8 @@ export const StepRecordSchema = z
     claimsComplete: z.boolean().optional(),
     /** F-228: raw provider-limit evidence, for `classifyLimitSignal`. */
     limitSignal: RawLimitSignalSchema.optional(),
+    /** WP-626: false when the executor cannot enumerate its tool calls. */
+    toolCallsObserved: z.boolean().optional(),
   })
   .strict();
 

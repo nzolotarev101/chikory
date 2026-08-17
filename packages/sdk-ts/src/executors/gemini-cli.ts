@@ -77,6 +77,7 @@ export function parseAgyOutput(prompt: string): (stdout: string) => ParsedCliRes
       summary,
       // Print mode does not enumerate tool calls; the diff is the evidence.
       toolCalls: 0,
+      toolCallsObserved: false,
       tokens,
       // Keyless Antigravity OAuth — no wire cost; token counts are estimated.
       costUsd: 0,
