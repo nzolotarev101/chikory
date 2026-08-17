@@ -7,10 +7,13 @@ import { describe, expect, it } from "vitest";
 
 import {
   computeVerdict,
+  MAX_VERDICT_RATIONALE_CHARS,
   RUBRIC_DESIGN_SERVES_OVERALL_GOAL,
+  RUBRIC_PRE_EXISTING_SUITE_GREEN,
   STANDING_RUBRIC,
 } from "../../src/judge/index.js";
 import type { JudgeForm } from "../../src/types.js";
+import { buildCompletionReviewBrief } from "../../src/workflow/completion-review.js";
 
 type Item = { id: string; pass: boolean; justification: string };
 
@@ -239,5 +242,48 @@ describe("computeVerdict (CONTRACTS.md §4)", () => {
       { "AC-1": [false, false], "AC-2": [true, false, true, false] },
     );
     expect(decision.kind).toBe("HALT");
+  });
+
+  it("WP-616 / F-328 (AC-2): computeVerdict rationale is bounded <= 4096 chars with 44 KB raw log and names failing rubric id, while buildCompletionReviewBrief on same form reaches raw log", () => {
+    const rawLog =
+      "LOG-HEAD: regression failure details\n" +
+      "x".repeat(44 * 1024) +
+      "\nLOG-TAIL: 1 test failed (AssertionError)";
+    const justification = `regression suite command \`npm test\` exited 1:\n${rawLog}`;
+    const testForm = form({
+      rubricResults: [
+        ...STANDING_RUBRIC.map((r) => pass(r.id)),
+        { id: RUBRIC_PRE_EXISTING_SUITE_GREEN, pass: false, justification },
+      ],
+    });
+
+    const decision = computeVerdict(testForm, {});
+    expect(decision.kind).toBe("PROCEED");
+    expect(decision.rationale.length).toBeLessThanOrEqual(MAX_VERDICT_RATIONALE_CHARS);
+    expect(decision.rationale).toContain(RUBRIC_PRE_EXISTING_SUITE_GREEN);
+    expect(decision.rationale).toContain("regression suite command `npm test` exited 1");
+    expect(decision.rationale).not.toContain(rawLog);
+
+    // The SAME form passed into buildCompletionReviewBrief must still reach the raw log
+    const brief = buildCompletionReviewBrief(testForm);
+    expect(brief.length).toBeLessThanOrEqual(2000);
+    expect(brief).toContain("LOG-TAIL: 1 test failed (AssertionError)");
+  });
+
+  it("bounded rationale: huge justification without newline colon is bounded to MAX_VERDICT_RATIONALE_CHARS", () => {
+    const hugeJustification = "a".repeat(10 * 1024);
+    const testForm = form({
+      rubricResults: [
+        ...STANDING_RUBRIC.filter((r) => r.id !== RUBRIC_DESIGN_SERVES_OVERALL_GOAL).map((r) =>
+          pass(r.id),
+        ),
+        { id: RUBRIC_DESIGN_SERVES_OVERALL_GOAL, pass: false, justification: hugeJustification },
+      ],
+    });
+
+    const decision = computeVerdict(testForm, {});
+    expect(decision.kind).toBe("PROCEED");
+    expect(decision.rationale.length).toBeLessThanOrEqual(MAX_VERDICT_RATIONALE_CHARS);
+    expect(decision.rationale).toContain(RUBRIC_DESIGN_SERVES_OVERALL_GOAL);
   });
 });

@@ -40,8 +40,28 @@ function trailingFails(history: boolean[]): number {
   return count;
 }
 
+/** Maximum length of a single rubric item's justification summary rendered into verdict rationale. */
+export const MAX_RATIONALE_ITEM_CHARS = 512;
+/** Maximum length of the complete verdict rationale string returned by computeVerdict. */
+export const MAX_VERDICT_RATIONALE_CHARS = 4096;
+
+function renderRubricItemSummary(id: string, justification: string): string {
+  const colonNewline = justification.indexOf(":\n");
+  const summary = colonNewline !== -1 ? justification.slice(0, colonNewline) : justification;
+  const bounded =
+    summary.length <= MAX_RATIONALE_ITEM_CHARS
+      ? summary
+      : `${summary.slice(0, MAX_RATIONALE_ITEM_CHARS - 1)}…`;
+  return `${id}: ${bounded}`;
+}
+
 function describe(items: Array<{ id: string; justification: string }>): string {
-  return items.map((i) => `${i.id}: ${i.justification}`).join("; ");
+  return items.map((i) => renderRubricItemSummary(i.id, i.justification)).join("; ");
+}
+
+function clampRationale(rationale: string, maxChars: number = MAX_VERDICT_RATIONALE_CHARS): string {
+  if (rationale.length <= maxChars) return rationale;
+  return `${rationale.slice(0, maxChars - 1)}…`;
 }
 
 /**
@@ -79,7 +99,9 @@ export function computeVerdict(
   if (destructiveFails.length > 0) {
     return {
       kind: "ROLLBACK",
-      rationale: `destructive rubric failure → ROLLBACK — ${describe(destructiveFails)}`,
+      rationale: clampRationale(
+        `destructive rubric failure → ROLLBACK — ${describe(destructiveFails)}`,
+      ),
     };
   }
 
@@ -87,7 +109,9 @@ export function computeVerdict(
   if (branchConcern !== undefined) {
     return {
       kind: "BRANCH",
-      rationale: `judge recommends BRANCH for alternative exploration — ${branchConcern}`,
+      rationale: clampRationale(
+        `judge recommends BRANCH for alternative exploration — ${branchConcern}`,
+      ),
     };
   }
 
@@ -116,9 +140,10 @@ export function computeVerdict(
   if (stuck.length > 0) {
     return {
       kind: "HALT",
-      rationale:
+      rationale: clampRationale(
         `criterion ${stuck.map((s) => s.id).join(", ")} failed ` +
         `${HALT_CONSECUTIVE_FAILS}+ consecutive verdicts → HALT (goal drift / budget-waste guard)`,
+      ),
     };
   }
 
@@ -131,15 +156,18 @@ export function computeVerdict(
     ? []
     : sequences.filter((s) => flipFlops(s.history) >= FLIP_FLOPS_TO_ESCALATE);
   if (flippers.length > 0) {
-    const reason =
+    const reason = clampRationale(
       `criterion ${flippers.map((s) => s.id).join(", ")} flip-flopped ` +
-      `${FLIP_FLOPS_TO_ESCALATE}+ times across verdicts — judge drift or unstable criterion (JD-7)`;
+      `${FLIP_FLOPS_TO_ESCALATE}+ times across verdicts — judge drift or unstable criterion (JD-7)`,
+    );
     return { kind: "ESCALATE", rationale: reason, escalateReason: reason, escalateClass: "judge_drift" };
   }
 
   // Rule 4 — concerns with no rubric basis → ESCALATE (ambiguity belongs to humans).
   if (form.concerns.length > 0 && rubricFails.length === 0) {
-    const reason = `judge raised concerns outside the rubric: ${form.concerns.join(" | ")}`;
+    const reason = clampRationale(
+      `judge raised concerns outside the rubric: ${form.concerns.join(" | ")}`,
+    );
     return { kind: "ESCALATE", rationale: reason, escalateReason: reason, escalateClass: "out_of_rubric" };
   }
 
@@ -166,6 +194,6 @@ export function computeVerdict(
     rubricFails.length > 0 ? `; non-destructive rubric failures: ${describe(rubricFails)}` : "";
   return {
     kind: "PROCEED",
-    rationale: `work in progress, no regressions — ${failNote}${rubricNote}`,
+    rationale: clampRationale(`work in progress, no regressions — ${failNote}${rubricNote}`),
   };
 }

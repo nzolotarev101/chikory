@@ -282,4 +282,260 @@ describe.skipIf(address === null)("standing rubric findings accumulation and ded
       "with every finding cleared the review carries no out-of-rubric concerns section at all",
     ).not.toContain(CONCERNS_HEADER);
   }, 180_000);
+
+  test("accumulating fewer findings than the bound keeps every one of them intact and emits NO elision notice", async () => {
+    const findingAlpha = `FEW-ALPHA-${randomUUID().slice(0, 8)}: small design issue`;
+    const findingBeta = `FEW-BETA-${randomUUID().slice(0, 8)}: another small design issue`;
+
+    // Pass 1: fails design_serves_overall_goal with findingAlpha
+    // Pass 2: fails design_serves_overall_goal with findingBeta
+    // Pass 3: clean pass (AC-1 passes) -> triggers completion review
+    const wire = await startFakeJudgeWire(
+      [
+        designFailForm(findingAlpha, false),
+        designFailForm(findingBeta, false),
+        judgeForm({ criteria: { "AC-1": true } }),
+      ],
+      {
+        reviewForms: [completionReviewForm()],
+      },
+    );
+    cleanups.push(() => wire.close());
+
+    const { repoUrl, runner } = await setup(wire);
+    const spec = makeJudgedSpec({ repoUrl, cadence: 1, maxSteps: 4 });
+
+    const handle = await runner.start(spec);
+    const report = await awaitTerminal(handle);
+
+    expect(report.status).toBe("SUCCESS");
+    expect(wire.reviewHits).toBe(1);
+
+    const reviewRequest = wire.requests.find((r) => r.includes(REVIEW_MARKER));
+    expect(reviewRequest, "no completion review pass fired").toBeDefined();
+    expect(reviewRequest!).toContain(CONCERNS_HEADER);
+    expect(reviewRequest!).toContain(findingAlpha);
+    expect(reviewRequest!).toContain(findingBeta);
+    expect(reviewRequest!).not.toContain("omitted");
+  }, 180_000);
+
+  test("settlement clears every accumulated justification for the settled id while preserving model-judged findings", async () => {
+    const modelFinding = `PRESERVED-DESIGN-${randomUUID().slice(0, 8)}: unhandled edge case in query parsing`;
+
+    // Pass 1: tests_pass fails (step-2.txt missing), design_serves_overall_goal fails
+    // Pass 2: tests_pass fails differently (step-3.txt missing), clean design
+    // Pass 3: tests_pass passes (settles), clean pass -> triggers completion review
+    const wire = await startFakeJudgeWire(
+      [
+        {
+          criterionResults: [
+            { id: "AC-A", pass: false, justification: "not met" },
+            { id: "AC-B", pass: false, justification: "not met" },
+          ],
+          rubricResults: STANDING_RUBRIC.map((r) =>
+            r.id === DESIGN_RUBRIC_ID
+              ? { id: r.id, pass: false, justification: modelFinding }
+              : { id: r.id, pass: true, justification: "ok" },
+          ),
+          concerns: [],
+        },
+        {
+          criterionResults: [
+            { id: "AC-A", pass: true, justification: "ok" },
+            { id: "AC-B", pass: false, justification: "not met" },
+          ],
+          rubricResults: STANDING_RUBRIC.map((r) => ({ id: r.id, pass: true, justification: "ok" })),
+          concerns: [],
+        },
+        {
+          criterionResults: [
+            { id: "AC-A", pass: true, justification: "ok" },
+            { id: "AC-B", pass: true, justification: "ok" },
+          ],
+          rubricResults: STANDING_RUBRIC.map((r) => ({ id: r.id, pass: true, justification: "ok" })),
+          concerns: [],
+        },
+      ],
+      {
+        reviewForms: [completionReviewForm()],
+      },
+    );
+    cleanups.push(() => wire.close());
+
+    const { repoUrl, runner } = await setup(wire);
+    const spec = makeJudgedSpec({
+      repoUrl,
+      cadence: 1,
+      maxSteps: 4,
+      acceptanceCriteria: [
+        { id: "AC-A", description: "step 2 file exists", check: "test -f step-2.txt" },
+        { id: "AC-B", description: "step 3 file exists", check: "test -f step-3.txt" },
+      ],
+    });
+
+    const handle = await runner.start(spec);
+    const report = await awaitTerminal(handle);
+
+    expect(report.status).toBe("SUCCESS");
+    expect(wire.reviewHits).toBe(1);
+
+    const reviewRequest = wire.requests.find((r) => r.includes(REVIEW_MARKER));
+    expect(reviewRequest, "no completion review pass fired").toBeDefined();
+    expect(reviewRequest!).toContain(CONCERNS_HEADER);
+    expect(reviewRequest!).toContain(modelFinding);
+    expect(reviewRequest!).not.toContain("judge-executed checks failed");
+    expect(reviewRequest!).not.toContain(RUBRIC_TESTS_PASS);
+  }, 180_000);
+
+  test("AC-1 live proof: 7-pass run accumulating 6 large distinct findings bounds concerns section <= 3072 chars, keeps oldest and newest intact with elision notice", async () => {
+    const makeFinding = (n: number) =>
+      `OBJ-${n}-HEAD: ${"y".repeat(900)} :OBJ-${n}-TAIL`;
+
+    // 7 passes: passes 1..6 fail criteria in rotating contiguous blocks of 2 + fail design with ~950 chars; pass 7 is clean
+    const wireForms: JudgeForm[] = [
+      // Pass 1: AC-A false, AC-B true, AC-C true
+      {
+        criterionResults: [
+          { id: "AC-A", pass: false, justification: "not met" },
+          { id: "AC-B", pass: true, justification: "ok" },
+          { id: "AC-C", pass: true, justification: "ok" },
+        ],
+        rubricResults: STANDING_RUBRIC.map((r) =>
+          r.id === DESIGN_RUBRIC_ID
+            ? { id: r.id, pass: false, justification: makeFinding(1) }
+            : { id: r.id, pass: true, justification: "ok" },
+        ),
+        concerns: [],
+      },
+      // Pass 2: AC-A false, AC-B true, AC-C true
+      {
+        criterionResults: [
+          { id: "AC-A", pass: false, justification: "not met" },
+          { id: "AC-B", pass: true, justification: "ok" },
+          { id: "AC-C", pass: true, justification: "ok" },
+        ],
+        rubricResults: STANDING_RUBRIC.map((r) =>
+          r.id === DESIGN_RUBRIC_ID
+            ? { id: r.id, pass: false, justification: makeFinding(2) }
+            : { id: r.id, pass: true, justification: "ok" },
+        ),
+        concerns: [],
+      },
+      // Pass 3: AC-A true, AC-B false, AC-C true
+      {
+        criterionResults: [
+          { id: "AC-A", pass: true, justification: "ok" },
+          { id: "AC-B", pass: false, justification: "not met" },
+          { id: "AC-C", pass: true, justification: "ok" },
+        ],
+        rubricResults: STANDING_RUBRIC.map((r) =>
+          r.id === DESIGN_RUBRIC_ID
+            ? { id: r.id, pass: false, justification: makeFinding(3) }
+            : { id: r.id, pass: true, justification: "ok" },
+        ),
+        concerns: [],
+      },
+      // Pass 4: AC-A true, AC-B false, AC-C true
+      {
+        criterionResults: [
+          { id: "AC-A", pass: true, justification: "ok" },
+          { id: "AC-B", pass: false, justification: "not met" },
+          { id: "AC-C", pass: true, justification: "ok" },
+        ],
+        rubricResults: STANDING_RUBRIC.map((r) =>
+          r.id === DESIGN_RUBRIC_ID
+            ? { id: r.id, pass: false, justification: makeFinding(4) }
+            : { id: r.id, pass: true, justification: "ok" },
+        ),
+        concerns: [],
+      },
+      // Pass 5: AC-A true, AC-B true, AC-C false
+      {
+        criterionResults: [
+          { id: "AC-A", pass: true, justification: "ok" },
+          { id: "AC-B", pass: true, justification: "ok" },
+          { id: "AC-C", pass: false, justification: "not met" },
+        ],
+        rubricResults: STANDING_RUBRIC.map((r) =>
+          r.id === DESIGN_RUBRIC_ID
+            ? { id: r.id, pass: false, justification: makeFinding(5) }
+            : { id: r.id, pass: true, justification: "ok" },
+        ),
+        concerns: [],
+      },
+      // Pass 6: AC-A true, AC-B true, AC-C false
+      {
+        criterionResults: [
+          { id: "AC-A", pass: true, justification: "ok" },
+          { id: "AC-B", pass: true, justification: "ok" },
+          { id: "AC-C", pass: false, justification: "not met" },
+        ],
+        rubricResults: STANDING_RUBRIC.map((r) =>
+          r.id === DESIGN_RUBRIC_ID
+            ? { id: r.id, pass: false, justification: makeFinding(6) }
+            : { id: r.id, pass: true, justification: "ok" },
+        ),
+        concerns: [],
+      },
+      // Pass 7: All criteria pass
+      {
+        criterionResults: [
+          { id: "AC-A", pass: true, justification: "ok" },
+          { id: "AC-B", pass: true, justification: "ok" },
+          { id: "AC-C", pass: true, justification: "ok" },
+        ],
+        rubricResults: STANDING_RUBRIC.map((r) => ({ id: r.id, pass: true, justification: "ok" })),
+        concerns: [],
+      },
+    ];
+
+    const wire = await startFakeJudgeWire(wireForms, {
+      reviewForms: [completionReviewForm()],
+    });
+    cleanups.push(() => wire.close());
+
+    const { repoUrl, runner } = await setup(wire);
+    const spec = makeJudgedSpec({
+      repoUrl,
+      cadence: 1,
+      maxSteps: 8,
+      acceptanceCriteria: [
+        { id: "AC-A", description: "criterion A" },
+        { id: "AC-B", description: "criterion B" },
+        { id: "AC-C", description: "criterion C" },
+      ],
+    });
+
+    const handle = await runner.start(spec);
+    const report = await awaitTerminal(handle);
+
+    expect(report.status).toBe("SUCCESS");
+    expect(wire.reviewHits).toBe(1);
+
+    const reviewRequest = wire.requests.find((r) => r.includes(REVIEW_MARKER));
+    expect(reviewRequest, "no completion review pass fired").toBeDefined();
+
+    // Extract out-of-rubric concerns section
+    const concernsIdx = reviewRequest!.indexOf(CONCERNS_HEADER);
+    expect(concernsIdx).not.toBe(-1);
+    const nextHeadingIdx = reviewRequest!.indexOf("\\n\\n##", concernsIdx);
+    const sectionRaw = nextHeadingIdx !== -1
+      ? reviewRequest!.slice(concernsIdx, nextHeadingIdx)
+      : reviewRequest!.slice(concernsIdx);
+
+    // Unescape JSON newlines to measure rendered characters
+    const section = sectionRaw.replace(/\\n/g, "\n");
+    expect(section.length).toBeLessThanOrEqual(3072);
+
+    // Both ends of OLDEST finding intact
+    expect(section).toContain("OBJ-1-HEAD");
+    expect(section).toContain("OBJ-1-TAIL");
+
+    // Both ends of NEWEST finding intact
+    expect(section).toContain("OBJ-6-HEAD");
+    expect(section).toContain("OBJ-6-TAIL");
+
+    // Explicit elision notice with count left out
+    expect(section).toMatch(/… \[\d+ findings? omitted\]/);
+  }, 180_000);
 });

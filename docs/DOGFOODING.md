@@ -5,14 +5,15 @@ This is the complete operating manual for executing Phase 2+ work packages
 task spec for a WP (every field explained), how to launch, supervise, and
 recover a run, and how to land the result as a normal PR.
 
-**Status (2026-08-16, bounded — update discipline: REPLACE this block, ≤15 lines;
+**Status (2026-08-17, bounded — update discipline: REPLACE this block, ≤15 lines;
 displaced prose moves verbatim to [`PLAN-HISTORY.md`](PLAN-HISTORY.md); per-run detail:
 `docs/reports/`; queue + course correction: `plan.md` §6/§7).**
-✅ **dogfood-148 / WP-630 (a second, DIFFERENT objection on the same rubric id must not silently replace the first) DELIVERED — sealed SUCCESS, landed** — `run-2213aec1-9683-4c6a-a496-b74f968975c1`, terminal **SUCCESS**, 1 step, $0.0808/$20.00, 6m 15s, AC 2/2 re-run green, harvest byte-IDENTICAL 2/2 (`docs/reports/dogfood-148.md`). `standingRubricFindings` is now `Map<string, string[]>` (`agent-loop.ts:272`): the fail branch appends a justification the id does not already hold (`:1149`, `:1154`), the accessor flattens (`:274`), settlement still deletes the whole id (`:1157`). All 5 traps rejected; settling rule, free-text concerns and both consumers byte-unchanged. Suite re-measured by hand: **191 files / 1,526 tests**; `test/runner/` 394 → **397**.
-⚠️ **The judge caught nothing and the run still shipped 2 defects** — both found by human review, neither by its 10 rubric evaluations. The rubric reads the diff; nothing in it asks "is this claim tested?" or "what is the growth bound of this structure?".
-🟠 **F-365 → WP-631, ARMED as half the dogfood-149 headline**: WP-630's accumulator is UNBOUNDED — only `tests_pass` is ever cleared, and every distinct justification renders as its own uncapped completion-review bullet (`src/judge/prompt.ts:227`). One model-judged id can contribute ~30 bullets (8–12 KB) over a 30-step run.
-🟡 **F-366 HAND-FIXED**: the delivery's own test file advertised settlement-clears-all coverage that no test in the repo provided — closed at `test/runner/standing-findings-overwrite-live.test.ts:213`, probe-verified RED against a clear-only-the-latest mutation. 🟢 F-368 hand-fixed (2 rationale comment lines restored, `agent-loop.ts:268`); 🟢 F-367 track-B (the spec's full-suite baseline was 6 tests stale — it came from the previous review's HEAD, not the launch commit).
-**NEXT HEADLINE = WP-616 + WP-631 (dogfood-149): no string on the judge evidence path is unbounded at the point something renders it** (F-328 + F-365) — one design principle, two sites, both premises re-measured live on this tree (`examples/dogfood/dogfood-149-wp616-wp631-bounded-judge-strings.yaml`). Ladder unchanged at `rung=4` — rung-5's remaining half (`brownfield-001` gold-patch, operator-by-hand) still cannot headline.
+🔴 **dogfood-149 / WP-616 + WP-631 (no string on the judge evidence path is unbounded where something renders it) DELIVERED and LANDED — but the run sealed FAILED** — `branch-run-f57c3f17-a3d7-4273-b62f-82beb8c63a03-step-5-770afe4b` (a `chikory branch` fork of `run-f57c3f17-…` at checkpoint `@5`), terminal **FAILED**, 3 steps, $0.2759/$20.00, 10m 48s, AC **3/3** re-run green, harvest byte-IDENTICAL 6/6 (`docs/reports/dogfood-149.md`). Verdict rationale bounded at all five `computeVerdict` branches (`verdict.ts:62`, ≤4096) with per-item summaries ≤512 (`:48`); completion-review concerns bounded at the render site (`prompt.ts:243`, cap 3072) keeping oldest+newest in full plus `- … [N findings omitted]`. Suite re-measured by hand: **191 files / 1,540 tests**; `test/runner/` 397 → **400**.
+✅ **The judge worked, and the gate held** — 1 genuine true-positive pre-land (step 0 left two input shapes unbounded; the executor's own step-2 diff confirms it), and an unresolved objection on a converged step produced a FAILED seal instead of a green one. `unattended: seal_resumable_failed` turned that into a terminal state rather than an overnight park (F-322 honoured).
+🔴 **F-370 — the run failed on its own goal, not on the code.** The goal demanded an absolute character bound AND untruncated endpoints; those collide when the two endpoints alone exceed the cap, and no AC ever built that input. **Authoring rule (§8): a goal that asserts an absolute invariant AND a preservation invariant must say which wins at their boundary, and one AC must drive an input where they actually collide.** Precedence settled in-code (`prompt.ts:236-241`): **bounded wins**.
+🔴 **F-369 → WP-632**: an empty-diff step scored `design_serves_overall_goal` vacuously **PASS** (*"no design changes in the supplied diff"*) between two real FAILs, and bought 2 judge passes for **36.2% of run spend**. 🟠 **F-371 HAND-FIXED**: a clamped finding was truncated silently — `clampFinding` (`prompt.ts:210-224`) now states the chars removed; tests 13 → **15**, probe-verified RED.
+🟡 **F-372 — two launch-discipline defects (§7):** the spec was **edited and launched uncommitted** (`wp:` narrowed one minute before launch), so the run is not reproducible from any commit; and `chikory branch` leaves the parent journal — plus any abandoned child — at `RUNNING` forever, so `chikory status` showed **2 phantom live runs**.
+**NEXT HEADLINE = WP-632 (dogfood-150): a step that changed nothing must not hand the reviewer a fresh clean bill of health** (F-369, absorbs WP-608's residue F-355). Ladder unchanged at `rung=0` — P3 rung-5's remaining half (`brownfield-001`/WP-304) is operator-by-hand and still cannot headline.
 
 Related docs: [`docs/spec/task-spec.md`](spec/task-spec.md) (schema
 reference) · [`docs/TASK-PROTOCOL.md`](TASK-PROTOCOL.md) (WP etiquette, §7 is
@@ -939,7 +940,73 @@ broken (a false-green, not a follow-on fix).
   judge pass plus an `⚠ ESCALATE` seal means the gate was skipped — re-run that
   suite by hand before trusting the green.
 
+- **A dead run still says `RUNNING`, and the run that did the work is a
+  `branch-run-…` id** (F-372, dogfood-149). `chikory branch <run-id>@<step>` forks
+  a run at a committed checkpoint into a NEW child journal and **leaves the
+  parent's status at `RUNNING` forever** — nothing ever seals it. A child that is
+  created and then abandoned does the same. After dogfood-149's recovery,
+  `chikory status` listed **three** rows for one run: the parent `RUNNING` (dead
+  5 hours), an abandoned child `RUNNING` (dead 60 seconds after creation), and the
+  child that actually sealed `FAILED`. Nothing is lost — the audit trail is intact
+  and the child journal carries a `branch_fork` entry naming
+  `parentRunId`/`forkCheckpointId`/`forkCommit` — but **do not read `chikory
+  status` as a liveness view after a branch**. To find the run that holds the
+  work, sort by `ended_at`, not by status, and expect its id to start with
+  `branch-run-`. `/dogfood-review` phase 0 must be pointed at that child id, not
+  the parent: `dogfood-open.sh <branch-run-id>`.
+
+- **Commit the spec before you launch it — including a one-word edit** (F-372,
+  dogfood-149). The workspace clones HEAD, but the TaskSpec is read from the HOST
+  path at launch, so an uncommitted spec edit silently takes effect while nothing
+  in the repo records it. dogfood-149's spec was edited at 15:03 (`wp:
+  WP-616+WP-631` → `wp: WP-616`) and launched at 15:04; the persisted `task_json`
+  carries `WP-616` while the spec's header, goal, and README row all still
+  describe both work packages, and **the run is reproducible from no commit at
+  all**. This is the same move as editing a plan row to appease the stale-spec
+  guard, one file over: if the guard or a precheck objects, re-measure the premise
+  and launch with `CHIKORY_ALLOW_STALE_SPEC=1`, do not quietly reshape the spec.
+
 ## 8. Known P1 limitations (so you don't fight them)
+
+- **🔴 A GOAL THAT ASSERTS TWO INVARIANTS MUST SAY WHICH ONE WINS AT THEIR
+  BOUNDARY — and one AC must drive an input where they actually collide**
+  (F-370, dogfood-149). This is a spec-authoring rule, not a code limitation, and
+  it cost a whole run. dogfood-149's goal said *"the accumulation handed to the
+  completion review is BOUNDED"* (absolute) **and** *"when entries are left out,
+  the oldest and the newest findings survive INTACT — both, in full, not
+  truncated"* (preservation). When the two endpoint findings alone exceed the
+  budget, **no program satisfies both**. The judge read the goal correctly and
+  upheld each half in turn against two successive deliveries; the executor
+  oscillated between them; the run sealed FAILED with **3/3 acceptance criteria
+  green and the declared suite green**. The oracle never caught it because AC-1
+  used six ~950-char findings against a 3072-char cap — the endpoints total
+  ~1,900 chars, so the collision shape was **never constructed by any check**.
+  Two rules follow. (1) When a goal states an absolute invariant, name the
+  invariant that yields at the boundary, in the goal, in one sentence. (2) The
+  input families an AC must enumerate include the **size relation between one
+  input and the budget**, not just the input COUNT — a bound is a two-variable
+  property and an AC that varies only one of them proves nothing about the other.
+  Sibling of the older rule that an AC must not contradict its goal: here the ACs
+  agreed with each other and the *goal* contradicted itself, which beats both.
+  Precedence for this specific function is now settled in code
+  (`packages/sdk-ts/src/judge/prompt.ts:236-241`): **bounded wins**, and the clamp
+  announces the characters it removed (`clampFinding`, `:210-224`) so a shortened
+  finding is never silent.
+
+- **🔴 An empty-diff step is judged as if it were a delivery, and scores
+  model-judged rubric rows vacuously green** (F-369 → WP-632, dogfood-149).
+  `decideQuestionStep` (`packages/sdk-ts/src/workflow/question-step.ts:55-65`)
+  classifies an empty diff whose summary ASKS for approval; an empty diff whose
+  summary ASSERTS completion is not classified at all and goes to the judge as a
+  normal step. The judge then answers model-judged rows from an absent diff —
+  MEASURED: *"There are no design changes in the supplied diff to judge
+  adversely"* scored `design_serves_overall_goal` **PASS** one pass after that row
+  FAILED and one pass before it FAILED again, for the same defect — and the step
+  bought 2 judge passes for **$0.09997, 36.2% of run spend**, for zero bytes.
+  Until WP-632 lands: **when reading a trace, treat any judge pass over a 0-byte
+  diff as carrying no information about the model-judged rows**, and check the
+  passes either side of it before believing an objection was resolved. Nothing is
+  lost today only because `standingRubricFindings` never clears a model-judged id.
 
 - **✅ CLOSED — a second, DIFFERENT objection on the same rubric id no longer
   silently replaces the first** (F-364 → WP-630, landed in the dogfood-148 review,
@@ -952,9 +1019,14 @@ broken (a false-green, not a follow-on fix).
   `packages/sdk-ts/test/runner/standing-findings-overwrite-live.test.ts:213`. This closes
   the last member of the objection-dies-without-adjudication family (F-288, F-295, F-361).
 
-- **🟠 Standing findings accumulate WITHOUT A BOUND, and every entry becomes its own
-  completion-review bullet** (F-365 → WP-631, ARMED as half the dogfood-149 headline,
-  2026-08-16 — introduced by WP-630 above). Only `tests_pass` is ever cleared
+- **✅ CLOSED — standing findings no longer accumulate without a bound** (F-365 →
+  WP-631, landed in the dogfood-149 review). The bound lives at the RENDER site
+  (`renderCompletionReviewConcerns`, `packages/sdk-ts/src/judge/prompt.ts:243`, cap
+  3072), not at the accumulator, so no evidence is destroyed: oldest and newest
+  survive in full, middle findings are greedily re-admitted while they fit, and
+  `- … [N findings omitted]` states the count. Verified over 4,000 randomised
+  shapes at the dogfood-149 review — zero bound violations. The description below
+  is the defect as it stood. Only `tests_pass` is ever cleared
   (`isRubricItemSettledAgainstWholeDelivery`, `packages/sdk-ts/src/judge/rubric.ts:134-147`
   returns `false` for the other 5 `STANDING_RUBRIC` rows), and each accumulated string is
   rendered one-to-one with no cap and no near-duplicate collapse

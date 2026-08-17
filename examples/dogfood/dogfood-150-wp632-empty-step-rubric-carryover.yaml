@@ -1,0 +1,777 @@
+# Plain: when the agent takes a turn and changes nothing, the reviewer currently treats that
+# empty turn like a real delivery - it re-scores the open design questions from a blank page,
+# writes down "looks fine, there is nothing here to object to", and burns one of the two chances
+# the run gets to fix what the reviewer already complained about. After this run an empty turn
+# keeps the previous answer to every question that can only be answered by looking at changed
+# code, keeps the freshly measured answer to every question a machine re-derives from the whole
+# repository, and costs the run none of its repair chances.
+# WP: WP-632 (an empty-diff step must not vacuously green a model-judged rubric row, nor spend
+#   the one bounded repair attempt, F-369)
+# Ladder-rung: 0 (off-ladder - the remaining rung-5 half is WP-304, not agent-runnable; see WHY)
+# Thesis-KPI: judge reliability (CLAUDE.md: "Agent-as-a-Judge runs in the inner loop"), measured
+#   as the per-step rubric record staying a truthful account of which objections are still open.
+#
+# THE MEASURED PREMISE (measured on `branch-run-f57c3f17-a3d7-4273-b62f-82beb8c63a03-step-5-770afe4b`,
+#   dogfood-149, 2026-08-17 - do not re-litigate):
+#   * `isCompletionMilestone` (`src/workflow/judge-trigger.ts:4-9`) fires a judge pass on ANY
+#     SUCCESS step with `diffRef.bytes === 0`, regardless of cadence. `decideQuestionStep`
+#     (`src/workflow/question-step.ts:55-65`) intercepts only an empty diff whose summary ASKS
+#     for approval; an empty diff whose summary ASSERTS completion is not classified and reaches
+#     `activities.judgeStep` (`src/workflow/agent-loop.ts:1123`) as an ordinary step.
+#   * MEASURED HARM 1 - a vacuous green. On the run above, journal idx 10 scored
+#     `design_serves_overall_goal` PASS with the justification "There are no design changes in
+#     the supplied diff to judge adversely", and `scope_matches_instruction` PASS with "There are
+#     no changes in the supplied workspace diff". That same row FAILED at idx 3 and FAILED again
+#     at idx 17, for the same function and the same defect.
+#   * MEASURED HARM 2 - a spent repair grant, and this is the one that changes a terminal state.
+#     `acceptanceCriteriaMet` was true on that empty step, so it entered the completion-review
+#     branch (`src/workflow/agent-loop.ts:1266`), incremented `completionReviewAttempts` 0 -> 1
+#     (`:1283`) and consumed completion review #1 on a delivery it had not touched. At the NEXT
+#     step `canRetry` (`:1305-1313`) required `reviewAttemptsUsed < MAX_COMPLETION_REVIEWS` (2,
+#     `src/workflow/completion-review.ts:16`); attempts were already 2, so the run sealed FAILED
+#     with one real repair instead of two.
+#   * Cost of that one step: 0 bytes, 0 tool calls, 100.4 s, and 2 judge passes at
+#     $0.05127 + $0.0487 = $0.09997 - **36.2% of the run's $0.2759**.
+#   * `isRubricItemSettledAgainstWholeDelivery` (`src/judge/rubric.ts:134-147`) ALREADY draws the
+#     line this fix needs: `tests_pass` backed by declared `check` commands is re-derived against
+#     the WHOLE tree every pass and is authoritative on an empty step; every other STANDING_RUBRIC
+#     row is answered from the incremental diff and is not. Reuse it; do not invent a second
+#     classification.
+#   * The suite this run must not break, MEASURED at the launch commit (F-342 - run
+#     `pnpm --filter @chikory/sdk exec vitest run` yourself and read its own tail): at this review
+#     it stood at 191 files / 1,540 tests (1,517 passed | 23 skipped) in 65.12s, and
+#     `test/runner/` alone stood at 56 files / 400 tests. BOTH numbers measured in the same
+#     sitting at the same commit (F-367).
+#   * The `unattended:` block below is not decoration (F-322).
+#
+# PRECEDENCE - stated here because dogfood-149 died for want of this line (F-370). Two rules in
+#   this goal can disagree about one rubric row on one pass. When they do:
+#   1. A row `isRubricItemSettledAgainstWholeDelivery` calls settled keeps THIS pass's freshly
+#      derived answer. Machine evidence beats a remembered answer, always.
+#   2. Otherwise the previous pass's answer for that row wins on an empty-diff pass.
+#   3. If there is NO previous answer for that row, this pass's answer stands. Nothing is
+#      invented to fill a gap.
+#   AC-1 and AC-3 drive rules 1, 2 and 3 against inputs where they actually collide.
+#
+# Format: loose - the outcome and the named observables are fixed, the mechanism is the executor.
+#
+# Launch mode: RUN (single node - one decision, one call site).
+#   CHIKORY_PREFLIGHT_ONLY=1 devbox run run-dogfood
+#   devbox run run-dogfood
+#
+# WHY THIS AND NOT THE LADDER RUNG (dogfood-149 review, 2026-08-17):
+#   `scripts/dogfood-progression.sh` reads STALLED, so the binding rule wants the current phase
+#   ladder rung (P3-rung-5, WP-530 section 7) as the next headline. Unchanged since dogfood-139:
+#   rung-5's remaining half (WP-304's OpenHands arm plus a corpus wide enough to separate 19
+#   requirements at 95 percent confidence) is a quota-bound, multi-hour suite the OPERATOR runs
+#   by hand (dogfood-122's lesson: an LLM executor may not supervise it). No spec can headline it.
+#   Among runnable candidates WP-632 wins on three counts. (1) It is red loop-integrity found
+#   LIVE by the run this spec follows, with both harms measured on that run's own journal. (2) Its
+#   second half changes a terminal state - dogfood-149 would have had a second repair step - so it
+#   is worth a run, not a hand-fix. (3) It closes the residue WP-608 explicitly left open (F-355,
+#   the STALL half of executor passivity) rather than opening new ground. WP-589 (F-264) remains
+#   the highest-billed open seam but still needs an operator decision on `chikory-bench compare`
+#   inputs; WP-610 (F-317) is smaller and unchanged.
+#
+# Designed traps - the plausible-but-wrong deliveries the acceptance criteria exist to reject:
+#   A. **Skip the judge pass entirely when the diff is empty.** The acceptance criteria are
+#      re-derived from check exit codes against the WHOLE tree (`src/judge/evidence.ts`), so they
+#      stay meaningful on an empty step; suppressing the pass hides a criterion that went red for
+#      reasons outside the step, and hides the machine-derived `tests_pass` too. AC-1 asserts the
+#      empty step still journals a verdict AND that its `tests_pass` row carries the machine
+#      justification produced at THAT pass.
+#   B. **Carry EVERYTHING forward.** That freezes `tests_pass` at a stale answer even though the
+#      checks were just re-run against the whole tree. AC-1 asserts the settled row is fresh while
+#      the model-judged row is carried - the two rows must disagree about which pass they came from.
+#   C. **Make the model-judged row sticky forever**, on every pass rather than only on empty ones.
+#      A later NON-empty step that genuinely fixes the design must be able to turn the row green.
+#      AC-3 drives a real diff after a carried-forward FAIL and requires the fresh PASS to stand.
+#   D. **Invent an answer when there is no previous one.** An empty FIRST step has nothing to
+#      carry; fabricating a FAIL would condemn a run that has done nothing wrong. AC-3 drives an
+#      empty step 1 and requires this pass's own answer to be journaled unchanged.
+#   E. **Stop the empty step from reaching the completion review at all**, or raise
+#      `MAX_COMPLETION_REVIEWS`. Both buy the second repair by changing the budget instead of by
+#      spending it correctly. AC-2 asserts `MAX_COMPLETION_REVIEWS` is still literally 2, and
+#      requires the SUCCESS to come from a real repair step the executor actually took.
+#   F. **Touch `decideQuestionStep` or `STANDING_APPROVAL_ANSWER`.** WP-608's ask path is out of
+#      scope and its behaviour must not move. AC-3 greps its exact classifier lines byte-unchanged
+#      and runs the whole committed `test/runner/` tree, which pins the ask path live.
+#
+# NOT IN SCOPE: which rubric ids exist; `isRubricItemSettledAgainstWholeDelivery`'s own rule (reuse
+#   it, do not change which ids it settles); the free-text `standingConcerns` channel; the WP-608
+#   ask classifier; `MAX_COMPLETION_REVIEWS`; the judge charter text; the TaskSpec contract; chain
+#   semantics; the bounded-render caps WP-616/WP-631 just landed.
+
+name: dogfood-150-wp632-empty-step-rubric-carryover
+wp: WP-632
+goal: >
+  A step that changed nothing must not hand the judge's record a fresh clean bill of health, and
+  must not spend one of the run's two chances to repair a finding.
+
+  Site 1 - the vacuous green. `isCompletionMilestone` (`src/workflow/judge-trigger.ts:4-9`) fires a
+  judge pass on any SUCCESS step with a zero-byte diff, and that pass answers every rubric row from
+  an absent diff: on `branch-run-f57c3f17-a3d7-4273-b62f-82beb8c63a03-step-5-770afe4b` it scored
+  `design_serves_overall_goal` PASS with "There are no design changes in the supplied diff to judge
+  adversely", between two passes that FAILED the same row for the same defect. Make this true: on a
+  judge pass whose step diff is zero bytes, a rubric row that `isRubricItemSettledAgainstWholeDelivery`
+  (`src/judge/rubric.ts:134-147`) does NOT call settled is recorded with the previous pass's answer
+  for that row - the same pass/fail AND the same justification text - while a row it DOES call
+  settled keeps the answer derived at this pass. A row with no previous answer keeps this pass's
+  answer. Whatever the loop records must be what everything downstream sees: the journaled verdict,
+  `standingRubricFindings`, `computeVerdict`, and `chikory trace` read one form, not two.
+
+  Site 2 - the spent repair grant. That same empty step had all acceptance criteria passing, so it
+  entered the completion-review branch (`src/workflow/agent-loop.ts:1266`) and incremented
+  `completionReviewAttempts` (`:1283`), consuming one of the two grants `MAX_COMPLETION_REVIEWS`
+  (`src/workflow/completion-review.ts:16`) allows. The next step's `canRetry` (`:1305-1313`) then
+  refused the second repair and the run sealed FAILED. Make this true: a zero-byte step does not
+  consume a completion-review grant, so a run whose executor stalls once still gets the repair it
+  was promised. Do not buy this by raising `MAX_COMPLETION_REVIEWS` and do not buy it by preventing
+  the empty step from being judged - the criteria answered at that pass are real.
+
+  How you do it is yours - a pure decision beside `decideQuestionStep`/`decideRemediation`, a
+  reconciliation inside the judge activity, or something else - pick ONE mechanism and say in your
+  step summary which consumers you re-verified. The workflow side stays deterministic: no clocks,
+  no randomness, no I/O outside activities, and the decision must be replay-safe.
+
+  Nothing else changes. `decideQuestionStep` and `STANDING_APPROVAL_ANSWER` (WP-608's ask path),
+  `isRubricItemSettledAgainstWholeDelivery`'s own settling rule, `MAX_COMPLETION_REVIEWS`, the
+  free-text `standingConcerns` array, the rubric item set, the judge charter text, the TaskSpec
+  contract, and the WP-616/WP-631 render caps are untouched. TypeScript stays strict ESM with named
+  exports and no `any`.
+
+  Pin your work with tests that live in the repo, under `test/runner/` and/or `test/workflow/`,
+  beside the files they cover. A behaviour proved only by the acceptance checks that grade this run
+  is not pinned at all (F-356), and a repo test copied verbatim from a grading check inherits its
+  blind spots (F-360) - cover something the grading checks do not. Two candidates the checks below
+  deliberately leave open: (1) a run where NO step is empty must journal byte-identical verdicts to
+  today; (2) an empty step whose summary ASKS for approval must still take WP-608's classifier path
+  and buy zero judge passes, not the new one.
+
+  If an existing test pins a shape this change must alter, update its expectation and say plainly in
+  the step summary that you did - do not delete it, and do not weaken it into a tautology.
+
+  Verify your work with FAST checks only: the package typecheck (tsc with noEmit), eslint over the
+  files you touched, and vitest over only the test files you touched. Do NOT run the full vitest
+  suite inside a step - it does not fit the step time cap (F-345) - this run's declared regression
+  suite plus the judge-executed checks are the trusted full-suite verification whatever your summary
+  says.
+
+repos:
+  - url: /Users/nikitazolotarev/repos/chikory
+    writable: true
+
+# The SDK suite is both the surface this run edits and the gate it must not break.
+# MEASURE it at the launch commit rather than trusting this line (F-342, dogfood-140).
+regression_suite: pnpm --filter @chikory/sdk exec vitest run
+check_timeout_ms: 180000
+
+acceptance_criteria:
+  - id: AC-1
+    description: >
+      THIS CHECK OWNS ITS ORACLE (site 1). It drives the REAL agent loop end to end - real Temporal
+      dev server, real workflow bundle, real judge pass sequencing, scripted executor, fake judge
+      wire - over a 3-step run whose SECOND step reports a zero-byte diff. The scripted judge FAILS
+      `design_serves_overall_goal` at pass 1 with a distinctive justification, then PASSES it at
+      pass 2 (the empty step) with a different distinctive justification. It then reads the
+      JOURNALED verdict for the empty step and requires BOTH halves of the precedence rule at once:
+      the model-judged row must carry pass 1's answer forward - `pass: false` AND pass 1's exact
+      justification text, NOT pass 2's - while `tests_pass`, which the spec's declared `check`
+      makes machine-settled, must carry the justification the harness derived at THIS pass. Trap A
+      (skip the pass) fails because no verdict is journaled at all; trap B (carry everything) fails
+      because `tests_pass` would carry stale text.
+    check: |
+      cd packages/sdk-ts || exit 1
+      TARGET=test/runner/ac1-empty-step-carryover.generated.test.ts
+      rm -f "$TARGET"
+      cat > "$TARGET" <<'GENEOF'
+      import { randomUUID } from "node:crypto";
+      import { mkdtemp, rm } from "node:fs/promises";
+      import { tmpdir } from "node:os";
+      import { join } from "node:path";
+
+      import { afterEach, describe, expect, inject, test } from "vitest";
+
+      import {
+        createRunnerWorker,
+        createTemporalRunner,
+        Journal,
+        journalPath,
+        RUBRIC_DESIGN_SERVES_OVERALL_GOAL,
+        RUBRIC_TESTS_PASS,
+        STANDING_RUBRIC,
+        type JudgeForm,
+        type RunStatusReport,
+      } from "../../src/index.js";
+      import {
+        completionReviewForm,
+        initSourceRepo,
+        makeJudgedSpec,
+        scriptedRegistry,
+        startFakeJudgeWire,
+        TERMINAL_STATUSES,
+        waitFor,
+      } from "./helpers.js";
+
+      const address = inject("temporalAddress");
+      const bundlePath = inject("workflowBundlePath");
+
+      const DESIGN_FAIL_AT_PASS_1 =
+        "PASS1-DESIGN-OBJECTION the renderer leaks its own budget across call sites";
+      const DESIGN_PASS_AT_PASS_2 =
+        "PASS2-VACUOUS-GREEN there are no design changes in the supplied diff to judge adversely";
+
+      function formFor(passIndex: number): JudgeForm {
+        const designPasses = passIndex >= 1;
+        return {
+          criterionResults: [
+            { id: "AC-A", pass: true, justification: "scripted judge: confirmed" },
+          ],
+          rubricResults: STANDING_RUBRIC.map((r) =>
+            r.id === RUBRIC_DESIGN_SERVES_OVERALL_GOAL
+              ? {
+                  id: r.id,
+                  pass: designPasses,
+                  justification: designPasses ? DESIGN_PASS_AT_PASS_2 : DESIGN_FAIL_AT_PASS_1,
+                }
+              : { id: r.id, pass: true, justification: "scripted judge: confirmed" },
+          ),
+          concerns: [],
+        };
+      }
+
+      describe.skipIf(address === null)(
+        "AC-1 WP-632/F-369: an empty-diff judge pass carries the model-judged row forward and keeps the settled row fresh",
+        () => {
+          const cleanups: Array<() => Promise<void>> = [];
+          afterEach(async () => {
+            while (cleanups.length > 0) await cleanups.pop()!();
+          });
+
+          test("the Temporal substrate is present — this AC must never pass vacuously", () => {
+            expect(address, "temporalAddress was not provided").not.toBeNull();
+            expect(bundlePath, "workflowBundlePath was not provided").not.toBeNull();
+          });
+
+          test("empty step: design row = pass-1 answer verbatim, tests_pass = this pass's machine answer", async () => {
+            const tmp = await mkdtemp(join(tmpdir(), "chikory-wp632-ac1-"));
+            cleanups.push(() => rm(tmp, { recursive: true, force: true }));
+            // Step 2 (1-based attempt 2) reports a ZERO-BYTE diff — the shape under test.
+            const repoUrl = await initSourceRepo(join(tmp, "src"), { emptyDiffSteps: [2] });
+            const dataDir = join(tmp, "data");
+            const taskQueue = "tq-" + randomUUID();
+
+            const wire = await startFakeJudgeWire(
+              [formFor(0), formFor(1), formFor(2)],
+              { reviewForms: [completionReviewForm()] },
+            );
+            cleanups.push(() => wire.close());
+
+            const worker = await createRunnerWorker({
+              adapters: scriptedRegistry,
+              address: address!,
+              taskQueue,
+              dataDir,
+              workflowBundlePath: bundlePath!,
+              routerOptions: { baseUrls: { "openai-compat": wire.url } },
+            });
+            const workerDone = worker.run();
+            const runner = createTemporalRunner({ address: address!, taskQueue, dataDir });
+            cleanups.push(async () => {
+              worker.shutdown();
+              await workerDone;
+              await runner.close();
+            });
+
+            const spec = makeJudgedSpec({
+              repoUrl,
+              cadence: 1,
+              maxSteps: 4,
+              acceptanceCriteria: [
+                // A declared `check` is what makes `tests_pass` machine-settled
+                // (isRubricItemSettledAgainstWholeDelivery) — the whole point of rule 1.
+                { id: "AC-A", description: "scripted criterion A", check: "true" },
+              ],
+            });
+
+            const handle = await runner.start(spec);
+            const report = await waitFor<RunStatusReport>(
+              async () => {
+                const r = await handle.status();
+                return TERMINAL_STATUSES.includes(r.status) ? r : undefined;
+              },
+              { what: "the 3-step run to reach a terminal status", timeoutMs: 180_000 },
+            );
+            expect(TERMINAL_STATUSES).toContain(report.status);
+
+            const journal = new Journal(journalPath(dataDir, handle.runId));
+            let verdicts: Array<{ atStep: number; form: JudgeForm }>;
+            try {
+              verdicts = journal
+                .entries("verdict")
+                .map((e) => e.payload as { atStep: number; verdict: { form: JudgeForm } })
+                .map((p) => ({ atStep: p.atStep, form: p.verdict.form }))
+                .filter((v) => v.form.criterionResults.length > 0);
+            } finally {
+              journal.close();
+            }
+
+            // atStep is 0-based; the empty step is the SECOND step -> atStep 1.
+            const emptyStepVerdict = verdicts.find((v) => v.atStep === 1);
+            expect(
+              emptyStepVerdict,
+              "no per-step verdict was journaled for the empty step — trap A: the judge pass was " +
+                "SKIPPED. The acceptance criteria are re-derived against the whole tree and stay " +
+                "meaningful on an empty step; suppressing the pass hides them.",
+            ).toBeDefined();
+
+            const design = emptyStepVerdict!.form.rubricResults.find(
+              (r) => r.id === RUBRIC_DESIGN_SERVES_OVERALL_GOAL,
+            );
+            expect(design, "the empty step's verdict carries no design row at all").toBeDefined();
+            expect(
+              design!.pass,
+              "the empty-diff pass scored design_serves_overall_goal PASS from an absent diff " +
+                "(F-369). The previous pass FAILED it; a step that changed nothing cannot have " +
+                "resolved it.",
+            ).toBe(false);
+            expect(
+              design!.justification,
+              "the design row was carried forward as a bare pass/fail but not as its TEXT — the " +
+                "recorded justification must be pass 1's objection verbatim, not pass 2's " +
+                "vacuous-green wording. Got: " + JSON.stringify(design!.justification.slice(0, 160)),
+            ).toBe(DESIGN_FAIL_AT_PASS_1);
+
+            const testsPass = emptyStepVerdict!.form.rubricResults.find(
+              (r) => r.id === RUBRIC_TESTS_PASS,
+            );
+            expect(testsPass, "the empty step's verdict carries no tests_pass row").toBeDefined();
+            expect(
+              testsPass!.justification.includes("judge-executed check"),
+              "tests_pass was carried forward instead of re-derived — trap B. It is settled " +
+                "against the WHOLE delivery (isRubricItemSettledAgainstWholeDelivery), the checks " +
+                "were re-run at this pass, and machine evidence beats a remembered answer. Got: " +
+                JSON.stringify(testsPass!.justification.slice(0, 160)),
+            ).toBe(true);
+          });
+        },
+      );
+      GENEOF
+      pnpm exec vitest run "$TARGET"
+      ST=$?
+      rm -f "$TARGET"
+      if [ "$ST" -ne 0 ]; then
+        echo "AC-1 FAIL: the empty-diff judge pass does not carry the model-judged row forward, or it carried the machine-settled row forward too, or the pass was skipped entirely. vitest exited $ST"
+        exit 1
+      fi
+      echo "AC-1 OK: empty-step verdict carries the design objection verbatim and keeps tests_pass fresh"
+
+  - id: AC-2
+    description: >
+      THIS CHECK OWNS ITS ORACLE (site 2) AND ITS OBSERVABLE IS A TERMINAL STATE. It drives the
+      REAL agent loop over a run that converges with a failing design row, gets its first
+      completion review, is granted a repair, and then STALLS - the repair step reports a zero-byte
+      diff. On HEAD that empty step consumes completion review #2, `canRetry` refuses a second
+      repair, and the run seals FAILED with the finding unaddressed. After the fix the empty step
+      spends no grant, the executor takes a real repair step, the review clears the finding, and
+      the run seals SUCCESS. The check requires `status === "SUCCESS"` and, to reject trap E,
+      requires `MAX_COMPLETION_REVIEWS` to still be literally 2 and the run to have taken a step
+      AFTER the stall.
+    check: |
+      cd packages/sdk-ts || exit 1
+      if ! grep -q "export const MAX_COMPLETION_REVIEWS = 2;" src/workflow/completion-review.ts; then
+        echo "AC-2 FAIL: MAX_COMPLETION_REVIEWS is no longer literally 2 — trap E (buying the second repair by raising the budget instead of spending it correctly)"
+        exit 1
+      fi
+      TARGET=test/runner/ac2-empty-step-repair-grant.generated.test.ts
+      rm -f "$TARGET"
+      cat > "$TARGET" <<'GENEOF'
+      import { randomUUID } from "node:crypto";
+      import { mkdtemp, rm } from "node:fs/promises";
+      import { tmpdir } from "node:os";
+      import { join } from "node:path";
+
+      import { afterEach, describe, expect, inject, test } from "vitest";
+
+      import {
+        createRunnerWorker,
+        createTemporalRunner,
+        Journal,
+        journalPath,
+        RUBRIC_DESIGN_SERVES_OVERALL_GOAL,
+        STANDING_RUBRIC,
+        type JudgeForm,
+        type RunStatusReport,
+      } from "../../src/index.js";
+      import {
+        completionReviewForm,
+        initSourceRepo,
+        makeJudgedSpec,
+        scriptedRegistry,
+        startFakeJudgeWire,
+        TERMINAL_STATUSES,
+        waitFor,
+      } from "./helpers.js";
+
+      const address = inject("temporalAddress");
+      const bundlePath = inject("workflowBundlePath");
+
+      // Per-step forms: every criterion passes from the start, so the run converges
+      // immediately and the completion review is what decides its fate.
+      function stepForm(designPasses: boolean): JudgeForm {
+        return {
+          criterionResults: [
+            { id: "AC-A", pass: true, justification: "scripted judge: confirmed" },
+          ],
+          rubricResults: STANDING_RUBRIC.map((r) => ({
+            id: r.id,
+            pass: r.id === RUBRIC_DESIGN_SERVES_OVERALL_GOAL ? designPasses : true,
+            justification:
+              r.id === RUBRIC_DESIGN_SERVES_OVERALL_GOAL && !designPasses
+                ? "OBJECTION the repair has not landed yet"
+                : "scripted judge: confirmed",
+          })),
+          concerns: [],
+        };
+      }
+
+      describe.skipIf(address === null)(
+        "AC-2 WP-632/F-369: a zero-byte step must not spend a completion-review repair grant",
+        () => {
+          const cleanups: Array<() => Promise<void>> = [];
+          afterEach(async () => {
+            while (cleanups.length > 0) await cleanups.pop()!();
+          });
+
+          test("the Temporal substrate is present — this AC must never pass vacuously", () => {
+            expect(address, "temporalAddress was not provided").not.toBeNull();
+            expect(bundlePath, "workflowBundlePath was not provided").not.toBeNull();
+          });
+
+          test("a stalled repair step does not cost the run its second repair — the run seals SUCCESS", async () => {
+            const tmp = await mkdtemp(join(tmpdir(), "chikory-wp632-ac2-"));
+            cleanups.push(() => rm(tmp, { recursive: true, force: true }));
+            // Attempt 2 is the granted repair step, and it STALLS (zero-byte diff).
+            const repoUrl = await initSourceRepo(join(tmp, "src"), { emptyDiffSteps: [2] });
+            const dataDir = join(tmp, "data");
+            const taskQueue = "tq-" + randomUUID();
+
+            const wire = await startFakeJudgeWire(
+              // step 1 objects, step 2 (the stall) objects, step 3 (the real repair) is clean.
+              [stepForm(false), stepForm(false), stepForm(true), stepForm(true)],
+              {
+                reviewForms: [
+                  completionReviewForm({ rubricFails: [RUBRIC_DESIGN_SERVES_OVERALL_GOAL] }),
+                  completionReviewForm({ rubricFails: [RUBRIC_DESIGN_SERVES_OVERALL_GOAL] }),
+                  completionReviewForm(),
+                ],
+              },
+            );
+            cleanups.push(() => wire.close());
+
+            const worker = await createRunnerWorker({
+              adapters: scriptedRegistry,
+              address: address!,
+              taskQueue,
+              dataDir,
+              workflowBundlePath: bundlePath!,
+              routerOptions: { baseUrls: { "openai-compat": wire.url } },
+            });
+            const workerDone = worker.run();
+            const runner = createTemporalRunner({ address: address!, taskQueue, dataDir });
+            cleanups.push(async () => {
+              worker.shutdown();
+              await workerDone;
+              await runner.close();
+            });
+
+            const spec = makeJudgedSpec({
+              repoUrl,
+              cadence: 1,
+              maxSteps: 5,
+              acceptanceCriteria: [
+                { id: "AC-A", description: "scripted criterion A", check: "true" },
+              ],
+            });
+
+            const handle = await runner.start(spec);
+            const report = await waitFor<RunStatusReport>(
+              async () => {
+                const r = await handle.status();
+                return TERMINAL_STATUSES.includes(r.status) ? r : undefined;
+              },
+              { what: "the stall-then-repair run to reach a terminal status", timeoutMs: 240_000 },
+            );
+
+            const journal = new Journal(journalPath(dataDir, handle.runId));
+            let stepCount: number;
+            try {
+              stepCount = journal.entries("step").length;
+            } finally {
+              journal.close();
+            }
+
+            expect(
+              report.status,
+              "the run sealed " + report.status + " after its granted repair step stalled with a " +
+                "zero-byte diff. On HEAD that empty step consumes completion review #2 " +
+                "(agent-loop.ts:1283), so canRetry refuses the second repair and the finding is " +
+                "never addressed. A step that changed nothing must cost the run no repair grant.",
+            ).toBe("SUCCESS");
+            expect(
+              stepCount,
+              "the SUCCESS must come from a REAL repair step taken AFTER the stall — trap E, a " +
+                "delivery that simply lets the run seal without repairing anything. Steps: " + stepCount,
+            ).toBeGreaterThanOrEqual(3);
+          });
+        },
+      );
+      GENEOF
+      pnpm exec vitest run "$TARGET"
+      ST=$?
+      rm -f "$TARGET"
+      if [ "$ST" -ne 0 ]; then
+        echo "AC-2 FAIL: a zero-byte step still spends a completion-review repair grant, so a stalled repair costs the run its second attempt. vitest exited $ST"
+        exit 1
+      fi
+      echo "AC-2 OK: a stalled repair step spends no grant, the real repair lands, the run seals SUCCESS"
+
+  - id: AC-3
+    description: >
+      Boundary families the first two checks deliberately leave open, plus hygiene and a durability
+      floor. Drives the REAL loop twice: (D) an empty FIRST step, which has no previous answer to
+      carry, must journal this pass's own answer unchanged — nothing is invented; and (C) a real,
+      NON-empty step after a carried-forward FAIL must be able to turn the row green — the
+      carry-forward is scoped to empty diffs, not sticky forever. Then: strict typecheck, eslint
+      over the touched modules, byte-greps proving WP-608's ask classifier is untouched (trap F),
+      and the whole committed `test/runner/` tree green AND grown by at least 3 tests.
+    check: |
+      cd packages/sdk-ts || exit 1
+      pnpm run typecheck || { echo "AC-3 FAIL: strict typecheck is red"; exit 1; }
+      pnpm exec eslint src/workflow/agent-loop.ts src/workflow/question-step.ts src/workflow/judge-trigger.ts src/judge/rubric.ts src/workflow/completion-review.ts || { echo "AC-3 FAIL: eslint is red on the modules this WP touches"; exit 1; }
+      if ! grep -q 'if (isAskingSummary(record.summary)) {' src/workflow/question-step.ts; then
+        echo "AC-3 FAIL: WP-608's ask classifier changed — trap F (out of scope)"
+        exit 1
+      fi
+      if ! grep -q 'return { question: false, reason: "step produced a non-empty diff" };' src/workflow/question-step.ts; then
+        echo "AC-3 FAIL: WP-608's non-empty-diff guard changed — trap F (a real diff is NEVER a question step)"
+        exit 1
+      fi
+      if ! grep -q "isRubricItemSettledAgainstWholeDelivery" src/judge/rubric.ts; then
+        echo "AC-3 FAIL: the settled-row predicate is gone — reuse it, do not replace it"
+        exit 1
+      fi
+      TARGET=test/runner/ac3-empty-step-boundaries.generated.test.ts
+      rm -f "$TARGET"
+      cat > "$TARGET" <<'GENEOF'
+      import { randomUUID } from "node:crypto";
+      import { mkdtemp, rm } from "node:fs/promises";
+      import { tmpdir } from "node:os";
+      import { join } from "node:path";
+
+      import { afterEach, describe, expect, inject, test } from "vitest";
+
+      import {
+        createRunnerWorker,
+        createTemporalRunner,
+        Journal,
+        journalPath,
+        RUBRIC_DESIGN_SERVES_OVERALL_GOAL,
+        STANDING_RUBRIC,
+        type JudgeForm,
+        type RunStatusReport,
+      } from "../../src/index.js";
+      import {
+        completionReviewForm,
+        initSourceRepo,
+        makeJudgedSpec,
+        scriptedRegistry,
+        startFakeJudgeWire,
+        TERMINAL_STATUSES,
+        waitFor,
+      } from "./helpers.js";
+
+      const address = inject("temporalAddress");
+      const bundlePath = inject("workflowBundlePath");
+
+      const FIRST_STEP_ANSWER = "FIRSTSTEP-OWN-ANSWER nothing precedes this pass";
+      const LATER_FIX_ANSWER = "LATERFIX-GENUINE-GREEN the objection is addressed by this diff";
+
+      function form(designPasses: boolean, justification: string): JudgeForm {
+        return {
+          criterionResults: [
+            { id: "AC-A", pass: true, justification: "scripted judge: confirmed" },
+          ],
+          rubricResults: STANDING_RUBRIC.map((r) => ({
+            id: r.id,
+            pass: r.id === RUBRIC_DESIGN_SERVES_OVERALL_GOAL ? designPasses : true,
+            justification:
+              r.id === RUBRIC_DESIGN_SERVES_OVERALL_GOAL ? justification : "scripted judge: confirmed",
+          })),
+          concerns: [],
+        };
+      }
+
+      interface Journaled { atStep: number; form: JudgeForm }
+
+      async function runScripted(opts: {
+        emptyDiffSteps: number[];
+        forms: JudgeForm[];
+        maxSteps: number;
+        cleanups: Array<() => Promise<void>>;
+      }): Promise<{ verdicts: Journaled[]; report: RunStatusReport }> {
+        const tmp = await mkdtemp(join(tmpdir(), "chikory-wp632-ac3-"));
+        opts.cleanups.push(() => rm(tmp, { recursive: true, force: true }));
+        const repoUrl = await initSourceRepo(join(tmp, "src"), { emptyDiffSteps: opts.emptyDiffSteps });
+        const dataDir = join(tmp, "data");
+        const taskQueue = "tq-" + randomUUID();
+
+        const wire = await startFakeJudgeWire(opts.forms, { reviewForms: [completionReviewForm()] });
+        opts.cleanups.push(() => wire.close());
+
+        const worker = await createRunnerWorker({
+          adapters: scriptedRegistry,
+          address: address!,
+          taskQueue,
+          dataDir,
+          workflowBundlePath: bundlePath!,
+          routerOptions: { baseUrls: { "openai-compat": wire.url } },
+        });
+        const workerDone = worker.run();
+        const runner = createTemporalRunner({ address: address!, taskQueue, dataDir });
+        opts.cleanups.push(async () => {
+          worker.shutdown();
+          await workerDone;
+          await runner.close();
+        });
+
+        const spec = makeJudgedSpec({
+          repoUrl,
+          cadence: 1,
+          maxSteps: opts.maxSteps,
+          acceptanceCriteria: [{ id: "AC-A", description: "scripted criterion A", check: "true" }],
+        });
+        const handle = await runner.start(spec);
+        const report = await waitFor<RunStatusReport>(
+          async () => {
+            const r = await handle.status();
+            return TERMINAL_STATUSES.includes(r.status) ? r : undefined;
+          },
+          { what: "the scripted run to reach a terminal status", timeoutMs: 180_000 },
+        );
+        const journal = new Journal(journalPath(dataDir, handle.runId));
+        try {
+          const verdicts = journal
+            .entries("verdict")
+            .map((e) => e.payload as { atStep: number; verdict: { form: JudgeForm } })
+            .map((p) => ({ atStep: p.atStep, form: p.verdict.form }))
+            .filter((v) => v.form.criterionResults.length > 0);
+          return { verdicts, report };
+        } finally {
+          journal.close();
+        }
+      }
+
+      function designRow(v: Journaled) {
+        return v.form.rubricResults.find((r) => r.id === RUBRIC_DESIGN_SERVES_OVERALL_GOAL)!;
+      }
+
+      describe.skipIf(address === null)("AC-3 WP-632: the two boundary families", () => {
+        const cleanups: Array<() => Promise<void>> = [];
+        afterEach(async () => {
+          while (cleanups.length > 0) await cleanups.pop()!();
+        });
+
+        test("the Temporal substrate is present — this AC must never pass vacuously", () => {
+          expect(address, "temporalAddress was not provided").not.toBeNull();
+          expect(bundlePath, "workflowBundlePath was not provided").not.toBeNull();
+        });
+
+        test("trap D — an empty FIRST step has nothing to carry, so its own answer stands unchanged", async () => {
+          const { verdicts } = await runScripted({
+            emptyDiffSteps: [1],
+            forms: [form(true, FIRST_STEP_ANSWER), form(true, FIRST_STEP_ANSWER)],
+            maxSteps: 3,
+            cleanups,
+          });
+          const first = verdicts.find((v) => v.atStep === 0);
+          expect(first, "no verdict was journaled for the empty first step").toBeDefined();
+          const row = designRow(first!);
+          expect(
+            row.pass,
+            "an empty FIRST step has no previous answer to carry; fabricating a FAIL condemns a " +
+              "run that has done nothing wrong (trap D)",
+          ).toBe(true);
+          expect(
+            row.justification,
+            "the first pass's own justification must be journaled unchanged",
+          ).toBe(FIRST_STEP_ANSWER);
+        });
+
+        test("trap C — a real diff AFTER a carried-forward FAIL must still be able to turn the row green", async () => {
+          const { verdicts } = await runScripted({
+            emptyDiffSteps: [2],
+            forms: [
+              form(false, "OBJECTION raised against step 1"),
+              form(true, "vacuous green on the empty step"),
+              form(true, LATER_FIX_ANSWER),
+            ],
+            maxSteps: 4,
+            cleanups,
+          });
+          const third = verdicts.find((v) => v.atStep === 2);
+          expect(third, "no verdict was journaled for the third (non-empty) step").toBeDefined();
+          const row = designRow(third!);
+          expect(
+            row.pass,
+            "the carry-forward must be scoped to EMPTY-diff passes only. A later step with a real " +
+              "diff that genuinely fixes the design has to be able to clear the row — a row that " +
+              "is sticky forever is trap C, and it makes the run unwinnable.",
+          ).toBe(true);
+          expect(
+            row.justification,
+            "the fixing pass's own justification must be journaled, not a carried one",
+          ).toBe(LATER_FIX_ANSWER);
+        });
+      });
+      GENEOF
+      pnpm exec vitest run "$TARGET"
+      ST=$?
+      rm -f "$TARGET"
+      if [ "$ST" -ne 0 ]; then
+        echo "AC-3 FAIL: a boundary family is wrong — either an empty FIRST step invented an answer (trap D) or the carry-forward is sticky beyond empty-diff passes (trap C). vitest exited $ST"
+        exit 1
+      fi
+      OUT=$(pnpm exec vitest run test/runner/ 2>&1)
+      ST=$?
+      echo "$OUT" | tail -30
+      if [ "$ST" -ne 0 ]; then
+        echo "AC-3 FAIL: the committed test/runner tree is RED (vitest exited $ST). If a question-step or standing-findings test failed, you likely moved WP-608's ask path or the settling rule."
+        exit 1
+      fi
+      N=$(echo "$OUT" | grep -oE "Tests +[0-9]+ passed" | grep -oE "[0-9]+" | head -1)
+      echo "committed test/runner tests: ${N:-UNPARSEABLE} (floor 403, measured baseline 400)"
+      if [ -z "$N" ]; then
+        echo "AC-3 FAIL: could not read a test count out of the vitest summary"
+        exit 1
+      fi
+      if [ "$N" -lt 403 ]; then
+        echo "AC-3 FAIL: durability floor not met — the committed runner tree did not grow by at least 3 tests. A behaviour proved only by the generated grading checks is not pinned at all (F-356), and a repo test transcribed from one inherits its blind spots (F-360)."
+        exit 1
+      fi
+      echo "AC-3 OK: boundary families correct, strict TS, lint clean, WP-608 byte-intact, committed runner tree green AND larger"
+
+budget_usd: 20
+max_steps: 6
+
+agent_classes:
+  executor: executor-default
+  judge: judge-default
+
+judge:
+  cadence: 1
+
+# F-322 (dogfood-135): without this, a converged out-of-rubric escalation parks overnight for a
+# human instead of auto-sealing.
+unattended:
+  escalation: seal_resumable_failed

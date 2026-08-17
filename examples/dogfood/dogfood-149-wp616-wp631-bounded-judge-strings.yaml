@@ -97,7 +97,7 @@
 #   text; the TaskSpec contract; chain semantics; the 2000-char brief cap itself.
 
 name: dogfood-149-wp616-wp631-bounded-judge-strings
-wp: WP-616+WP-631
+wp: WP-616
 goal: >
   No string on the judge evidence path may be unbounded at the point something renders it.
   Two sites are unbounded today and both must be fixed as one design decision, not two patches.

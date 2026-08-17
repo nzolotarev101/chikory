@@ -184,6 +184,167 @@ function renderHistory(history: Record<string, boolean[]>): string {
     .join("\n");
 }
 
+/**
+ * Character budget for the out-of-rubric concerns section rendered into
+ * the completion-review prompt (WP-631 / F-365).
+ */
+export const MAX_COMPLETION_REVIEW_CONCERNS_CHARS = 3072;
+
+function clampText(text: string, maxLen: number): string {
+  if (maxLen <= 0) return "";
+  if (text.length <= maxLen) return text;
+  if (maxLen === 1) return "…";
+  return `${text.slice(0, maxLen - 1)}…`;
+}
+
+/**
+ * Clamps ONE finding and says out loud that it did (F-371, dogfood-149).
+ *
+ * A bare `…` is an elision with no count: the reader cannot tell a finding that
+ * ended from one whose substance was cut. The whole point of the WP-631 bound is
+ * that nothing leaves the evidence path silently, so a truncated finding carries
+ * the exact number of characters removed, the same way an omitted finding carries
+ * the exact count omitted. Falls back to the bare clamp only when `maxLen` has no
+ * room for the notice — the character bound always wins.
+ */
+function clampFinding(text: string, maxLen: number): string {
+  if (maxLen <= 0) return "";
+  if (text.length <= maxLen) return text;
+  const note = (omitted: number): string => ` … [truncated, ${omitted} chars omitted]`;
+  // The notice length depends on the digit count of the omitted total, which depends
+  // on the notice length. Two passes reach the fixed point for any realistic input;
+  // the length check below is the actual guarantee.
+  let keep = maxLen - note(text.length).length;
+  for (let pass = 0; pass < 2 && keep > 0; pass++) {
+    keep = maxLen - note(text.length - keep).length;
+  }
+  if (keep <= 0) return clampText(text, maxLen);
+  const out = `${text.slice(0, keep)}${note(text.length - keep)}`;
+  return out.length <= maxLen ? out : clampText(text, maxLen);
+}
+
+/**
+ * Renders the out-of-rubric concerns section for completion review with a strict
+ * character budget. When the accumulated findings exceed `maxChars`, the oldest
+ * and newest findings survive intact (in full, never per-entry truncated when they
+ * fit within the budget), while middle findings are omitted and replaced by an
+ * explicit elision notice containing the exact count left out. If individual
+ * findings are so large that even the oldest and newest endpoints exceed `maxChars`,
+ * they are deterministically clamped to guarantee that the rendered output strictly
+ * satisfies `lines.join("\n").length <= maxChars`.
+ *
+ * PRECEDENCE, settled by the dogfood-149 review (F-370): the character bound is
+ * absolute and the intact-endpoints rule is conditional on there being room for it.
+ * The two cannot both hold when the oldest and newest findings alone exceed
+ * `maxChars`, and an unbounded prompt is the defect this function exists to close,
+ * so BOUNDED WINS — but the clamp must announce itself (`clampFinding`), because a
+ * silently shortened finding is evidence dropped without a trace (F-364).
+ */
+export function renderCompletionReviewConcerns(
+  concerns: readonly string[],
+  maxChars: number = MAX_COMPLETION_REVIEW_CONCERNS_CHARS,
+): string[] {
+  if (concerns.length === 0 || maxChars <= 0) return [];
+  const header = "### Out-of-rubric concerns to adjudicate against the cumulative diff:";
+
+  // Check if all concerns fit without any elision
+  const allLines = [header, ...concerns.map((c) => `- ${c}`)];
+  if (allLines.join("\n").length <= maxChars) {
+    return allLines;
+  }
+
+  // Single concern that exceeds maxChars: clamp the concern text to fit within maxChars
+  if (concerns.length === 1) {
+    const available = maxChars - header.length - 1 - 2; // for '\n' and '- '
+    if (available <= 0) {
+      return [clampText(header, maxChars)];
+    }
+    return [header, `- ${clampFinding(concerns[0], available)}`];
+  }
+
+  // Multiple concerns: keep oldest and newest intact when possible, eliding middle items.
+  const buildLines = (hEnd: number, tStart: number): string[] => {
+    const omitted = tStart - hEnd - 1;
+    const lines = [header];
+    for (let i = 0; i <= hEnd; i++) {
+      lines.push(`- ${concerns[i]}`);
+    }
+    if (omitted > 0) {
+      lines.push(`- … [${omitted} finding${omitted === 1 ? "" : "s"} omitted]`);
+    }
+    for (let i = tStart; i < concerns.length; i++) {
+      lines.push(`- ${concerns[i]}`);
+    }
+    return lines;
+  };
+
+  // If the base representation (oldest + elision + newest) fits within maxChars,
+  // greedily expand headEnd and tailStart to include as many intact findings as possible.
+  const baseLines = buildLines(0, concerns.length - 1);
+  if (baseLines.join("\n").length <= maxChars) {
+    let headEnd = 0;
+    let tailStart = concerns.length - 1;
+    while (tailStart - headEnd > 1) {
+      const candidateHead = buildLines(headEnd + 1, tailStart);
+      if (candidateHead.join("\n").length <= maxChars) {
+        headEnd++;
+        continue;
+      }
+      const candidateTail = buildLines(headEnd, tailStart - 1);
+      if (candidateTail.join("\n").length <= maxChars) {
+        tailStart--;
+        continue;
+      }
+      break;
+    }
+    return buildLines(headEnd, tailStart);
+  }
+
+  // If even the base representation exceeds maxChars (e.g. oldest or newest is individually huge),
+  // retain the structure (oldest, elision notice if any, newest) while clamping the oversized endpoints.
+  const omitted = concerns.length - 2;
+  const elisionLine =
+    omitted > 0 ? `- … [${omitted} finding${omitted === 1 ? "" : "s"} omitted]` : undefined;
+  const fixedOverhead =
+    header.length +
+    1 + // '\n'
+    2 + // '- '
+    (elisionLine !== undefined ? 1 + elisionLine.length : 0) +
+    1 + // '\n'
+    2; // '- '
+  const available = Math.max(0, maxChars - fixedOverhead);
+
+  const oldest = concerns[0];
+  const newest = concerns[concerns.length - 1];
+
+  let oldestBudget = Math.floor(available / 2);
+  let newestBudget = available - oldestBudget;
+
+  if (oldest.length < oldestBudget) {
+    newestBudget = available - oldest.length;
+    oldestBudget = oldest.length;
+  } else if (newest.length < newestBudget) {
+    oldestBudget = available - newest.length;
+    newestBudget = newest.length;
+  }
+
+  const boundedOldest = clampFinding(oldest, oldestBudget);
+  const boundedNewest = clampFinding(newest, newestBudget);
+
+  const lines = [
+    header,
+    `- ${boundedOldest}`,
+    ...(elisionLine !== undefined ? [elisionLine] : []),
+    `- ${boundedNewest}`,
+  ];
+
+  const joined = lines.join("\n");
+  if (joined.length <= maxChars) {
+    return lines;
+  }
+  return [clampText(joined, maxChars)];
+}
+
 function renderCompletionReviewScope(escalationConcerns?: string[]): string {
   const hasConcerns = escalationConcerns !== undefined && escalationConcerns.length > 0;
   // F-340 (dogfood-140): the adjudication sentence and its rubric row appear
@@ -223,8 +384,7 @@ function renderCompletionReviewScope(escalationConcerns?: string[]): string {
   if (hasConcerns) {
     lines.push(
       "",
-      "### Out-of-rubric concerns to adjudicate against the cumulative diff:",
-      ...escalationConcerns.map((c) => `- ${c}`),
+      ...renderCompletionReviewConcerns(escalationConcerns),
     );
   }
   return lines.join("\n");

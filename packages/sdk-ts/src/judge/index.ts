@@ -29,7 +29,9 @@ export {
   buildJudgeMessages,
   JUDGE_FORM_RESPONSE_SCHEMA,
   JUDGE_SYSTEM_PROMPT,
+  MAX_COMPLETION_REVIEW_CONCERNS_CHARS,
   renderActiveWorkChunkScope,
+  renderCompletionReviewConcerns,
   renderOverallGoal,
   renderOverallGoalContext,
   renderWriteBoundaryScope,
@@ -52,6 +54,8 @@ export {
   computeVerdict,
   FLIP_FLOPS_TO_ESCALATE,
   HALT_CONSECUTIVE_FAILS,
+  MAX_RATIONALE_ITEM_CHARS,
+  MAX_VERDICT_RATIONALE_CHARS,
   type VerdictDecision,
 } from "./verdict.js";
 export {
