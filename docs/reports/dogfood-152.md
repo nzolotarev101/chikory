@@ -237,3 +237,95 @@ the field through the real production seam rather than a literal built in the te
 | meta:product headline ratio | 0:1 (product) | **0 harness-meta of the last 3** — cap ≤1/3 not busted |
 | per-step reliability (runs ≥5 steps) | n/a (<5 steps) | 94.7% (9 rollbacks / 170 steps) — target 99%+ |
 | ladder rung vs exit gate | rung-0 (off-ladder) | P3 rung-5 remainder is operator-run (WP-304); no agent-runnable rung |
+
+## NEXT RUN
+
+**When the judge spots a real problem its checklist has no row for, and the checklist also has a failing row, the agent doing the work finally gets told — while it still has steps left to fix it.**
+
+- **Spec:** `examples/dogfood/dogfood-153-wp599-concern-beside-rubric-fail.yaml`
+- **WP:** WP-599 (a judge concern raised alongside a rubric failure never reaches the executor)
+
+**Why this and not the ladder rung.** §0 reads ✅ PROGRESSING, so the default is
+the P3 ladder rung (WP-530 §7, rung-5). Rung-5's remaining half is WP-304 — the
+OpenHands arm plus a corpus wide enough to separate 19 requirements at 95%
+confidence — a quota-bound multi-hour suite the **operator** runs by hand
+(dogfood-122's lesson: an LLM executor may not supervise it). No spec can headline
+it, unchanged since dogfood-139. Among runnable candidates WP-599 is the judge
+pillar *and* the self-correction pillar at once, its premise was re-measured this
+review (and the measurement **corrected the plan.md row**), and it composes
+directly on WP-548 landed one run ago.
+
+**The premise, re-measured not transcribed (F-203/F-342).** Driving the built
+`computeVerdict` and `buildCriterionFeedback` over a form with all criteria
+passing, one non-destructive rubric failure and one blocking out-of-rubric concern:
+
+```
+verdict.kind      : PROCEED
+escalateClass     : (none)
+rationale names concern?  false
+criterionFeedback : (undefined — nothing rides to the executor)
+```
+
+plan.md said the concern is *"dropped entirely"*. It is not — `standingConcerns`
+(`packages/sdk-ts/src/workflow/agent-loop.ts:1168`) still accumulates it and the
+completion review still adjudicates it. **The real defect is sharper: the loop holds
+a diagnosis it will condemn the run over at the seal, and refuses to hand it to the
+only agent that could fix it.**
+
+**The designed trap.** Delete rule 4's `rubricFails.length === 0` guard
+(`packages/sdk-ts/src/judge/verdict.ts:184`). It is the obvious fix and it is
+wrong: `escalateClass: "out_of_rubric"` carries F-154's force-seal-on-approve
+semantics, so an operator approving that escalation with all criteria passing would
+seal SUCCESS **over a red rubric row**, in one keystroke. AC-1 drives that exact
+input and demands PROCEED with `escalateClass` absent. Four more: moving the
+concern out of `standingConcerns` instead of adding a consumer (AC-2 asserts both
+ends over one form); a header emitted on every healthy pass; reading
+`concernSeverities` directly instead of `blockingConcerns`, re-opening the
+unmarked-concern hole; and assembling the string inline so nothing can test it.
+
+**Gate verdicts**
+
+| gate | verdict | one line |
+|---|---|---|
+| §0 progression | ✅ | PROGRESSING; ladder rung-5 is operator-run (WP-304), so it cannot headline |
+| §1.1 failure surface | ✅ | judge + self-correction pillar, cross-file, five designed traps — plausibly failable |
+| §1.2 product progress | ✅ | WP-599 is a real open plan.md §6 product WP; no scaffolding invented |
+| §1.3 mission-critical | ✅ PROCEED | not busy work, not scaffold-hosted — feature code on the thesis pillar |
+| §1.5 friction budget | ✅ | `class=product`; 0 harness-meta headlines in the trailing 3, cap ≤1/3 intact. WP-634 (F-382) is harness-meta and only 🟠 → **⛔ VETOED as a headline**, tracked track-B |
+
+**AC arming evidence** — all three ACs are VERIFY-SUITE, so `scripts/dogfood.sh`
+did **not** dry-run them; every one was hand-verified in BOTH directions with
+`scripts/dogfood-arm.sh` against `942d023`:
+
+| AC | RED on HEAD | GREEN vs reference | % of 120 s cap |
+|---|---|---|---|
+| AC-1 | ✅ exit **1**, **2s** | ✅ exit 0, **3s** | 3 % |
+| AC-2 | ✅ exit **1**, **1s** | ✅ exit 0, **1s** | 1 % |
+| AC-3 | ✅ exit **1**, **6s** | ✅ exit 0, **76s** | 63 % |
+
+Worst case **76s = 63% of the 120s judge cap**; the spec declares
+`check_timeout_ms: 180000`, which covers it. AC-3 runs the **declared regression
+suite** rather than a hand-picked subdirectory list — the F-382 fix applied to this
+spec's own oracle, which is why it is the slow one.
+
+Both RED readings are genuine assertion failures, not crashes (*"expected undefined
+to be defined"* on the executor-feedback half), read from the logs rather than the
+exit codes (F-133's lesson).
+
+Two arming findings worth recording:
+
+- **AC-2's first draft was GREEN on HEAD.** It asserted only the seal-side
+  no-regression half, which is already true, so it could not gate new work. It now
+  drives **both** consumers over **one** form and is RED until the executor half lands.
+- **AC-3's RED pass caught a real defect in this review's own hand-fixes.**
+  `tsc --noEmit` covers only `src/**/*`; the `CheckRun` type error in the new
+  `harness.test.ts` pins was invisible until `pnpm run typecheck` also ran
+  `tsc --noEmit -p tsconfig.test.json`. Fixed in `942d023` — and it is the same
+  lesson as F-382 one level down: a verification whose scope you chose by hand
+  cannot see what you put outside it.
+
+Launch preflight is green and the spec-pick glob resolves to this file.
+
+```sh
+devbox run run-dogfood
+```

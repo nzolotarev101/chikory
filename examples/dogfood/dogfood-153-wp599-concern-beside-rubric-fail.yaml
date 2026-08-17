@@ -128,7 +128,7 @@ goal: |
   1. **The verdict is untouched.** That same form must still compute PROCEED with `escalateClass`
      absent. In particular rule 4's `rubricFails.length === 0` guard (src/judge/verdict.ts:184)
      stays exactly as it is. Deleting or widening it is the obvious "fix" and it is wrong:
-     `escalateClass: "out_of_rubric"` carries F-154's force-seal semantics, so an operator
+     escalateClass: "out_of_rubric" carries F-154's force-seal semantics, so an operator
      approving that escalation with all criteria passing would seal SUCCESS **over a red rubric
      row**, in one keystroke. This run changes what the executor is TOLD, never what the loop
      DECIDES.
@@ -144,12 +144,12 @@ goal: |
   is the function that produces today's string and the natural home, but a sibling helper it
   composes with is equally acceptable. What is not acceptable is a second copy of the severity
   rule, or building the string inline at the call site so nothing can test it. Note that
-  `buildRemediationBrief` (src/workflow/remediation.ts:58) already lists `form.concerns`
+  buildRemediationBrief (src/workflow/remediation.ts:58) already lists form.concerns
   unfiltered on the HALT path; if you touch it, it must move to `blockingConcerns` too, and if
   you leave it alone, say so in your step summary.
 
   If you add a field to any contract object, remember the F-380 lesson from the run before this
-  one: `applyCheckOverrides` (src/judge/harness.ts:236) rebuilds `JudgeForm` from a hand-written
+  one: applyCheckOverrides (src/judge/harness.ts:236) rebuilds `JudgeForm` from a hand-written
   field list and silently deletes anything it does not name. This WP should not need a new field
   at all — if you find yourself adding one, that is a signal to re-read the goal.
 
@@ -169,8 +169,8 @@ goal: |
   Verify your work with FAST checks only: the package typecheck (tsc with noEmit), eslint over the
   files you touched, and vitest over only the test files you touched. Do NOT run the full vitest
   suite inside a step — it does not fit the step time cap (F-345). **But note where your new tests
-  LIVE**: dogfood-152 failed because the executor put a new test in `test/runner/` and then
-  verified with a scope covering only `test/judge/` and `test/workflow/` (F-382). Run the
+  LIVE**: dogfood-152 failed because the executor put a new test in test/runner/ and then
+  verified with a scope covering only test/judge/ and `test/workflow/` (F-382). Run the
   directories you actually wrote into.
 
 repos:
