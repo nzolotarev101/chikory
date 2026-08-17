@@ -460,8 +460,10 @@ acceptance_criteria:
               // step 1 objects, step 2 (the stall) objects, step 3 (the real repair) is clean.
               [stepForm(false), stepForm(false), stepForm(true), stepForm(true)],
               {
+                // Only MAX_COMPLETION_REVIEWS (2) reviews ever fire. Review #1 upholds
+                // the finding and buys the repair; review #2 must be able to clear it,
+                // so the run's fate turns entirely on WHICH step spends review #2.
                 reviewForms: [
-                  completionReviewForm({ rubricFails: [RUBRIC_DESIGN_SERVES_OVERALL_GOAL] }),
                   completionReviewForm({ rubricFails: [RUBRIC_DESIGN_SERVES_OVERALL_GOAL] }),
                   completionReviewForm(),
                 ],
@@ -597,10 +599,14 @@ acceptance_criteria:
       const FIRST_STEP_ANSWER = "FIRSTSTEP-OWN-ANSWER nothing precedes this pass";
       const LATER_FIX_ANSWER = "LATERFIX-GENUINE-GREEN the objection is addressed by this diff";
 
-      function form(designPasses: boolean, justification: string): JudgeForm {
+      function form(designPasses: boolean, justification: string, criterionPasses = true): JudgeForm {
         return {
           criterionResults: [
-            { id: "AC-A", pass: true, justification: "scripted judge: confirmed" },
+            {
+              id: "AC-A",
+              pass: criterionPasses,
+              justification: criterionPasses ? "scripted judge: confirmed" : "scripted judge: not met yet",
+            },
           ],
           rubricResults: STANDING_RUBRIC.map((r) => ({
             id: r.id,
@@ -619,6 +625,10 @@ acceptance_criteria:
         forms: JudgeForm[];
         maxSteps: number;
         cleanups: Array<() => Promise<void>>;
+        // A declared `check` makes the criterion MACHINE-derived from its exit code
+        // (src/judge/harness.ts), which overrides whatever the scripted wire says.
+        // Drop it when the test needs to drive the criterion itself.
+        withCheck?: boolean;
       }): Promise<{ verdicts: Journaled[]; report: RunStatusReport }> {
         const tmp = await mkdtemp(join(tmpdir(), "chikory-wp632-ac3-"));
         opts.cleanups.push(() => rm(tmp, { recursive: true, force: true }));
@@ -649,7 +659,11 @@ acceptance_criteria:
           repoUrl,
           cadence: 1,
           maxSteps: opts.maxSteps,
-          acceptanceCriteria: [{ id: "AC-A", description: "scripted criterion A", check: "true" }],
+          acceptanceCriteria: [
+            opts.withCheck === false
+              ? { id: "AC-A", description: "scripted criterion A" }
+              : { id: "AC-A", description: "scripted criterion A", check: "true" },
+          ],
         });
         const handle = await runner.start(spec);
         const report = await waitFor<RunStatusReport>(
@@ -709,15 +723,19 @@ acceptance_criteria:
         });
 
         test("trap C — a real diff AFTER a carried-forward FAIL must still be able to turn the row green", async () => {
+          // AC-A must stay unmet through passes 1-2 so the run actually REACHES step 3.
+          // Two consecutive fails is below HALT_CONSECUTIVE_FAILS (3), so no goal-drift HALT.
           const { verdicts } = await runScripted({
             emptyDiffSteps: [2],
             forms: [
-              form(false, "OBJECTION raised against step 1"),
-              form(true, "vacuous green on the empty step"),
-              form(true, LATER_FIX_ANSWER),
+              form(false, "OBJECTION raised against step 1", false),
+              form(true, "vacuous green on the empty step", false),
+              form(true, LATER_FIX_ANSWER, true),
+              form(true, LATER_FIX_ANSWER, true),
             ],
             maxSteps: 4,
             cleanups,
+            withCheck: false,
           });
           const third = verdicts.find((v) => v.atStep === 2);
           expect(third, "no verdict was journaled for the third (non-empty) step").toBeDefined();
