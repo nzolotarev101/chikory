@@ -115,3 +115,38 @@ describe("createNativeAdapter", () => {
     expect(transcript).toContain("does-not-exist.txt");
   });
 });
+
+describe("native adapter inherits the workspace-ref normalisation (F-392 / WP-606)", () => {
+  it("strips the ephemeral workspace root from its summary while keeping lines and outside paths", async () => {
+    const ws = await makeWorkspace();
+    const REL = "packages/sdk-ts/src/judge/harness.ts";
+    const OUTSIDE = "https://example.com/docs/harness.ts#L1-L2";
+    const provider = new ScriptedProvider([
+      () =>
+        nativeJson({
+          summary:
+            `Edited [\`applyCheckOverrides\`](file://${ws.workspaceDir}/${REL}#L106-L147) ` +
+            `and a bare ${ws.workspaceDir}/${REL} path. See ${OUTSIDE} for context.`,
+          final: true,
+        }),
+    ]);
+    const adapter = createNativeAdapter({
+      store: ws.store,
+      router: routerFromProvider(provider),
+      modelFamily: "openai-compat",
+    });
+
+    const record = await adapter.runStep(makeStepInput(ws, "Summarise the work.", 30));
+
+    StepRecordSchema.parse(record);
+    // `native` does not pass through `runCliStep`, so the shared-site fix does
+    // not reach it for free — the adapter must apply it itself.
+    expect(
+      record.summary,
+      "the run workspace is deleted when the run ends; its absolute path must not ride into the next step",
+    ).not.toContain(ws.workspaceDir);
+    expect(record.summary).toContain(`${REL}:106-147`);
+    expect(record.summary).toContain(`${REL} path`);
+    expect(record.summary, "a real website is somebody else's path").toContain(OUTSIDE);
+  });
+});

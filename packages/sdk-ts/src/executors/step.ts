@@ -32,6 +32,68 @@ export function claimsCompleteFromSummary(summary: string): boolean {
   return summary.split("\n").some((line) => line.trim() === COMPLETION_MARKER);
 }
 
+/** Escape regex special characters in a string. */
+function escapeRegex(str: string): string {
+  return str.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+/**
+ * WP-606 (dogfood-155 / F-390): Normalises references to files inside the run
+ * workspace so they are workspace-relative and outlive the ephemeral run
+ * directory, while preserving the line information the agent emitted. Paths
+ * outside the workspace and summaries with nothing to normalise are left untouched.
+ */
+export function normalizeWorkspaceRefs(summary: string, workspaceDir: string): string {
+  if (!summary || typeof summary !== "string") return summary;
+  if (!workspaceDir || typeof workspaceDir !== "string") return summary;
+  const wsRoot = workspaceDir.replace(/\/+$/, "");
+  if (!wsRoot || wsRoot === "/") return summary;
+
+  const escapedWs = escapeRegex(wsRoot);
+  const pattern = new RegExp(
+    `(?:file:\\/\\/*)?${escapedWs}(?:\\/([^\\s)\\]>"'\`#?]+))?(?:#(?:L|l)?(\\d+)(?:[-:](?:L|l)?(\\d+))?|:(\\d+)(?:-(\\d+))?)?(?=[\\s)\\]>"'\`,;!?]|$)`,
+    "g",
+  );
+
+  return summary.replace(
+    pattern,
+    (
+      _match,
+      relPath?: string,
+      hashLineStart?: string,
+      hashLineEnd?: string,
+      colonLineStart?: string,
+      colonLineEnd?: string,
+    ) => {
+      let cleanRel = relPath || "";
+      let trailingPunct = "";
+      const lineStart = hashLineStart || colonLineStart;
+      const lineEnd = hashLineEnd || colonLineEnd;
+
+      if (!lineStart && cleanRel) {
+        const punctMatch = cleanRel.match(/([.,;:!?]+)$/);
+        if (punctMatch) {
+          trailingPunct = punctMatch[1];
+          cleanRel = cleanRel.slice(0, -trailingPunct.length);
+        }
+      }
+
+      let lineRef = "";
+      if (lineStart && lineEnd) {
+        lineRef = `:${lineStart}-${lineEnd}`;
+      } else if (lineStart) {
+        lineRef = `:${lineStart}`;
+      }
+
+      if (!cleanRel) {
+        return (lineRef ? `.${lineRef}` : ".") + trailingPunct;
+      }
+
+      return cleanRel + lineRef + trailingPunct;
+    },
+  );
+}
+
 /** What an adapter's parser extracts from the CLI's stdout. */
 export interface ParsedCliResult {
   ok: boolean;
@@ -151,7 +213,7 @@ export async function runCliStep(opts: CliStepOptions): Promise<StepRecord> {
   const base = {
     diffRef,
     transcriptRef,
-    summary: parsed.summary,
+    summary: normalizeWorkspaceRefs(parsed.summary, opts.input.workspaceDir),
     toolCalls: parsed.toolCalls,
     tokens: parsed.tokens,
     costUsd: parsed.costUsd,
@@ -173,7 +235,7 @@ export async function runCliStep(opts: CliStepOptions): Promise<StepRecord> {
     record = {
       ...base,
       status: "FAILED",
-      summary: parsed.summary || "step killed: exceeded maxSeconds",
+      summary: base.summary || "step killed: exceeded maxSeconds",
       // F-210: the cap killed the step — the judge may still report on whatever
       // landed, but this outcome must not spend a rule-3 strike.
       infraFailed: true,
@@ -196,7 +258,7 @@ export async function runCliStep(opts: CliStepOptions): Promise<StepRecord> {
     record = {
       ...base,
       status: "FAILED",
-      summary: parsed.summary,
+      summary: base.summary,
       failure: {
         reason:
           `executor wrote OUTSIDE its workspace: the step diff is empty but ` +
@@ -221,7 +283,7 @@ export async function runCliStep(opts: CliStepOptions): Promise<StepRecord> {
     record = {
       ...base,
       status: "FAILED",
-      summary: parsed.summary || failure.reason,
+      summary: base.summary || failure.reason,
       failure: { ...failure, reason: `${failure.reason}${exitCtx}` },
       // F-228 (WP-553): hand the raw stderr to the limit scheduler. A quota or
       // rate wall reads as an ordinary executor failure here — `agy`'s
@@ -249,7 +311,7 @@ export async function runCliStep(opts: CliStepOptions): Promise<StepRecord> {
     record = {
       ...base,
       status: "SUCCESS",
-      claimsComplete: claimsCompleteFromSummary(parsed.summary),
+      claimsComplete: claimsCompleteFromSummary(base.summary),
     };
   }
 

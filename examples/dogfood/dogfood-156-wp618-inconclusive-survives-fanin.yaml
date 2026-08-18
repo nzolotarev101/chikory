@@ -1,0 +1,438 @@
+# Plain: when a chain runs several agents in sequence, each one gets a verdict. Sometimes a node's
+# test suite never finished — it was killed by the clock, so nobody actually knows whether the code
+# is good or bad. The run itself records that ("inconclusive"). The chain throws it away: the node
+# folds in as an ordinary success, the next node builds on it, and the only surviving trace is a
+# sentence in a prose field. After this run, "the check never ran" survives all the way to what the
+# chain writes down and what `chikory chain trace` prints.
+# WP: WP-618 (a node's inconclusive outcome must survive the fan-in; F-332)
+# Ladder-rung: 0 (off-ladder - P3 rung-5's remaining half is WP-304, operator-run; see WHY)
+# Thesis-KPI: compounding error (CLAUDE.md) - a dependent node must not build on a node whose
+#   verdict was never actually earned. Measured as: does the inconclusive marker survive every hop
+#   between the child run's seal and the chain's own record + renderer.
+#
+# THE MEASURED PREMISE - read out of the code at THIS review (F-203/F-342: measured, not
+#   transcribed). Reproduce with:
+#     grep -rn 'inconclusiveCheck' packages/sdk-ts/src --include='*.ts'
+#   RUN LEVEL - WP-615 built this and it works:
+#     * written into the terminal journal payload   src/runner/activities.ts:2976
+#     * read back onto the report                   src/journal/journal.ts:319
+#     * rendered by `chikory trace`                 src/cli/trace.ts:437, :819
+#   CHAIN LEVEL - zero occurrences. `grep -rn 'inconclusiveCheck' src/chain/` returns NOTHING.
+#   The value has to cross FIVE hops and it dies at the first one:
+#     1. `readNodeResult` (src/chain/activities.ts:235) reads the child's terminal payload and
+#        copies `handoff` (:249), `reason` (:251), `resumable` (:254). Not this.
+#     2. `NodeResult` (src/chain/activities.ts:64) has no field for it.
+#     3. `chain-loop.ts:338` calls `recordNodeSealed({chainId, nodeId, outcome, ...handoff})` - a
+#        HAND-WRITTEN field list.
+#     4. `recordNodeSealed` (src/chain/activities.ts:283) takes a hand-written input type and
+#        builds the `node_sealed` payload from a hand-written field list (:294-298); the payload
+#        type `NodeSealedPayload` (src/chain/store.ts:78) has three fields.
+#     5. `chikory chain trace` renders through `renderChainReadTrace` (src/chain/read-trace.ts:82),
+#        which reads `record.nodeOutcomes` - folded from `node_sealed` at src/chain/store.ts:296.
+#
+#   * WHY IT MATTERS, in thesis terms. A cap-killed regression suite is the run saying "I did not
+#     find out". WP-615 removed exactly this guesswork at run level. At chain level the dependent
+#     node still starts, `recordNodeSealed` journals no marker, and the only signal left is prose
+#     inside `reason` - the "regex a sentence" state WP-615 deleted one altitude down. That is
+#     compounding error with the brakes off: a node whose verdict was never earned becomes the
+#     foundation of the next one.
+#   * THIS IS THE THIRD INSTANCE OF ONE FAMILY, AND IT IS THE TRAP. An additive field is only real
+#     where its CONSUMER reads it: F-380 (dogfood-152, `concernSeverities` deleted by a
+#     re-constructor), F-388 (dogfood-154, a tail preserved then head-clamped one seam later),
+#     F-392 (dogfood-155, the `native` adapter never crossed the "shared" seam). Every one of them
+#     was green at the point of manufacture. Assert where the value is CONSUMED.
+#   * NOT IN SCOPE: `NodeOutcome`'s value set does not change. Inconclusive is a MARKER on a sealed
+#     outcome, not a fourth status - a new status value would reshape `advanceChain`, the reducer,
+#     the gate and every fold, and this WP is a value change.
+#   * THE SUITE THIS RUN MUST NOT BREAK, MEASURED at the launch commit by running it under devbox
+#     (F-342 - run it yourself and read its own tail): 194 files passed | 2 skipped,
+#     1599 passed | 23 skipped (1622 total).
+#
+# PRECEDENCE - two rules below can disagree about one node. When they do:
+#   1. A NODE THAT NEVER LEARNED beats a node that reported. If the child run sealed with an
+#      inconclusive marker, the chain records that, whatever else the terminal payload says.
+#   2. SILENCE STAYS SILENT. A node whose checks all really ran gains NO key, no empty string, no
+#      "none" - the healthy path is byte-unchanged. AC-1 drives both, on two nodes in one chain.
+#
+# Format: loose - the outcome (the marker survives to the chain journal and the renderer) is fixed;
+#   the field name, where on `NodeResult` it lives, and the rendered wording are the executor's
+#   call. AC-1 and AC-2 assert on the VALUE, never on a field name (F-393).
+#
+# Launch mode: RUN (single node - one value crossing five hops in one package).
+#   CHIKORY_PREFLIGHT_ONLY=1 devbox run run-dogfood
+#   devbox run run-dogfood
+#
+# WHY THIS AND NOT THE LADDER RUNG (dogfood-155 review, 2026-08-18):
+#   `scripts/dogfood-progression.sh` reads **PROGRESSING** (max steps 3 vs 2), so the default
+#   candidate is the current phase ladder rung - P3's ladder is WP-530 (plan.md section 7) and its
+#   next rung is rung-5, whose remaining half is WP-304's OpenHands arm plus a corpus wide enough
+#   to separate 19 requirements at 95 percent confidence. Re-checked against plan.md section 7 at
+#   this review and still true. That is a quota-bound multi-hour benchmark suite the OPERATOR runs
+#   by hand (dogfood-122's lesson - an LLM executor may not supervise it), so it cannot be a spec,
+#   and has not been since dogfood-139. WP-618 beats it on runnable thesis value: it is product
+#   code on the chain pillar (durable multi-run execution, WP-219), its premise was re-measured
+#   from the code at this review, and it is the third consecutive instance of the defect family
+#   that has cost this project three runs - so the run doubles as a test of whether the loop can
+#   finally reject it. Rejected: WP-592 (F-268 - the capability entry declares the executor
+#   `subscription-linked` with `zero-wire-cost`, so "$0.00 is wrong" is NOT measured true; the
+#   premise needs re-work before it is worth a run) · WP-634 (F-382, harness-meta, section 1.5
+#   track-B) · WP-633 (F-378, latent behind an unreachable predicate) · F-389 (the 64 KiB
+#   collection bound - real, track-B).
+
+name: dogfood-156-wp618-inconclusive-survives-fanin
+wp: WP-618
+
+goal: |
+  When a chain node's child run seals with an inconclusive check — the run's own record that a
+  declared check never actually finished, so its verdict was never earned — the chain must carry
+  that fact, not discard it.
+
+  Measured from the code at this review: grepping for the marker under packages/sdk-ts/src/chain/
+  returns **nothing**. The run level has it end to end (written `src/runner/activities.ts:2976`,
+  read back `src/journal/journal.ts:319`, rendered `src/cli/trace.ts:437`). The chain level drops
+  it at the first of five hops: `readNodeResult` (src/chain/activities.ts:235) copies handoff
+  (:249), `reason` (`:251`) and resumable (:254) off the child's terminal payload and stops;
+  NodeResult (:64) has no field for it; chain-loop.ts:338 and `recordNodeSealed` (:283,
+  payload built at :294) are hand-written field lists; the node_sealed payload type
+  (src/chain/store.ts:78) has three fields; and the chain read-trace renderer
+  (src/chain/read-trace.ts:82) renders from the chain record's nodeOutcomes map, folded from
+  `node_sealed` at src/chain/store.ts:296.
+
+  Make two things true.
+
+  1. **The inconclusive marker survives to what the chain WRITES DOWN.** A child run that sealed
+     with an inconclusive check produces a persisted `node_sealed` chain-journal entry that carries
+     which check never ran. The value must reach the entry that is actually written to disk — not
+     merely an in-memory `NodeResult`.
+  2. **The inconclusive marker survives to what an OPERATOR SEES.** `chikory chain trace` names the
+     inconclusive check on that node's line. A chain whose gate never ran must not read like a
+     chain whose gate passed.
+
+  Four things must NOT change, and each is a trap this run is graded on:
+
+  1. **`NodeOutcome`'s value set does not change.** Inconclusive is a marker on a sealed outcome,
+     not a fourth status. A node that sealed SUCCESS still seals SUCCESS.
+  2. **Silence stays silent.** A node whose checks all really ran gains no key, no empty string and
+     no "none" — its `node_sealed` payload and its rendered line are what they are today.
+  3. **The run-level plumbing WP-615 built is not touched.** `src/runner/activities.ts:2976`,
+     `src/journal/journal.ts:319` and `src/cli/trace.ts:437` already work; this WP is the chain
+     level, and moving or rewriting the run level is out of scope.
+  4. **`reason` keeps carrying what it carries today.** WP-521's retry brief reads it
+     (`src/chain/activities.ts:251`); the marker is a separate, structured signal — do not encode
+     it into the prose and do not stop populating `reason`.
+
+  TypeScript stays strict ESM with named exports and no `any`. Do not touch the planner, the plan
+  gate, the reducer's status arithmetic, the budget arithmetic, the Python mirror, or the TaskSpec
+  contract.
+
+  Pin your work with tests that live in the repo, beside the files they cover. A behaviour proved
+  only by the acceptance checks that grade this run is not pinned at all (F-356), and a repo test
+  copied verbatim from a grading check inherits its blind spots (F-360).
+
+  **Assert at the seam where the value is CONSUMED, not where it is manufactured.** This is the
+  single most likely way this run ships something inert, and it has happened three runs running:
+  F-380 (an additive field deleted by a re-constructor that never appeared in the diff), F-388 (a
+  tail preserved at one boundary and head-clamped at the next), F-392 (a "shared" site the fourth
+  adapter never crossed). All three were green at the point of manufacture. Here the point of
+  manufacture is `readNodeResult`; the points of consumption are the **persisted `node_sealed`
+  entry** and the **`chikory chain trace` output**. A test that asserts on the object
+  `readNodeResult` returns proves nothing — there are three more hand-written field lists after it.
+
+  Verify your work with FAST checks only: the package typecheck (`pnpm run typecheck` — NOT bare
+  tsc --noEmit, which does not cover the test/ tree, F-382), eslint over the files you touched,
+  and vitest over the directories you actually wrote into. Do NOT run the full vitest suite inside
+  a step — it does not fit the step time cap (F-345).
+
+repos:
+  - url: /Users/nikitazolotarev/repos/chikory
+    writable: true
+
+# The SDK suite is both the surface this run edits and the gate it must not break.
+# MEASURE it at the launch commit rather than trusting this line (F-342, dogfood-140).
+regression_suite: pnpm --filter @chikory/sdk exec vitest run
+check_timeout_ms: 180000
+
+acceptance_criteria:
+  - id: AC-1
+    description: >
+      THIS CHECK OWNS ITS ORACLE (does the chain write down that a node's check never ran) AND
+      ASSERTS AT THE CONSUMED SEAM. It seeds two REAL child-run journals on disk — one sealed with
+      an inconclusive check, one clean — drives the REAL `readNodeResult` and the REAL
+      `recordNodeSealed` activities, then RE-OPENS the chain journal from disk and asserts on the
+      persisted `node_sealed` payloads. It asserts on the marker's VALUE, never on a field name, so
+      the executor is free to name the field (F-393). Traps: the clean node gains nothing, and both
+      nodes still seal with their original `NodeOutcome` status.
+    check: |
+      cd packages/sdk-ts || exit 1
+      TARGET=test/chain/ac1-inconclusive-survives-fanin.generated.test.ts
+      mkdir -p test/chain
+      rm -f "$TARGET"
+      cat > "$TARGET" <<'GENEOF'
+      import { mkdtemp } from "node:fs/promises";
+      import { tmpdir } from "node:os";
+      import { join } from "node:path";
+
+      import { describe, expect, test } from "vitest";
+
+      import { createChainActivities } from "../../src/chain/activities.js";
+      import { ChainJournal } from "../../src/chain/store.js";
+      import { Journal } from "../../src/journal/journal.js";
+      import { chainJournalPath, journalPath } from "../../src/runner/paths.js";
+      import type { TaskSpec } from "../../src/types.js";
+
+      const MARKER = "pre_existing_suite_still_green";
+      const TASK = { name: "t", goal: "g", budgetUsd: 10 } as unknown as TaskSpec;
+
+      function seedChild(dataDir: string, runId: string, inconclusive?: string): void {
+        const j = new Journal(journalPath(dataDir, runId));
+        j.createRun(runId, TASK);
+        j.append({
+          kind: "terminal",
+          payload: {
+            status: "SUCCESS",
+            handoff: { summary: "node " + runId + " done" },
+            reason: "sealed",
+            ...(inconclusive === undefined ? {} : { inconclusiveCheck: inconclusive }),
+          },
+          costDeltaUsd: 0,
+          artifactRefs: [],
+        });
+        j.sealRun("SUCCESS");
+        j.close();
+      }
+
+      describe("an inconclusive node survives the fan-in (WP-618)", () => {
+        test("the persisted node_sealed entry carries which check never ran", async () => {
+          const dataDir = await mkdtemp(join(tmpdir(), "chikory-ac1-fanin-"));
+          const chainId = "chain-ac1";
+          seedChild(dataDir, "run-killed", MARKER);
+          seedChild(dataDir, "run-clean", undefined);
+
+          const acts = createChainActivities({ dataDir });
+          const killed = await acts.readNodeResult({ childRunId: "run-killed" });
+          const clean = await acts.readNodeResult({ childRunId: "run-clean" });
+
+          // Spread the WHOLE NodeResult: the check must not care what the field
+          // is called, only that the fact reaches the disk (F-393).
+          await acts.recordNodeSealed({ chainId, nodeId: "N-1", ...killed });
+          await acts.recordNodeSealed({ chainId, nodeId: "N-2", ...clean });
+
+          const cj = new ChainJournal(chainJournalPath(dataDir, chainId));
+          const sealed = cj.entries("node_sealed");
+          const payloadFor = (nodeId: string): string => {
+            const hit = sealed.find(
+              (e) => (e.payload as { nodeId?: string }).nodeId === nodeId,
+            );
+            expect(hit, "no node_sealed entry was written for " + nodeId).toBeDefined();
+            return JSON.stringify(hit?.payload ?? {});
+          };
+          const n1 = payloadFor("N-1");
+          const n2 = payloadFor("N-2");
+          cj.close();
+
+          expect(
+            n1,
+            "the chain must write down that this node's check never ran — an in-memory NodeResult is not the consumed seam",
+          ).toContain(MARKER);
+          expect(
+            n2,
+            "TRAP: silence stays silent — a node whose checks really ran gains no marker",
+          ).not.toContain(MARKER);
+          expect(
+            n2,
+            "TRAP: not an empty string, not 'none' — the healthy payload is unchanged",
+          ).not.toContain("inconclusive");
+
+          // TRAP: a marker, not a fourth status.
+          expect(JSON.parse(n1).outcome.status).toBe("SUCCESS");
+          expect(JSON.parse(n2).outcome.status).toBe("SUCCESS");
+          // TRAP: `reason` still carries what WP-521's retry brief reads.
+          expect(killed.reason).toBe("sealed");
+        });
+      });
+      GENEOF
+      pnpm exec vitest run "$TARGET"
+      ST=$?
+      rm -f "$TARGET"
+      if [ "$ST" -ne 0 ]; then
+        echo "AC-1 FAIL: the inconclusive marker does not reach the persisted node_sealed entry, or a clean node picked one up, or the outcome status set changed, or reason stopped being populated. vitest exited $ST"
+        exit 1
+      fi
+      echo "AC-1 OK: the chain writes down that a node's check never ran, and writes nothing extra when it did"
+
+  - id: AC-2
+    description: >
+      THIS CHECK OWNS THE SECOND CONSUMED SEAM — what an OPERATOR sees. It builds a real chain on
+      disk (real plan, two sealed nodes, one inconclusive) and drives the REAL `cmdChainTrace`
+      entry point, asserting its rendered output names the inconclusive check on that node and says
+      nothing extra about the clean one. A marker that is persisted but never rendered leaves the
+      operator reading a chain whose gate never ran as one whose gate passed.
+    check: |
+      cd packages/sdk-ts || exit 1
+      TARGET=test/chain/ac2-inconclusive-rendered.generated.test.ts
+      mkdir -p test/chain
+      rm -f "$TARGET"
+      cat > "$TARGET" <<'GENEOF'
+      import { mkdtemp } from "node:fs/promises";
+      import { tmpdir } from "node:os";
+      import { join } from "node:path";
+
+      import { describe, expect, test } from "vitest";
+
+      import { createChainActivities } from "../../src/chain/activities.js";
+      import { cmdChainTrace } from "../../src/cli/chain.js";
+      import { Journal } from "../../src/journal/journal.js";
+      import { journalPath } from "../../src/runner/paths.js";
+      import type { Plan, TaskSpec } from "../../src/types.js";
+
+      const MARKER = "pre_existing_suite_still_green";
+      const TASK = { name: "t", goal: "g", budgetUsd: 10 } as unknown as TaskSpec;
+
+      function node(id: string, dependsOn: string[]) {
+        return {
+          id,
+          goal: "do " + id,
+          acceptanceCriteria: [{ id: "AC-1", description: "d" }],
+          dependsOn,
+          budgetUsd: 5,
+        };
+      }
+
+      function seedChild(dataDir: string, runId: string, inconclusive?: string): void {
+        const j = new Journal(journalPath(dataDir, runId));
+        j.createRun(runId, TASK);
+        j.append({
+          kind: "terminal",
+          payload: {
+            status: "SUCCESS",
+            reason: "sealed",
+            ...(inconclusive === undefined ? {} : { inconclusiveCheck: inconclusive }),
+          },
+          costDeltaUsd: 0,
+          artifactRefs: [],
+        });
+        j.sealRun("SUCCESS");
+        j.close();
+      }
+
+      describe("chikory chain trace shows a node whose gate never ran (WP-618)", () => {
+        test("the rendered trace names the inconclusive check, and only on that node", async () => {
+          const dataDir = await mkdtemp(join(tmpdir(), "chikory-ac2-fanin-"));
+          const chainId = "chain-ac2";
+          const plan: Plan = {
+            id: "plan-ac2",
+            goal: "two nodes",
+            nodes: [node("N-1", []), node("N-2", ["N-1"])],
+            createdAt: new Date().toISOString(),
+          };
+          seedChild(dataDir, "run-killed", MARKER);
+          seedChild(dataDir, "run-clean", undefined);
+
+          const acts = createChainActivities({ dataDir });
+          await acts.initChain({ chainId, plan });
+          const killed = await acts.readNodeResult({ childRunId: "run-killed" });
+          const clean = await acts.readNodeResult({ childRunId: "run-clean" });
+          await acts.recordNodeSealed({ chainId, nodeId: "N-1", ...killed });
+          await acts.recordNodeSealed({ chainId, nodeId: "N-2", ...clean });
+
+          const lines: string[] = [];
+          const code = cmdChainTrace(
+            { chainId, dataDir },
+            { out: (line: string) => lines.push(line) },
+          );
+          expect(code, "cmdChainTrace must succeed against a real chain journal").toBe(0);
+          const rendered = lines.join("\n");
+
+          const renderedLines = rendered.split("\n");
+          expect(rendered, "the trace must mention both nodes").toContain("N-1");
+          expect(rendered, "the trace must mention both nodes").toContain("N-2");
+          expect(
+            renderedLines.some((l) => l.includes("N-1") && l.includes(MARKER)),
+            "an operator reading this trace must be able to tell that N-1's gate never ran: " + rendered,
+          ).toBe(true);
+          // Per LINE, so the shared topology line ("N-2 <- N-1") cannot confuse the trap.
+          for (const line of renderedLines) {
+            if (!line.includes("N-2") || line.includes("N-1")) continue;
+            expect(
+              line,
+              "TRAP: the clean node must not be tarred with the other node's marker",
+            ).not.toContain(MARKER);
+          }
+        });
+      });
+      GENEOF
+      pnpm exec vitest run "$TARGET"
+      ST=$?
+      rm -f "$TARGET"
+      if [ "$ST" -ne 0 ]; then
+        echo "AC-2 FAIL: chikory chain trace does not surface the inconclusive check — a marker that is persisted but never rendered leaves the operator reading an unearned verdict as an earned one. vitest exited $ST"
+        exit 1
+      fi
+      echo "AC-2 OK: the operator-facing trace names the node whose gate never ran"
+
+  - id: AC-3
+    description: >
+      Strict typecheck (including the test tree, F-382), eslint over the chain modules, the
+      neighbouring contracts this WP must not disturb, and the DECLARED regression suite green AND
+      larger — a behaviour proved only by these grading checks is not pinned at all (F-356). Every
+      grep here is a TRAP on something that must NOT move; none of them pins the spelling of the
+      new code (F-393, dogfood-155).
+    check: |
+      cd packages/sdk-ts || exit 1
+      pnpm run typecheck || { echo "AC-3 FAIL: strict typecheck is red (this covers test/ too — F-382)"; exit 1; }
+      pnpm exec eslint src/chain/activities.ts src/chain/store.ts src/cli/chain.ts || { echo "AC-3 FAIL: eslint is red on the modules this WP touches"; exit 1; }
+
+      grep -qE 'inconclusiveCheck: input\.inconclusiveCheck' src/runner/activities.ts || {
+        echo "AC-3 FAIL: trap — WP-615's RUN-level write (src/runner/activities.ts:2976) moved or was deleted. That plumbing already works; this WP is the chain level."
+        exit 1
+      }
+      grep -qE 'report\.inconclusiveCheck = payload\.inconclusiveCheck' src/journal/journal.ts || {
+        echo "AC-3 FAIL: trap — the run report no longer reads the terminal payload's inconclusive marker (src/journal/journal.ts:319). This WP does not touch the run level."
+        exit 1
+      }
+      grep -qE 'inconclusive check' src/cli/trace.ts || {
+        echo "AC-3 FAIL: trap — the chikory trace command's RUN-level inconclusive line (src/cli/trace.ts:437) moved or was deleted."
+        exit 1
+      }
+      grep -qE 'if \(terminal\?\.reason !== undefined\) result\.reason' src/chain/activities.ts || {
+        echo "AC-3 FAIL: trap — readNodeResult stopped populating reason (src/chain/activities.ts:251). WP-521's retry brief reads it; the marker is an ADDITION, not a replacement."
+        exit 1
+      }
+      if grep -qE '"INCONCLUSIVE"' src/chain/activities.ts src/chain/store.ts src/types.ts; then
+        echo "AC-3 FAIL: trap — NodeOutcome gained an INCONCLUSIVE status. This WP is a MARKER on a sealed outcome, not a fourth status: a new status reshapes advanceChain, the reducer, the gate and every fold."
+        exit 1
+      fi
+
+      OUT=$(pnpm --filter @chikory/sdk exec vitest run 2>&1)
+      ST=$?
+      echo "$OUT" | tail -25
+      if [ "$ST" -ne 0 ]; then
+        echo "AC-3 FAIL: the DECLARED regression suite is RED (vitest exited $ST)"
+        exit 1
+      fi
+      N=$(echo "$OUT" | grep -oE "Tests +[0-9]+ passed" | grep -oE "[0-9]+" | head -1)
+      echo "committed suite tests passing: ${N:-UNPARSEABLE} (floor 1603, measured baseline 1599)"
+      if [ -z "$N" ]; then
+        echo "AC-3 FAIL: could not read a test count out of the vitest summary"
+        exit 1
+      fi
+      if [ "$N" -lt 1603 ]; then
+        echo "AC-3 FAIL: durability floor not met — the committed suite did not grow by at least 4 tests. A behaviour proved only by the generated grading checks is not pinned at all (F-356)."
+        exit 1
+      fi
+      echo "AC-3 OK: strict typecheck and lint green, the run-level plumbing and the outcome value set are untouched, DECLARED suite green AND larger"
+
+budget_usd: 20
+max_steps: 6
+
+agent_classes:
+  executor: executor-default
+  judge: judge-default
+
+judge:
+  cadence: 1
+
+# F-322 (dogfood-135): without this, a converged out-of-rubric escalation parks overnight for a
+# human instead of auto-sealing.
+unattended:
+  escalation: seal_resumable_failed

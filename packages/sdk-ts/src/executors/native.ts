@@ -21,7 +21,7 @@ import type {
   TokenUsage,
 } from "../types.js";
 import { renderStepPrompt } from "./prompt.js";
-import { claimsCompleteFromSummary, SPAN_STEP } from "./step.js";
+import { claimsCompleteFromSummary, normalizeWorkspaceRefs, SPAN_STEP } from "./step.js";
 import { assertGitWorkspace, captureWorkspaceDiff } from "./workspace.js";
 
 export interface NativeAdapterOptions {
@@ -242,10 +242,15 @@ async function buildRecord(opts: {
     }),
   ]);
 
+  // F-392 (WP-606): `native` is the one registered adapter that does not pass
+  // through `runCliStep`, so it must apply the shared workspace-ref
+  // normalisation itself — otherwise its summary keeps the ephemeral run
+  // workspace path every other adapter now drops.
+  const summary = normalizeWorkspaceRefs(opts.summary, opts.input.workspaceDir);
   const base = {
     diffRef,
     transcriptRef,
-    summary: opts.summary,
+    summary,
     toolCalls: opts.toolCalls,
     tokens: opts.tokens,
     costUsd: opts.costUsd,
@@ -254,12 +259,12 @@ async function buildRecord(opts: {
   };
   const record: StepRecord =
     opts.status === "SUCCESS"
-      ? { ...base, status: "SUCCESS", claimsComplete: claimsCompleteFromSummary(opts.summary) }
+      ? { ...base, status: "SUCCESS", claimsComplete: claimsCompleteFromSummary(summary) }
       : {
           ...base,
           status: "FAILED",
           ...(opts.infraFailed === true ? { infraFailed: true } : {}),
-          failure: opts.failure ?? { reason: opts.summary || "native executor failed", retriable: true },
+          failure: opts.failure ?? { reason: summary || "native executor failed", retriable: true },
         };
 
   const span = getTracer().startSpan(SPAN_STEP, { startTime: opts.startedAt });

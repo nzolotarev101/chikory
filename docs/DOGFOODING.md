@@ -8,13 +8,14 @@ recover a run, and how to land the result as a normal PR.
 **Status (2026-08-18, bounded — update discipline: REPLACE this block, ≤15 lines;
 displaced prose moves verbatim to [`PLAN-HISTORY.md`](PLAN-HISTORY.md); per-run detail:
 `docs/reports/`; queue + course correction: `plan.md` §6/§7).**
-🟢 **dogfood-154 / WP-635 (the handover to the next step must carry insight, not bulk) DELIVERED and LANDED** — `run-f7735f50-5c99-4d5a-8cb8-74f84a48f964`, SUCCESS, 1 step, $0.1335/$20.00, 9m 36s, AC 3/3 re-run green, harvest byte-IDENTICAL 7/7 (`docs/reports/dogfood-154.md`). A failing check's criterion justification now carries the check's OUTPUT — the assertion and the author's `AC-n FAIL: …` sentence — instead of the 6,624-byte command echo (`src/judge/harness.ts:130`), and the completion-milestone feedback site COMPOSES with `verdict.rationale` instead of displacing it (`src/workflow/agent-loop.ts:1409`), closing F-385. All four designed traps rejected; the channel constant was not raised.
-🟡 **The judge scored 0 true positives** — two clean passes, 3/3 criteria, `design_serves_overall_goal` green on "preserves tail diagnostics" over a delivery whose tail never arrived.
-🔴 **F-388, hand-fixed this sitting (§8): two clamps disagreed about which end is the signal.** The harness keeps the output's TAIL; `clampBrief` (`src/workflow/remediation.ts:46`) then keeps the HEAD — so at any check output **≥1,890 bytes** the executor got build-banner noise, no assertion, no author sentence. A fully GREEN `pnpm --filter @chikory/sdk exec vitest run` prints **17,403 bytes**, 9× past the cliff. Fixed by `clampSectionKeepingTail` (`src/workflow/remediation.ts:166`), 5 tests (`test/runner/remediation.test.ts:267`, 3 RED pre-fix). Suite 1,583 → **1,588 passed | 23 skipped**.
-⚠️ **An AC that owns its oracle at ONE boundary proves nothing about the NEXT one (§8).** F-384 said "drive the measured magnitude"; F-388 is the same lesson one seam later — measure the input at every seam it crosses, and when a fix says "keep the tail", grep every OTHER clamp the value passes through before calling it done.
-⚠️ **The judge reasons over the diff, and a diff cannot show the file that did not change** — F-376 (unchanged readers), F-380 (reconstructors), now F-388 (an unchanged clamp). Three of the last five reviews found the shipped defect by hand.
-ℹ️ **WP-548's live behaviour is still unmeasured THREE runs on (F-391/F-386)** — the judge raised 0 concerns again, so `concernSeverities` has still never held a real value.
-**NEXT HEADLINE = WP-606 (dogfood-155): the step summary must hand the next step references it can use** — 35.2% of this run's 6,634-byte summary (2,333 B across 15 URLs) is absolute `file://` paths into the run's own deleted workspace, paid into the next prompt AND the pacing estimate (`src/workflow/agent-loop.ts:982`).
+🟢 **dogfood-155 / WP-606 (a step summary must carry refs that outlive the run) DELIVERED and LANDED** — `run-c1f1b066-d59e-4f8e-848f-2b1508b2ba7b`, SUCCESS, 3 steps, $0.2235/$20.00, 13m 5s, AC 3/3 re-run green, harvest byte-IDENTICAL 2/2 (`docs/reports/dogfood-155.md`). `normalizeWorkspaceRefs` runs once at the shared `runCliStep` seam (`packages/sdk-ts/src/executors/step.ts:216`); codex, claude-code and gemini-cli inherit it unedited. Suite 1,588 → 1,598 passed | 23 skipped, 194 files.
+🟢 **Verified by hand against the PREVIOUS run's real summary** — `run-f7735f50`'s persisted step record goes 6,660 → 5,006 B (**−24.8%**), **15 → 0** `file://` URLs, line info preserved, nothing outside the workspace touched. All four designed traps rejected.
+🟢 **Judge true-positive: 1, and it drove a repair** — the *cumulative-design* pass read the whole diff, found a duplicated normalisation call that 3/3 green ACs could not see, did NOT gate, and the executor fixed it in the next step. First repair-driving catch since dogfood-152.
+🟡 **F-393 (§7): an AC grep that pins a code SPELLING can outrank a correct judge finding.** AC-3's `summary: [A-Za-z]+\(` false-RED'd the ES6 shorthand the judge had just asked for; step 3 ($0.0796, 36% of run spend) existed only to restore a matching spelling. A structural grep must accept every legal spelling of the seam — or, better, assert behaviour.
+🟡 **F-392, hand-fixed this sitting (§8): the shared seam is only shared by the adapters that cross it.** `native` (`src/agents/registry.ts:70`) builds its own `StepRecord` and never called `runCliStep`; it now normalises at `src/executors/native.ts:245`. Before writing "every adapter inherits X", enumerate the adapters and check which ones bypass the seam.
+⚠️ **F-197 again: a run cannot exercise the runner fix it delivers.** This run's own 3 summaries still measure 14,637 B / 34 URLs / 4,781 B (32.7%). Next review: read `record.summary` from the next run's journal (`kind='step'`) and expect **0** `file://…/workspace/` matches.
+ℹ️ **WP-548's live behaviour is unmeasured FOUR runs on (F-391/F-386)** — all 5 persisted verdicts carry no `concerns` array, so `concernSeverities` has still never held a real value.
+**NEXT HEADLINE = `dogfood-156`** — the progression gate reads ⛔ STALLED, but P3 rung-5 (WP-530) is an operator-run multi-hour benchmark suite and has been unrunnable as a spec since dogfood-139; the candidate and its §0/§1.1/§1.2/§1.3/§1.5 verdicts are recorded at the end of `docs/reports/dogfood-155.md`.
 
 Related docs: [`docs/spec/task-spec.md`](spec/task-spec.md) (schema
 reference) · [`docs/TASK-PROTOCOL.md`](TASK-PROTOCOL.md) (WP etiquette, §7 is
@@ -967,7 +968,42 @@ broken (a false-green, not a follow-on fix).
   guard, one file over: if the guard or a precheck objects, re-measure the premise
   and launch with `CHIKORY_ALLOW_STALE_SPEC=1`, do not quietly reshape the spec.
 
+- **An AC grep that pins a code SPELLING can outrank a correct judge finding**
+  (F-393, dogfood-155). AC-3 asserted the shared seam with
+  `grep -qE 'summary: parsed\.summary|summary: [A-Za-z]+\('` over
+  `packages/sdk-ts/src/executors/step.ts`. Judge pass #2 raised a real finding —
+  the delivery normalised twice, once into a local `const summary` and again when
+  building `base`. Step 2 fixed it exactly as asked, by reusing the variable via
+  the ES6 shorthand `summary,` — and AC-3 exited 1 with *"no longer builds
+  StepRecord.summary from the parsed result"*. The seam was intact; only the
+  spelling had changed. Step 3 (**$0.0796, 36% of the run's spend**) existed
+  solely to restore a grep-matching spelling, and the judge's own improvement was
+  reverted to satisfy the grader. Two rules. (1) A structural grep must accept
+  **every legal spelling** of the thing it pins — for an object property that
+  means the shorthand (`summary,`), the explicit assignment
+  (`summary: <expr>`), and a spread — or it is grading style, not structure. (2)
+  Prefer a behavioural AC that owns its oracle; AC-1 and AC-2 drove the real
+  `runCliStep` and never produced a false RED. Structural greps belong on the
+  **traps** (a neighbouring contract that must NOT move), where a false RED is
+  impossible because nothing is supposed to change.
+
 ## 8. Known P1 limitations (so you don't fight them)
+
+- **🟠 A "SHARED SITE" IS ONLY SHARED BY THE ADAPTERS THAT ACTUALLY CROSS IT**
+  (F-392, dogfood-155, hand-fixed at that review). WP-606 sited the summary
+  normalisation at `runCliStep` (`packages/sdk-ts/src/executors/step.ts:216`)
+  precisely because it is "the single site every CLI adapter's summary passes
+  through", and that is true — `codex.ts:145`, `claude-code.ts:199` and
+  `gemini-cli.ts:147` all inherited it without being edited. But there are
+  **four** registered adapters, not three (`AdapterYaml`,
+  `packages/sdk-ts/src/agents/registry.ts:70`): `native` (WP-213, the raw-LLM
+  in-process loop) builds its own `StepRecord` at
+  `packages/sdk-ts/src/executors/native.ts` and never calls `runCliStep`, so it
+  kept emitting the ephemeral workspace path. This is the F-376/F-380 family at
+  the adapter altitude — the bypassing file never appears in the diff, because
+  nobody has to touch it to leave it behind. Rule: before a goal says "every X
+  inherits this", enumerate X from the **registry enum**, not from the call sites
+  you already know, and name in an AC each member that does *not* cross the seam.
 
 - **🔴 AN ADDITIVE CONTRACT FIELD DIES IN THE PLACES THAT REBUILD THE OBJECT, NOT
   IN THE PLACES THAT READ IT** (F-380, dogfood-152). The F-376 rule — grep every
