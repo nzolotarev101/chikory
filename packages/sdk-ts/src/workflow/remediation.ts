@@ -135,9 +135,53 @@ function clampSections(sections: string[], maxChars: number = REMEDIATION_BRIEF_
     .map((_, index) => index)
     .sort((a, b) => sections[a].length - sections[b].length);
   for (const index of shortestFirst) {
-    clamped[index] = clampBrief(sections[index], Math.floor(remaining / unallocated));
+    clamped[index] = clampSectionKeepingTail(
+      sections[index],
+      Math.floor(remaining / unallocated),
+    );
     remaining -= clamped[index].length;
     unallocated -= 1;
   }
   return clamped.join(separator);
 }
+
+/**
+ * F-388 (dogfood-154 review): WP-635 made a failing check's justification carry
+ * the check's OUTPUT and deliberately preserved its TAIL — the assertion and the
+ * author's `AC-n FAIL: …` sentence, the only text written for the next attempt
+ * (src/judge/harness.ts:137). This clamp then threw exactly that away, because
+ * `clampBrief` keeps the HEAD: measured over the real `applyCheckOverrides`, any
+ * check output from 1,890 bytes up reached the executor as build-banner noise
+ * with neither the assertion nor the author's sentence in it. That is the common
+ * case, not a corner: a fully GREEN `pnpm --filter @chikory/sdk exec vitest run`
+ * over this suite prints 17,403 bytes. Two clamps disagreeing about which end is
+ * the signal make the feature inert.
+ *
+ * Every section here is `<header line>\n<body>`: the header names WHAT failed,
+ * and the body's signal is at its END. So keep both — the header verbatim, the
+ * body tail-clamped behind the same head-truncation marker the harness and the
+ * judge prompt already use (src/judge/prompt.ts:87), so the executor can always
+ * tell that what it received is partial.
+ */
+function clampSectionKeepingTail(section: string, maxChars: number): string {
+  if (section.length <= maxChars) return section;
+  const headerEnd = section.indexOf("\n");
+  if (headerEnd < 0) return clampBrief(section, maxChars);
+  const header = section.slice(0, headerEnd);
+  const marker = "\n… [head truncated]\n";
+  const bodyBudget = maxChars - header.length - marker.length;
+  if (bodyBudget <= 0) return clampBrief(section, maxChars);
+  return `${header}${marker}${section.slice(-bodyBudget)}`;
+}
+
+/**
+ * F-212 / F-385: compose the verdict rationale with the failing acceptance
+ * criteria and blocking concerns. A mechanical violation must never mask the
+ * substantive one, and the feedback from a milestone pass must not displace
+ * the verdict rationale that names the failing rubric rows.
+ */
+export function withCriterionFeedback(rationale: string, form: JudgeForm): string {
+  const criteria = buildCriterionFeedback(form);
+  return criteria === undefined ? rationale : `${rationale}\n\n${criteria}`;
+}
+

@@ -8,13 +8,13 @@ recover a run, and how to land the result as a normal PR.
 **Status (2026-08-18, bounded — update discipline: REPLACE this block, ≤15 lines;
 displaced prose moves verbatim to [`PLAN-HISTORY.md`](PLAN-HISTORY.md); per-run detail:
 `docs/reports/`; queue + course correction: `plan.md` §6/§7).**
-🟢 **dogfood-153 / WP-599 (a judge concern raised beside a rubric failure never reaches the executor) DELIVERED and LANDED** — `run-8113a98d-53e2-42b6-bed0-41e7d08920ca`, SUCCESS, 1 step, $0.0852/$20.00, 7m 21s, AC 3/3 re-run green, harvest byte-IDENTICAL 4/4 (`docs/reports/dogfood-153.md`). `buildCriterionFeedback` (`src/workflow/remediation.ts:91`) now carries blocking out-of-rubric concerns into the next step, filtered through the one existing `blockingConcerns` policy; the verdict, the seal's adjudication and the healthy-path silence are all unchanged.
-🟡 **The judge scored 0 true positives** — two clean passes, 6 rubric rows each, 3/3 criteria, over a delivery whose feature could not work in its primary case.
-🔴 **F-384, hand-fixed this sitting (§8): the clamp deleted the feature whenever it mattered.** The criteria and concerns sections were joined and clamped as ONE 2,000-char string; this run's own judge justifications measured **6,532 / 3,757 / 2,851 bytes**, so one failing criterion overran the budget and the concerns section was dropped silently and always. Fixed by `clampSections` (`src/workflow/remediation.ts:127`), pinned by 3 tests (`test/runner/remediation.test.ts:175`, 2 RED pre-fix). Suite 1,571 → **1,574 passed | 23 skipped**.
-⚠️ **Drive the measured MAGNITUDE of an input, not a plausible-looking literal (§8).** AC-1 asserted "failing-criterion evidence is still carried, not replaced" — with a 24-character justification. The oracle was owned; the size family of its inputs was not. Judge output length is telemetry you already have: read it out of `.chikory/runs/<id>/journal.db` (`kind='verdict'`) before writing the AC.
-⚠️ **There was nothing to detect in the diff.** The fact that voided the feature lived in the judge's own PREVIOUS output, not in the change under review — a new altitude for "judge detects but does not gate", where a structurally correct diff meets a budget only telemetry can reveal.
-ℹ️ **WP-548's live behaviour is still unmeasured two runs on (F-386)** — the judge raised 0 concerns, so `concernSeverities` was never populated with a real value; carried into the next spec's premise as a measurement to take.
-**NEXT HEADLINE = WP-635 (dogfood-154): the per-pass feedback channel must fit its payload** — 2,000 chars of channel against a 6,532-byte measured payload, plus F-385 (`agent-loop.ts:1422` displaces the rationale instead of composing).
+🟢 **dogfood-154 / WP-635 (the handover to the next step must carry insight, not bulk) DELIVERED and LANDED** — `run-f7735f50-5c99-4d5a-8cb8-74f84a48f964`, SUCCESS, 1 step, $0.1335/$20.00, 9m 36s, AC 3/3 re-run green, harvest byte-IDENTICAL 7/7 (`docs/reports/dogfood-154.md`). A failing check's criterion justification now carries the check's OUTPUT — the assertion and the author's `AC-n FAIL: …` sentence — instead of the 6,624-byte command echo (`src/judge/harness.ts:130`), and the completion-milestone feedback site COMPOSES with `verdict.rationale` instead of displacing it (`src/workflow/agent-loop.ts:1409`), closing F-385. All four designed traps rejected; the channel constant was not raised.
+🟡 **The judge scored 0 true positives** — two clean passes, 3/3 criteria, `design_serves_overall_goal` green on "preserves tail diagnostics" over a delivery whose tail never arrived.
+🔴 **F-388, hand-fixed this sitting (§8): two clamps disagreed about which end is the signal.** The harness keeps the output's TAIL; `clampBrief` (`src/workflow/remediation.ts:46`) then keeps the HEAD — so at any check output **≥1,890 bytes** the executor got build-banner noise, no assertion, no author sentence. A fully GREEN `pnpm --filter @chikory/sdk exec vitest run` prints **17,403 bytes**, 9× past the cliff. Fixed by `clampSectionKeepingTail` (`src/workflow/remediation.ts:166`), 5 tests (`test/runner/remediation.test.ts:267`, 3 RED pre-fix). Suite 1,583 → **1,588 passed | 23 skipped**.
+⚠️ **An AC that owns its oracle at ONE boundary proves nothing about the NEXT one (§8).** F-384 said "drive the measured magnitude"; F-388 is the same lesson one seam later — measure the input at every seam it crosses, and when a fix says "keep the tail", grep every OTHER clamp the value passes through before calling it done.
+⚠️ **The judge reasons over the diff, and a diff cannot show the file that did not change** — F-376 (unchanged readers), F-380 (reconstructors), now F-388 (an unchanged clamp). Three of the last five reviews found the shipped defect by hand.
+ℹ️ **WP-548's live behaviour is still unmeasured THREE runs on (F-391/F-386)** — the judge raised 0 concerns again, so `concernSeverities` has still never held a real value.
+**NEXT HEADLINE = WP-606 (dogfood-155): the step summary must hand the next step references it can use** — 35.2% of this run's 6,634-byte summary (2,333 B across 15 URLs) is absolute `file://` paths into the run's own deleted workspace, paid into the next prompt AND the pacing estimate (`src/workflow/agent-loop.ts:982`).
 
 Related docs: [`docs/spec/task-spec.md`](spec/task-spec.md) (schema
 reference) · [`docs/TASK-PROTOCOL.md`](TASK-PROTOCOL.md) (WP etiquette, §7 is
@@ -1927,3 +1927,40 @@ broken (a false-green, not a follow-on fix).
   output, not in the change under review. When a WP writes into a bounded
   channel, put the channel's bound and the payload's measured size in the goal,
   so both are inside the evidence the judge reasons over.
+
+- **A fix that says "keep the tail" must own every clamp the value passes
+  through (🔴 F-388, dogfood-154).** WP-635 made `applyCheckOverrides` preserve a
+  failing check's output TAIL — the assertion and the author's `AC-n FAIL: …`
+  sentence — and marked the cut (`packages/sdk-ts/src/judge/harness.ts:137`).
+  One seam later `clampBrief` (`packages/sdk-ts/src/workflow/remediation.ts:46`)
+  clamped the same string from the HEAD, so at any check output **≥1,890 bytes**
+  the executor received build-banner noise and none of the diagnosis. A fully
+  GREEN `pnpm --filter @chikory/sdk exec vitest run` prints **17,403 bytes**, so
+  this was the common case, not a corner. Two clamps disagreeing about which end
+  is the signal is silent and total data loss. Before landing a keep-the-tail
+  fix, grep every other bound the value crosses — `clampBrief`, `clampSections`,
+  `bound`, the prompt builders — and make them agree, or state in the goal which
+  end wins where. Fixed by `clampSectionKeepingTail`
+  (`packages/sdk-ts/src/workflow/remediation.ts:166`): section header verbatim,
+  body tail-clamped behind the same `… [head truncated]` marker
+  `packages/sdk-ts/src/judge/prompt.ts:87` already uses.
+
+- **An AC that owns its oracle at ONE boundary proves nothing about the NEXT
+  one (🔴 F-388, dogfood-154).** dogfood-154's AC-1 drove the real
+  `applyCheckOverrides` at the real measured magnitudes and was right about
+  everything it asserted — it simply stopped at the harness and never crossed
+  into `buildCriterionFeedback`, where the value was destroyed. F-384 taught
+  "drive the input's measured magnitude"; F-388 is the same lesson one seam
+  later: **drive it at every seam it crosses.** When a WP's value is "the
+  executor is told X", the AC must assert X arrives at the executor, not that it
+  is correct at the point of manufacture.
+
+- **A check's output is head-bounded at collection, so a very loud check loses
+  its tail before anything can preserve it (🟡 F-389, dogfood-154).** `runCheck`
+  stores `bound(output, 64 * 1024)`
+  (`packages/sdk-ts/src/judge/evidence.ts:205`) and `bound`
+  (`packages/sdk-ts/src/judge/evidence.ts:109`) slices from the front. Above
+  64 KiB the assertion and the author's sentence are gone before F-388's fix can
+  act. Reach is limited — a green full-suite run is 17,403 bytes, so this needs
+  roughly 20+ failing test blocks — but if you are writing a check that runs a
+  broad suite, pipe it through `tail -N` rather than relying on the bound.

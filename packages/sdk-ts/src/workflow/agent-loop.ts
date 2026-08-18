@@ -72,6 +72,7 @@ import {
   buildCriterionFeedback,
   buildRemediationBrief,
   decideRemediation,
+  withCriterionFeedback,
 } from "./remediation.js";
 import { decideRejection, DEFAULT_MAX_REJECTION_STRIKES } from "./rejection.js";
 import { decideHealRollback } from "./heal-rollback.js";
@@ -154,19 +155,6 @@ function allRubricPass(verdict: JudgeVerdict | undefined): boolean {
     verdict.form.rubricResults.length > 0 &&
     verdict.form.rubricResults.every((r) => r.pass)
   );
-}
-
-/**
- * F-212: the rationale PLUS the failing acceptance criteria. A rule-1 ROLLBACK
- * rationale names only the destructive rubric item, so on dogfood-120 `N-2` the
- * executor was told "the evidence report is outside the allowed write scope"
- * and nothing about the substantive gap the same form had recorded. It moved
- * the file, and the strike it was already carrying killed the node one verdict
- * later. A mechanical violation must never mask the substantive one.
- */
-function withCriterionFeedback(verdict: JudgeVerdict): string {
-  const criteria = buildCriterionFeedback(verdict.form);
-  return criteria === undefined ? verdict.rationale : `${verdict.rationale}\n\n${criteria}`;
 }
 
 function projectMemoryRefs(
@@ -1172,7 +1160,7 @@ export async function agentLoop(spec: TaskSpec): Promise<RunStatus> {
       // verified-good state (judge.md verdict table).
       if (verdict.kind === "ROLLBACK") {
         await activities.restoreCheckpoint({ runId, checkpointId: verdict.rollbackTo! });
-        judgeFeedback = withCriterionFeedback(verdict);
+        judgeFeedback = withCriterionFeedback(verdict.rationale, verdict.form);
       }
     }
 
@@ -1418,9 +1406,9 @@ export async function agentLoop(spec: TaskSpec): Promise<RunStatus> {
         // rather than hand-fixed, because the fix also adds the rationale to
         // every milestone pass that HAS failing criteria and that common-path
         // change wants its own run.
-        judgeFeedback =
-          buildCriterionFeedback(verdict.form) ??
-          (completionMilestone ? verdict.rationale : undefined);
+        judgeFeedback = completionMilestone
+          ? withCriterionFeedback(verdict.rationale, verdict.form)
+          : buildCriterionFeedback(verdict.form);
       } else if (verdict.kind === "HALT") {
         // WP-519 (ADR-009 D3) remediation-before-HALT: instead of discarding
         // the judge's diagnosis, fold it into a remediation brief, roll back
@@ -1451,9 +1439,9 @@ export async function agentLoop(spec: TaskSpec): Promise<RunStatus> {
           },
         );
       } else if (verdict.kind === "BRANCH") {
-        judgeFeedback = withCriterionFeedback(verdict);
+        judgeFeedback = withCriterionFeedback(verdict.rationale, verdict.form);
       } else if (verdict.kind === "ESCALATE") {
-        judgeFeedback = withCriterionFeedback(verdict);
+        judgeFeedback = withCriterionFeedback(verdict.rationale, verdict.form);
         // F-229: the run has CONVERGED. Every acceptance criterion passed, every
         // rubric item passed, and the step produced an EMPTY diff — the judge is
         // objecting only in free text, about evidence the incremental diff cannot

@@ -12,6 +12,7 @@ import {
   decideRemediation,
   MAX_REMEDIATION_ATTEMPTS,
   REMEDIATION_BRIEF_MAX_CHARS,
+  withCriterionFeedback,
 } from "../../src/index.js";
 import type { JudgeForm } from "../../src/index.js";
 
@@ -217,5 +218,103 @@ describe("buildCriterionFeedback (WP-519 slice (a) / WP-599 — every-pass feedb
     expect(feedback).toContain(`- ${blocking}`);
     // the short section survives WHOLE — no ellipsis mid-concern
     expect(feedback.endsWith(`- ${blocking}`)).toBe(true);
+  });
+});
+
+describe("withCriterionFeedback (F-212 / F-385 — compose, never displace)", () => {
+  const rationale = "work in progress, no regressions — non-destructive rubric failures: scope_matches_instruction: extra write";
+
+  test("composes verdict rationale with failing criterion evidence", () => {
+    const feedback = withCriterionFeedback(rationale, form());
+    expect(feedback).toContain(rationale);
+    expect(feedback).toContain("unmet acceptance criteria");
+    expect(feedback).toContain("- AC-1: check exited 1: marker file missing");
+  });
+
+  test("composes verdict rationale with blocking concerns", () => {
+    const blocking = "potential handle leak on abort";
+    const feedback = withCriterionFeedback(
+      rationale,
+      form({
+        criterionResults: [{ id: "AC-1", pass: true, justification: "confirmed" }],
+        concerns: [blocking],
+        concernSeverities: ["blocking"],
+      }),
+    );
+    expect(feedback).toContain(rationale);
+    expect(feedback).toContain("judge concerns");
+    expect(feedback).toContain(blocking);
+  });
+
+  test("clean form returns rationale unmodified without extra whitespace", () => {
+    const feedback = withCriterionFeedback(
+      rationale,
+      form({
+        criterionResults: [{ id: "AC-1", pass: true, justification: "confirmed" }],
+      }),
+    );
+    expect(feedback).toBe(rationale);
+  });
+
+  test("does not duplicate rubric names already mentioned in rationale", () => {
+    const feedback = withCriterionFeedback(rationale, form());
+    const count = feedback.split("scope_matches_instruction").length - 1;
+    expect(count).toBe(1);
+  });
+});
+
+
+describe("clampSections keeps the diagnosis tail (F-388 — dogfood-154 review)", () => {
+  // The MEASURED magnitude, not a plausible-looking literal (the F-384 lesson
+  // this file's own last regression re-learned one seam later). A fully GREEN
+  // `pnpm --filter @chikory/sdk exec vitest run` over this suite prints 17,403
+  // bytes; the harness tail-bounds a failing check's output to 4,000
+  // (MAX_CHECK_OUTPUT_CHARS) before it ever reaches this 2,000-char channel.
+  const ASSERTION = "AssertionError: expected undefined to be defined";
+  const AUTHOR_SENTENCE = "AC-1 FAIL: the diagnosis never reaches the executor";
+  const banner = "stdout: a noisy build line that every real check prints\n".repeat(80);
+  const justification = `judge-executed check \`AC-1\` exited 1:\n${banner}${ASSERTION}\n${AUTHOR_SENTENCE}`;
+
+  const failing = () =>
+    form({ criterionResults: [{ id: "AC-1", pass: false, justification }] });
+
+  test("a check output past the channel bound still delivers the assertion and the author's sentence", () => {
+    expect(justification.length).toBeGreaterThan(REMEDIATION_BRIEF_MAX_CHARS);
+    const feedback = buildCriterionFeedback(failing())!;
+    expect(feedback.length).toBeLessThanOrEqual(REMEDIATION_BRIEF_MAX_CHARS);
+    expect(feedback).toContain(ASSERTION);
+    expect(feedback.endsWith(AUTHOR_SENTENCE)).toBe(true);
+  });
+
+  test("the section header survives and the cut is marked, so the executor knows it is partial", () => {
+    const feedback = buildCriterionFeedback(failing())!;
+    expect(feedback.startsWith("unmet acceptance criteria (judge evidence")).toBe(true);
+    expect(feedback).toContain("… [head truncated]");
+  });
+
+  test("both sections keep their own tail when a verbose criterion shares the budget", () => {
+    const blocking = "the temp dir leaks when the guard rejects the spec";
+    const feedback = buildCriterionFeedback(
+      form({
+        criterionResults: [{ id: "AC-1", pass: false, justification }],
+        concerns: [blocking],
+        concernSeverities: ["blocking"],
+      }),
+    )!;
+    expect(feedback.length).toBeLessThanOrEqual(REMEDIATION_BRIEF_MAX_CHARS);
+    expect(feedback).toContain(AUTHOR_SENTENCE);
+    expect(feedback).toContain(blocking);
+  });
+
+  test("TRAP: a section that fits is not marked and is not reordered", () => {
+    const feedback = buildCriterionFeedback(form())!;
+    expect(feedback).not.toContain("… [head truncated]");
+    expect(feedback).toContain("- AC-1: check exited 1: marker file missing");
+  });
+
+  test("TRAP: the remediation brief still clamps from the HEAD — its header is its signal", () => {
+    const brief = buildRemediationBrief(failing(), "criterion AC-1 stuck 3+ verdicts");
+    expect(brief.startsWith("REMEDIATION BRIEF")).toBe(true);
+    expect(brief.length).toBeLessThanOrEqual(REMEDIATION_BRIEF_MAX_CHARS);
   });
 });

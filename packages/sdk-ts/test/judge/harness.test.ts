@@ -458,3 +458,105 @@ describe("applyCheckOverrides infra classification (WP-263(b))", () => {
     expect("concernSeverities" in result.form).toBe(false);
   });
 });
+
+describe("applyCheckOverrides check diagnosis formatting (WP-635)", () => {
+  const criteria = [
+    { id: "AC-1", description: "check criterion 1", check: "vitest run test/foo.test.ts" },
+    { id: "AC-2", description: "check criterion 2", check: "vitest run test/bar.test.ts" },
+  ];
+  const llmForm: JudgeForm = {
+    criterionResults: [
+      { id: "AC-1", pass: true, justification: "LLM says done" },
+      { id: "AC-2", pass: true, justification: "LLM says done" },
+    ],
+    rubricResults: STANDING_RUBRIC.map((r) => ({ id: r.id, pass: true, justification: "ok" })),
+    concerns: [],
+  };
+
+  const command = "vitest run --reporter=verbose " + "# long script\n".repeat(200);
+  const assertion = "AssertionError: expected false to be true";
+  const authorSentence = "AC-1 FAIL: the expected event was never emitted";
+  const output = [
+    "> test @ vitest",
+    "FAIL test/foo.test.ts > suite > case",
+    assertion,
+    authorSentence,
+  ].join("\n");
+
+  it("failing check justification carries output and author sentence, not the command script", () => {
+    const result = applyCheckOverrides(llmForm, criteria, STANDING_RUBRIC, [
+      {
+        criterionId: "AC-1",
+        command,
+        exitCode: 1,
+        output,
+        durationMs: 15,
+        infraFailed: false,
+      },
+    ]);
+    if ("error" in result) throw new Error(result.error);
+    const ac1 = result.form.criterionResults.find((r) => r.id === "AC-1")!;
+    expect(ac1.pass).toBe(false);
+    expect(ac1.justification).toContain("AC-1");
+    expect(ac1.justification).toContain("exited 1");
+    expect(ac1.justification).toContain(assertion);
+    expect(ac1.justification).toContain(authorSentence);
+    expect(ac1.justification).not.toContain("# long script");
+  });
+
+  it("when check output exceeds MAX_CHECK_OUTPUT_CHARS, tail survives and cut is marked", () => {
+    const longNoise = "noise banner line\n".repeat(300);
+    const longOutput = `${longNoise}${assertion}\n${authorSentence}`;
+    const result = applyCheckOverrides(llmForm, criteria, STANDING_RUBRIC, [
+      {
+        criterionId: "AC-1",
+        command,
+        exitCode: 1,
+        output: longOutput,
+        durationMs: 50,
+        infraFailed: false,
+      },
+    ]);
+    if ("error" in result) throw new Error(result.error);
+    const ac1 = result.form.criterionResults.find((r) => r.id === "AC-1")!;
+    expect(ac1.justification).toContain(authorSentence);
+    expect(ac1.justification).toMatch(/head truncated|omitted|truncated/);
+  });
+
+  it("passing check justification remains compact and does not dump output", () => {
+    const result = applyCheckOverrides(llmForm, criteria, STANDING_RUBRIC, [
+      {
+        criterionId: "AC-1",
+        command,
+        exitCode: 0,
+        output: "PASS test/foo.test.ts\n".repeat(100),
+        durationMs: 10,
+        infraFailed: false,
+      },
+    ]);
+    if ("error" in result) throw new Error(result.error);
+    const ac1 = result.form.criterionResults.find((r) => r.id === "AC-1")!;
+    expect(ac1.pass).toBe(true);
+    expect(ac1.justification).toBe("judge-executed check `AC-1` exited 0");
+  });
+
+  it("killed check is flagged infraFailed and does not dump partial output", () => {
+    const result = applyCheckOverrides(llmForm, criteria, STANDING_RUBRIC, [
+      {
+        criterionId: "AC-1",
+        command,
+        exitCode: 1,
+        output: "partial build output...",
+        durationMs: 120_000,
+        infraFailed: true,
+      },
+    ]);
+    if ("error" in result) throw new Error(result.error);
+    const ac1 = result.form.criterionResults.find((r) => r.id === "AC-1")!;
+    expect(ac1.pass).toBe(false);
+    expect(ac1.infraFailed).toBe(true);
+    expect(ac1.justification).toContain("DID NOT COMPLETE");
+    expect(ac1.justification).toContain("infra failure, not a code red");
+  });
+});
+

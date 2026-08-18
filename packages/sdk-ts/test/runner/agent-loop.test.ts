@@ -810,9 +810,10 @@ describe.skipIf(address === null)("agent loop (WP-121)", () => {
     try {
       const steps = journal.entries("step").map((entry) => entry.payload as StepPayload);
       expect(steps).toHaveLength(2);
-      // WP-519 slice (a): the carried feedback is the failing-criterion
-      // EVIDENCE (per-criterion justification), not just the verdict rationale.
-      expect(steps[1]!.record.summary).toContain("judge feedback: unmet acceptance criteria");
+      // WP-519 slice (a) / F-385: the carried feedback is the verdict
+      // rationale composed with the failing-criterion EVIDENCE.
+      expect(steps[1]!.record.summary).toContain("judge feedback:");
+      expect(steps[1]!.record.summary).toContain("unmet acceptance criteria");
       expect(steps[1]!.record.summary).toContain("AC-1");
       expect(journal.entries("judge")).toHaveLength(1);
       expect(journal.entries("terminal")).toHaveLength(1);
@@ -820,4 +821,52 @@ describe.skipIf(address === null)("agent loop (WP-121)", () => {
       journal.close();
     }
   });
+
+  test("failing check diagnosis reaches the next step's feedback on a live run (WP-635)", async () => {
+    const assertionMarker = "AssertionError: expected file-exists to be true (probe-wp635)";
+    const authorSentence = "AC-1 FAIL: missing required component implementation";
+    const checkCommand = `echo "${assertionMarker}\n${authorSentence}" >&2; exit 1`;
+
+    const wire = await startFakeJudgeWire([
+      judgeForm({ criteria: { "AC-1": true } }),
+    ]);
+    cleanups.push(() => wire.close());
+    const { repoUrl, dataDir, runner } = await setup({
+      judgeWireUrl: wire.url,
+      scriptedConfig: {
+        delayMs: 100,
+        claimsCompleteSteps: [1],
+        echoJudgeFeedback: true,
+      },
+    });
+    const spec = makeJudgedSpec({
+      repoUrl,
+      maxSteps: 2,
+      cadence: 10,
+      acceptanceCriteria: [
+        { id: "AC-1", description: "check must pass", check: checkCommand },
+      ],
+    });
+
+    const handle = await runner.start(spec);
+    const report = await awaitTerminal(handle);
+    expect(report.status).toBe("FAILED");
+    expect(report.failure?.reason).toContain("maxSteps");
+
+    const journal = new Journal(journalPath(dataDir, handle.runId));
+    try {
+      const steps = journal.entries("step").map((entry) => entry.payload as StepPayload);
+      expect(steps).toHaveLength(2);
+      const step2Summary = steps[1]!.record.summary;
+      expect(step2Summary).toContain("judge feedback:");
+      expect(step2Summary).toContain(assertionMarker);
+      expect(step2Summary).toContain(authorSentence);
+      expect(step2Summary).toContain("AC-1");
+      expect(step2Summary).toContain("exited 1");
+      expect(step2Summary).not.toContain(checkCommand);
+    } finally {
+      journal.close();
+    }
+  });
 });
+

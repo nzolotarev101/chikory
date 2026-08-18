@@ -386,6 +386,7 @@ export {
   decideRemediation,
   MAX_REMEDIATION_ATTEMPTS,
   REMEDIATION_BRIEF_MAX_CHARS,
+  withCriterionFeedback,
   type RemediationDecision,
   type RemediationState,
 } from "./workflow/remediation.js";

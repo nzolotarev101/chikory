@@ -1,0 +1,499 @@
+# Plain: every step writes a summary that the NEXT step reads. A third of this run's summary was
+# long absolute web-style links into a folder that gets deleted the moment the run ends — 155 bytes
+# each to name a file that a 42-byte `path:line` names better. The bulk is charged twice: once as
+# the next step's prompt, once as the fuel gauge's estimate of that prompt. After this run a step
+# summary names files the way the rest of the project does, and nothing points into a folder that
+# no longer exists.
+# WP: WP-606 (a step summary must carry what the agent said, in refs that outlive the run; F-390)
+# Ladder-rung: 0 (off-ladder - P3 rung-5's remaining half is WP-304, operator-run; see WHY)
+# Thesis-KPI: context rot (CLAUDE.md: context rot, compounding error, Memory Pointer Pattern),
+#   measured as the share of a step summary that is neither what the agent said nor usable later.
+#
+# THE MEASURED PREMISE - taken at the dogfood-154 review by reading run-f7735f50's OWN persisted
+#   step record, not transcribed (F-203/F-342). Read it back yourself with:
+#     sqlite3 .chikory/runs/run-f7735f50-.../journal.db \
+#       "select payload_json from journal_entries where kind='step';"
+#   then JSON.parse(row).record.summary:
+#     summary bytes                          : 6634
+#     file:// URL count                      : 15
+#     file:// URL bytes                      : 2333  (35.2% of the summary)
+#     of those, pointing into .chikory/runs/ : 15  (ALL of them)
+#     mean bytes per URL                     : 155
+#   Every one has the shape
+#     file:///Users/<user>/repos/chikory/.chikory/runs/run-<id>/workspace/packages/sdk-ts/src/judge/harness.ts#L106-L147
+#   to say what `packages/sdk-ts/src/judge/harness.ts:106-147` says in 42 bytes - and the directory
+#   it names is deleted when the run ends, so the seal, the report, and any chain successor read
+#   dead links.
+#
+#   * PAID TWICE. `record.summary` has two consumers, both in the durable loop:
+#     `recentSummaries` -> the next step's prompt (src/workflow/agent-loop.ts:883 -> :769), and
+#     `estimateTokensFromText(record.summary)` (src/workflow/agent-loop.ts:982), which is what the
+#     pacing governor projects the next step's size from. Inflating the summary inflates the
+#     estimate that decides whether the run throttles. It is also the `chikory trace` step title.
+#   * THIS IS THE MEMORY POINTER PATTERN INVERTED (CLAUDE.md). The pattern says: store the big
+#     thing outside context, pass a SHORT ref in. A 155-byte absolute URL into a deleted directory
+#     is the opposite - long, and it does not resolve.
+#   * WHERE THE ONE SITE IS, measured so the executor does not have to guess. `parseAgyOutput`
+#     (src/executors/gemini-cli.ts:64) sees only stdout and the prompt; it CANNOT know the
+#     workspace root, so an adapter-local fix is not merely narrow, it is impossible to do
+#     correctly. `runCliStep` (src/executors/step.ts:96) has `opts.input.workspaceDir` and is the
+#     ONE site every CLI adapter's summary passes through on its way into `StepRecord`
+#     (`summary: parsed.summary`, src/executors/step.ts:152). claude-code, codex and gemini-cli
+#     all go through it.
+#   * THE TRANSCRIPT IS THE AUDIT TRAIL AND MUST NOT BE REWRITTEN. `transcriptRef`
+#     (src/executors/step.ts:126) stores raw stdout+stderr on purpose. Normalising the summary is
+#     a context decision; normalising the archive is evidence tampering.
+#   * PRECEDENT IN THIS FILE ALREADY. F-306 and F-309 stripped two harness-telemetry envelopes out
+#     of this same string (src/executors/gemini-cli.ts:52,62). Those were adapter-shaped because
+#     the envelope is `agy`-specific. This one is not: the absolute path is a property of the
+#     workspace, not of the vendor, so it belongs at the shared site.
+#   * SELF-NARRATION IS NO LONGER THE STORY (F-306/F-387). Re-measured on the same record: 148
+#     bytes / 2.2% of the summary, down from 16%. Do not spend the run there.
+#   * THE SUITE THIS RUN MUST NOT BREAK, MEASURED at the launch commit by running it under devbox
+#     (F-342 - run it yourself and read its own tail): 193 files passed | 2 skipped,
+#     1588 passed | 23 skipped (1611 total).
+#
+# PRECEDENCE - two rules below can disagree about one input. When they do:
+#   1. A REF THAT STILL RESOLVES beats a shorter one. Deleting the path entirely is not the fix;
+#      the reader needs the file and the line. Shortening is the consequence, not the goal.
+#   2. ONLY THE WORKSPACE IS REWRITTEN. A path the summary mentions that is NOT under
+#      `workspaceDir` is somebody else's path and is left exactly as written - a normaliser that
+#      guesses is worse than one that does nothing.
+#   AC-1 drives both.
+#
+# Format: loose - the outcome (a step summary names files in refs that outlive the run) is fixed;
+#   the ref syntax, the matching strategy and the helper's name are the executor's call.
+#
+# Launch mode: RUN (single node - one string, one site, one pair of consumers).
+#   CHIKORY_PREFLIGHT_ONLY=1 devbox run run-dogfood
+#   devbox run run-dogfood
+#
+# WHY THIS AND NOT THE LADDER RUNG (dogfood-154 review, 2026-08-18):
+#   `scripts/dogfood-progression.sh` reads **STALLED**, which BINDS the next headline to the
+#   current phase ladder rung. P3's ladder is WP-530 (plan.md section 7) and its next rung is
+#   rung-5, whose remaining half is WP-304's OpenHands arm plus a corpus wide enough to separate
+#   19 requirements at 95 percent confidence - re-checked against plan.md section 7 at this review
+#   and still true: "the OpenHands arm has never run, and rung-5 needs a corpus wide enough to
+#   separate". That is a quota-bound multi-hour suite the OPERATOR runs by hand (dogfood-122's
+#   lesson - an LLM executor may not supervise it), so it cannot be a spec, and has not been since
+#   dogfood-139. With the rung unrunnable, WP-606 is the strongest candidate: it is product code on
+#   the context-rot pillar, its premise is a measurement taken this review off the previous run's
+#   own journal, and it is that run's largest recorded waste. Rejected: WP-634 (F-382, harness-meta
+#   and only orange - section 1.5 VETO, track-B); WP-633 (F-378, latent behind an unreachable
+#   predicate); F-389 (the 64 KiB collection bound - real but needs ~20 failing test blocks to
+#   reach, track-B).
+
+name: dogfood-155-wp606-summary-carries-usable-refs
+wp: WP-606
+
+goal: |
+  A step summary must name files in refs that still resolve after the run ends, and must not spend
+  the next step's context on the workspace's absolute location.
+
+  Measured on the previous run's own persisted step record (`run-f7735f50-5c99-4d5a-8cb8-74f84a48f964`,
+  journal kind='step'): the summary is 6,634 bytes, of which 2,333 — **35.2%**, across **15**
+  URLs averaging **155 bytes each** — are absolute
+  `file:///…/.chikory/runs/run-<id>/workspace/packages/sdk-ts/src/judge/harness.ts#L106-L147`
+  links. All 15 point inside the run's own workspace, which is deleted when the run ends. The same
+  file is named by packages/sdk-ts/src/judge/harness.ts:106-147 in 42 bytes, and that ref still
+  works tomorrow.
+
+  This string is not cosmetic. `record.summary` feeds recentSummaries into the next step's prompt
+  (src/workflow/agent-loop.ts:883 → :769) AND `estimateTokensFromText`
+  (src/workflow/agent-loop.ts:982), which is what the pacing governor projects the next step's
+  size from — so the bulk is paid twice, and the second payment distorts a throttling decision. It
+  is also the `chikory trace` step title.
+
+  Make two things true.
+
+  1. **A step summary's references to files inside the run workspace are workspace-relative, and
+     they still carry the line information the writer put there.** packages/sdk-ts/src/judge/harness.ts:106-147
+     — or any shape that names the same file and the same lines relative to the workspace root —
+     not an absolute URL and not a bare path stripped of its lines. Both spellings the executor
+     actually emits must be handled: the `file://…#L106-L147` URL form and a bare absolute
+     `/…/workspace/packages/sdk-ts/src/judge/harness.ts` path.
+  2. **It happens once, at the site that knows the workspace root.** `parseAgyOutput`
+     (src/executors/gemini-cli.ts:64) receives only stdout and the prompt and cannot know where
+     the workspace is, so an adapter-local fix cannot be correct. `runCliStep`
+     (src/executors/step.ts:96) holds opts.input.workspaceDir and is the single site every CLI
+     adapter's summary passes through into `StepRecord` (summary: parsed.summary, :152).
+     claude-code, codex and gemini-cli must all inherit this without being edited.
+
+  Four things must NOT change, and each is a trap this run is graded on:
+
+  1. **A path outside the workspace is left exactly as written.** The summary may legitimately
+     mention a system path, a URL to a real website, or the operator's own repo. Rewriting those
+     is a guess, and a normaliser that guesses is worse than one that does nothing.
+  2. **The transcript artifact is not rewritten.** `transcriptRef` (src/executors/step.ts:126)
+     stores raw stdout+stderr as the audit trail. Normalising what rides into the next prompt is a
+     context decision; normalising the archive is evidence tampering.
+  3. **A summary with nothing to normalise comes back byte-identical**, and an empty summary stays
+     empty — the healthy path pays nothing and gains no marker, header or trailing newline.
+  4. **The `agy` envelope strips stay where they are.** F-306/F-309's `NOTIFICATION_BLOCK` and
+     GMSG_NOTIFICATION_BLOCK (src/executors/gemini-cli.ts:52,62) are vendor-specific and stay
+     in the adapter; do not move them to the shared site or delete them.
+
+  TypeScript stays strict ESM with named exports and no `any`. Do not touch the artifact store, the
+  diff capture, the escape guard (F-192), the pacing policy, the TaskSpec contract, or the Python
+  mirror. Do not change `StepRecord`'s shape — this is a value change, not a contract change.
+
+  Pin your work with tests that live in the repo, beside the files they cover. A behaviour proved
+  only by the acceptance checks that grade this run is not pinned at all (F-356), and a repo test
+  copied verbatim from a grading check inherits its blind spots (F-360).
+
+  **Assert at the seam where the value is CONSUMED, not where it is manufactured.** This is the
+  F-388 lesson from the run immediately before this one, and it is the single most likely way this
+  run ships something inert: WP-635 preserved a diagnosis correctly at one boundary and it was
+  destroyed at the next, because every test stopped at the point of manufacture. A pure helper that
+  returns the right string proves nothing on its own — drive the REAL `runCliStep` against a REAL
+  temporary git workspace (test/executors/workspace-escape.test.ts:35 builds exactly that fixture,
+  and :78 shows the shape: bin: "sh", a `parse` you supply) and assert on the `StepRecord` it
+  returns, because that record is what the journal and the pacing estimate both read.
+
+  Sizing rule for your own tests, the F-384/F-388 lesson: use the input's MEASURED magnitude. The
+  premise above gives you the real one — 15 URLs, 2,333 bytes, 155 bytes each, in a 6,634-byte
+  summary. A two-line fixture with one short path does not exercise this.
+
+  Verify your work with FAST checks only: the package typecheck (`pnpm run typecheck` — NOT bare
+  tsc --noEmit, which does not cover the test/ tree, F-382), eslint over the files you touched,
+  and vitest over the directories you actually wrote into. Do NOT run the full vitest suite inside
+  a step — it does not fit the step time cap (F-345).
+
+repos:
+  - url: /Users/nikitazolotarev/repos/chikory
+    writable: true
+
+# The SDK suite is both the surface this run edits and the gate it must not break.
+# MEASURE it at the launch commit rather than trusting this line (F-342, dogfood-140).
+regression_suite: pnpm --filter @chikory/sdk exec vitest run
+check_timeout_ms: 180000
+
+acceptance_criteria:
+  - id: AC-1
+    description: >
+      THIS CHECK OWNS ITS ORACLE (what a step summary carries forward) AND DRIVES THE REAL ENTRY
+      POINT AT THE CONSUMED SEAM. It runs the REAL runCliStep against a REAL temporary git
+      workspace — no mocks, no calling a helper directly — at the MEASURED magnitude from the
+      previous run (15 URLs, ~2.3 KB, in a ~6.6 KB summary) and asserts on the returned StepRecord:
+      workspace refs became relative and kept their lines, a path outside the workspace is
+      untouched, the transcript artifact still holds the raw text, and a summary with nothing to
+      normalise comes back byte-identical.
+    check: |
+      cd packages/sdk-ts || exit 1
+      TARGET=test/executors/ac1-summary-refs-resolve.generated.test.ts
+      rm -f "$TARGET"
+      cat > "$TARGET" <<'GENEOF'
+      import { execFile } from "node:child_process";
+      import { mkdtemp, mkdir, writeFile } from "node:fs/promises";
+      import { tmpdir } from "node:os";
+      import { join } from "node:path";
+      import { promisify } from "node:util";
+
+      import { describe, expect, test } from "vitest";
+
+      import { createLocalArtifactStore } from "../../src/artifacts/index.js";
+      import { runCliStep } from "../../src/executors/step.js";
+      import type { ArtifactStore, StepInput } from "../../src/types.js";
+
+      const execFileAsync = promisify(execFile);
+
+      const REL = "packages/sdk-ts/src/judge/harness.ts";
+      const OUTSIDE_URL = "https://example.com/docs/harness.ts#L1-L2";
+      const OUTSIDE_PATH = "/usr/local/lib/node_modules/pnpm/bin/pnpm.cjs";
+
+      async function makeWorkspace(): Promise<{ dir: string; store: ArtifactStore }> {
+        const parent = await mkdtemp(join(tmpdir(), "chikory-ac1-"));
+        const dir = join(parent, "ws");
+        await mkdir(dir);
+        await mkdir(join(parent, "artifacts"));
+        const g = (args: string[]) => execFileAsync("git", ["-C", dir, ...args]);
+        await g(["init", "-q"]);
+        await g(["config", "user.email", "ac1@chikory.dev"]);
+        await g(["config", "user.name", "chikory-ac1"]);
+        await writeFile(join(dir, "seed.txt"), "seed\n");
+        await g(["add", "-A"]);
+        await g(["commit", "-q", "-m", "base"]);
+        return { dir, store: createLocalArtifactStore(join(parent, "artifacts")) };
+      }
+
+      function stepInput(dir: string): StepInput {
+        return {
+          workspaceDir: dir,
+          instruction: "summarise",
+          context: {
+            goal: "Summarise the work.",
+            acceptanceCriteria: [{ id: "AC-1", description: "refs resolve" }],
+            planItem: "summarise",
+            notes: {},
+            recentSteps: [],
+            injections: [],
+            memoryRefs: [],
+          },
+          limits: { maxSeconds: 60, maxCostUsd: 1 },
+        };
+      }
+
+      /** The MEASURED shape: 15 file:// URLs into the workspace, ~2.3 KB of them. */
+      function measuredSummary(dir: string): string {
+        const lines: string[] = ["### Summary of Changes", ""];
+        for (let i = 0; i < 14; i += 1) {
+          lines.push(
+            "* In [`applyCheckOverrides`](file://" + dir + "/" + REL + "#L106-L147) the criterion",
+          );
+        }
+        lines.push("* A bare absolute path: " + dir + "/" + REL + " was also edited.");
+        lines.push("* Unrelated: " + OUTSIDE_URL + " and " + OUTSIDE_PATH + " are not ours.");
+        return lines.join("\n");
+      }
+
+      const RAW_STDOUT_MARKER = "raw stdout the archive must keep";
+
+      async function runWith(dir: string, store: ArtifactStore, summary: string) {
+        // The fake CLI echoes a file, so the RAW text really flows through the
+        // subprocess and into the transcript artifact — no stdout injection hook.
+        const stdoutFile = join(dir, "..", "stdout.txt");
+        await writeFile(stdoutFile, RAW_STDOUT_MARKER + "\n");
+        return runCliStep({
+          adapterName: "fake-summariser",
+          store,
+          input: stepInput(dir),
+          bin: "cat",
+          args: [stdoutFile],
+          parse: () => ({
+            ok: true,
+            summary,
+            toolCalls: 0,
+            tokens: { input: 10, output: 10 },
+            costUsd: 0,
+            costEstimated: true,
+          }),
+        });
+      }
+
+      describe("step summary refs outlive the run (WP-606)", () => {
+        test("workspace refs become relative and keep their lines; outside paths are untouched", async () => {
+          const { dir, store } = await makeWorkspace();
+          const raw = measuredSummary(dir);
+          // The premise's magnitude, not a plausible-looking literal (F-384/F-388).
+          expect(raw.length).toBeGreaterThan(1500);
+          expect(raw.split(dir).length - 1).toBeGreaterThanOrEqual(15);
+
+          const record = await runWith(dir, store, raw);
+          const out = record.summary;
+
+          expect(
+            out,
+            "the workspace's absolute location must not ride into the next step's prompt",
+          ).not.toContain(dir);
+          expect(out, "the file must still be named, relative to the workspace root").toContain(REL);
+          expect(
+            out,
+            "the lines the writer put there are the point of the ref — a bare path is not enough",
+          ).toMatch(/harness\.ts[:#]L?106/);
+          expect(
+            out,
+            "trap: a URL to a real website is somebody else's path",
+          ).toContain(OUTSIDE_URL);
+          expect(
+            out,
+            "trap: an absolute path outside the workspace is somebody else's path",
+          ).toContain(OUTSIDE_PATH);
+          expect(out.length, "the point of the WP is that this gets smaller").toBeLessThan(
+            raw.length,
+          );
+        });
+
+        test("TRAP: the transcript artifact still holds the raw text (audit trail, not context)", async () => {
+          const { dir, store } = await makeWorkspace();
+          const record = await runWith(dir, store, measuredSummary(dir));
+          const transcript = new TextDecoder().decode(await store.get(record.transcriptRef));
+          expect(
+            transcript,
+            "normalising the summary is a context decision; normalising the archive is tampering",
+          ).toContain(RAW_STDOUT_MARKER);
+        });
+
+        test("TRAP: a summary with nothing to normalise comes back byte-identical", async () => {
+          const { dir, store } = await makeWorkspace();
+          const clean = "Edited packages/sdk-ts/src/judge/harness.ts:106 and ran the suite.";
+          const record = await runWith(dir, store, clean);
+          expect(record.summary).toBe(clean);
+        });
+
+        test("TRAP: an empty summary gains no marker, header or newline", async () => {
+          const { dir, store } = await makeWorkspace();
+          const record = await runWith(dir, store, "");
+          expect(record.summary).toBe("");
+        });
+      });
+      GENEOF
+      pnpm exec vitest run "$TARGET"
+      ST=$?
+      rm -f "$TARGET"
+      if [ "$ST" -ne 0 ]; then
+        echo "AC-1 FAIL: a step summary still carries the workspace's absolute location into the next step, or the normalisation dropped the line numbers, or it rewrote a path that is not ours, or it rewrote the transcript, or it charged the healthy path. vitest exited $ST"
+        exit 1
+      fi
+      echo "AC-1 OK: the summary's workspace refs are relative, still carry their lines, and nothing else moved"
+
+  - id: AC-2
+    description: >
+      THIS CHECK OWNS THE SECOND HALF — the normalisation is at the SHARED site, so every adapter
+      inherits it without being edited. It drives the REAL gemini-cli adapter's parse function
+      through the REAL runCliStep and asserts the same guarantee holds, while the F-306/F-309
+      envelope strips stay in the adapter where they belong.
+    check: |
+      cd packages/sdk-ts || exit 1
+      grep -qE 'const NOTIFICATION_BLOCK *= */' src/executors/gemini-cli.ts || {
+        echo "AC-2 FAIL: trap — F-306's agy <notification> strip was removed from src/executors/gemini-cli.ts. It is vendor-specific and stays in the adapter; this WP adds a workspace-relative ref normalisation at the SHARED site, it does not relocate the envelope handling."
+        exit 1
+      }
+      grep -qE 'const GMSG_NOTIFICATION_BLOCK *= */' src/executors/gemini-cli.ts || {
+        echo "AC-2 FAIL: trap — F-309's agy <gmsg name=\"task_notification\"> strip was removed from src/executors/gemini-cli.ts. Same rule as F-306's: vendor-specific, stays in the adapter."
+        exit 1
+      }
+      TARGET=test/executors/ac2-shared-site.generated.test.ts
+      rm -f "$TARGET"
+      cat > "$TARGET" <<'GENEOF'
+      import { execFile } from "node:child_process";
+      import { mkdtemp, mkdir, writeFile } from "node:fs/promises";
+      import { tmpdir } from "node:os";
+      import { join } from "node:path";
+      import { promisify } from "node:util";
+
+      import { describe, expect, test } from "vitest";
+
+      import { createLocalArtifactStore } from "../../src/artifacts/index.js";
+      import { parseAgyOutput } from "../../src/executors/gemini-cli.js";
+      import { runCliStep } from "../../src/executors/step.js";
+      import type { StepInput } from "../../src/types.js";
+
+      const execFileAsync = promisify(execFile);
+      const REL = "packages/sdk-ts/src/workflow/agent-loop.ts";
+
+      describe("every CLI adapter inherits the ref normalisation (WP-606)", () => {
+        test("the real gemini-cli parser's summary comes back workspace-relative", async () => {
+          const parent = await mkdtemp(join(tmpdir(), "chikory-ac2-"));
+          const dir = join(parent, "ws");
+          await mkdir(dir);
+          await mkdir(join(parent, "artifacts"));
+          const g = (args: string[]) => execFileAsync("git", ["-C", dir, ...args]);
+          await g(["init", "-q"]);
+          await g(["config", "user.email", "ac2@chikory.dev"]);
+          await g(["config", "user.name", "chikory-ac2"]);
+          await writeFile(join(dir, "seed.txt"), "seed\n");
+          await g(["add", "-A"]);
+          await g(["commit", "-q", "-m", "base"]);
+          const store = createLocalArtifactStore(join(parent, "artifacts"));
+
+          const input: StepInput = {
+            workspaceDir: dir,
+            instruction: "summarise",
+            context: {
+              goal: "Summarise.",
+              acceptanceCriteria: [{ id: "AC-1", description: "d" }],
+              planItem: "summarise",
+              notes: {},
+              recentSteps: [],
+              injections: [],
+              memoryRefs: [],
+            },
+            limits: { maxSeconds: 60, maxCostUsd: 1 },
+          };
+
+          // Real agy print output, emitted by a real subprocess: the envelope the
+          // adapter strips, plus the workspace URLs the SHARED site must normalise.
+          const agyStdout =
+            "<notification><task_id>abc123</task_id></notification>\n" +
+            "Rewired the loop at [`agentLoop`](file://" + dir + "/" + REL + "#L982).\n";
+          const stdoutFile = join(parent, "agy-stdout.txt");
+          await writeFile(stdoutFile, agyStdout);
+
+          const record = await runCliStep({
+            adapterName: "gemini-cli",
+            store,
+            input,
+            bin: "cat",
+            args: [stdoutFile],
+            // The REAL adapter parser, not a re-implementation.
+            parse: parseAgyOutput("the prompt"),
+          });
+
+          expect(record.summary, "the envelope strip must still work").not.toContain("<notification>");
+          expect(
+            record.summary,
+            "the shared site must normalise a summary the ADAPTER produced — a gemini-only fix cannot know workspaceDir",
+          ).not.toContain(dir);
+          expect(record.summary).toContain(REL);
+        });
+      });
+      GENEOF
+      pnpm exec vitest run "$TARGET"
+      ST=$?
+      rm -f "$TARGET"
+      if [ "$ST" -ne 0 ]; then
+        echo "AC-2 FAIL: the normalisation is not at the shared runCliStep site — a summary produced by the real gemini-cli parser still carries the workspace's absolute location, or the agy envelope strip was broken. vitest exited $ST"
+        exit 1
+      fi
+      echo "AC-2 OK: the shared site normalises every adapter's summary, and the vendor-specific strips stayed put"
+
+  - id: AC-3
+    description: >
+      Strict typecheck (including the test tree, F-382), eslint over the touched modules, the
+      neighbouring contracts this WP must not disturb, and the DECLARED regression suite green AND
+      larger — a behaviour proved only by these grading checks is not pinned at all (F-356).
+    check: |
+      cd packages/sdk-ts || exit 1
+      pnpm run typecheck || { echo "AC-3 FAIL: strict typecheck is red (this covers test/ too — F-382)"; exit 1; }
+      pnpm exec eslint src/executors/step.ts src/executors/gemini-cli.ts || { echo "AC-3 FAIL: eslint is red on the modules this WP touches"; exit 1; }
+
+      grep -qE 'summary: parsed\.summary|summary: [A-Za-z]+\(' src/executors/step.ts || {
+        echo "AC-3 FAIL: src/executors/step.ts no longer builds StepRecord.summary from the parsed result. That assignment (:152) is the one seam every CLI adapter's summary crosses; a fix that does not go through it cannot be shared."
+        exit 1
+      }
+      grep -qE 'workspaceDir' src/executors/step.ts || {
+        echo "AC-3 FAIL: src/executors/step.ts never reads the workspace root. The whole point of siting the fix here is that this is where workspaceDir is known."
+        exit 1
+      }
+      grep -qE 'OUTSIDE its workspace' src/executors/step.ts || {
+        echo "AC-3 FAIL: trap — F-192's sandbox-escape guard wording moved or was deleted. This WP does not touch the escape guard."
+        exit 1
+      }
+      grep -qE 'estimateTokensFromText\(record\.summary\)' src/workflow/agent-loop.ts || {
+        echo "AC-3 FAIL: trap — the pacing governor no longer estimates from the step summary. That consumer is half the premise; this WP changes the summary's CONTENT, not who reads it."
+        exit 1
+      }
+
+      OUT=$(pnpm --filter @chikory/sdk exec vitest run 2>&1)
+      ST=$?
+      echo "$OUT" | tail -25
+      if [ "$ST" -ne 0 ]; then
+        echo "AC-3 FAIL: the DECLARED regression suite is RED (vitest exited $ST)"
+        exit 1
+      fi
+      N=$(echo "$OUT" | grep -oE "Tests +[0-9]+ passed" | grep -oE "[0-9]+" | head -1)
+      echo "committed suite tests passing: ${N:-UNPARSEABLE} (floor 1592, measured baseline 1588)"
+      if [ -z "$N" ]; then
+        echo "AC-3 FAIL: could not read a test count out of the vitest summary"
+        exit 1
+      fi
+      if [ "$N" -lt 1592 ]; then
+        echo "AC-3 FAIL: durability floor not met — the committed suite did not grow by at least 4 tests. A behaviour proved only by the generated grading checks is not pinned at all (F-356)."
+        exit 1
+      fi
+      echo "AC-3 OK: strict typecheck and lint green, the shared site reads workspaceDir, the neighbouring contracts are untouched, DECLARED suite green AND larger"
+
+budget_usd: 20
+max_steps: 6
+
+agent_classes:
+  executor: executor-default
+  judge: judge-default
+
+judge:
+  cadence: 1
+
+# F-322 (dogfood-135): without this, a converged out-of-rubric escalation parks overnight for a
+# human instead of auto-sealing.
+unattended:
+  escalation: seal_resumable_failed

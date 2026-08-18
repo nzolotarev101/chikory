@@ -21,6 +21,7 @@ import type {
 } from "../types.js";
 import {
   collectEvidence,
+  MAX_CHECK_OUTPUT_CHARS,
   type CheckRun,
   type CollectedEvidence,
   type EvidenceWorkspaceRepo,
@@ -126,12 +127,22 @@ export function applyCheckOverrides(
       // the criterion (conservative: never seal SUCCESS on an unproven
       // check), but the flag rides the form so the deterministic verdict's
       // stuck-criterion history skips it (dogfood-072 F-76/F-79).
+      const pass = check.exitCode === 0 && !check.infraFailed;
+      let justification = check.infraFailed
+        ? `judge-executed check \`${criterion.id}\` DID NOT COMPLETE (killed at the per-check cap) — infra failure, not a code red`
+        : `judge-executed check \`${criterion.id}\` exited ${check.exitCode}`;
+      if (!pass && !check.infraFailed && check.output && check.output.trim().length > 0) {
+        const rawOutput = check.output.trim();
+        const boundedOutput =
+          rawOutput.length > MAX_CHECK_OUTPUT_CHARS
+            ? `… [head truncated, ${rawOutput.length - MAX_CHECK_OUTPUT_CHARS} chars omitted]\n${rawOutput.slice(-MAX_CHECK_OUTPUT_CHARS)}`
+            : rawOutput;
+        justification += `:\n${boundedOutput}`;
+      }
       criterionResults.push({
         id: criterion.id,
-        pass: check.exitCode === 0,
-        justification: check.infraFailed
-          ? `judge-executed check \`${check.command}\` DID NOT COMPLETE (killed at the per-check cap) — infra failure, not a code red`
-          : `judge-executed check \`${check.command}\` exited ${check.exitCode}`,
+        pass,
+        justification,
         ...(check.infraFailed ? { infraFailed: true } : {}),
       });
       continue;
