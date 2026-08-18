@@ -1407,6 +1407,17 @@ export async function agentLoop(spec: TaskSpec): Promise<RunStatus> {
         // into the next step on EVERY judge pass, not only at completion
         // milestones — the executor never retries blind against evidence the
         // judge already holds.
+        //
+        // F-385 (dogfood-153 review): compose, never displace — the same rule
+        // `withCriterionFeedback` already applies at the three other feedback
+        // sites (:1175, :1443, :1445). Under this `??` fall-back, WP-599 made
+        // `buildCriterionFeedback` return a string for a concern-only form, so
+        // a milestone pass with NO criteria evaluated now trades its rationale
+        // — which names the failing rubric rows — for the concern. Reachable
+        // only for a spec with zero acceptance criteria; queued as WP-635
+        // rather than hand-fixed, because the fix also adds the rationale to
+        // every milestone pass that HAS failing criteria and that common-path
+        // change wants its own run.
         judgeFeedback =
           buildCriterionFeedback(verdict.form) ??
           (completionMilestone ? verdict.rationale : undefined);

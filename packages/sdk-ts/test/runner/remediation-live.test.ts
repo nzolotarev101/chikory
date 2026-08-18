@@ -225,4 +225,79 @@ describe.skipIf(address === null)("remediation-before-HALT + resumable FAILED (W
     await expect(runner.resume(handle.runId)).rejects.toThrow(/dead FAILED.*not resumable/s);
     await expect(runner.resume(handle.runId)).rejects.toThrow(/chikory branch/);
   });
+
+  test("WP-599 live loop: blocking out-of-rubric concern beside rubric failure reaches executor next-step feedback", async () => {
+    const blockingConcern = "the new retry wrapper swallows the AbortError, so a cancelled run can never stop";
+    const wire = await startFakeJudgeWire([
+      judgeForm({
+        criteria: { "AC-1": false },
+        rubricFails: ["design_serves_overall_goal"],
+        concerns: [blockingConcern],
+        concernSeverities: ["blocking"],
+      }),
+      judgeForm({ criteria: { "AC-1": true } }),
+    ]);
+    const { dataDir, handle } = await start(wire, { maxSteps: 4 });
+    const report = await awaitTerminal(handle);
+
+    expect(report.status).toBe("SUCCESS");
+    journalRead(dataDir, handle.runId, (journal) => {
+      const steps = journal.entries("step").map((e) => e.payload as StepPayload);
+      expect(steps.length).toBeGreaterThanOrEqual(2);
+      // Step 1 saw the blocking concern in its prompt / judgeFeedback alongside AC-1 failure
+      expect(steps[1]!.record.summary).toContain("judge feedback:");
+      expect(steps[1]!.record.summary).toContain(blockingConcern);
+      expect(steps[1]!.record.summary).toContain("judge concerns");
+      expect(steps[1]!.record.summary).toContain("unmet acceptance criteria");
+      expect(steps[1]!.record.summary).toContain("AC-1");
+    });
+  });
+
+  test("WP-599 live loop: minor concern beside rubric failure does NOT reach executor next-step feedback", async () => {
+    const cosmeticNit = "trailing whitespace in docstring";
+    const wire = await startFakeJudgeWire([
+      judgeForm({
+        criteria: { "AC-1": false },
+        rubricFails: ["design_serves_overall_goal"],
+        concerns: [cosmeticNit],
+        concernSeverities: ["minor"],
+      }),
+      judgeForm({ criteria: { "AC-1": true } }),
+    ]);
+    const { dataDir, handle } = await start(wire, { maxSteps: 4 });
+    const report = await awaitTerminal(handle);
+
+    expect(report.status).toBe("SUCCESS");
+    journalRead(dataDir, handle.runId, (journal) => {
+      const steps = journal.entries("step").map((e) => e.payload as StepPayload);
+      expect(steps.length).toBeGreaterThanOrEqual(2);
+      // Step 1 saw AC-1 failure but did NOT see the minor concern
+      expect(steps[1]!.record.summary).toContain("unmet acceptance criteria");
+      expect(steps[1]!.record.summary).toContain("AC-1");
+      expect(steps[1]!.record.summary).not.toContain(cosmeticNit);
+    });
+  });
+
+  test("WP-599 live loop: unmarked concern defaults to blocking and reaches executor next-step feedback", async () => {
+    const unmarkedConcern = "unmarked legacy concern: missing cleanup handler";
+    const wire = await startFakeJudgeWire([
+      judgeForm({
+        criteria: { "AC-1": false },
+        rubricFails: ["design_serves_overall_goal"],
+        concerns: [unmarkedConcern],
+      }),
+      judgeForm({ criteria: { "AC-1": true } }),
+    ]);
+    const { dataDir, handle } = await start(wire, { maxSteps: 4 });
+    const report = await awaitTerminal(handle);
+
+    expect(report.status).toBe("SUCCESS");
+    journalRead(dataDir, handle.runId, (journal) => {
+      const steps = journal.entries("step").map((e) => e.payload as StepPayload);
+      expect(steps.length).toBeGreaterThanOrEqual(2);
+      expect(steps[1]!.record.summary).toContain("judge feedback:");
+      expect(steps[1]!.record.summary).toContain(unmarkedConcern);
+      expect(steps[1]!.record.summary).toContain("AC-1");
+    });
+  });
 });

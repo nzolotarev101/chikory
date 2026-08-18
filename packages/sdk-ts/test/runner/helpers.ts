@@ -343,6 +343,7 @@ export function judgeForm(opts: {
   criteria: Record<string, boolean>;
   rubricFails?: string[];
   concerns?: string[];
+  concernSeverities?: Array<"minor" | "blocking">;
 }): JudgeForm {
   return {
     criterionResults: Object.entries(opts.criteria).map(([id, pass]) => ({
@@ -356,6 +357,7 @@ export function judgeForm(opts: {
       justification: "scripted judge",
     })),
     concerns: opts.concerns ?? [],
+    ...(opts.concernSeverities !== undefined ? { concernSeverities: opts.concernSeverities } : {}),
   };
 }
 

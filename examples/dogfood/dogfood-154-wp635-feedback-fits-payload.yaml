@@ -1,0 +1,518 @@
+# Plain: when the reviewer explains what is wrong, the note it sends the worker is capped at
+# 2,000 characters — and the reviewer's own explanations on the last run were 6,532, 3,757 and
+# 2,851 characters. The worker is handed a fragment of the reason it is supposed to act on, with
+# nothing telling it the rest was cut. After this run the note still fits in a stated budget, but
+# every finding is named, nothing vanishes without a mark, and the reviewer's summary is added to
+# it rather than replaced by it.
+# WP: WP-635 (the per-pass feedback channel must fit its payload, F-384/F-385)
+# Ladder-rung: 0 (off-ladder - P3 rung-5's remaining half is WP-304, operator-run; see WHY)
+# Thesis-KPI: self-correction and context rot (CLAUDE.md: compounding error, Memory Pointer
+#   Pattern), measured as the share of the judge's diagnosis the executor can actually read.
+#
+# THE MEASURED PREMISE - taken from run-8113a98d's OWN persisted verdict form at the dogfood-153
+#   review, not transcribed (F-203/F-342). Read back with:
+#     sqlite3 -json .chikory/runs/run-8113a98d-.../journal.db \
+#       'select payload_json from journal_entries where kind="verdict";'
+#   then `JSON.parse(row.payload_json).verdict.form.criterionResults[].justification.length`:
+#     AC-1 justification : 6532 bytes
+#     AC-2 justification : 3757 bytes
+#     AC-3 justification : 2851 bytes
+#     channel budget     : 2000 chars (REMEDIATION_BRIEF_MAX_CHARS, src/workflow/remediation.ts:21)
+#   A judge justification quotes the check it ran, so this is the normal size, not an outlier.
+#   ONE failing criterion overruns the entire budget.
+#
+#   * WHAT ALREADY LANDED, so you do not re-fix it: at the dogfood-153 review F-384 was hand-fixed.
+#     `buildCriterionFeedback` used to join the criteria and concerns sections and clamp the
+#     CONCATENATION, and `clampBrief` truncates from the tail, so the concerns section was dropped
+#     in every combined case. `clampSections` (`src/workflow/remediation.ts:127`) now gives each
+#     SECTION a fair share of the budget, shortest first. That guarantees both sections SURVIVE.
+#   * WHAT IS STILL WRONG, and it is the whole of this WP: survival is not legibility. With two
+#     sections each gets ~1000 chars, so a 6,532-byte justification arrives as a ~1000-char
+#     fragment ending in a single `…`, and with several failing criteria the later ones are cut
+#     off entirely - the executor is never even told their IDs. A control plane whose thesis is
+#     agents that fix themselves is handing the agent a truncated reason to fix itself.
+#   * THE SECOND HALF, F-385: `src/workflow/agent-loop.ts:1422` reads
+#     `buildCriterionFeedback(verdict.form) ?? (completionMilestone ? verdict.rationale :
+#     undefined)`. It is the loop's ONLY feedback site that uses `??` - `:1175`, `:1454` and
+#     `:1456` all use `withCriterionFeedback` (`:167`), which COMPOSES the rationale with the
+#     criterion feedback and carries the F-212 doctrine in its own docstring: "A mechanical
+#     violation must never mask the substantive one." Once WP-599 made a concern-only form return
+#     a string, the `??` stopped firing for it, so a milestone pass that evaluated zero criteria
+#     now trades its rationale - which names the failing rubric rows - for the concern. Narrow
+#     today (measured: `:1422` is reached only when `allCriteriaPass` is false, and
+#     `src/workflow/agent-loop.ts:138` requires `criterionResults.length > 0`), and the fix
+#     changes what EVERY milestone step sees, which is why it is a run and not a review edit.
+#   * THE GROWTH BOUND IS NOT OPTIONAL (F-365, the bounded-channel-made-unbounded lesson). Every
+#     byte here is paid on every step of every run forever, and it feeds the pacing governor's
+#     token estimate as well as the prompt. "Raise the constant" is the trap, not the fix.
+#   * MEASURE THIS FOR FREE WHILE YOU ARE HERE (F-386/F-197): WP-548 landed `concernSeverities`
+#     two runs ago and no run has yet seen a real judge populate it - dogfood-153's judge raised
+#     0 concerns. If this run's judge raises one, its persisted form is the first live datum.
+#   * The suite this run must not break, MEASURED at the launch commit (F-342 - run it yourself
+#     and read its own tail): at this review it stood at 193 files / 1,597 tests
+#     (1,574 passed | 23 skipped).
+#
+# PRECEDENCE - two rules below can disagree about one input. When they do:
+#   1. The BOUND wins over completeness. There is always an input large enough that not everything
+#      fits; the output must stay under a stated ceiling no matter what is fed in. Completeness is
+#      "every finding is NAMED and every drop is MARKED", never "nothing is dropped".
+#   2. Silence still wins over both. A pass with no failing criterion and no blocking concern must
+#      still produce NO feedback string at all.
+#   AC-1 drives rule 1 with a pathological input; AC-1 and AC-3 drive rule 2.
+#
+# Format: loose - the outcome (legible, bounded, marked, composed) is fixed; the allocation
+#   policy, the marker text and where the composition helper lives are the executor's call.
+#
+# Launch mode: RUN (single node - one channel, two call sites).
+#   CHIKORY_PREFLIGHT_ONLY=1 devbox run run-dogfood
+#   devbox run run-dogfood
+#
+# WHY THIS AND NOT THE LADDER RUNG (dogfood-153 review, 2026-08-18):
+#   `scripts/dogfood-progression.sh` reads **STALLED**, which BINDS the next headline to the
+#   current phase ladder rung. P3's ladder is WP-530 (plan.md section 7) and its next rung is
+#   rung-5, whose remaining half is WP-304's OpenHands arm plus a corpus wide enough to separate
+#   19 requirements at 95 percent confidence: a quota-bound, multi-hour suite the OPERATOR runs by
+#   hand (dogfood-122's lesson - an LLM executor may not supervise it). It cannot be a spec, and
+#   has not been since dogfood-139. With the rung unrunnable, WP-635 is the strongest candidate:
+#   it is product code on the self-correction AND context-rot pillars, its premise is a
+#   measurement taken this review from the previous run's own journal, and it is the direct
+#   residue of the defect that run shipped. Rejected: WP-634 (F-382, harness-meta and only 🟠 -
+#   section 1.5 VETO, tracked track-B); WP-633 (F-378, latent behind an unreachable predicate);
+#   WP-606 (F-306/F-387, re-measured this review at 5.0% of summary bytes - not headline-sized).
+
+name: dogfood-154-wp635-feedback-fits-payload
+wp: WP-635
+
+goal: |
+  The per-pass feedback the executor receives must carry the judge's diagnosis legibly, within a
+  stated bound, and must add to the verdict rationale rather than replace it.
+
+  Two measurements, both from the previous run's own persisted verdict form: the judge's
+  failing-criterion justifications were 6,532 / 3,757 / 2,851 bytes, and the channel that carries
+  them into the next step is 2,000 chars (the named budget constant in src/workflow/remediation.ts:21). A single failing criterion overruns the whole budget. Today
+  `buildCriterionFeedback` (src/workflow/remediation.ts:91) splits the budget fairly between its
+  sections, so both sections survive — but with several failing criteria the later ones are cut
+  off mid-sentence or dropped entirely, and the executor is never told they existed.
+
+  Make three things true.
+
+  1. **Every finding is NAMED.** Whatever the input size, the feedback names every failing
+     criterion id and carries every blocking concern. Evidence text may be shortened; an
+     identifier may not disappear.
+  2. **Every drop is MARKED.** When content is shortened or omitted, the string says so in a way
+     the executor can read — a truncation marker on the shortened item, and, where evidence is
+     dropped entirely, a line saying so. The executor must never be unable to tell that the reason
+     it was given is partial.
+  3. **The channel stays BOUNDED, and the bound is a named constant.** The output must stay under
+     a ceiling for ANY input — twelve 6,500-byte justifications must not produce an 80 KB prompt
+     block. This is paid on every step of every run and also feeds the pacing governor's token
+     estimate (src/workflow/agent-loop.ts:841), so "raise the constant until it fits" is the wrong
+     direction: F-365 is exactly this shape, a "stop dropping X" fix that added unbounded
+     retention. If you change the budget, the new value must be a named exported constant and your
+     step summary must state what bounds it.
+
+  And fix the composition site. the completion-milestone feedback site at src/workflow/agent-loop.ts:1422 falls back with a
+  nullish-coalescing operator instead of composing, so on a completion milestone the feedback DISPLACES the rationale. It is the loop's only
+  feedback site that does: lines 1175, 1454 and 1456 all go through `withCriterionFeedback`
+  (line 167), whose own docstring carries the F-212 rule — "A mechanical violation must never mask
+  the substantive one." Make the milestone site compose too. The composition must be reachable
+  from a test: `withCriterionFeedback` is currently a private function in a Temporal workflow
+  module, so move it (or an equivalent) somewhere a unit test can import — `remediation.ts` is
+  the natural home — and have the call site use it.
+
+  Two things must NOT change, and each is a trap this run is graded on:
+
+  1. **Silence stays cheap.** A judge pass with no failing criterion and no blocking concern must
+     still produce NO feedback string at all — `undefined`, exactly as today. No header, no
+     "nothing to report", no empty section.
+  2. **Nothing prints twice.** The verdict rationale already names the failing rubric rows
+     (computeVerdict, src/judge/verdict.ts). A composition that appends the criterion feedback
+     to the rationale must not restate the rubric failures a second time, and must not repeat a
+     concern that is already in the rationale.
+
+  TypeScript stays strict ESM with named exports and no `any`. Do not touch the rubric list, the
+  verdict rules, the completion-review budget, the pacing governor's policy, the TaskSpec
+  contract, or the Python mirror.
+
+  Pin your work with tests that live in the repo, beside the files they cover. A behaviour proved
+  only by the acceptance checks that grade this run is not pinned at all (F-356), and a repo test
+  copied verbatim from a grading check inherits its blind spots (F-360). One case the grading
+  checks below deliberately leave open, and you must cover it: **the live loop** — that the string
+  actually reaching the next step's prompt on a completion milestone carries the rationale AND the
+  per-pass feedback. test/runner/remediation-live.test.ts already drives that path with echoJudgeFeedback
+  (test/runner/helpers.ts:165), and claimsCompleteSteps (helpers.ts:76) is how a scripted step
+  claims completion. Watch out for an assertion confounded by its own fixture
+  (F-383): assert on something only the behaviour under test can produce.
+
+  FOUR EXISTING TESTS PIN THE SHAPES THIS CHANGE MUST BREAK, measured by running the reference
+  implementation against the suite at the arming pass. Migrating them is correct; weakening them
+  is not, and silently deleting one is a scope violation. Three in test/runner/remediation.test.ts
+  assert the feedback length against the 2,000-char brief constant — if you introduce a new bound
+  they must assert against the NEW named constant, never against no bound at all. One in
+  test/runner/agent-loop.test.ts asserts the next step's summary contains the exact string
+  "judge feedback: unmet acceptance criteria", which pins the DISPLACEMENT you are removing: once
+  the milestone site composes, the rationale sits between those two phrases. Keep both halves
+  asserted.
+
+  Sizing rule for your own tests, the F-384 lesson that produced this WP: when a test exercises a
+  bounded channel, use the input's MEASURED magnitude, not a plausible-looking literal. The last
+  run's clamp test used a 24-character justification against a real distribution of 2,851–6,532
+  bytes, and passed over a feature that could not work.
+
+  Verify your work with FAST checks only: the package typecheck (`pnpm run typecheck` — NOT bare tsc with
+  --noEmit alone, which does not cover the `test/` tree, F-382), eslint over the files you touched, and
+  vitest over the directories you actually wrote into. Do NOT run the full vitest suite inside a
+  step — it does not fit the step time cap (F-345).
+
+repos:
+  - url: /Users/nikitazolotarev/repos/chikory
+    writable: true
+
+# The SDK suite is both the surface this run edits and the gate it must not break.
+# MEASURE it at the launch commit rather than trusting this line (F-342, dogfood-140).
+regression_suite: pnpm --filter @chikory/sdk exec vitest run
+check_timeout_ms: 180000
+
+acceptance_criteria:
+  - id: AC-1
+    description: >
+      THIS CHECK OWNS ITS ORACLE (legibility, marking and the bound). It drives the REAL feedback
+      producer — no mocks, no re-implementation — at the MEASURED input magnitude taken from the
+      previous run's persisted verdict form (6,532-byte justifications), plus a pathological input
+      twelve times that size, and asserts every failing criterion is still NAMED, every blocking
+      concern still arrives in full, truncation is MARKED, the output stays under a ceiling, and a
+      clean pass still produces nothing at all. Expected values are written into this check.
+    check: |
+      cd packages/sdk-ts || exit 1
+      TARGET=test/workflow/ac1-feedback-fits-payload.generated.test.ts
+      rm -f "$TARGET"
+      cat > "$TARGET" <<'GENEOF'
+      import { describe, expect, test } from "vitest";
+
+      import { buildCriterionFeedback } from "../../src/workflow/remediation.js";
+      import type { JudgeForm } from "../../src/types.js";
+
+      // The measured shape: a judge justification quotes the check it ran. The three on
+      // run-8113a98d were 6532 / 3757 / 2851 bytes against a 2000-char channel.
+      const MEASURED = 6532;
+      const CEILING = 8000;
+
+      const CONCERN_A = "the retry wrapper swallows the AbortError, so a cancelled run can never stop";
+      const CONCERN_B = "the temp dir is created before the guard, so a rejected spec leaks it";
+
+      function justification(id: string, bytes: number): string {
+        const head = `judge-executed check for ${id} exited 1: `;
+        return head + "x".repeat(Math.max(0, bytes - head.length));
+      }
+
+      function form(over: Partial<JudgeForm>): JudgeForm {
+        return {
+          criterionResults: [],
+          rubricResults: [{ id: "tests_pass", pass: true, justification: "ok" }],
+          concerns: [],
+          ...over,
+        } as JudgeForm;
+      }
+
+      describe("AC-1 WP-635/F-384: the feedback fits its payload", () => {
+        test("at the MEASURED magnitude, the criterion is named and the concern arrives whole", () => {
+          const fb = buildCriterionFeedback(
+            form({
+              criterionResults: [
+                { id: "AC-1", pass: false, justification: justification("AC-1", MEASURED) },
+              ],
+              concerns: [CONCERN_A],
+              concernSeverities: ["blocking"],
+            } as Partial<JudgeForm>),
+          );
+          expect(
+            fb,
+            "one failing criterion at the measured size (6532 bytes) against a 2000-char budget",
+          ).toBeDefined();
+          expect(fb!, "the criterion must be NAMED even when its evidence is shortened").toContain("AC-1");
+          expect(
+            fb!,
+            "the concern is 76 characters. Nothing about a 6532-byte justification justifies " +
+              "losing it, and it is the executor's only copy — the seal's copy arrives too late.",
+          ).toContain(CONCERN_A);
+          expect(fb!.length, "the bound still holds").toBeLessThanOrEqual(CEILING);
+        });
+
+        test("shortening is MARKED — the executor can tell the reason it got is partial", () => {
+          const fb = buildCriterionFeedback(
+            form({
+              criterionResults: [
+                { id: "AC-1", pass: false, justification: justification("AC-1", MEASURED) },
+              ],
+            } as Partial<JudgeForm>),
+          )!;
+          expect(fb).toContain("AC-1");
+          expect(
+            /…|\.\.\.|truncat|shorten|omitt|elided|\bcut\b/i.test(fb),
+            "6532 bytes of evidence went into a bounded channel and something was dropped. A " +
+              "silent drop is what F-384 was: the string must SAY it is partial.",
+          ).toBe(true);
+        });
+
+        test("PATHOLOGICAL input: every id is still named, every concern still whole, still bounded", () => {
+          const ids = Array.from({ length: 12 }, (_, i) => `AC-${String(i + 1).padStart(2, "0")}`);
+          const fb = buildCriterionFeedback(
+            form({
+              criterionResults: ids.map((id) => ({
+                id,
+                pass: false,
+                justification: justification(id, MEASURED),
+              })),
+              concerns: [CONCERN_A, CONCERN_B],
+              concernSeverities: ["blocking", "blocking"],
+            } as Partial<JudgeForm>),
+          )!;
+          expect(
+            fb.length,
+            "78 KB of judge evidence must not become an 78 KB prompt block. Every byte here is " +
+              "paid on every step and feeds the pacing estimate (F-365: a stop-dropping-X fix " +
+              "that adds unbounded retention is the trap, not the fix).",
+          ).toBeLessThanOrEqual(CEILING);
+          for (const id of ids) {
+            expect(
+              fb,
+              `${id} failed and the executor is not told it exists. Evidence may be shortened; ` +
+                "an identifier may not disappear.",
+            ).toContain(id);
+          }
+          expect(fb).toContain(CONCERN_A);
+          expect(fb).toContain(CONCERN_B);
+        });
+
+        test("a MINOR concern still reaches nobody (WP-548's floor is unchanged)", () => {
+          const fb = buildCriterionFeedback(
+            form({
+              concerns: ["trailing whitespace in the docstring"],
+              concernSeverities: ["minor"],
+            } as Partial<JudgeForm>),
+          );
+          expect(fb === undefined || !fb.includes("trailing whitespace")).toBe(true);
+        });
+
+        test("TRAP: silence stays cheap — a clean pass still produces NO string at all", () => {
+          expect(
+            buildCriterionFeedback(
+              form({
+                criterionResults: [{ id: "AC-1", pass: true, justification: "check exited 0" }],
+              } as Partial<JudgeForm>),
+            ),
+            "no header, no 'nothing to report', no empty section. A helper that always returns " +
+              "something grows every step's context for nothing.",
+          ).toBeUndefined();
+        });
+
+        test("TRAP: an unmarked concern still counts as blocking (WP-548 fail-safe)", () => {
+          const fb = buildCriterionFeedback(form({ concerns: [CONCERN_A] } as Partial<JudgeForm>));
+          expect(fb).toBeDefined();
+          expect(fb!).toContain(CONCERN_A);
+        });
+      });
+      GENEOF
+      pnpm exec vitest run "$TARGET"
+      ST=$?
+      rm -f "$TARGET"
+      if [ "$ST" -ne 0 ]; then
+        echo "AC-1 FAIL: a finding is unnamed, a concern was lost, a drop went unmarked, the output is unbounded, or the healthy path grew a string. vitest exited $ST"
+        exit 1
+      fi
+      echo "AC-1 OK: every finding named, every concern whole, drops marked, output bounded, silence still free"
+
+  - id: AC-2
+    description: >
+      THIS CHECK OWNS ITS ORACLE for the composition half (F-385). It requires the rationale +
+      feedback composition to be a NAMED, IMPORTABLE export — a private function inside the
+      Temporal workflow module is why this regression shipped untested — and drives it over the
+      exact shapes that made the milestone site lose a diagnosis, including the no-double-print
+      trap. It also asserts the live call site actually uses it.
+    check: |
+      cd packages/sdk-ts || exit 1
+      grep -qE 'withCriterionFeedback|composeJudgeFeedback|withJudgeFeedback' src/workflow/agent-loop.ts || {
+        echo "AC-2 FAIL: the completion-milestone feedback site no longer routes through a composition helper at all"
+        exit 1
+      }
+      if grep -qE 'buildCriterionFeedback\(verdict\.form\) \?\?' src/workflow/agent-loop.ts; then
+        echo "AC-2 FAIL: src/workflow/agent-loop.ts still displaces the rationale with '??' at the completion-milestone feedback site (F-385). The loop's three other feedback sites compose; this one must too."
+        exit 1
+      fi
+      TARGET=test/workflow/ac2-feedback-composes.generated.test.ts
+      rm -f "$TARGET"
+      cat > "$TARGET" <<'GENEOF'
+      import { describe, expect, test } from "vitest";
+
+      import * as remediation from "../../src/workflow/remediation.js";
+      import type { JudgeForm } from "../../src/types.js";
+
+      const CONCERN = "the retry wrapper swallows the AbortError, so a cancelled run can never stop";
+      const RATIONALE =
+        "work in progress, no regressions — no criteria evaluated; non-destructive rubric " +
+        "failures: scope_matches_instruction: touched an unrelated module";
+
+      function form(over: Partial<JudgeForm>): JudgeForm {
+        return {
+          criterionResults: [],
+          rubricResults: [
+            { id: "tests_pass", pass: true, justification: "ok" },
+            { id: "scope_matches_instruction", pass: false, justification: "touched an unrelated module" },
+          ],
+          concerns: [],
+          ...over,
+        } as JudgeForm;
+      }
+
+      // The composition must be importable. A private function inside the Temporal workflow
+      // module is exactly why F-385 shipped with no test able to reach it.
+      function composerOf(): (rationale: string, f: JudgeForm) => string {
+        const mod = remediation as unknown as Record<string, unknown>;
+        const names = Object.keys(mod).filter(
+          (k) => typeof mod[k] === "function" && /compose|with/i.test(k),
+        );
+        for (const name of names) {
+          const fn = mod[name] as (a: unknown, b: unknown) => unknown;
+          if (fn.length < 2) continue;
+          try {
+            const out = fn(RATIONALE, form({ concerns: [CONCERN] } as Partial<JudgeForm>));
+            if (typeof out === "string" && out.includes(RATIONALE)) {
+              return fn as (rationale: string, f: JudgeForm) => string;
+            }
+          } catch {
+            continue;
+          }
+        }
+        throw new Error(
+          "no exported (rationale, form) => string composer found in src/workflow/remediation.ts. " +
+            "The composition the completion-milestone site performs must be a named export a unit " +
+            "test can import — withCriterionFeedback is private to the workflow module today, " +
+            "which is why F-385 shipped with nothing able to test it.",
+        );
+      }
+
+      describe("AC-2 WP-635/F-385: the milestone feedback composes, it does not displace", () => {
+        test("a concern-only form keeps the rationale AND gains the concern", () => {
+          const out = composerOf()(RATIONALE, form({ concerns: [CONCERN] } as Partial<JudgeForm>));
+          expect(
+            out,
+            "this is the F-385 regression: once a concern-only form returned a string, the '??' " +
+              "stopped firing and the rationale — which names the failing rubric rows — was gone.",
+          ).toContain(RATIONALE);
+          expect(out).toContain(CONCERN);
+        });
+
+        test("a failing criterion keeps the rationale AND its evidence", () => {
+          const out = composerOf()(
+            RATIONALE,
+            form({
+              criterionResults: [
+                { id: "AC-9", pass: false, justification: "the marker file is absent" },
+              ],
+            } as Partial<JudgeForm>),
+          );
+          expect(out).toContain(RATIONALE);
+          expect(out).toContain("AC-9");
+          expect(out).toContain("the marker file is absent");
+        });
+
+        test("TRAP: nothing prints twice", () => {
+          const out = composerOf()(
+            RATIONALE,
+            form({
+              criterionResults: [
+                { id: "AC-9", pass: false, justification: "the marker file is absent" },
+              ],
+              concerns: [CONCERN],
+            } as Partial<JudgeForm>),
+          );
+          const occurrences = out.split("scope_matches_instruction").length - 1;
+          expect(
+            occurrences,
+            "the rationale already names the failing rubric rows; a composition that restates " +
+              "them spends the executor's context saying the same thing twice.",
+          ).toBe(1);
+          expect(out.split(CONCERN).length - 1, "the concern must appear once").toBe(1);
+        });
+
+        test("TRAP: a clean form adds nothing to the rationale", () => {
+          const out = composerOf()(
+            RATIONALE,
+            form({
+              criterionResults: [{ id: "AC-1", pass: true, justification: "check exited 0" }],
+            } as Partial<JudgeForm>),
+          );
+          expect(out.trim(), "silence stays cheap on this path too").toBe(RATIONALE);
+        });
+      });
+      GENEOF
+      pnpm exec vitest run "$TARGET"
+      ST=$?
+      rm -f "$TARGET"
+      if [ "$ST" -ne 0 ]; then
+        echo "AC-2 FAIL: the composition is not an importable named export, or it displaces the rationale, or it double-prints, or it grows a clean pass. vitest exited $ST"
+        exit 1
+      fi
+      echo "AC-2 OK: the milestone feedback composes with the rationale, is testable, and prints each thing once"
+
+  - id: AC-3
+    description: >
+      Hygiene, the anti-trap greps, and the DECLARED regression suite with a durability floor.
+      This check runs the whole declared suite on purpose — dogfood-152 passed 3/3 acceptance
+      criteria on a delivery whose own new test was failing in a directory the checks did not
+      name (F-382).
+    check: |
+      cd packages/sdk-ts || exit 1
+      pnpm run typecheck || { echo "AC-3 FAIL: strict typecheck is red (this covers test/ too — F-382)"; exit 1; }
+      pnpm exec eslint src/workflow/remediation.ts src/workflow/agent-loop.ts src/judge/verdict.ts || { echo "AC-3 FAIL: eslint is red on the modules this WP touches"; exit 1; }
+
+      grep -qE 'export const [A-Z_]*MAX[A-Z_]*(_CHARS)? *(: *number)? *= *[0-9]+' src/workflow/remediation.ts || {
+        echo "AC-3 FAIL: the channel bound is no longer a named exported constant. 'How big can this get' must have an answer a reader can find (F-365)."
+        exit 1
+      }
+      grep -qE 'export function blockingConcerns' src/judge/verdict.ts || {
+        echo "AC-3 FAIL: blockingConcerns is no longer the single exported severity policy (WP-548)"
+        exit 1
+      }
+      grep -q 'blockingConcerns' src/workflow/remediation.ts || {
+        echo "AC-3 FAIL: the per-pass feedback no longer reads blockingConcerns — a second copy of the severity rule drifts from the first, and reading concernSeverities directly re-opens the unmarked-concern hole WP-548 closed."
+        exit 1
+      }
+      grep -qE 'rubricFails\.length === 0' src/judge/verdict.ts || {
+        echo "AC-3 FAIL: trap — rule 4's guard was deleted or rewritten. escalateClass out_of_rubric carries F-154's force-seal-on-approve semantics; handing them to a run with a red rubric row lets one approval seal SUCCESS past a failing rubric item. This WP does not touch the verdict."
+        exit 1
+      }
+
+      OUT=$(pnpm --filter @chikory/sdk exec vitest run 2>&1)
+      ST=$?
+      echo "$OUT" | tail -25
+      if [ "$ST" -ne 0 ]; then
+        echo "AC-3 FAIL: the DECLARED regression suite is RED (vitest exited $ST)"
+        exit 1
+      fi
+      N=$(echo "$OUT" | grep -oE "Tests +[0-9]+ passed" | grep -oE "[0-9]+" | head -1)
+      echo "committed suite tests passing: ${N:-UNPARSEABLE} (floor 1578, measured baseline 1574)"
+      if [ -z "$N" ]; then
+        echo "AC-3 FAIL: could not read a test count out of the vitest summary"
+        exit 1
+      fi
+      if [ "$N" -lt 1578 ]; then
+        echo "AC-3 FAIL: durability floor not met — the committed suite did not grow by at least 4 tests. A behaviour proved only by the generated grading checks is not pinned at all (F-356), and the LIVE completion-milestone path is covered by no check above."
+        exit 1
+      fi
+      echo "AC-3 OK: bound named, policies intact, verdict untouched, DECLARED suite green AND larger"
+
+budget_usd: 20
+max_steps: 6
+
+agent_classes:
+  executor: executor-default
+  judge: judge-default
+
+judge:
+  cadence: 1
+
+# F-322 (dogfood-135): without this, a converged out-of-rubric escalation parks overnight for a
+# human instead of auto-sealing.
+unattended:
+  escalation: seal_resumable_failed

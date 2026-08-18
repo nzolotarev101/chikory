@@ -5,16 +5,16 @@ This is the complete operating manual for executing Phase 2+ work packages
 task spec for a WP (every field explained), how to launch, supervise, and
 recover a run, and how to land the result as a normal PR.
 
-**Status (2026-08-17, bounded — update discipline: REPLACE this block, ≤15 lines;
+**Status (2026-08-18, bounded — update discipline: REPLACE this block, ≤15 lines;
 displaced prose moves verbatim to [`PLAN-HISTORY.md`](PLAN-HISTORY.md); per-run detail:
 `docs/reports/`; queue + course correction: `plan.md` §6/§7).**
-🟢 **dogfood-152 / WP-548 (an out-of-rubric judge concern needs a severity floor) DELIVERED and LANDED from a FAILED run** — `run-ac06b2bf-f6bb-4489-9c18-8da7d963075a`, 2 steps, $0.1994/$20.00, 11m 44s, AC 3/3 re-run green, harvest byte-IDENTICAL 13/13 (`docs/reports/dogfood-152.md`). `concernSeverities?: Array<"minor" | "blocking">` is additive on all three mirrors and requested in the judge prompt; one pure `blockingConcerns` policy (`src/judge/verdict.ts:72`, unmapped ⇒ BLOCKING) drives rule 4 and the standing-concerns accumulation; `chikory trace` marks minor concerns without changing the blocking rendering.
-🟡 **The judge scored 1 true positive and it is what condemned the run** — the deterministic `pre_existing_suite_still_green` row (WP-609/WP-619) ran the declared suite and found it RED, over an executor that had just reported four green check tables. The gate condemns; it does not diagnose, and it spent 0 steps on the cause.
-🔴 **The feature was built correctly and shipped INERT; human review found why (§8): F-380** — `applyCheckOverrides` (`src/judge/harness.ts:240`) rebuilds `JudgeForm` from a hand-written field list, so `concernSeverities` was deleted on EVERY real judge pass. Hand-fixed + pinned (`test/judge/harness.test.ts:434,450`; reverting turns 3 tests RED).
-🔴 **F-381, the same shape one altitude up** — the converged and approved out-of-rubric seals passed RAW `verdict.form.concerns` into the completion review (`src/workflow/agent-loop.ts:1490,1531`), re-injecting a minor concern the floor had just filtered. Hand-fixed + pinned (`test/runner/standing-findings-live.test.ts:529`).
-⚠️ **Sweep for RE-CONSTRUCTORS, not just readers (§8).** The F-376 reader grep was performed correctly and still missed both defects: a function that rebuilds a contract object from a field list never appears in the diff, and a `.strict()` schema does not protect you because the rebuild happens after the parse.
-⚠️ **An AC that asserts "the suite is green" must not pick its own scope (§8, F-382 → WP-634).** AC-3 ran `test/judge/ test/workflow/` while the delivery's own new test sat RED in `test/runner/` — 3/3 ACs green on a red declared suite.
-**NEXT HEADLINE = WP-599 (dogfood-153): a judge concern raised alongside a rubric failure must not be silently dropped.** Rule 4's `rubricFails.length === 0` guard means the concern vanishes exactly when the judge is most alarmed; WP-548's floor now supplies the vocabulary to route a BLOCKING one without handing out_of_rubric's approve-seals-SUCCESS semantics to a red rubric.
+🟢 **dogfood-153 / WP-599 (a judge concern raised beside a rubric failure never reaches the executor) DELIVERED and LANDED** — `run-8113a98d-53e2-42b6-bed0-41e7d08920ca`, SUCCESS, 1 step, $0.0852/$20.00, 7m 21s, AC 3/3 re-run green, harvest byte-IDENTICAL 4/4 (`docs/reports/dogfood-153.md`). `buildCriterionFeedback` (`src/workflow/remediation.ts:91`) now carries blocking out-of-rubric concerns into the next step, filtered through the one existing `blockingConcerns` policy; the verdict, the seal's adjudication and the healthy-path silence are all unchanged.
+🟡 **The judge scored 0 true positives** — two clean passes, 6 rubric rows each, 3/3 criteria, over a delivery whose feature could not work in its primary case.
+🔴 **F-384, hand-fixed this sitting (§8): the clamp deleted the feature whenever it mattered.** The criteria and concerns sections were joined and clamped as ONE 2,000-char string; this run's own judge justifications measured **6,532 / 3,757 / 2,851 bytes**, so one failing criterion overran the budget and the concerns section was dropped silently and always. Fixed by `clampSections` (`src/workflow/remediation.ts:127`), pinned by 3 tests (`test/runner/remediation.test.ts:175`, 2 RED pre-fix). Suite 1,571 → **1,574 passed | 23 skipped**.
+⚠️ **Drive the measured MAGNITUDE of an input, not a plausible-looking literal (§8).** AC-1 asserted "failing-criterion evidence is still carried, not replaced" — with a 24-character justification. The oracle was owned; the size family of its inputs was not. Judge output length is telemetry you already have: read it out of `.chikory/runs/<id>/journal.db` (`kind='verdict'`) before writing the AC.
+⚠️ **There was nothing to detect in the diff.** The fact that voided the feature lived in the judge's own PREVIOUS output, not in the change under review — a new altitude for "judge detects but does not gate", where a structurally correct diff meets a budget only telemetry can reveal.
+ℹ️ **WP-548's live behaviour is still unmeasured two runs on (F-386)** — the judge raised 0 concerns, so `concernSeverities` was never populated with a real value; carried into the next spec's premise as a measurement to take.
+**NEXT HEADLINE = WP-635 (dogfood-154): the per-pass feedback channel must fit its payload** — 2,000 chars of channel against a 6,532-byte measured payload, plus F-385 (`agent-loop.ts:1422` displaces the rationale instead of composing).
 
 Related docs: [`docs/spec/task-spec.md`](spec/task-spec.md) (schema
 reference) · [`docs/TASK-PROTOCOL.md`](TASK-PROTOCOL.md) (WP etiquette, §7 is
@@ -1897,3 +1897,33 @@ broken (a false-green, not a follow-on fix).
   put every hit in the enumeration or say in writing why it is out of scope.
   The contract-mirror discipline (types + CONTRACTS.md + zod + component doc)
   already exists for the WRITE side; this is the same rule for the READ side.
+
+- **An AC must drive the measured MAGNITUDE of its inputs, not a plausible-looking
+  literal (🔴 F-384, dogfood-153).** WP-599 made blocking judge concerns ride into
+  the executor's next-step feedback beside the failing-criterion evidence. The
+  delivery built both sections, joined them, and clamped the concatenation to
+  `REMEDIATION_BRIEF_MAX_CHARS` (2,000, `packages/sdk-ts/src/workflow/remediation.ts:21`)
+  — and `clampBrief` truncates from the tail, so the concerns section is what
+  disappears. That is not a corner case: a judge's failing-criterion
+  justification quotes the check it ran, and the three this very run produced
+  measured **6,532 / 3,757 / 2,851 bytes**. One failing criterion overruns the
+  entire budget, so the feature's payload was dropped silently and always in
+  exactly the combined case the goal names. **AC-1 had the right assertion** —
+  "failing-criterion evidence is still carried, not replaced" — with a
+  24-character justification, and the run's own clamp test asserted only
+  `length <= REMEDIATION_BRIEF_MAX_CHARS`, which passes either way. **Rule:** when
+  an AC exercises anything bounded — a char budget, a token window, a retention
+  cap — take the input's real size from telemetry you already have (here:
+  `sqlite3 .chikory/runs/<run-id>/journal.db "select payload_json from
+  journal_entries where kind='verdict'"`, then read `criterionResults[].justification.length`)
+  and write THAT magnitude into the check. This is the F-187/F-196/F-198 rule
+  (drive every input family) extended to a dimension none of them named: input size.
+
+- **A structurally correct diff can still be wrong for a reason the diff does not
+  contain (🟡 F-384, dogfood-153).** The judge passed 6 rubric rows twice and
+  3/3 criteria over a delivery that used the right policy, the right seam, and
+  rejected all four designed traps — and could not work. The fact that condemned
+  it (payload 6,532 bytes vs channel 2,000) lived in the judge's OWN previous
+  output, not in the change under review. When a WP writes into a bounded
+  channel, put the channel's bound and the payload's measured size in the goal,
+  so both are inside the evidence the judge reasons over.
