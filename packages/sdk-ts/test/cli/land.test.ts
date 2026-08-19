@@ -1,4 +1,5 @@
 import { execFileSync } from "node:child_process";
+import { existsSync } from "node:fs";
 import { mkdtemp, mkdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -292,6 +293,35 @@ describe("chikory land (WP-220)", () => {
         "touch",
         "malicious.txt",
       ]);
+    });
+
+    test("default runCheck prevents shell command injection when running acceptance checks under --verify", async () => {
+      const f = await fixture();
+      const c = cli();
+      const injectionFile = join(f.root, "injected.txt");
+
+      const binDir = join(f.root, "bin");
+      await mkdir(binDir, { recursive: true });
+      const dummyDevbox = join(binDir, "devbox");
+      await writeFile(dummyDevbox, "#!/bin/sh\nexit 0\n", { mode: 0o755 });
+
+      const originalPath = process.env.PATH;
+      process.env.PATH = `${binDir}:${originalPath}`;
+
+      try {
+        c.deps.loadAcceptanceChecks = () => [`echo safe; touch ${injectionFile}`];
+
+        expect(
+          await main(
+            ["land", f.runId, "--verify", "--repo", f.repo, "--data-dir", f.dataDir],
+            c.deps,
+          ),
+        ).toBe(0);
+
+        expect(existsSync(injectionFile)).toBe(false);
+      } finally {
+        process.env.PATH = originalPath;
+      }
     });
   });
 });
