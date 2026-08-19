@@ -215,8 +215,8 @@ describe("buildJudgeMessages", () => {
     const content = getUserContent(
       baseInput({
         rubric: [
-          { id: "R-1", description: "no secrets" },
-          { id: "R-2", description: "clean code" },
+          { id: "R-1", description: "no secrets", destructive: false },
+          { id: "R-2", description: "clean code", destructive: false },
         ],
       }),
     );
@@ -232,9 +232,9 @@ describe("buildJudgeMessages", () => {
     const content = getUserContent(
       baseInput({
         checkRuns: [
-          { criterionId: "AC-1", command: "npm test", exitCode: 0, durationMs: 120, output: "  all tests pass  " },
-          { criterionId: "AC-2", command: "eslint .", exitCode: 1, durationMs: 45, output: longOutput },
-          { criterionId: "AC-3", command: "true", exitCode: 0, durationMs: 10, output: "   " },
+          { criterionId: "AC-1", command: "npm test", exitCode: 0, durationMs: 120, output: "  all tests pass  ", infraFailed: false },
+          { criterionId: "AC-2", command: "eslint .", exitCode: 1, durationMs: 45, output: longOutput, infraFailed: false },
+          { criterionId: "AC-3", command: "true", exitCode: 0, durationMs: 10, output: "   ", infraFailed: false },
         ],
       }),
     );
@@ -295,8 +295,8 @@ describe("buildJudgeMessages", () => {
         reviewScope: "incremental",
         diffText: "",
         diffSections: [
-          { repoName: "repo-a", relativePath: "packages/a", diffText: "+ change a" },
-          { repoName: "repo-b", relativePath: "packages/b", diffText: "" },
+          { repoName: "repo-a", relativePath: "packages/a", diffText: "+ change a", sinceCommit: "c1", label: "repo-a", evidenceText: "+ change a" },
+          { repoName: "repo-b", relativePath: "packages/b", diffText: "", sinceCommit: "c1", label: "repo-b", evidenceText: "" },
         ],
       }),
     );
