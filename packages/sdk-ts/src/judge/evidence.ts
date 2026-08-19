@@ -226,6 +226,11 @@ export async function runCriteriaChecks(input: {
   checkTimeoutMs?: number;
 }): Promise<CheckRun[]> {
   const runs: CheckRun[] = [];
+  const checksToRun = input.criteria.filter((c) => c.check);
+  if (checksToRun.length === 0) {
+    return runs;
+  }
+
   const reposToSnapshot =
     input.workspaceRepos && input.workspaceRepos.length > 0
       ? input.workspaceRepos.map((repo) => ({
@@ -252,7 +257,9 @@ export async function runCriteriaChecks(input: {
   };
 
   try {
-    for (const criterion of input.criteria.filter((c) => c.check)) {
+    // WP-623 / F-349: Checks MUST run sequentially with side-effect cleanup between runs
+    // to maintain check isolation and prevent workspace cross-contamination.
+    for (const criterion of checksToRun) {
       const run = await runCheck(
         input.workspaceDir,
         criterion,
@@ -310,64 +317,71 @@ export async function collectEvidence(input: CollectEvidenceInput): Promise<Coll
   );
 
   // Judge-executed acceptance checks (JD-4) — sequential: checks may share
-  // workspace state (build artifacts, ports).
+  // workspace state (build artifacts, ports) and must be isolated (WP-623 / F-349).
   const checkRuns: CheckRun[] = [];
   let regressionSuiteRun: CheckRun | undefined;
 
-  const writableRepos = input.workspaceRepos?.filter((repo) => repo.writable) ?? [];
-  const reposToSnapshot =
-    writableRepos.length > 0
-      ? writableRepos.map((repo) => ({
-          dir: repo.relativePath === "." ? input.workspaceDir : join(input.workspaceDir, repo.relativePath),
-        }))
-      : [{ dir: input.workspaceDir }];
+  const checksToRun = input.criteria.filter((c) => c.check);
+  const hasChecks = checksToRun.length > 0 || Boolean(input.regressionSuite);
 
-  const beforeSnapshots = new Map<string, WorkspaceDirtySnapshot>();
-  const snapshotResults = await Promise.all(
-    reposToSnapshot.map((r) => snapshotWorkspace(r.dir))
-  );
-  reposToSnapshot.forEach((r, idx) => {
-    beforeSnapshots.set(r.dir, snapshotResults[idx]!);
-  });
+  if (hasChecks) {
+    const writableRepos = input.workspaceRepos?.filter((repo) => repo.writable) ?? [];
+    const reposToSnapshot =
+      writableRepos.length > 0
+        ? writableRepos.map((repo) => ({
+            dir: repo.relativePath === "." ? input.workspaceDir : join(input.workspaceDir, repo.relativePath),
+          }))
+        : [{ dir: input.workspaceDir }];
 
-  const cleanup = async () => {
-    await Promise.all(
-      reposToSnapshot.map(async (r) => {
-        const before = beforeSnapshots.get(r.dir);
-        const after = await snapshotWorkspace(r.dir);
-        const plan = planCheckSideEffectCleanup(before ?? "", after);
-        await applyCleanupPlan(r.dir, plan, before);
-      }),
+    const beforeSnapshots = new Map<string, WorkspaceDirtySnapshot>();
+    const snapshotResults = await Promise.all(
+      reposToSnapshot.map((r) => snapshotWorkspace(r.dir))
     );
-  };
+    reposToSnapshot.forEach((r, idx) => {
+      beforeSnapshots.set(r.dir, snapshotResults[idx]!);
+    });
 
-  try {
-    for (const criterion of input.criteria.filter((c) => c.check)) {
-      const run = await runCheck(
-        input.workspaceDir,
-        criterion,
-        input.checkTimeoutMs ?? DEFAULT_CHECK_TIMEOUT_MS,
-        input.workspaceRepos ?? [],
+    const cleanup = async () => {
+      await Promise.all(
+        reposToSnapshot.map(async (r) => {
+          const before = beforeSnapshots.get(r.dir);
+          const after = await snapshotWorkspace(r.dir);
+          const plan = planCheckSideEffectCleanup(before ?? "", after);
+          await applyCleanupPlan(r.dir, plan, before);
+        }),
       );
-      checkRuns.push(run);
+    };
+
+    try {
+      // WP-623 / F-349: Checks MUST run sequentially with side-effect cleanup between runs
+      // to maintain check isolation and prevent workspace cross-contamination.
+      for (const criterion of checksToRun) {
+        const run = await runCheck(
+          input.workspaceDir,
+          criterion,
+          input.checkTimeoutMs ?? DEFAULT_CHECK_TIMEOUT_MS,
+          input.workspaceRepos ?? [],
+        );
+        checkRuns.push(run);
+        await cleanup();
+      }
+
+      if (input.regressionSuite) {
+        regressionSuiteRun = await runCheck(
+          input.workspaceDir,
+          {
+            id: "pre_existing_suite_still_green",
+            description: "regression suite",
+            check: input.regressionSuite,
+          },
+          input.checkTimeoutMs ?? DEFAULT_CHECK_TIMEOUT_MS,
+          input.workspaceRepos ?? [],
+        );
+        await cleanup();
+      }
+    } finally {
       await cleanup();
     }
-
-    if (input.regressionSuite) {
-      regressionSuiteRun = await runCheck(
-        input.workspaceDir,
-        {
-          id: "pre_existing_suite_still_green",
-          description: "regression suite",
-          check: input.regressionSuite,
-        },
-        input.checkTimeoutMs ?? DEFAULT_CHECK_TIMEOUT_MS,
-        input.workspaceRepos ?? [],
-      );
-      await cleanup();
-    }
-  } finally {
-    await cleanup();
   }
 
   let testResults: TestResultArtifact | undefined;
