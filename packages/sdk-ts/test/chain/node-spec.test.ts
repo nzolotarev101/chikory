@@ -287,4 +287,17 @@ describe("deriveNodeOutcome", () => {
       verdict: "ESCALATE",
     });
   });
+
+  it("attaches inconclusiveCheck when supplied and omits it when absent", () => {
+    expect(deriveNodeOutcome("SUCCESS", "PROCEED", "pre_existing_suite_green")).toEqual({
+      status: "SUCCESS",
+      verdict: "PROCEED",
+      inconclusiveCheck: "pre_existing_suite_green",
+    });
+    expect(deriveNodeOutcome("SUCCESS", "PROCEED", undefined)).toEqual({
+      status: "SUCCESS",
+      verdict: "PROCEED",
+    });
+    expect("inconclusiveCheck" in deriveNodeOutcome("SUCCESS", "PROCEED")).toBe(false);
+  });
 });

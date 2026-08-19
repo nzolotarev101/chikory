@@ -5,17 +5,16 @@ This is the complete operating manual for executing Phase 2+ work packages
 task spec for a WP (every field explained), how to launch, supervise, and
 recover a run, and how to land the result as a normal PR.
 
-**Status (2026-08-18, bounded — update discipline: REPLACE this block, ≤15 lines;
+**Status (2026-08-19, bounded — update discipline: REPLACE this block, ≤15 lines;
 displaced prose moves verbatim to [`PLAN-HISTORY.md`](PLAN-HISTORY.md); per-run detail:
 `docs/reports/`; queue + course correction: `plan.md` §6/§7).**
-🟢 **dogfood-156 / WP-618 (a node's inconclusive outcome must survive the fan-in) DELIVERED and LANDED** — `run-3ff7c55a-ba68-48af-a125-218236bbdbca`, terminal SUCCESS, **2 steps, $0.1925/$20.00**, 13m 48s, AC **3/3** re-run green, harvest byte-IDENTICAL **12/12** (`docs/reports/dogfood-156.md`). A chain node whose regression suite was cap-killed no longer folds in as an ordinary success: the marker crosses all five hops to the **persisted** `node_sealed` entry (`packages/sdk-ts/src/chain/activities.ts:307`) and is named by **three** renderers (`src/chain/read-trace.ts:45`, `src/chain/trace.ts:17`, `src/cli/chain.ts:470`) — two more than the goal asked for. Suite **1,599 → 1,603 passed | 23 skipped**, 194 → 195 files.
-🟢 **All four designed traps rejected** — `NodeOutcome`'s value set unchanged (no `INCONCLUSIVE` status), silence stays silent (the clean node's rendered line asserted byte-exact), the WP-615 run-level plumbing absent from the diff, `reason` still populated.
-🟢 **Judge true-positive: 1, and it drove a repair — second run running.** Pass #2's *cumulative-design* rubric found the marker persisted in TWO places at once (inside `outcome` AND at the payload top level, reconciled with `??` at every read) — invisible to 3/3 green ACs and a green suite. Step 2 collapsed it to one canonical representation; pass #4 confirmed ✓. The catch rode a `✓ PROCEED` verdict (F-335 stands), but the loop acted on it.
-🟢 **F-197 duty discharged — WP-606 is live-proven.** This run's own 2 persisted summaries measure **10,167 B, 0 `file://` URLs, 0 absolute `/Users/…` paths**, against dogfood-155's own 14,637 B / 34 URLs.
-🟡 **F-395 (§8) → WP-636: the live chain record and the disk-restored one disagree.** `chain-loop.ts:349` folds `advanceChain` with the bare outcome, so the marker is present after a `chain resume` and `undefined` on a chain that never resumed. Latent — and the judge missed it six lines below a hunk it reviewed.
-🟡 **F-396 (§8) → WP-637: the DEPENDENT AGENT is the seam the spec forgot.** `buildStructuredCompactionNote` (`src/chain/compaction-note.ts:37`–`:39`) renders outcome/verdict/changed_paths only; the successor's brief is byte-identical whether the predecessor's gate ran or not. Not a delivery defect — a scoping gap: **enumerating consumed seams is the spec author's binding job, derived from a grep of the field's TYPE, not from the narrative of the data flow.**
-ℹ️ **F-397 (§8)** `⚠ cost meter blind` fires on a declared `zero-wire-cost` executor whose $0.00 is correct · **F-398 (§8)** 381 B (6.7%) of a step summary is still launch narration (F-306 family, down from 16%).
-**NEXT HEADLINE = `dogfood-157` / WP-637** — the progression gate reads ✅ PROGRESSING; P3 rung-5 (WP-530) remains WP-304's operator-run multi-hour benchmark arm and cannot be a spec, so the default candidate is unrunnable and WP-637 wins on thesis value: it closes WP-618's own compounding-error claim at the one seam that carries it into the next agent.
+🟢 **dogfood-157 / WP-637 (a dependent node's prompt must say its predecessor's gate never ran) + WP-636 (the live chain record and the disk-restored one must agree) DELIVERED and LANDED** — `run-8b00e28a-3abf-4f91-bd92-4438c79087b0`, terminal SUCCESS, **2 steps, $0.1428/$20.00**, 11m 15s, AC **3/3** re-run green, harvest byte-IDENTICAL **7/7**, suite **1,603 → 1,609**, `docs/reports/dogfood-157.md`.
+🟢 **The successor's brief now names the check that never finished** — `inconclusive_check:` renders ABOVE the unbounded `changed_paths` (`src/chain/compaction-note.ts:39`–`:41`), so the 1,200-char clip cannot make the fix inert; the marker is attached at the SOURCE (`deriveNodeOutcome`, `src/chain/node-spec.ts:350`), so the live fold and `chainRecordFrom` agree without a special adapter.
+🟢 **All three designed traps rejected** — silence stays byte-identical for a clean predecessor, the bound holds with the marker intact on a 400-path input, and WP-618's canonical durable shape survives (persisted `outcome` stays clean, marker top-level: `src/chain/activities.ts:301`, `:312`).
+🟢 **Judge true-positive: 1, and it drove a repair — THIRD consecutive run.** Step 1 enriched the outcome with a local adapter inside `chainLoop`; AC-1 (folding the REAL `readNodeResult` outcome) went RED and `design_serves_overall_goal` named the consumed seam; step 2 moved the fix to the source and deleted the adapter.
+🟡 **F-399 (§8) HAND-FIXED this review** — the WP-521 seeded-fail drill branch folded a bare `{FAILED, HALT}` literal while the journal kept the marker, so live ≠ restored on the branch the heal/replan drills use (`src/chain/chain-loop.ts:339`, +1 test).
+ℹ️ **F-400 (§7)** `chikory trace`'s step table shows the completion review's `(0/0 criteria)` as the LAST step's verdict (`src/cli/trace.ts:183`) — read `--step <n>` for that step's real acceptance pass · **F-397/F-398 (§8)** recur: cost-meter-blind warning on a correctly-$0 executor; launch narration down to 5.7%.
+**NEXT HEADLINE = `dogfood-158` / WP-589 half (1)** — the progression gate reads ✅ PROGRESSING; P3 rung-5 (WP-530) remains WP-304's operator-run multi-hour benchmark arm and cannot be a spec. The write boundary is measured with `git diff --name-only` (`src/runner/activities.ts:2845`–`:2850`), so every gitignored write is invisible to it — re-measured TRUE at this review.
 
 Related docs: [`docs/spec/task-spec.md`](spec/task-spec.md) (schema
 reference) · [`docs/TASK-PROTOCOL.md`](TASK-PROTOCOL.md) (WP etiquette, §7 is
@@ -755,6 +754,17 @@ broken (a false-green, not a follow-on fix).
 
 ## 7. Troubleshooting
 
+- **The run summary table reports the LAST judge pass per step, so the final
+  step can read `(0/0 criteria)`** (F-400, dogfood-157). `chikory trace <run-id>`
+  built its step rows from `verdictsByStep`, which keeps the last verdict at each
+  step index (`packages/sdk-ts/src/cli/trace.ts:183`), and the WP-311 completion
+  review — rubric items, **no** acceptance criteria — is journaled at the final
+  step. So a run whose last step passed 3/3 acceptance checks renders as
+  `✓ PROCEED (0/0 criteria)` in the summary. The number is not wrong, it is a
+  different pass. **Read `chikory trace <run-id> --step <n>` for that step's own
+  acceptance verdict** — it lists every pass separately — or the facts pack from
+  `scripts/dogfood-verify.sh --facts`, which reads the acceptance pass.
+
 | Symptom | Cause → fix |
 |---|---|
 | An acceptance check the arming pass proved GREEN fails every judge pass with `exited 2` (or any code the check itself never returns), and re-running it by hand passes | **A SIBLING check broke it — 🔴 F-349, dogfood-142.** The judge runs every acceptance check CONCURRENTLY in ONE shared workspace (`src/judge/evidence.ts:244`, `Promise.all` over `runCheck`). dogfood-142's AC-1 wrote a transient `test/runner/ac1-question-step.generated.test.ts`; AC-2 ran `pnpm run typecheck` over the whole package, compiled AC-1's temp file, and died on `error TS6133: 'FakeJudgeWire' is declared but its value is never read` — 4 passes, `AC-2 failed 3+ consecutive verdicts` → goal-drift HALT → a correct delivery sealed FAILED for $0.1846. `dogfood-arm.sh` runs checks in TURN, so it cannot see this (🟠 F-350). **Until WP-623 lands: never let one AC write into a tree another AC compiles or lints.** Put generated files under a path no whole-tree tool reads, or fold the interfering checks into ONE AC. Diagnose it by opening the run's `test_results` evidence artifact — the sibling's filename is in the error text. A check that DIED is not a criterion failure; verify the delivery independently (`dogfood-open.sh` re-runs the ACs serially) before believing the seal. |
@@ -988,6 +998,19 @@ broken (a false-green, not a follow-on fix).
   impossible because nothing is supposed to change.
 
 ## 8. Known P1 limitations (so you don't fight them)
+
+- **🟡 A DURABLE SYSTEM WITH A LIVE REDUCER AND A REPLAY RECONSTRUCTOR HAS AS
+  MANY BRANCHES AS THE REDUCER HAS OVERRIDES** (F-399, dogfood-157). WP-636 made
+  `ChainRecord.nodeOutcomes[id]` agree across the live fold and `chainRecordFrom`
+  by attaching the marker where the outcome is *produced* — which fixes every
+  path that folds `result.outcome`. It does not fix a path that folds something
+  *else*: the WP-521 seeded-fail drill (`CHIKORY_SEED_CHAIN_FAIL_NODE`) replaces
+  the outcome with a literal before folding it, while `recordNodeSealed` keeps
+  persisting the child's marker, so live ≠ restored on exactly the branch the
+  heal and replan drills run on. Hand-fixed at the dogfood-157 review
+  (`packages/sdk-ts/src/chain/chain-loop.ts:339`). **The rule: after fixing a
+  producer, grep the reducer's call sites for arguments that are NOT the
+  producer's output** — those are the branches your fix did not reach.
 
 - **🟠 ENUMERATING THE CONSUMED SEAMS IS THE SPEC AUTHOR'S JOB, AND THE
   ENUMERATION COMES FROM A GREP OF THE FIELD'S TYPE — NOT FROM THE NARRATIVE OF

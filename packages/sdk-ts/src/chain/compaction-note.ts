@@ -36,6 +36,9 @@ export function buildStructuredCompactionNote(input: StructuredCompactionNoteInp
     `goal: ${input.node.goal}`,
     `outcome: ${input.outcome.status}`,
     `verdict: ${input.outcome.verdict}`,
+    ...(input.outcome.inconclusiveCheck !== undefined
+      ? [`inconclusive_check: ${input.outcome.inconclusiveCheck}`]
+      : []),
     `changed_paths: ${changedPaths.length === 0 ? "(none recorded)" : changedPaths.join(", ")}`,
   ];
   return limit(lines.join("\n"), normalizedMax(input.maxChars));

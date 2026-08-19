@@ -1,0 +1,506 @@
+# Plain: a chain node is given a list of paths it is allowed to write. Today that list is checked
+# against what git TRACKS, so anything the node writes into a path listed in .gitignore is invisible
+# to the check — one real run wrote 2.1 GiB across 95,068 files outside its boundary and sealed
+# SUCCESS with the judge scoring "every changed file is one of the required artifacts". After this
+# run, a node that writes outside its boundary is stopped even when the write is gitignored — and a
+# node that only produced the toolchain's own install output is not.
+# WP: WP-589 half (1) (the write-boundary check must see gitignored writes; F-264)
+# Ladder-rung: 0 (off-ladder - P3 rung-5's remaining half is WP-304, operator-run; see WHY)
+# Thesis-KPI: compounding error (CLAUDE.md) - 95% per-step becomes ~5% end-to-end over 60 steps.
+#   Measured as: can a node's undeclared side effects leave the workspace unnoticed by the gate that
+#   exists to catch exactly that. A boundary that binds only tracked files is not a boundary.
+#
+# THE MEASURED PREMISE - read out of the code AND PROBED AT THIS REVIEW (F-203/F-342: measured,
+#   never transcribed). Reproduce the read with:
+#     sed -n '2843,2851p' packages/sdk-ts/src/runner/activities.ts   # git diff --name-only
+#     grep -n 'undeclaredWritePaths(' packages/sdk-ts/src/runner/activities.ts   # -> 2864
+#   `publishChainHandoff` (src/runner/activities.ts:2824) is the ONE place the boundary is
+#   enforced: it measures the node's writes with `git diff --name-only ${BASE_TAG}..HEAD`
+#   (:2845-:2850) and feeds ONLY that list to `undeclaredWritePaths` (:2864). A path matched by
+#   .gitignore never appears in that diff, so it can never be undeclared.
+#   PROBED at the dogfood-157 review by driving the REAL activity (no Temporal): a node whose
+#   writeSet was ["src/a.ts"] wrote `src/a.ts` AND `results/big.txt` (ignored). Result:
+#     {"status":"SUCCESS", ... "changedPaths":["src/a.ts"] ...}
+#   The 2.1 GiB dogfood-123 escape is this line, not an executor failure.
+#
+#   * THE TRAP, AND IT IS THE WHOLE POINT OF THE RUN. The obvious fix - also enumerate ignored
+#     paths and pass them to the same admission check - FAILS EVERY REAL NODE. A dogfood node runs
+#     `pnpm install`; `node_modules/` is ignored, is not in any writeSet, and is not the node's
+#     work. A delivery with no exemption seals FAILED on every node that ever installed a
+#     dependency, which is strictly worse than the hole. AC-1 drives BOTH: an undeclared ignored
+#     write must FAIL, and an undeclared `node_modules/` write must SUCCEED.
+#   * THE SECOND TRAP IS A CHANNEL THAT IS ALREADY BOUNDED. `RepoHandoff.changedPaths`
+#     (src/types.ts:830) is the tracked diff, and it is consumed by
+#     `buildStructuredCompactionNote` (src/chain/compaction-note.ts:42) - the note the NEXT agent
+#     reads, capped at 1,200 chars. Widening `changedPaths` to carry ignored paths would push
+#     95,068 entries into a bounded prompt channel and undo dogfood-157. The BOUNDARY widens; the
+#     HANDOFF does not. AC-1 asserts `changedPaths` is unchanged on every passing case (F-365).
+#   * THE THIRD TRAP IS SIZE. The failure `reason` rides into the journal, the chain's replan brief
+#     and the operator's console. An implementation that enumerates 400 files inside one ignored
+#     directory produces a multi-kilobyte reason. AC-2 writes 400 files into one ignored directory
+#     and requires a reason under 2,000 chars that still names the directory.
+#   * NOT IN SCOPE: WP-589 half (2) (`chikory-bench compare` accepting arm summaries from outside
+#     the sandbox) is a separate, later slice. No planner, plan gate, judge rubric, chain reducer,
+#     budget arithmetic, Python mirror or TaskSpec contract change. The four admission rules in
+#     `write-boundary.ts` (isTestPath/isBarrelPath/parentDirOf, F-218) keep governing what counts
+#     as declared - this run changes WHAT IS MEASURED, not WHAT IS ADMITTED.
+#   * THE SUITE THIS RUN MUST NOT BREAK, MEASURED at the launch commit by running it under devbox
+#     (F-342 - run it yourself and read its own tail): 195 files passed | 2 skipped,
+#     1610 passed | 23 skipped (1633 total).
+#
+# PRECEDENCE - two rules below can disagree about one path. When they do:
+#   1. AN EXEMPTION BEATS A VIOLATION. If a path is inside a directory the toolchain owns, it is
+#      not the node's work and never fails the seal - even though it is ignored and undeclared.
+#      Get this wrong in the other direction and every node that installs a dependency seals
+#      FAILED.
+#   2. A DECLARATION BEATS IGNORED-NESS. A path a node DECLARED in its writeSet is allowed whether
+#      or not git ignores it. The node asked for it; the planner granted it.
+#   3. THE BOUNDARY IS NOT THE HANDOFF. Nothing this run does may change what
+#      `RepoHandoff.changedPaths` carries, because a bounded prompt channel consumes it.
+#
+# Format: loose - the outcome (a gitignored write outside the boundary stops the seal; the
+#   toolchain's own output does not) is fixed. How the workspace is enumerated, where the
+#   exemptions live, and how they are spelled are the executor's call. No AC greps a new symbol or
+#   field name (F-393).
+#
+# Launch mode: RUN (one seam, one package).
+#   CHIKORY_PREFLIGHT_ONLY=1 devbox run run-dogfood
+#   devbox run run-dogfood
+#
+# WHY THIS AND NOT THE LADDER RUNG (dogfood-157 review, 2026-08-19):
+#   `scripts/dogfood-progression.sh` reads **PROGRESSING**, so the default candidate is the current
+#   phase ladder rung - P3's ladder is WP-530 (plan.md section 7) and its next rung, rung-5, is
+#   WP-304's OpenHands arm plus a corpus wide enough to separate 19 requirements at 95 percent
+#   confidence. Re-checked against plan.md section 7 at this review and still true: that is a
+#   quota-bound, multi-hour benchmark suite the OPERATOR runs by hand (dogfood-122's lesson), so it
+#   cannot be a spec, and has not been since dogfood-139. WP-589 beats it on runnable thesis value:
+#   plan.md calls it "the highest-value open seam", it is product code on the chain pillar
+#   (WP-219), and its premise was re-measured AND probed from the code at this review. Rejected:
+#   WP-636/WP-637 (delivered by dogfood-157) - WP-592 (F-268: the capability entry declares the
+#   executor `subscription-linked` with `zero-wire-cost`, so "$0.00 is wrong" is NOT measured true)
+#   - WP-634 (F-382, harness-meta, section 1.5 track-B) - WP-633 (F-378, latent behind an
+#   unreachable predicate) - F-399 (hand-fixed at this review) - F-400 (informational, track-B).
+
+name: dogfood-158-wp589-boundary-sees-ignored-writes
+wp: WP-589
+
+goal: |
+  A chain node's declared write boundary must be enforced over what the node actually wrote into
+  its workspace — not only over what git happens to track.
+
+  Measured from the code and PROBED at this review. `publishChainHandoff`
+  (`packages/sdk-ts/src/runner/activities.ts:2824`) is the only place the boundary is enforced. It
+  measures the node's writes with `git diff --name-only ${BASE_TAG}..HEAD`
+  (`packages/sdk-ts/src/runner/activities.ts:2845`–`:2850`) and feeds only that list to
+  `undeclaredWritePaths` (`:2864`). A `.gitignore`-matched path is never in that diff, so it can
+  never be reported. Driving the real activity with a node whose `writeSet` was `["src/a.ts"]` and
+  which wrote both `src/a.ts` and `results/big.txt` returns
+  `{"status":"SUCCESS", … "changedPaths":["src/a.ts"] …}`. This is the seam that let dogfood-123
+  write 2.1 GiB across 95,068 files outside its declared boundary while the judge scored
+  `scope_matches_instruction ✓`.
+
+  Make two things true.
+
+  1. **An undeclared write stops the seal even when git ignores it.** A node that writes to a path
+     outside its `writeSet` does not publish its handoff, and the failure names the offending path
+     — whether or not that path is tracked.
+  2. **The toolchain's own output is not the node's work.** A node whose only undeclared,
+     ignored writes are dependency-install output (`node_modules/`) still seals normally. Every
+     dogfood node installs dependencies; a boundary that fails all of them is worse than the hole
+     it closes.
+
+  Three things must NOT change, and each is a trap this run is graded on:
+
+  1. **The handoff channel stays exactly as wide as it is.** `RepoHandoff.changedPaths`
+     (`packages/sdk-ts/src/types.ts:830`) is the tracked diff and is consumed by
+     `buildStructuredCompactionNote` (`packages/sdk-ts/src/chain/compaction-note.ts:42`) — the
+     bounded note the next agent reads. It must carry the same paths after this run as before.
+     The BOUNDARY is what widens; the HANDOFF does not.
+  2. **The failure stays readable.** The seal's failure `reason` rides into the journal, the
+     replan brief and the operator's console. Four hundred files inside one ignored directory must
+     not produce four hundred paths of `reason`.
+  3. **A declaration still wins, and the admission rules are untouched.** A path the node declared
+     is allowed whether or not git ignores it, and the four admission rules that decide what counts
+     as declared (`packages/sdk-ts/src/chain/write-boundary.ts`, F-218 — the prompt the executor
+     reads and the check that kills it are ONE definition) keep governing. This run changes what is
+     MEASURED, not what is ADMITTED, and the executor-facing boundary text must still be produced
+     from that module.
+
+  TypeScript stays strict ESM with named exports and no `any`. Do not touch the planner, the plan
+  gate, the judge rubric, the chain reducer, the budget arithmetic, the Python mirror, or the
+  TaskSpec contract. WP-589's second half (`chikory-bench compare` reading arm summaries from
+  outside the sandbox) is NOT in scope.
+
+  Pin your work with tests that live in the repo, beside the files they cover. A behaviour proved
+  only by the acceptance checks that grade this run is not pinned at all (F-356), and a repo test
+  copied verbatim from a grading check inherits its blind spots (F-360).
+
+  **The plausible-but-wrong delivery is the one with no exemption.** Enumerating ignored paths and
+  handing them to the same admission check compiles, typechecks, and closes the hole — and then
+  seals FAILED on every node that ever ran an install, because `node_modules/` is ignored and in no
+  writeSet. The opposite error is an exemption so broad it re-opens the hole. Both are graded.
+
+  Verify your work with FAST checks only: the package typecheck (`pnpm run typecheck` — NOT bare
+  tsc --noEmit, which does not cover the test/ tree, F-382), eslint over the files you touched,
+  and vitest over the directories you actually wrote into. Do NOT run the full vitest suite inside
+  a step — it does not fit the step time cap (F-345).
+
+repos:
+  - url: /Users/nikitazolotarev/repos/chikory
+    writable: true
+
+# The SDK suite is both the surface this run edits and the gate it must not break.
+# MEASURE it at the launch commit rather than trusting this line (F-342, dogfood-140).
+regression_suite: pnpm --filter @chikory/sdk exec vitest run
+check_timeout_ms: 180000
+
+acceptance_criteria:
+  - id: AC-1
+    description: >
+      THIS CHECK OWNS ITS ORACLE (does an undeclared gitignored write stop the seal, and does the
+      toolchain's own output not) AND DRIVES THE REAL ENTRY POINT. It builds four real git
+      workspaces laid out exactly as the runner lays them out, seeds a real run journal with a real
+      chainLink writeSet, and calls the REAL `publishChainHandoff` — no Temporal, no mocks. Case A
+      (undeclared ignored write) must FAIL and name the path; case B (the same path DECLARED) must
+      SUCCEED; case C (an undeclared `node_modules/` write that no admission rule covers) must SUCCEED — the
+      exemption a no-exemption delivery fails; case D (an undeclared TRACKED write in a directory
+      no declared entry owns) must still FAIL, proving today's directory-scoped behaviour is
+      preserved. On both passing cases the published
+      `handoff.repos[0].changedPaths` must be exactly `["src/a.ts"]` — the bounded channel the next
+      agent reads does not widen.
+    check: |
+      cd packages/sdk-ts || exit 1
+      TARGET=test/runner/ac1-boundary-ignored.generated.test.ts
+      mkdir -p test/runner
+      rm -f "$TARGET"
+      cat > "$TARGET" <<'GENEOF'
+      import { execFile } from "node:child_process";
+      import { mkdir, mkdtemp, writeFile } from "node:fs/promises";
+      import { tmpdir } from "node:os";
+      import { join } from "node:path";
+      import { promisify } from "node:util";
+
+      import { describe, expect, test } from "vitest";
+
+      import {
+        createMemoryArtifactStore,
+        createRunnerActivities,
+        Journal,
+        journalPath,
+        workspaceDir,
+        type AdapterRegistry,
+        type TaskSpec,
+      } from "../../src/index.js";
+
+      const exec = promisify(execFile);
+      const git = async (cwd: string, args: string[]): Promise<string> =>
+        (await exec("git", args, { cwd })).stdout.trim();
+
+      interface Case {
+        runId: string;
+        writeSet: string[];
+        extraWrites: Array<{ path: string; bytes: number }>;
+      }
+
+      async function seed(c: Case): Promise<{ dataDir: string }> {
+        const dataDir = await mkdtemp(join(tmpdir(), "ac1-wb-"));
+        const ws = workspaceDir(dataDir, c.runId);
+        await mkdir(ws, { recursive: true });
+        await git(ws, ["init", "-b", "main"]);
+        await git(ws, ["config", "user.email", "t@t"]);
+        await git(ws, ["config", "user.name", "t"]);
+        await mkdir(join(ws, "src"), { recursive: true });
+        await writeFile(join(ws, "src/a.ts"), "export const a = 1;\n");
+        await writeFile(join(ws, ".gitignore"), "results/\nnode_modules/\n");
+        await git(ws, ["add", "-A"]);
+        await git(ws, ["commit", "-m", "base"]);
+        await git(ws, ["tag", "chikory-base"]);
+        await git(ws, ["checkout", "-b", "chikory/run-" + c.runId]);
+
+        // the node's DECLARED work, always the same
+        await writeFile(join(ws, "src/a.ts"), "export const a = 2;\n");
+        for (const w of c.extraWrites) {
+          const full = join(ws, w.path);
+          await mkdir(join(full, ".."), { recursive: true });
+          await writeFile(full, "x".repeat(w.bytes));
+        }
+        await git(ws, ["add", "-A"]);
+        await git(ws, ["commit", "-m", "node work"]);
+
+        const spec = {
+          name: "ac1",
+          goal: "g",
+          acceptanceCriteria: [{ id: "AC-1", description: "d" }],
+          budgetUsd: 5,
+          repos: [{ url: ws, writable: true }],
+          chainLink: { planId: "p", nodeId: "N-1", chainId: "c", writeSet: c.writeSet },
+        } as unknown as TaskSpec;
+        const j = new Journal(journalPath(dataDir, c.runId));
+        j.createRun(c.runId, spec);
+        j.close();
+        return { dataDir };
+      }
+
+      async function publish(c: Case) {
+        const { dataDir } = await seed(c);
+        const acts = createRunnerActivities({
+          dataDir,
+          adapters: {} as AdapterRegistry,
+          handoffStore: createMemoryArtifactStore(),
+        });
+        return acts.publishChainHandoff({ runId: c.runId });
+      }
+
+      describe("the write boundary is measured over what the node wrote (WP-589)", () => {
+        test("an undeclared IGNORED write stops the seal, the toolchain's own output does not", async () => {
+          const a = await publish({
+            runId: "run-a",
+            writeSet: ["src/a.ts"],
+            extraWrites: [{ path: "results/big.txt", bytes: 1000 }],
+          });
+          expect(
+            a.status,
+            "case A: a node whose writeSet is [src/a.ts] wrote results/big.txt — a gitignored path outside its boundary — and the seal must not publish: " +
+              JSON.stringify(a).slice(0, 300),
+          ).toBe("FAILED");
+          expect(
+            a.status === "FAILED" ? a.reason : "",
+            "case A: the failure must NAME the path that escaped the boundary",
+          ).toContain("results/big.txt");
+
+          const b = await publish({
+            runId: "run-b",
+            writeSet: ["src/a.ts", "results/big.txt"],
+            extraWrites: [{ path: "results/big.txt", bytes: 1000 }],
+          });
+          expect(
+            b.status,
+            "case B: the SAME write, DECLARED in the writeSet, must seal — a declaration wins over ignored-ness: " +
+              JSON.stringify(b).slice(0, 300),
+          ).toBe("SUCCESS");
+
+          const c = await publish({
+            runId: "run-c",
+            writeSet: ["src/a.ts"],
+            extraWrites: [{ path: "node_modules/pkg/lib/util.js", bytes: 500 }],
+          });
+          expect(
+            c.status,
+            "case C: dependency-install output is not the node's work — a delivery with no exemption fails EVERY node that ever ran an install: " +
+              JSON.stringify(c).slice(0, 300),
+          ).toBe("SUCCESS");
+
+          const d = await publish({
+            runId: "run-d",
+            writeSet: ["src/a.ts"],
+            extraWrites: [{ path: "docs/notes.md", bytes: 20 }],
+          });
+          expect(
+            d.status,
+            "case D: today's TRACKED-path behaviour must be preserved",
+          ).toBe("FAILED");
+          expect(
+            d.status === "FAILED" ? d.reason : "",
+            "case D: the tracked violation still names its path",
+          ).toContain("docs/notes.md");
+
+          // TRAP: the bounded channel the NEXT agent reads must not widen (F-365; it feeds
+          // buildStructuredCompactionNote, capped at 1,200 chars).
+          for (const [label, ok] of [["B", b], ["C", c]] as const) {
+            expect(
+              ok.status === "SUCCESS" ? ok.handoff.repos[0]?.changedPaths : ["<failed>"],
+              "case " + label + ": RepoHandoff.changedPaths is the tracked diff and must be unchanged by this run",
+            ).toEqual(["src/a.ts"]);
+          }
+        }, 120_000);
+      });
+      GENEOF
+      pnpm exec vitest run "$TARGET"
+      ST=$?
+      rm -f "$TARGET"
+      if [ "$ST" -ne 0 ]; then
+        echo "AC-1 FAIL: an undeclared gitignored write still seals, or the toolchain exemption is missing, or a declared ignored path was refused, or tracked-path behaviour regressed, or the handoff's changedPaths widened. vitest exited $ST"
+        exit 1
+      fi
+      echo "AC-1 OK: the boundary sees ignored writes, exempts the toolchain's own output, and the handoff channel is unchanged"
+
+  - id: AC-2
+    description: >
+      THIS CHECK COLLIDES CORRECTNESS WITH SIZE. The failure `reason` is journaled, fed to the
+      replan brief and printed to the operator, so an implementation that enumerates every file
+      inside an ignored directory produces a multi-kilobyte reason from one escape. It writes 400
+      files into a single non-exempt ignored directory, requires the seal to FAIL, requires the
+      reason to stay under 2,000 characters while still naming the directory, and requires the
+      whole publish to finish in under 60 s. It then proves the exemption does not merely skip
+      reporting: 300 files under `node_modules/` still seal SUCCESS.
+    check: |
+      cd packages/sdk-ts || exit 1
+      TARGET=test/runner/ac2-boundary-bounded.generated.test.ts
+      mkdir -p test/runner
+      rm -f "$TARGET"
+      cat > "$TARGET" <<'GENEOF'
+      import { execFile } from "node:child_process";
+      import { mkdir, mkdtemp, writeFile } from "node:fs/promises";
+      import { tmpdir } from "node:os";
+      import { join } from "node:path";
+      import { promisify } from "node:util";
+
+      import { describe, expect, test } from "vitest";
+
+      import {
+        createMemoryArtifactStore,
+        createRunnerActivities,
+        Journal,
+        journalPath,
+        workspaceDir,
+        type AdapterRegistry,
+        type TaskSpec,
+      } from "../../src/index.js";
+
+      const exec = promisify(execFile);
+      const git = async (cwd: string, args: string[]): Promise<string> =>
+        (await exec("git", args, { cwd })).stdout.trim();
+
+      async function publish(runId: string, dir: string, count: number) {
+        const dataDir = await mkdtemp(join(tmpdir(), "ac2-wb-"));
+        const ws = workspaceDir(dataDir, runId);
+        await mkdir(ws, { recursive: true });
+        await git(ws, ["init", "-b", "main"]);
+        await git(ws, ["config", "user.email", "t@t"]);
+        await git(ws, ["config", "user.name", "t"]);
+        await mkdir(join(ws, "src"), { recursive: true });
+        await writeFile(join(ws, "src/a.ts"), "export const a = 1;\n");
+        await writeFile(join(ws, ".gitignore"), "results/\nnode_modules/\n");
+        await git(ws, ["add", "-A"]);
+        await git(ws, ["commit", "-m", "base"]);
+        await git(ws, ["tag", "chikory-base"]);
+        await git(ws, ["checkout", "-b", "chikory/run-" + runId]);
+
+        await writeFile(join(ws, "src/a.ts"), "export const a = 2;\n");
+        await mkdir(join(ws, dir), { recursive: true });
+        for (let i = 0; i < count; i += 1) {
+          await writeFile(join(ws, dir, "f" + i + ".txt"), "x".repeat(64));
+        }
+        await git(ws, ["add", "-A"]);
+        await git(ws, ["commit", "-m", "node work"]);
+
+        const spec = {
+          name: "ac2",
+          goal: "g",
+          acceptanceCriteria: [{ id: "AC-1", description: "d" }],
+          budgetUsd: 5,
+          repos: [{ url: ws, writable: true }],
+          chainLink: { planId: "p", nodeId: "N-1", chainId: "c", writeSet: ["src/a.ts"] },
+        } as unknown as TaskSpec;
+        const j = new Journal(journalPath(dataDir, runId));
+        j.createRun(runId, spec);
+        j.close();
+
+        const acts = createRunnerActivities({
+          dataDir,
+          adapters: {} as AdapterRegistry,
+          handoffStore: createMemoryArtifactStore(),
+        });
+        const startedAt = Date.now();
+        const result = await acts.publishChainHandoff({ runId });
+        return { result, elapsedMs: Date.now() - startedAt };
+      }
+
+      describe("one escape must not produce a four-hundred-path failure (WP-589)", () => {
+        test("a big ignored directory fails the seal with a bounded, readable reason", async () => {
+          const many = await publish("run-many", "results", 400);
+          expect(
+            many.result.status,
+            "400 files written into an ignored directory outside the writeSet must stop the seal",
+          ).toBe("FAILED");
+          const reason = many.result.status === "FAILED" ? many.result.reason : "";
+          expect(
+            reason,
+            "the failure must still name the directory that escaped",
+          ).toContain("results");
+          expect(
+            reason.length,
+            "the reason rides into the journal, the replan brief and the operator's console — it must not enumerate 400 paths. reason was " +
+              reason.length +
+              " chars: " +
+              reason.slice(0, 300),
+          ).toBeLessThanOrEqual(2000);
+          expect(
+            many.elapsedMs,
+            "the boundary check must not become the slowest thing in a seal",
+          ).toBeLessThan(60_000);
+
+          const exempt = await publish("run-exempt", "node_modules/pkg", 300);
+          expect(
+            exempt.result.status,
+            "300 files of dependency-install output must still seal — the exemption is real, not a reporting trick",
+          ).toBe("SUCCESS");
+        }, 180_000);
+      });
+      GENEOF
+      pnpm exec vitest run "$TARGET"
+      ST=$?
+      rm -f "$TARGET"
+      if [ "$ST" -ne 0 ]; then
+        echo "AC-2 FAIL: a large ignored escape did not fail the seal, or produced an unbounded failure reason, or was too slow, or the toolchain exemption does not hold at scale. vitest exited $ST"
+        exit 1
+      fi
+      echo "AC-2 OK: one escape produces one bounded, readable failure and the exemption holds at scale"
+
+  - id: AC-3
+    description: >
+      Hygiene and the traps that are cheaper to grep than to drive: strict typecheck over src AND
+      test (F-382), eslint over the boundary modules, the WP-637 note plumbing still present, the
+      F-218 one-definition boundary module still exporting its executor-facing text, and the
+      DECLARED regression suite green AND grown by at least 4 committed tests (F-356).
+    check: |
+      cd packages/sdk-ts || exit 1
+      pnpm run typecheck || { echo "AC-3 FAIL: strict typecheck is red (this covers test/ too — F-382)"; exit 1; }
+      pnpm exec eslint src/runner/activities.ts src/chain/write-set.ts src/chain/write-boundary.ts || { echo "AC-3 FAIL: eslint is red on the modules this WP touches"; exit 1; }
+
+      grep -qE 'inconclusive_check' src/chain/compaction-note.ts || {
+        echo "AC-3 FAIL: trap — dogfood-157's successor note (src/chain/compaction-note.ts:40) lost its inconclusive marker. This WP does not touch the note."
+        exit 1
+      }
+      grep -qE 'WRITE_BOUNDARY_NOTE' src/chain/write-boundary.ts || {
+        echo "AC-3 FAIL: trap — the F-218 one-definition boundary module no longer exports the note key the executor prompt rides on. The sentence the executor reads and the check that kills it must stay ONE definition."
+        exit 1
+      }
+      grep -qE 'export function undeclaredWritePaths' src/chain/write-set.ts || {
+        echo "AC-3 FAIL: trap — the admission oracle was removed. This run changes WHAT IS MEASURED, not WHAT IS ADMITTED."
+        exit 1
+      }
+
+      OUT=$(pnpm --filter @chikory/sdk exec vitest run 2>&1)
+      ST=$?
+      echo "$OUT" | tail -25
+      if [ "$ST" -ne 0 ]; then
+        echo "AC-3 FAIL: the DECLARED regression suite is RED (vitest exited $ST)"
+        exit 1
+      fi
+      N=$(echo "$OUT" | grep -oE "Tests +[0-9]+ passed" | grep -oE "[0-9]+" | head -1)
+      echo "committed suite tests passing: ${N:-UNPARSEABLE} (floor 1614, measured baseline 1610)"
+      if [ -z "$N" ]; then
+        echo "AC-3 FAIL: could not read a test count out of the vitest summary"
+        exit 1
+      fi
+      if [ "$N" -lt 1614 ]; then
+        echo "AC-3 FAIL: durability floor not met — the committed suite did not grow by at least 4 tests. A behaviour proved only by the generated grading checks is not pinned at all (F-356)."
+        exit 1
+      fi
+      echo "AC-3 OK: strict typecheck and lint green, WP-637 and F-218 plumbing intact, DECLARED suite green AND larger"
+
+budget_usd: 20
+max_steps: 6
+
+agent_classes:
+  executor: executor-default
+  judge: judge-default
+
+judge:
+  cadence: 1
+
+# F-322 (dogfood-135): without this, a converged out-of-rubric escalation parks overnight for a
+# human instead of auto-sealing.
+unattended:
+  escalation: seal_resumable_failed

@@ -251,7 +251,7 @@ export function createChainActivities(deps: ChainActivityDeps) {
           | undefined;
         const inconclusiveCheck = terminal?.inconclusiveCheck ?? report.inconclusiveCheck;
         const result: NodeResult = {
-          outcome: deriveNodeOutcome(report.status, report.lastVerdict?.kind),
+          outcome: deriveNodeOutcome(report.status, report.lastVerdict?.kind, inconclusiveCheck),
         };
         if (terminal?.handoff !== undefined) result.handoff = terminal.handoff;
         // WP-521: the seal reason is the retry brief's evidence on a FAILED node.
@@ -297,15 +297,20 @@ export function createChainActivities(deps: ChainActivityDeps) {
     }): Promise<void> {
       const journal = openChain(deps, input.chainId);
       try {
+        const inconclusiveCheck = input.inconclusiveCheck ?? input.outcome.inconclusiveCheck;
+        const persistedOutcome: NodeOutcome = {
+          status: input.outcome.status,
+          verdict: input.outcome.verdict,
+        };
         journal.appendOnce(
           "node_sealed",
           { field: "nodeId", value: input.nodeId },
           {
             nodeId: input.nodeId,
-            outcome: input.outcome,
+            outcome: persistedOutcome,
             ...(input.handoff !== undefined ? { handoff: input.handoff } : {}),
-            ...(input.inconclusiveCheck !== undefined
-              ? { inconclusiveCheck: input.inconclusiveCheck }
+            ...(inconclusiveCheck !== undefined
+              ? { inconclusiveCheck }
               : {}),
           },
         );

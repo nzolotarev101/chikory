@@ -341,10 +341,12 @@ export function planNodeToTaskSpec(
 export function deriveNodeOutcome(
   status: RunStatus,
   verdictKind?: VerdictKind,
+  inconclusiveCheck?: string,
 ): NodeOutcome {
   const terminal = status === "SUCCESS" ? "SUCCESS" : "FAILED";
   return {
     status: terminal,
     verdict: verdictKind ?? (terminal === "SUCCESS" ? "PROCEED" : "HALT"),
+    ...(inconclusiveCheck !== undefined ? { inconclusiveCheck } : {}),
   };
 }

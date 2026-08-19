@@ -118,4 +118,74 @@ describe("buildStructuredCompactionNote", () => {
       expect(note.length).toBeLessThanOrEqual(DEFAULT_STRUCTURED_COMPACTION_NOTE_MAX_CHARS);
     }
   });
+
+  it("names inconclusive check when outcome carries inconclusiveCheck", () => {
+    const note = buildStructuredCompactionNote({
+      node,
+      outcome: {
+        status: "SUCCESS",
+        verdict: "PROCEED",
+        inconclusiveCheck: "pre_existing_suite_green",
+      },
+      handoff,
+    });
+
+    expect(note).toBe(
+      [
+        "node: N-1",
+        "goal: write the first slice",
+        "outcome: SUCCESS",
+        "verdict: PROCEED",
+        "inconclusive_check: pre_existing_suite_green",
+        "changed_paths: a.txt, z.txt",
+      ].join("\n"),
+    );
+  });
+
+  it("produces exact 5 lines for clean outcome without inconclusive key or none placeholder", () => {
+    const note = buildStructuredCompactionNote({
+      node,
+      outcome: { status: "SUCCESS", verdict: "PROCEED" },
+      handoff,
+    });
+
+    expect(note).toBe(
+      [
+        "node: N-1",
+        "goal: write the first slice",
+        "outcome: SUCCESS",
+        "verdict: PROCEED",
+        "changed_paths: a.txt, z.txt",
+      ].join("\n"),
+    );
+    expect(note).not.toContain("inconclusive");
+  });
+
+  it("preserves inconclusive check marker when changed_paths exceeds maxChars", () => {
+    const manyPaths = Array.from({ length: 300 }, (_, i) => `packages/pkg-${i}/src/deep/nested/path/file-${i}.ts`);
+    const note = buildStructuredCompactionNote({
+      node,
+      outcome: {
+        status: "SUCCESS",
+        verdict: "PROCEED",
+        inconclusiveCheck: "pre_existing_suite_green",
+      },
+      handoff: {
+        ...handoff,
+        repos: [
+          {
+            ...handoff.repos[0],
+            changedPaths: manyPaths,
+          },
+        ],
+      },
+    });
+
+    expect(note.length).toBeLessThanOrEqual(DEFAULT_STRUCTURED_COMPACTION_NOTE_MAX_CHARS);
+    expect(note.endsWith("...")).toBe(true);
+    expect(note).toContain("inconclusive_check: pre_existing_suite_green");
+    expect(note).toContain("node: N-1");
+    expect(note).toContain("outcome: SUCCESS");
+    expect(note).toContain("verdict: PROCEED");
+  });
 });

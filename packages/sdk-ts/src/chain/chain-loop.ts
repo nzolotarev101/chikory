@@ -38,6 +38,7 @@ import {
 } from "./escalation-park.js";
 import {
   childRunId,
+  deriveNodeOutcome,
   isSeededFailNode,
   planNodeToTaskSpec,
   type ChainNodeTemplate,
@@ -331,7 +332,12 @@ export async function chainLoop(input: ChainLoopInput): Promise<ChainStatus> {
     // only the first incarnation fails; frozen into the template host-side, never
     // an env read inside this deterministic workflow body.
     const seeded = isSeededFailNode(node.id, dispatchIndex, template.seedFailNodeId);
-    const outcome: NodeOutcome = seeded ? { status: "FAILED", verdict: "HALT" } : result.outcome;
+    // F-399: the seeded literal must carry the child's inconclusive marker too —
+    // `recordNodeSealed` persists it top-level either way, so a bare literal here
+    // leaves the LIVE fold knowing less than `chainRecordFrom` rebuilds (WP-636).
+    const outcome: NodeOutcome = seeded
+      ? deriveNodeOutcome("FAILED", "HALT", result.inconclusiveCheck)
+      : result.outcome;
     const failureReason = seeded
       ? "seeded first-incarnation failure (CHIKORY_SEED_CHAIN_FAIL_NODE)"
       : result.reason;

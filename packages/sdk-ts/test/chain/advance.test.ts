@@ -108,4 +108,21 @@ describe("chain advance (WP-219 S3, ADR-005 D3/D4)", () => {
     expect(record.status).toBe(originalStatus);
     expect(record.nodeOutcomes["N-2"]).toBeUndefined();
   });
+
+  it("preserves inconclusiveCheck marker when folding node outcome", () => {
+    const inconclusiveOutcome: NodeOutcome = {
+      status: "SUCCESS",
+      verdict: "PROCEED",
+      inconclusiveCheck: "pre_existing_suite_green",
+    };
+    const record = chainRecord({ "N-1": successOutcome });
+    const advanced = advanceChain(record, "N-2", inconclusiveOutcome);
+
+    expect(advanced.nodeOutcomes["N-2"]).toEqual({
+      status: "SUCCESS",
+      verdict: "PROCEED",
+      inconclusiveCheck: "pre_existing_suite_green",
+    });
+    expect(advanced.status).toBe("RUNNING");
+  });
 });
