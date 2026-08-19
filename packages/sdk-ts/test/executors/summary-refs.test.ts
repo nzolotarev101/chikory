@@ -126,9 +126,14 @@ describe("runCliStep summary reference normalisation (WP-606)", () => {
     expect(summary).toContain(systemPath);
     expect(summary).toContain(siblingDir);
 
-    // 4. Significant byte reduction achieved
+    // 4. Significant byte reduction achieved — bound derived from the measured
+    // workspace dir length (mkdtemp path length varies by platform/CI runner:
+    // short /tmp on Linux CI vs long /private/var/folders/... on macOS), not a
+    // hardcoded constant. Every normalised occurrence removes at least the dir
+    // string itself (plus the "file://" prefix and/or anchor punctuation).
+    const dirOccurrences = rawSummary.split(dir).length - 1;
     expect(summary.length).toBeLessThan(rawSummary.length);
-    expect(rawSummary.length - summary.length).toBeGreaterThan(1000);
+    expect(rawSummary.length - summary.length).toBeGreaterThanOrEqual(dirOccurrences * dir.length);
   });
 
   it("integrates with real gemini-cli parseAgyOutput through runCliStep", async () => {
