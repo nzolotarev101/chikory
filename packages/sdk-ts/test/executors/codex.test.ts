@@ -69,6 +69,25 @@ describe("parseCodexOutput", () => {
     expect(parsed.toolCallsObserved).toBeUndefined();
   });
 
+  it("skips interleaved non-JSON noise and malformed JSON lines starting with {", () => {
+    const lines = [
+      "Starting Codex process...",
+      "[DEBUG] initializing workspace sandbox",
+      " { invalid json object starting with brace",
+      "{bad json syntax",
+      '{"type":"item.completed","item":{"id":"i0","type":"command_execution"}}',
+      "{ truncated line...",
+      "Plain text log entry",
+      REAL_TAIL,
+    ].join("\n");
+
+    const parsed = parseCodexOutput(undefined)(lines);
+    expect(parsed.ok).toBe(true);
+    expect(parsed.summary).toBe("pong");
+    expect(parsed.toolCalls).toBe(1);
+    expect(parsed.tokens).toEqual({ input: 14407, output: 5 });
+  });
+
   it("fails on turn.failed and on missing turn.completed", () => {
     const failed = parseCodexOutput(undefined)(
       '{"type":"turn.failed","error":{"message":"sandbox denied"}}',

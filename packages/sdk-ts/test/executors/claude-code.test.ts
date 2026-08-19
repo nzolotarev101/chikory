@@ -104,6 +104,28 @@ describe("parseClaudeCodeOutput", () => {
     expect(parsed.summary).toBe("Bumped zod to 4.x; 2 tests still red in zodios.test.ts.");
   });
 
+  it("skips interleaved non-JSON noise and malformed JSON lines starting with {", () => {
+    const lines = [
+      "Starting Claude Code process...",
+      "[INFO] initializing model context",
+      " { not valid json but starts with brace",
+      "{bad json: syntax error",
+      JSON.stringify({
+        type: "assistant",
+        message: { content: [{ type: "tool_use" }, { type: "text", text: "Working..." }] },
+      }),
+      "{ truncation error...",
+      "Some plain text stdout log line",
+      REAL_RESULT_LINE,
+    ].join("\n");
+
+    const parsed = parseClaudeCodeOutput(undefined)(lines);
+    expect(parsed.ok).toBe(true);
+    expect(parsed.summary).toBe("pong");
+    expect(parsed.toolCalls).toBe(1);
+    expect(parsed.tokens).toEqual({ input: 10 + 6355 + 12122, output: 58 });
+  });
+
   it("fails on error subtypes and on missing result event", () => {
     const errored = parseClaudeCodeOutput(undefined)(
       JSON.stringify({ type: "result", subtype: "error_during_execution", is_error: true, result: "bad" }),
