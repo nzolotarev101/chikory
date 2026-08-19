@@ -39,6 +39,7 @@ class DummyJudge(Judge):
         )
 
 
+@pytest.mark.anyio
 async def test_judge_base_evaluate_raises_not_implemented_error() -> None:
     judge = Judge()
     evidence = JudgeEvidence(
@@ -53,6 +54,7 @@ async def test_judge_base_evaluate_raises_not_implemented_error() -> None:
         await judge.evaluate(evidence)
 
 
+@pytest.mark.anyio
 async def test_dummy_judge_evaluate() -> None:
     judge = DummyJudge()
     evidence = JudgeEvidence(
