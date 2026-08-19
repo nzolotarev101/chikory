@@ -51,10 +51,10 @@ export function mean(values) {
 
 export function median(values) {
   if (values.length === 0) throw new RangeError("median of empty array");
-  // BUG: median must not depend on input order.
-  const mid = Math.floor(values.length / 2);
-  if (values.length % 2 === 1) return values[mid];
-  return (values[mid - 1] + values[mid]) / 2;
+  const sorted = [...values].sort((a, b) => a - b);
+  const mid = Math.floor(sorted.length / 2);
+  if (sorted.length % 2 === 1) return sorted[mid];
+  return (sorted[mid - 1] + sorted[mid]) / 2;
 }
 EOF
 cat > "$brownfield/test/stats.test.js" <<'EOF'
