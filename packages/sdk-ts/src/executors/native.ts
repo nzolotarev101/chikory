@@ -418,16 +418,22 @@ export function createNativeAdapter(opts: NativeAdapterOptions): ExecutorAdapter
           });
         }
 
-        for (const call of calls) {
-          toolCalls++;
-          let status: "SUCCESS" | "FAILED" = "SUCCESS";
-          let observation: string;
-          try {
-            observation = await executeTool(input.workspaceDir, call);
-          } catch (err) {
-            status = "FAILED";
-            observation = err instanceof Error ? err.message : String(err);
-          }
+        toolCalls += calls.length;
+        const results = await Promise.all(
+          calls.map(async (call) => {
+            let status: "SUCCESS" | "FAILED" = "SUCCESS";
+            let observation: string;
+            try {
+              observation = await executeTool(input.workspaceDir, call);
+            } catch (err) {
+              status = "FAILED";
+              observation = err instanceof Error ? err.message : String(err);
+            }
+            return { call, status, observation };
+          }),
+        );
+
+        for (const { call, status, observation } of results) {
           messages.push(toolObservation(call, status, observation));
           transcript.push({
             role: "tool",
