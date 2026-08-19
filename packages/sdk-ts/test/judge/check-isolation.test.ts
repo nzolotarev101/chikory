@@ -32,27 +32,27 @@ const KEEP_BYTES = "pre-existing ignored content, must survive the batch";
 const WRITER: AcceptanceCriterion = {
   id: "writer",
   description: "writes a transient scratch file, then removes it",
-  check: `printf x > ${MARK}; sleep 1; rm -f ${MARK}`,
+  check: `sh -c "printf x > ${MARK}; sleep 1; rm -f ${MARK}"`,
 };
 const OBSERVER: AcceptanceCriterion = {
   id: "observer",
   description: "must never observe a sibling check writing into the tree",
-  check: `sleep 0.4; test ! -e ${MARK}`,
+  check: `sh -c "sleep 0.4; test ! -e ${MARK}"`,
 };
 const IGNORED_WRITER: AcceptanceCriterion = {
   id: "ignored-writer",
   description: "leaves an artifact under an ignored path",
-  check: `mkdir -p dist; printf leak > ${LEAK}`,
+  check: `sh -c "mkdir -p dist; printf leak > ${LEAK}"`,
 };
 const IGNORED_OBSERVER: AcceptanceCriterion = {
   id: "ignored-observer",
   description: "must never observe a sibling artifact, ignored or not",
-  check: `test ! -e ${LEAK}`,
+  check: `sh -c "test ! -e ${LEAK}"`,
 };
 const HONEST_FAILURE: AcceptanceCriterion = {
   id: "honest-failure",
   description: "a check that is genuinely wrong still fails, with its own exit code",
-  check: "exit 3",
+  check: "sh -c \"exit 3\"",
 };
 const SLOW = (id: string): AcceptanceCriterion => ({
   id,

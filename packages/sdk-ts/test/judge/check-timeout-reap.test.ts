@@ -47,7 +47,7 @@ describe("judge check timeout reaping (WP-264)", () => {
         workspaceDir: workspace,
         store: createMemoryArtifactStore(),
         criteria: [
-          { id: "AC-HANG", description: "hang-grandchild", check: "sleep 60 & sleep 60" },
+          { id: "AC-HANG", description: "hang-grandchild", check: "sh -c \"sleep 60 & sleep 60\"" },
         ],
         sinceCommit: created.baseCommit,
         criteriaHistory: {},
