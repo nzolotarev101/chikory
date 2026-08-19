@@ -108,4 +108,38 @@ describe("chainRecordFrom", () => {
       journal.close();
     }
   });
+
+  it("reconstructs nodeOutcomes carrying inconclusiveCheck from node_sealed", () => {
+    const journal = new ChainJournal(chainJournalPath(dir, "chain-inconclusive"));
+    try {
+      journal.createChain("chain-inconclusive", plan);
+      journal.append("plan", plan);
+      journal.append("node_started", { nodeId: "N-1", childRunId: "run-inconclusive" });
+      journal.append("node_sealed", {
+        nodeId: "N-1",
+        outcome: success,
+        inconclusiveCheck: "pre_existing_suite_green",
+      });
+      journal.append("node_started", { nodeId: "N-2", childRunId: "run-clean" });
+      journal.append("node_sealed", {
+        nodeId: "N-2",
+        outcome: success,
+      });
+
+      const record = chainRecordFrom(journal);
+      expect(record).toBeDefined();
+      expect(record!.nodeOutcomes["N-1"]).toEqual({
+        status: "SUCCESS",
+        verdict: "PROCEED",
+        inconclusiveCheck: "pre_existing_suite_green",
+      });
+      expect(record!.nodeOutcomes["N-2"]).toEqual({
+        status: "SUCCESS",
+        verdict: "PROCEED",
+      });
+      expect(record!.nodeOutcomes["N-2"]?.inconclusiveCheck).toBeUndefined();
+    } finally {
+      journal.close();
+    }
+  });
 });

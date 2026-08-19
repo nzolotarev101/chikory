@@ -340,6 +340,9 @@ export async function chainLoop(input: ChainLoopInput): Promise<ChainStatus> {
       nodeId: node.id,
       outcome,
       ...(result.handoff !== undefined ? { handoff: result.handoff } : {}),
+      ...(result.inconclusiveCheck !== undefined
+        ? { inconclusiveCheck: result.inconclusiveCheck }
+        : {}),
     });
 
     // Fold: record the node→run linkage and the sealed outcome, recompute status.

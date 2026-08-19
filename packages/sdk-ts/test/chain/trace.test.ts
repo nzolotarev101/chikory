@@ -108,6 +108,20 @@ describe("renderChainTrace (WP-219 S6)", () => {
     expect(renderChainTrace(record, [])).toContain("N-2 · depends-on N-1 · run — · ⛔ FAILED (HALT)");
   });
 
+  it("renders inconclusive marker on node outcome", () => {
+    const record = chainRecord({
+      "N-1": { ...successOutcome, inconclusiveCheck: "pre_existing_suite_green" },
+      "N-2": successOutcome,
+    });
+
+    const output = renderChainTrace(record, []);
+    expect(output).toContain(
+      "N-1 · depends-on — · run — · ✓ SUCCESS (PROCEED) (inconclusive: pre_existing_suite_green)",
+    );
+    expect(output).toContain("N-2 · depends-on N-1 · run — · ✓ SUCCESS (PROCEED)");
+    expect(output).not.toContain("N-2 · depends-on N-1 · run — · ✓ SUCCESS (PROCEED) (inconclusive");
+  });
+
   it("renders totals for succeeded, failed, and pending nodes", () => {
     const record = chainRecord({
       "N-1": successOutcome,

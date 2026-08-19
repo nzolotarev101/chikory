@@ -8,14 +8,14 @@ recover a run, and how to land the result as a normal PR.
 **Status (2026-08-18, bounded — update discipline: REPLACE this block, ≤15 lines;
 displaced prose moves verbatim to [`PLAN-HISTORY.md`](PLAN-HISTORY.md); per-run detail:
 `docs/reports/`; queue + course correction: `plan.md` §6/§7).**
-🟢 **dogfood-155 / WP-606 (a step summary must carry refs that outlive the run) DELIVERED and LANDED** — `run-c1f1b066-d59e-4f8e-848f-2b1508b2ba7b`, SUCCESS, 3 steps, $0.2235/$20.00, 13m 5s, AC 3/3 re-run green, harvest byte-IDENTICAL 2/2 (`docs/reports/dogfood-155.md`). `normalizeWorkspaceRefs` runs once at the shared `runCliStep` seam (`packages/sdk-ts/src/executors/step.ts:216`); codex, claude-code and gemini-cli inherit it unedited. Suite 1,588 → 1,598 passed | 23 skipped, 194 files.
-🟢 **Verified by hand against the PREVIOUS run's real summary** — `run-f7735f50`'s persisted step record goes 6,660 → 5,006 B (**−24.8%**), **15 → 0** `file://` URLs, line info preserved, nothing outside the workspace touched. All four designed traps rejected.
-🟢 **Judge true-positive: 1, and it drove a repair** — the *cumulative-design* pass read the whole diff, found a duplicated normalisation call that 3/3 green ACs could not see, did NOT gate, and the executor fixed it in the next step. First repair-driving catch since dogfood-152.
-🟡 **F-393 (§7): an AC grep that pins a code SPELLING can outrank a correct judge finding.** AC-3's `summary: [A-Za-z]+\(` false-RED'd the ES6 shorthand the judge had just asked for; step 3 ($0.0796, 36% of run spend) existed only to restore a matching spelling. A structural grep must accept every legal spelling of the seam — or, better, assert behaviour.
-🟡 **F-392, hand-fixed this sitting (§8): the shared seam is only shared by the adapters that cross it.** `native` (`src/agents/registry.ts:70`) builds its own `StepRecord` and never called `runCliStep`; it now normalises at `src/executors/native.ts:245`. Before writing "every adapter inherits X", enumerate the adapters and check which ones bypass the seam.
-⚠️ **F-197 again: a run cannot exercise the runner fix it delivers.** This run's own 3 summaries still measure 14,637 B / 34 URLs / 4,781 B (32.7%). Next review: read `record.summary` from the next run's journal (`kind='step'`) and expect **0** `file://…/workspace/` matches.
-ℹ️ **WP-548's live behaviour is unmeasured FOUR runs on (F-391/F-386)** — all 5 persisted verdicts carry no `concerns` array, so `concernSeverities` has still never held a real value.
-**NEXT HEADLINE = `dogfood-156`** — the progression gate reads ⛔ STALLED, but P3 rung-5 (WP-530) is an operator-run multi-hour benchmark suite and has been unrunnable as a spec since dogfood-139; the candidate and its §0/§1.1/§1.2/§1.3/§1.5 verdicts are recorded at the end of `docs/reports/dogfood-155.md`.
+🟢 **dogfood-156 / WP-618 (a node's inconclusive outcome must survive the fan-in) DELIVERED and LANDED** — `run-3ff7c55a-ba68-48af-a125-218236bbdbca`, terminal SUCCESS, **2 steps, $0.1925/$20.00**, 13m 48s, AC **3/3** re-run green, harvest byte-IDENTICAL **12/12** (`docs/reports/dogfood-156.md`). A chain node whose regression suite was cap-killed no longer folds in as an ordinary success: the marker crosses all five hops to the **persisted** `node_sealed` entry (`packages/sdk-ts/src/chain/activities.ts:307`) and is named by **three** renderers (`src/chain/read-trace.ts:45`, `src/chain/trace.ts:17`, `src/cli/chain.ts:470`) — two more than the goal asked for. Suite **1,599 → 1,603 passed | 23 skipped**, 194 → 195 files.
+🟢 **All four designed traps rejected** — `NodeOutcome`'s value set unchanged (no `INCONCLUSIVE` status), silence stays silent (the clean node's rendered line asserted byte-exact), the WP-615 run-level plumbing absent from the diff, `reason` still populated.
+🟢 **Judge true-positive: 1, and it drove a repair — second run running.** Pass #2's *cumulative-design* rubric found the marker persisted in TWO places at once (inside `outcome` AND at the payload top level, reconciled with `??` at every read) — invisible to 3/3 green ACs and a green suite. Step 2 collapsed it to one canonical representation; pass #4 confirmed ✓. The catch rode a `✓ PROCEED` verdict (F-335 stands), but the loop acted on it.
+🟢 **F-197 duty discharged — WP-606 is live-proven.** This run's own 2 persisted summaries measure **10,167 B, 0 `file://` URLs, 0 absolute `/Users/…` paths**, against dogfood-155's own 14,637 B / 34 URLs.
+🟡 **F-395 (§8) → WP-636: the live chain record and the disk-restored one disagree.** `chain-loop.ts:349` folds `advanceChain` with the bare outcome, so the marker is present after a `chain resume` and `undefined` on a chain that never resumed. Latent — and the judge missed it six lines below a hunk it reviewed.
+🟡 **F-396 (§8) → WP-637: the DEPENDENT AGENT is the seam the spec forgot.** `buildStructuredCompactionNote` (`src/chain/compaction-note.ts:37`–`:39`) renders outcome/verdict/changed_paths only; the successor's brief is byte-identical whether the predecessor's gate ran or not. Not a delivery defect — a scoping gap: **enumerating consumed seams is the spec author's binding job, derived from a grep of the field's TYPE, not from the narrative of the data flow.**
+ℹ️ **F-397 (§8)** `⚠ cost meter blind` fires on a declared `zero-wire-cost` executor whose $0.00 is correct · **F-398 (§8)** 381 B (6.7%) of a step summary is still launch narration (F-306 family, down from 16%).
+**NEXT HEADLINE = `dogfood-157` / WP-637** — the progression gate reads ✅ PROGRESSING; P3 rung-5 (WP-530) remains WP-304's operator-run multi-hour benchmark arm and cannot be a spec, so the default candidate is unrunnable and WP-637 wins on thesis value: it closes WP-618's own compounding-error claim at the one seam that carries it into the next agent.
 
 Related docs: [`docs/spec/task-spec.md`](spec/task-spec.md) (schema
 reference) · [`docs/TASK-PROTOCOL.md`](TASK-PROTOCOL.md) (WP etiquette, §7 is
@@ -988,6 +988,56 @@ broken (a false-green, not a follow-on fix).
   impossible because nothing is supposed to change.
 
 ## 8. Known P1 limitations (so you don't fight them)
+
+- **🟠 ENUMERATING THE CONSUMED SEAMS IS THE SPEC AUTHOR'S JOB, AND THE
+  ENUMERATION COMES FROM A GREP OF THE FIELD'S TYPE — NOT FROM THE NARRATIVE OF
+  THE DATA FLOW** (F-396, dogfood-156 → WP-637). dogfood-156's spec did the
+  discipline right as far as it went: it named the point of manufacture
+  (`readNodeResult`) and two points of consumption (the persisted `node_sealed`
+  entry, the `chikory chain trace` output), and the delivery hit both plus two
+  renderers it never asked for. What it missed is the seam its OWN thesis-KPI
+  header claimed: the **dependent agent**. `buildStructuredCompactionNote`
+  (`packages/sdk-ts/src/chain/compaction-note.ts:29`) is the only channel
+  carrying a predecessor's outcome into the child's prompt, and it renders three
+  fields — `outcome` (`:37`), `verdict` (`:38`), `changed_paths` (`:39`).
+  `grep -c inconclusive` over that file returns **0**, so the successor's brief
+  is byte-identical whether the predecessor's suite passed or was killed at cap.
+  The spec's five-hop map was written by tracing the *value* forward from where
+  it dies; it never asked **who else reads `NodeOutcome`**. Rule: before writing
+  the ACs, `grep -rn '<TypeName>' src/` and list every reader; a reader that is
+  a PROMPT is a consumed seam exactly like a renderer is.
+
+- **🟠 A FOLD THAT REBUILDS STATE IN MEMORY IS A SECOND RECONSTRUCTOR, AND IT
+  WILL DISAGREE WITH THE ONE THAT READS DISK** (F-395, dogfood-156 → WP-636).
+  The F-380 family's usual shape is one reconstructor silently dropping an
+  additive field. Here there are **two**, and only one got the field:
+  `chainRecordFrom` merges the marker into the outcome when the record is
+  restored from disk (`packages/sdk-ts/src/chain/store.ts:301`), while the live
+  loop folds through `advanceChain(record, node.id, outcome)`
+  (`packages/sdk-ts/src/chain/chain-loop.ts:349`) with the bare
+  `{status, verdict}` that `deriveNodeOutcome` returns
+  (`packages/sdk-ts/src/chain/activities.ts:254`). Same typed field, two truths,
+  split by whether the chain ever resumed. Rule: when a durable system has a
+  live reducer AND a replay reconstructor, an additive field needs an assertion
+  that the two agree — not one test per path.
+
+- **ℹ️ `⚠ COST METER BLIND` FIRES ON EXECUTORS WHOSE $0.00 IS CORRECT**
+  (F-397, dogfood-156). `chikory trace`'s header warns "cost meter blind
+  (unpriced tokens)" whenever metered tokens carry no price, which includes
+  every capability entry declared `subscription-linked` with `zero-wire-cost`
+  (F-268). dogfood-156 read `$0.0000` on both steps against 5,336 metered
+  tokens and `judge share 100.0%` — all three correct. An operator cannot
+  currently distinguish a correctly-$0 subscription executor from a genuinely
+  unpriced model, which is why WP-592's "$0.00 is wrong" premise was measured
+  FALSE and rejected. Read the capability entry before treating $0.00 as a bug.
+
+- **ℹ️ A STEP SUMMARY STILL OPENS WITH LAUNCH NARRATION** (F-398, dogfood-156;
+  F-306 family). WP-606 removed the ephemeral-path bloat — dogfood-156's own
+  summaries measure 0 `file://` URLs and 0 absolute paths — but not the
+  self-narration. Step 2's persisted `record.summary` (5,615 B) opens with four
+  lines of "I have launched … / I am waiting … / I will wait …" (**381 B,
+  6.7%**) before any content, and that prefix rides into the next step's prompt
+  and the pacing estimate. Down from F-306's measured 16%, not closed.
 
 - **🟠 A "SHARED SITE" IS ONLY SHARED BY THE ADAPTERS THAT ACTUALLY CROSS IT**
   (F-392, dogfood-155, hand-fixed at that review). WP-606 sited the summary

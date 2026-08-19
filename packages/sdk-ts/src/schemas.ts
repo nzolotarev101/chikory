@@ -654,6 +654,7 @@ export const NodeOutcomeSchema = z
   .object({
     status: TerminalStatusSchema,
     verdict: VerdictKindSchema,
+    inconclusiveCheck: z.string().min(1).optional(),
   })
   .strict();
 

@@ -13,11 +13,13 @@ const RULE_WIDTH = 60;
 function outcomeCell(record: ChainRecord, node: PlanNode): string {
   const outcome = record.nodeOutcomes[node.id];
   if (!outcome) return "· pending";
+  const inconclusive =
+    outcome.inconclusiveCheck !== undefined ? ` (inconclusive: ${outcome.inconclusiveCheck})` : "";
   switch (outcome.status) {
     case "SUCCESS":
-      return `✓ SUCCESS (${outcome.verdict})`;
+      return `✓ SUCCESS (${outcome.verdict})${inconclusive}`;
     case "FAILED":
-      return `⛔ FAILED (${outcome.verdict})`;
+      return `⛔ FAILED (${outcome.verdict})${inconclusive}`;
   }
 }
 

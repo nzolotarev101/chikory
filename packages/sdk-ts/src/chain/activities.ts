@@ -67,6 +67,7 @@ export interface NodeResult {
   reason?: string;
   /** F-214: the child sealed a WP-520 resumable FAILED — re-enterable. */
   resumable?: boolean;
+  inconclusiveCheck?: string;
 }
 
 import { buildReplanBrief, buildRetryPlan } from "./replan-plan.js";
@@ -241,8 +242,14 @@ export function createChainActivities(deps: ChainActivityDeps) {
           throw new Error(`child run ${input.childRunId} has no journal — cannot seal node`);
         }
         const terminal = journal.entries("terminal").at(-1)?.payload as
-          | { handoff?: ChainNodeHandoff; reason?: string; resumable?: boolean }
+          | {
+              handoff?: ChainNodeHandoff;
+              reason?: string;
+              resumable?: boolean;
+              inconclusiveCheck?: string;
+            }
           | undefined;
+        const inconclusiveCheck = terminal?.inconclusiveCheck ?? report.inconclusiveCheck;
         const result: NodeResult = {
           outcome: deriveNodeOutcome(report.status, report.lastVerdict?.kind),
         };
@@ -252,6 +259,7 @@ export function createChainActivities(deps: ChainActivityDeps) {
         // F-214: the run's own answer to "can I continue?" — WP-520 writes it,
         // `chikory resume` has always honored it, and the chain used to ignore it.
         if (terminal?.resumable === true) result.resumable = true;
+        if (inconclusiveCheck !== undefined) result.inconclusiveCheck = inconclusiveCheck;
         return result;
       } finally {
         journal.close();
@@ -285,6 +293,7 @@ export function createChainActivities(deps: ChainActivityDeps) {
       nodeId: string;
       outcome: NodeOutcome;
       handoff?: ChainNodeHandoff;
+      inconclusiveCheck?: string;
     }): Promise<void> {
       const journal = openChain(deps, input.chainId);
       try {
@@ -295,6 +304,9 @@ export function createChainActivities(deps: ChainActivityDeps) {
             nodeId: input.nodeId,
             outcome: input.outcome,
             ...(input.handoff !== undefined ? { handoff: input.handoff } : {}),
+            ...(input.inconclusiveCheck !== undefined
+              ? { inconclusiveCheck: input.inconclusiveCheck }
+              : {}),
           },
         );
       } finally {

@@ -37,9 +37,14 @@ function topologyLine(node: PlanNode): string {
 function statusLine(record: Readonly<ChainRecord>, node: PlanNode): string {
   const outcome = record.nodeOutcomes[node.id];
   const runId = record.nodeRuns[node.id] ?? "(not started)";
-  return outcome === undefined
-    ? `${node.id} · PENDING · verdict (none) · run ${runId}`
-    : `${node.id} · ${outcome.status} · verdict ${outcome.verdict} · run ${runId}`;
+  if (outcome === undefined) {
+    return `${node.id} · PENDING · verdict (none) · run ${runId}`;
+  }
+  const inconclusive =
+    outcome.inconclusiveCheck !== undefined
+      ? ` · inconclusive: ${outcome.inconclusiveCheck}`
+      : "";
+  return `${node.id} · ${outcome.status} · verdict ${outcome.verdict}${inconclusive} · run ${runId}`;
 }
 
 function latestCompletionReview(

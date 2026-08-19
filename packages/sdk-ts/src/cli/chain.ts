@@ -34,7 +34,12 @@ import {
 import { classifyPlanGateFailure } from "../chain/plan-gate-failure.js";
 import { renderPlanGateFailureNotice } from "../chain/plan-gate-notice.js";
 import { renderChainReadTrace } from "../chain/read-trace.js";
-import { ChainJournal, chainRecordFrom, type ChainEntry } from "../chain/store.js";
+import {
+  ChainJournal,
+  chainRecordFrom,
+  type ChainEntry,
+  type NodeSealedPayload,
+} from "../chain/store.js";
 import { serializeWriteConflicts } from "../chain/write-set.js";
 import {
   renderStaleTemplateWarning,
@@ -460,8 +465,10 @@ function formatChainEntryLine(entry: ChainEntry): string {
       return `[${entry.ts}] node ${p.nodeId} started → ${p.childRunId}`;
     }
     case "node_sealed": {
-      const p = entry.payload as { nodeId: string; outcome: { status: string; verdict: string } };
-      return `[${entry.ts}] node ${p.nodeId} sealed ${p.outcome.status} (${p.outcome.verdict})`;
+      const p = entry.payload as NodeSealedPayload;
+      const inconclusive =
+        p.inconclusiveCheck !== undefined ? ` (inconclusive: ${p.inconclusiveCheck})` : "";
+      return `[${entry.ts}] node ${p.nodeId} sealed ${p.outcome.status} (${p.outcome.verdict})${inconclusive}`;
     }
     case "node_replanned": {
       const p = entry.payload as { failedNodeId: string; revisedPlan?: { id: string } };

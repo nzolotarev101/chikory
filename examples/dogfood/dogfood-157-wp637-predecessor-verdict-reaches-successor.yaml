@@ -1,0 +1,549 @@
+# Plain: when a chain hands work from one agent to the next, the second agent gets a short written
+# note about what the first one did. That note says "outcome: SUCCESS" even when the first agent's
+# test suite was killed by the clock and nobody ever found out whether the code was good. The chain
+# already writes that fact down and prints it for a human (WP-618, last run). It still never tells
+# the next agent. After this run, the note the next agent reads names the check that never ran.
+# WP: WP-637 (a dependent node's prompt must say its predecessor's gate never ran; F-396)
+#     + WP-636 (the live chain record and the disk-restored one must agree; F-395) — entailed, see PRECEDENCE
+# Ladder-rung: 0 (off-ladder - P3 rung-5's remaining half is WP-304, operator-run; see WHY)
+# Thesis-KPI: compounding error (CLAUDE.md) - 95% per-step becomes ~5% end-to-end over 60 steps.
+#   Measured as: does an unearned predecessor verdict reach the DEPENDENT AGENT's context, which is
+#   the only altitude at which the next agent can act on it.
+#
+# THE MEASURED PREMISE - read out of the code at THIS review (F-203/F-342: measured, not
+#   transcribed). Reproduce with:
+#     grep -c inconclusive packages/sdk-ts/src/chain/compaction-note.ts      # -> 0
+#     grep -n 'advanceChain(' packages/sdk-ts/src/chain/chain-loop.ts        # -> 349
+#   WHAT WP-618 BUILT LAST RUN AND IT WORKS: the marker reaches the PERSISTED node_sealed entry
+#   (src/chain/activities.ts:307) and THREE operator renderers name it (src/chain/read-trace.ts:45,
+#   src/chain/trace.ts:17, src/cli/chain.ts:470). Do not undo any of it.
+#   WHAT IS STILL FALSE, at two altitudes:
+#     A. THE SUCCESSOR'S NOTE. `buildStructuredCompactionNote`
+#        (src/chain/compaction-note.ts:29), called at src/chain/chain-loop.ts:254, is the ONLY
+#        channel carrying a predecessor's outcome into the dependent node's prompt. It renders
+#        exactly three fields: `outcome` (:37), `verdict` (:38), `changed_paths` (:39). A
+#        successor's brief is BYTE-IDENTICAL whether its predecessor's suite passed or was killed
+#        at the cap.
+#     B. THE SOURCE THAT NOTE READS IS EMPTY IN A LIVE CHAIN. chain-loop.ts:254 passes
+#        `record.nodeOutcomes[predecessor.id]`. That map has TWO truths today. Restored from disk,
+#        `chainRecordFrom` merges the marker INTO the outcome (src/chain/store.ts:301). In the live
+#        loop it never arrives: src/chain/chain-loop.ts:349 folds via `advanceChain(record, id,
+#        outcome)` where `outcome` is `deriveNodeOutcome(status, verdict)`
+#        (src/chain/activities.ts:254) and the marker rides BESIDE it on `NodeResult` (:262),
+#        straight to the journal. So the field is populated after a `chikory chain resume` and
+#        `undefined` on a chain that never resumed.
+#
+#   * THIS IS THE TRAP, AND IT IS THE WHOLE POINT OF THE RUN. The obvious one-line fix - read
+#     `record.nodeOutcomes[pred.id].inconclusiveCheck` in the note - COMPILES, TYPECHECKS, and
+#     PASSES any test that builds its record with `chainRecordFrom`. It is dead on every live
+#     chain. B must be fixed for A to be real. AC-1 drives BOTH constructors and requires them to
+#     agree; a delivery that fixes only the restored path fails it.
+#   * FOURTH INSTANCE OF ONE FAMILY: F-380 (a re-constructor deleted the field), F-388 (a tail kept
+#     then head-clamped), F-392 (the 4th adapter never crossed the shared seam), F-395 (two
+#     reconstructors, one got the field). Assert where the value is CONSUMED, and when a durable
+#     system has a live reducer AND a replay reconstructor, assert THEY AGREE.
+#   * NOT IN SCOPE: `NodeOutcome`'s value set does not change (still no fourth status). The
+#     run-level plumbing WP-615 built is untouched. The three WP-618 renderers keep working.
+#     `reason` keeps carrying what it carries. No planner, plan gate, reducer status arithmetic,
+#     budget arithmetic, Python mirror or TaskSpec change.
+#   * THE SUITE THIS RUN MUST NOT BREAK, MEASURED at the launch commit by running it under devbox
+#     (F-342 - run it yourself and read its own tail): 195 files passed | 2 skipped,
+#     1603 passed | 23 skipped (1626 total).
+#
+# PRECEDENCE - two rules below can disagree about one node. When they do:
+#   1. THE NOTE MUST NAME THE CHECK EVEN WHEN THE NOTE IS FULL. The note is BOUNDED
+#      (DEFAULT_STRUCTURED_COMPACTION_NOTE_MAX_CHARS = 1_200, src/chain/compaction-note.ts:3) and
+#      `changed_paths` is unbounded input. A marker appended AFTER a long path list is truncated
+#      away and the fix is inert. The bound wins over completeness; the marker wins over
+#      `changed_paths`. AC-2 collides them with a >1,200-char path list.
+#   2. SILENCE STAYS SILENT. A predecessor whose checks all really ran produces a note that is
+#      BYTE-IDENTICAL to today's five lines - no new key, no empty value, no "none". AC-1 pins that
+#      note exactly, character for character.
+#   3. THE DURABLE REPRESENTATION STAYS CANONICAL; THE IN-MEMORY ONE MAY MERGE. WP-618's judge
+#      already ruled on this once: the marker has ONE durable home, top-level on the node_sealed
+#      payload, and `test/chain/activities-inconclusive.test.ts` pins that the PERSISTED
+#      `outcome` object does NOT carry it. `chainRecordFrom` (src/chain/store.ts:301) then merges
+#      it INTO the outcome when rebuilding the in-memory record. Rule 1 of the goal makes the live
+#      fold match that in-memory shape - so a delivery that reaches it by widening what
+#      `readNodeResult` puts on `NodeResult.outcome` must ALSO keep it off the persisted payload's
+#      outcome, or the committed WP-618 test goes RED. Two representations, one durable, one
+#      reconstructed, and they must not be confused.
+#
+# Format: loose - the outcome (the successor's note names the check that never ran, on a chain that
+#   never resumed) is fixed; where the marker sits in the note, how it is worded, and how the live
+#   fold learns it are the executor's call. No AC greps a new symbol or field name (F-393).
+#
+# Launch mode: RUN (one value, two altitudes, one package).
+#   CHIKORY_PREFLIGHT_ONLY=1 devbox run run-dogfood
+#   devbox run run-dogfood
+#
+# WHY THIS AND NOT THE LADDER RUNG (dogfood-156 review, 2026-08-18):
+#   `scripts/dogfood-progression.sh` reads **PROGRESSING** (max steps 3 vs 2), so the default
+#   candidate is the current phase ladder rung - P3's ladder is WP-530 (plan.md section 7) and its
+#   next rung is rung-5, whose remaining half is WP-304's OpenHands arm plus a corpus wide enough
+#   to separate 19 requirements at 95 percent confidence. Re-checked against plan.md section 7 at
+#   this review and still true. That is a quota-bound multi-hour benchmark suite the OPERATOR runs
+#   by hand (dogfood-122's lesson - an LLM executor may not supervise it), so it cannot be a spec,
+#   and has not been since dogfood-139. WP-637 beats it on runnable thesis value: it is product
+#   code on the chain pillar (durable multi-run execution, WP-219), its premise was measured from
+#   the code at this review, and it closes the compounding-error claim WP-618's own goal scoped out
+#   - the seam the last spec forgot to enumerate. Rejected: WP-592 (F-268 - the capability entry
+#   declares the executor `subscription-linked` with `zero-wire-cost`, so "$0.00 is wrong" is NOT
+#   measured true) - WP-634 (F-382, harness-meta, section 1.5 track-B) - WP-633 (F-378, latent
+#   behind an unreachable predicate) - F-397/F-398 (both informational, track-B).
+
+name: dogfood-157-wp637-predecessor-verdict-reaches-successor
+wp: WP-637
+
+goal: |
+  A chain node that depends on another node must be TOLD when its predecessor's verdict was never
+  earned — when a check the predecessor declared never actually finished. Today it is not told, and
+  the source it would be told from is empty on any chain that never resumed.
+
+  Measured from the code at this review. WP-618 (last run) made the fact durable and
+  operator-visible and it works — the marker reaches the persisted `node_sealed` entry
+  (`src/chain/activities.ts:307`) and three renderers name it (`src/chain/read-trace.ts:45`,
+  `src/chain/trace.ts:17`, `src/cli/chain.ts:470`). Two things are still false:
+
+  - `buildStructuredCompactionNote` (`src/chain/compaction-note.ts:29`), called at
+    `src/chain/chain-loop.ts:254`, is the ONLY channel carrying a predecessor's outcome into the
+    dependent node's prompt, and it renders three fields: `outcome` (`:37`), `verdict` (`:38`),
+    `changed_paths` (`:39`). `grep -c inconclusive` over that file returns **0**.
+  - The map that note reads from has two truths. `chainRecordFrom` merges the marker into the
+    outcome when a chain is restored from disk (`src/chain/store.ts:301`), but the live loop folds
+    through `advanceChain(record, id, outcome)` (`src/chain/chain-loop.ts:349`) with the bare
+    `{status, verdict}` that `deriveNodeOutcome` returns (`src/chain/activities.ts:254`), while the
+    marker rides beside it on `NodeResult` (`:262`) straight to the journal.
+
+  Make two things true.
+
+  1. **The live chain record and the disk-restored chain record agree.** For the same sealed node,
+     `ChainRecord.nodeOutcomes[id]` folded live through `advanceChain` and reconstructed from the
+     chain journal through `chainRecordFrom` must be **equal** — including the inconclusive marker.
+     A chain that never resumed must not know less about its own nodes than one that did.
+  2. **The successor's structured note names the check that never ran.** The note
+     `buildStructuredCompactionNote` produces for a predecessor whose declared check never finished
+     names that check. A dependent agent reading its brief must be able to tell that the ground it
+     is building on was never actually verified.
+
+  Three things must NOT change, and each is a trap this run is graded on:
+
+  1. **Silence stays silent, byte for byte.** A predecessor whose checks all really ran produces a
+     note IDENTICAL to today's five lines — `node:`, `goal:`, `outcome:`, `verdict:`,
+     `changed_paths:` — with no new key, no empty value and no "none". Its `nodeOutcomes` entry
+     gains nothing either.
+  2. **The note stays bounded, and the marker survives the bound.** The note is capped
+     (`DEFAULT_STRUCTURED_COMPACTION_NOTE_MAX_CHARS`, `src/chain/compaction-note.ts:3`) and
+     `changed_paths` is unbounded caller input. A marker appended after a long path list is
+     truncated away and the whole fix is inert. The cap holds AND the marker is still named.
+  3. **WP-618 is not undone, including its canonical durable representation.** The marker still
+     reaches the persisted `node_sealed` entry and
+     `chikory chain trace` still names it, and it stays **top-level on that payload**: the
+     committed test pins that the PERSISTED `outcome` object does not carry it, while
+     `chainRecordFrom` merges it in on the way back out. `NodeOutcome`'s value set still does not change — this
+     is a marker on a sealed outcome, not a fourth status. `reason` keeps carrying what it carries
+     (`src/chain/activities.ts:252`); the run-level plumbing WP-615 built
+     (`src/runner/activities.ts:2976`, `src/journal/journal.ts:319`, `src/cli/trace.ts:437`) is out
+     of scope.
+
+  TypeScript stays strict ESM with named exports and no `any`. Do not touch the planner, the plan
+  gate, the reducer's status arithmetic, the budget arithmetic, the Python mirror, or the TaskSpec
+  contract.
+
+  Pin your work with tests that live in the repo, beside the files they cover. A behaviour proved
+  only by the acceptance checks that grade this run is not pinned at all (F-356), and a repo test
+  copied verbatim from a grading check inherits its blind spots (F-360).
+
+  **The obvious fix is dead code, and rejecting it is the point of this run.** Reading the marker
+  off `record.nodeOutcomes[predecessor.id]` inside the note compiles, typechecks, and passes any
+  test whose record came from `chainRecordFrom` — and does nothing on every live chain, because the
+  live fold never put it there. This is the fourth instance of one family: F-380 (a re-constructor
+  deleted an additive field), F-388 (a tail preserved then clamped one seam later), F-392 (the
+  fourth adapter never crossed the shared seam), F-395 (two reconstructors, one got the field).
+  When a durable system has a **live reducer** and a **replay reconstructor**, the invariant is not
+  "each path works" — it is **"the two agree"**.
+
+  Verify your work with FAST checks only: the package typecheck (`pnpm run typecheck` — NOT bare
+  tsc --noEmit, which does not cover the test/ tree, F-382), eslint over the files you touched,
+  and vitest over the directories you actually wrote into. Do NOT run the full vitest suite inside
+  a step — it does not fit the step time cap (F-345).
+
+repos:
+  - url: /Users/nikitazolotarev/repos/chikory
+    writable: true
+
+# The SDK suite is both the surface this run edits and the gate it must not break.
+# MEASURE it at the launch commit rather than trusting this line (F-342, dogfood-140).
+regression_suite: pnpm --filter @chikory/sdk exec vitest run
+check_timeout_ms: 180000
+
+acceptance_criteria:
+  - id: AC-1
+    description: >
+      THIS CHECK OWNS ITS ORACLE (does the next agent's note say the ground was never verified) AND
+      ASSERTS AT THE CONSUMED SEAM. It seeds two REAL child-run journals on disk — one sealed with
+      an inconclusive check, one clean — drives the REAL `readNodeResult` and `recordNodeSealed`,
+      then builds the chain record BOTH WAYS: live through `advanceChain` exactly as
+      `chain-loop.ts:349` does, and restored through `chainRecordFrom`. It requires the two to be
+      EQUAL, then drives the REAL `buildStructuredCompactionNote` off each and requires both notes
+      to name the check. A delivery that fixes only the restored path fails here. Traps: the clean
+      node's note is asserted byte-exact against today's five lines, and both nodes still seal with
+      their original status.
+    check: |
+      cd packages/sdk-ts || exit 1
+      TARGET=test/chain/ac1-successor-note.generated.test.ts
+      mkdir -p test/chain
+      rm -f "$TARGET"
+      cat > "$TARGET" <<'GENEOF'
+      import { mkdtemp } from "node:fs/promises";
+      import { tmpdir } from "node:os";
+      import { join } from "node:path";
+
+      import { describe, expect, test } from "vitest";
+
+      import { createChainActivities } from "../../src/chain/activities.js";
+      import { advanceChain } from "../../src/chain/advance.js";
+      import { buildStructuredCompactionNote } from "../../src/chain/compaction-note.js";
+      import { ChainJournal, chainRecordFrom } from "../../src/chain/store.js";
+      import { Journal } from "../../src/journal/journal.js";
+      import { chainJournalPath, journalPath } from "../../src/runner/paths.js";
+      import type { ChainRecord, Plan, TaskSpec } from "../../src/types.js";
+
+      const MARKER = "pre_existing_suite_still_green";
+      const TASK = { name: "t", goal: "g", budgetUsd: 10 } as unknown as TaskSpec;
+
+      function node(id: string, dependsOn: string[]) {
+        return {
+          id,
+          goal: "do " + id,
+          acceptanceCriteria: [{ id: "AC-1", description: "d" }],
+          dependsOn,
+          budgetUsd: 5,
+        };
+      }
+
+      function seedChild(dataDir: string, runId: string, inconclusive?: string): void {
+        const j = new Journal(journalPath(dataDir, runId));
+        j.createRun(runId, TASK);
+        j.append({
+          kind: "terminal",
+          payload: {
+            status: "SUCCESS",
+            reason: "sealed",
+            ...(inconclusive === undefined ? {} : { inconclusiveCheck: inconclusive }),
+          },
+          costDeltaUsd: 0,
+          artifactRefs: [],
+        });
+        j.sealRun("SUCCESS");
+        j.close();
+      }
+
+      describe("a dependent node is told its predecessor's gate never ran (WP-637/WP-636)", () => {
+        test("the live and restored records agree, and the successor's note names the check", async () => {
+          const dataDir = await mkdtemp(join(tmpdir(), "chikory-ac1-succnote-"));
+          const chainId = "chain-ac1";
+          const plan: Plan = {
+            id: "plan-ac1",
+            goal: "two nodes",
+            nodes: [node("N-1", []), node("N-2", ["N-1"])],
+            createdAt: new Date().toISOString(),
+          };
+          seedChild(dataDir, "run-killed", MARKER);
+          seedChild(dataDir, "run-clean", undefined);
+
+          const acts = createChainActivities({ dataDir });
+          await acts.initChain({ chainId, plan });
+          const killed = await acts.readNodeResult({ childRunId: "run-killed" });
+          const clean = await acts.readNodeResult({ childRunId: "run-clean" });
+
+          // Spread the WHOLE NodeResult: the check must not care what the field
+          // is called, only that the fact travels (F-393).
+          await acts.recordNodeSealed({ chainId, nodeId: "N-1", ...killed });
+          await acts.recordNodeSealed({ chainId, nodeId: "N-2", ...clean });
+
+          // LIVE fold — exactly the shape chain-loop.ts:349 uses.
+          const empty: ChainRecord = {
+            planId: plan.id,
+            plan,
+            nodeRuns: {},
+            nodeOutcomes: {},
+            nodeHandoffs: {},
+            status: "RUNNING",
+          };
+          const live = advanceChain(
+            advanceChain(empty, "N-1", killed.outcome),
+            "N-2",
+            clean.outcome,
+          );
+
+          // RESTORED fold — what a `chikory chain resume` rebuilds.
+          const cj = new ChainJournal(chainJournalPath(dataDir, chainId));
+          const restored = chainRecordFrom(cj);
+          cj.close();
+          expect(restored, "the chain journal must reconstruct").toBeDefined();
+
+          // WP-636: one typed field, one truth.
+          expect(
+            live.nodeOutcomes["N-1"],
+            "the LIVE fold must know exactly what the RESTORED fold knows about N-1 — a chain that never resumed must not know less about its own nodes",
+          ).toEqual(restored?.nodeOutcomes["N-1"]);
+          expect(
+            live.nodeOutcomes["N-2"],
+            "the two folds must also agree about a node with nothing to report",
+          ).toEqual(restored?.nodeOutcomes["N-2"]);
+
+          // WP-637: the note the DEPENDENT AGENT reads, from both records.
+          const noteFor = (rec: ChainRecord | undefined, id: string): string =>
+            buildStructuredCompactionNote({
+              node: plan.nodes.find((n) => n.id === id)!,
+              outcome: rec!.nodeOutcomes[id]!,
+            });
+
+          const liveNote = noteFor(live, "N-1");
+          const restoredNote = noteFor(restored, "N-1");
+          expect(
+            liveNote,
+            "the successor's note must name the check that never ran, on a chain that NEVER RESUMED: " +
+              liveNote,
+          ).toContain(MARKER);
+          expect(
+            restoredNote,
+            "and on a chain rebuilt from its journal: " + restoredNote,
+          ).toContain(MARKER);
+
+          // TRAP: silence stays silent, byte for byte.
+          expect(
+            noteFor(live, "N-2"),
+            "a predecessor whose checks really ran produces the note it produces today, unchanged",
+          ).toBe(
+            [
+              "node: N-2",
+              "goal: do N-2",
+              "outcome: SUCCESS",
+              "verdict: PROCEED",
+              "changed_paths: (none recorded)",
+            ].join("\n"),
+          );
+
+          // TRAP: a marker, not a fourth status.
+          expect(live.nodeOutcomes["N-1"]?.status).toBe("SUCCESS");
+          expect(live.nodeOutcomes["N-2"]?.status).toBe("SUCCESS");
+          // TRAP: `reason` still carries what WP-521's retry brief reads.
+          expect(killed.reason).toBe("sealed");
+        });
+      });
+      GENEOF
+      pnpm exec vitest run "$TARGET"
+      ST=$?
+      rm -f "$TARGET"
+      if [ "$ST" -ne 0 ]; then
+        echo "AC-1 FAIL: the live and restored chain records disagree, or the successor's note does not name the check that never ran, or a clean predecessor's note changed, or the outcome status set changed, or reason stopped being populated. vitest exited $ST"
+        exit 1
+      fi
+      echo "AC-1 OK: both folds agree, and the note a dependent node reads says its predecessor's gate never ran"
+
+  - id: AC-2
+    description: >
+      THIS CHECK COLLIDES THE TWO PRECEDENCE RULES. The note is bounded and `changed_paths` is
+      unbounded caller input, so a marker appended AFTER the path list is truncated away and the fix
+      is inert while every other check stays green. It drives the REAL
+      `buildStructuredCompactionNote` with a handoff carrying well over the default cap of changed
+      paths, and requires BOTH that the note respects the cap it is given AND that it still names
+      the check. It also proves WP-618 is not undone: the marker still reaches the persisted
+      `node_sealed` entry.
+    check: |
+      cd packages/sdk-ts || exit 1
+      TARGET=test/chain/ac2-note-bound.generated.test.ts
+      mkdir -p test/chain
+      rm -f "$TARGET"
+      cat > "$TARGET" <<'GENEOF'
+      import { mkdtemp } from "node:fs/promises";
+      import { tmpdir } from "node:os";
+      import { join } from "node:path";
+
+      import { describe, expect, test } from "vitest";
+
+      import { createChainActivities } from "../../src/chain/activities.js";
+      import {
+        DEFAULT_STRUCTURED_COMPACTION_NOTE_MAX_CHARS,
+        buildStructuredCompactionNote,
+      } from "../../src/chain/compaction-note.js";
+      import { ChainJournal, chainRecordFrom } from "../../src/chain/store.js";
+      import { Journal } from "../../src/journal/journal.js";
+      import { chainJournalPath, journalPath } from "../../src/runner/paths.js";
+      import type { ChainNodeHandoff, Plan, TaskSpec } from "../../src/types.js";
+
+      const MARKER = "pre_existing_suite_still_green";
+      const TASK = { name: "t", goal: "g", budgetUsd: 10 } as unknown as TaskSpec;
+
+      describe("the successor's note stays bounded AND still names the check (WP-637)", () => {
+        test("a path list far over the cap does not truncate the marker away", async () => {
+          const dataDir = await mkdtemp(join(tmpdir(), "chikory-ac2-notebound-"));
+          const chainId = "chain-ac2";
+          const plan: Plan = {
+            id: "plan-ac2",
+            goal: "one node",
+            nodes: [
+              {
+                id: "N-1",
+                goal: "do N-1",
+                acceptanceCriteria: [{ id: "AC-1", description: "d" }],
+                dependsOn: [],
+                budgetUsd: 5,
+              },
+            ],
+            createdAt: new Date().toISOString(),
+          };
+
+          const j = new Journal(journalPath(dataDir, "run-killed"));
+          j.createRun("run-killed", TASK);
+          j.append({
+            kind: "terminal",
+            payload: { status: "SUCCESS", reason: "sealed", inconclusiveCheck: MARKER },
+            costDeltaUsd: 0,
+            artifactRefs: [],
+          });
+          j.sealRun("SUCCESS");
+          j.close();
+
+          const acts = createChainActivities({ dataDir });
+          await acts.initChain({ chainId, plan });
+          const killed = await acts.readNodeResult({ childRunId: "run-killed" });
+          await acts.recordNodeSealed({ chainId, nodeId: "N-1", ...killed });
+
+          // WP-618 must not be undone: the fact still reaches the DISK.
+          const cj = new ChainJournal(chainJournalPath(dataDir, chainId));
+          const sealed = cj.entries("node_sealed");
+          const persisted = JSON.stringify(sealed.find(
+            (e) => (e.payload as { nodeId?: string }).nodeId === "N-1",
+          )?.payload ?? {});
+          const restored = chainRecordFrom(cj);
+          cj.close();
+          expect(
+            persisted,
+            "TRAP: WP-618 is not undone — the persisted node_sealed entry still carries which check never ran",
+          ).toContain(MARKER);
+
+          // 400 paths of ~40 chars each = ~16,000 chars of unbounded caller input,
+          // more than 13x the default cap.
+          const changedPaths = Array.from(
+            { length: 400 },
+            (_unused, i) => "packages/sdk-ts/src/generated/file-" + String(i).padStart(4, "0") + ".ts",
+          );
+          const handoff = {
+            summary: "did the thing",
+            repos: [{ name: "chikory", changedPaths }],
+          } as unknown as ChainNodeHandoff;
+
+          const outcome = restored!.nodeOutcomes["N-1"]!;
+          const note = buildStructuredCompactionNote({ node: plan.nodes[0]!, outcome, handoff });
+
+          expect(
+            note.length,
+            "the note must respect its own default cap even with a huge path list: " + note.length,
+          ).toBeLessThanOrEqual(DEFAULT_STRUCTURED_COMPACTION_NOTE_MAX_CHARS);
+          expect(
+            note,
+            "TRAP: the marker must survive the bound — a fact appended after an unbounded path list is truncated away and the whole fix is inert: " +
+              note.slice(0, 400),
+          ).toContain(MARKER);
+
+          // And with an explicit tighter cap, both properties still hold.
+          const tight = buildStructuredCompactionNote({
+            node: plan.nodes[0]!,
+            outcome,
+            handoff,
+            maxChars: 300,
+          });
+          expect(tight.length, "an explicit cap is honored: " + tight.length).toBeLessThanOrEqual(300);
+          expect(
+            tight,
+            "TRAP: the marker outranks changed_paths when space is short: " + tight,
+          ).toContain(MARKER);
+        });
+      });
+      GENEOF
+      pnpm exec vitest run "$TARGET"
+      ST=$?
+      rm -f "$TARGET"
+      if [ "$ST" -ne 0 ]; then
+        echo "AC-2 FAIL: the note busts its bound, or the marker is truncated away by an unbounded changed_paths list, or WP-618's persisted entry lost the marker. vitest exited $ST"
+        exit 1
+      fi
+      echo "AC-2 OK: the note stays bounded and the check that never ran outranks the path list"
+
+  - id: AC-3
+    description: >
+      Strict typecheck (including the test tree, F-382), eslint over the modules this WP touches,
+      the neighbouring contracts it must not disturb, and the DECLARED regression suite green AND
+      larger — a behaviour proved only by these grading checks is not pinned at all (F-356). Every
+      grep here is a TRAP on something that must NOT move; none of them pins the spelling of the
+      new code (F-393, dogfood-155).
+    check: |
+      cd packages/sdk-ts || exit 1
+      pnpm run typecheck || { echo "AC-3 FAIL: strict typecheck is red (this covers test/ too — F-382)"; exit 1; }
+      pnpm exec eslint src/chain/compaction-note.ts src/chain/advance.ts src/chain/activities.ts src/chain/chain-loop.ts src/chain/store.ts || { echo "AC-3 FAIL: eslint is red on the modules this WP touches"; exit 1; }
+
+      grep -qE 'inconclusiveCheck: input\.inconclusiveCheck' src/runner/activities.ts || {
+        echo "AC-3 FAIL: trap — WP-615's RUN-level write (src/runner/activities.ts:2976) moved or was deleted. That plumbing already works; this WP is the chain level."
+        exit 1
+      }
+      grep -qE 'report\.inconclusiveCheck = payload\.inconclusiveCheck' src/journal/journal.ts || {
+        echo "AC-3 FAIL: trap — the run report no longer reads the terminal payload's inconclusive marker (src/journal/journal.ts:319). This WP does not touch the run level."
+        exit 1
+      }
+      grep -qE 'inconclusive check' src/cli/trace.ts || {
+        echo "AC-3 FAIL: trap — the chikory trace command's RUN-level inconclusive line (src/cli/trace.ts:437) moved or was deleted."
+        exit 1
+      }
+      grep -qi 'inconclusive' src/chain/read-trace.ts || {
+        echo "AC-3 FAIL: trap — WP-618's operator-facing chain trace line (src/chain/read-trace.ts:45) no longer names the inconclusive check. This WP ADDS the successor's note; it does not replace the operator's view."
+        exit 1
+      }
+      grep -qE 'if \(terminal\?\.reason !== undefined\) result\.reason' src/chain/activities.ts || {
+        echo "AC-3 FAIL: trap — readNodeResult stopped populating reason (src/chain/activities.ts:252). WP-521's retry brief reads it; the marker is an ADDITION, not a replacement."
+        exit 1
+      }
+      grep -qE 'changed_paths' src/chain/compaction-note.ts || {
+        echo "AC-3 FAIL: trap — changed_paths was removed from the structured note. The marker must fit ALONGSIDE the predecessor's changed paths, not replace them."
+        exit 1
+      }
+      if grep -qE '"INCONCLUSIVE"' src/chain/activities.ts src/chain/store.ts src/chain/advance.ts src/types.ts; then
+        echo "AC-3 FAIL: trap — NodeOutcome gained an INCONCLUSIVE status. This WP is a MARKER on a sealed outcome, not a fourth status: a new status reshapes advanceChain, the reducer, the gate and every fold."
+        exit 1
+      fi
+
+      OUT=$(pnpm --filter @chikory/sdk exec vitest run 2>&1)
+      ST=$?
+      echo "$OUT" | tail -25
+      if [ "$ST" -ne 0 ]; then
+        echo "AC-3 FAIL: the DECLARED regression suite is RED (vitest exited $ST)"
+        exit 1
+      fi
+      N=$(echo "$OUT" | grep -oE "Tests +[0-9]+ passed" | grep -oE "[0-9]+" | head -1)
+      echo "committed suite tests passing: ${N:-UNPARSEABLE} (floor 1607, measured baseline 1603)"
+      if [ -z "$N" ]; then
+        echo "AC-3 FAIL: could not read a test count out of the vitest summary"
+        exit 1
+      fi
+      if [ "$N" -lt 1607 ]; then
+        echo "AC-3 FAIL: durability floor not met — the committed suite did not grow by at least 4 tests. A behaviour proved only by the generated grading checks is not pinned at all (F-356)."
+        exit 1
+      fi
+      echo "AC-3 OK: strict typecheck and lint green, WP-615/WP-618 plumbing and the outcome value set untouched, DECLARED suite green AND larger"
+
+budget_usd: 20
+max_steps: 6
+
+agent_classes:
+  executor: executor-default
+  judge: judge-default
+
+judge:
+  cadence: 1
+
+# F-322 (dogfood-135): without this, a converged out-of-rubric escalation parks overnight for a
+# human instead of auto-sealing.
+unattended:
+  escalation: seal_resumable_failed

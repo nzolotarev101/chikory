@@ -152,4 +152,85 @@ describe("chikory chain trace", () => {
       `chikory: unknown chain id 'missing-chain' (no journal under ${dataDir}/chains)`,
     ]);
   });
+
+  it("renders the inconclusive check name on the affected node's line and leaves clean node silent", () => {
+    const twoNodePlan: Plan = {
+      id: "plan-two-nodes",
+      goal: "Run two nodes where one has an inconclusive check.",
+      createdAt: "2026-07-19T00:00:00.000Z",
+      nodes: [
+        {
+          id: "node-inconclusive",
+          goal: "First node that finished with inconclusive check.",
+          acceptanceCriteria: [{ id: "AC-1", description: "First" }],
+          dependsOn: [],
+          budgetUsd: 1,
+        },
+        {
+          id: "node-clean",
+          goal: "Second node that finished clean.",
+          acceptanceCriteria: [{ id: "AC-2", description: "Second" }],
+          dependsOn: ["node-inconclusive"],
+          budgetUsd: 1,
+        },
+      ],
+    };
+
+    const journal = new ChainJournal(chainJournalPath(dataDir, "chain-inconclusive-trace"));
+    try {
+      journal.createChain("chain-inconclusive-trace", twoNodePlan);
+      journal.append("plan", twoNodePlan);
+      journal.append("node_started", {
+        nodeId: "node-inconclusive",
+        childRunId: "run-inconclusive",
+      });
+      journal.append("node_sealed", {
+        nodeId: "node-inconclusive",
+        outcome: { status: "SUCCESS", verdict: "PROCEED" },
+        inconclusiveCheck: "pre_existing_suite_green",
+      });
+      journal.append("node_started", {
+        nodeId: "node-clean",
+        childRunId: "run-clean",
+      });
+      journal.append("node_sealed", {
+        nodeId: "node-clean",
+        outcome: { status: "SUCCESS", verdict: "PROCEED" },
+      });
+      journal.append("terminal", { status: "SUCCESS" });
+      journal.setStatus("SUCCESS", true);
+    } finally {
+      journal.close();
+    }
+
+    const out: string[] = [];
+    const err: string[] = [];
+    const code = cmdChainTrace(
+      { chainId: "chain-inconclusive-trace", dataDir, json: false },
+      {
+        out: (line) => out.push(line),
+        err: (line) => err.push(line),
+      },
+    );
+
+    expect(code).toBe(0);
+    expect(err).toEqual([]);
+    expect(out).toHaveLength(1);
+
+    const rendered = out[0]!;
+    expect(rendered).toContain("pre_existing_suite_green");
+
+    // The inconclusive node line must name the check
+    const lines = rendered.split("\n");
+    const inconclusiveLine = lines.find((l) => l.startsWith("node-inconclusive ·"));
+    expect(inconclusiveLine).toBeDefined();
+    expect(inconclusiveLine).toContain("pre_existing_suite_green");
+    expect(inconclusiveLine).toContain("SUCCESS");
+
+    // The clean node line must be silent about inconclusive checks
+    const cleanLine = lines.find((l) => l.startsWith("node-clean ·"));
+    expect(cleanLine).toBeDefined();
+    expect(cleanLine).toBe("node-clean · SUCCESS · verdict PROCEED · run run-clean");
+    expect(cleanLine).not.toContain("inconclusive");
+  });
 });

@@ -79,6 +79,7 @@ export interface NodeSealedPayload {
   nodeId: string;
   outcome: NodeOutcome;
   handoff?: ChainNodeHandoff;
+  inconclusiveCheck?: string;
 }
 
 /** `node_replanned` payload: D3 abandoned one failed node and spliced a revised plan. */
@@ -295,7 +296,10 @@ export function chainRecordFrom(journal: ChainJournal): ChainRecord | undefined 
       nodeRuns[p.nodeId] = p.childRunId;
     } else if (e.kind === "node_sealed") {
       const p = e.payload as NodeSealedPayload;
-      nodeOutcomes[p.nodeId] = p.outcome;
+      nodeOutcomes[p.nodeId] = {
+        ...p.outcome,
+        ...(p.inconclusiveCheck !== undefined ? { inconclusiveCheck: p.inconclusiveCheck } : {}),
+      };
       if (p.handoff !== undefined) nodeHandoffs[p.nodeId] = p.handoff;
     } else if (e.kind === "node_replanned") {
       const p = e.payload as NodeReplannedPayload;

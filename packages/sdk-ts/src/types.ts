@@ -857,6 +857,8 @@ export type ChainStatus =
 export interface NodeOutcome {
   status: TerminalStatus;
   verdict: VerdictKind;
+  /** Additive marker: check that did not complete (inconclusive outcome, killed at cap). */
+  inconclusiveCheck?: string;
 }
 
 /** Chain-level state — spans runs, lives above any one run's journal (D4). */
