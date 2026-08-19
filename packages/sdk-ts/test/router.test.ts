@@ -378,4 +378,119 @@ describe("RouterOptions overrides", () => {
     });
     expect(fake.hits).toBe(1);
   });
+
+  it("uses default options when opts parameter is omitted", async () => {
+    const fake = await startFakeServer();
+    fake.setHandler((_req, res) => {
+      res.setHeader("content-type", "application/json");
+      res.end(chatCompletion("default opts"));
+    });
+    const origUrl = process.env.OPENAI_COMPAT_BASE_URL;
+    try {
+      process.env.OPENAI_COMPAT_BASE_URL = fake.url;
+      const router = createRouter(compatPolicy());
+      const result = await router.complete(request());
+      expect(result).toMatchObject({
+        status: "SUCCESS",
+        content: "default opts",
+        provider: "openai-compat",
+      });
+      expect(fake.hits).toBe(1);
+    } finally {
+      if (origUrl !== undefined) {
+        process.env.OPENAI_COMPAT_BASE_URL = origUrl;
+      } else {
+        delete process.env.OPENAI_COMPAT_BASE_URL;
+      }
+    }
+  });
+
+  it("merges partial retry options with DEFAULT_RETRY defaults", async () => {
+    const fake = await startFakeServer();
+    fake.setHandler((_req, res) => {
+      res.statusCode = 500;
+      res.end("server error");
+    });
+
+    const router = createRouter(compatPolicy(), {
+      env: ENV,
+      baseUrls: { "openai-compat": fake.url },
+      retry: { maxAttempts: 2 },
+    });
+
+    const result = await router.complete(request());
+    expect(result).toMatchObject({
+      status: "FAILED",
+      retriable: true,
+      attempts: 2,
+    });
+    expect(fake.hits).toBe(2);
+  });
+
+  it("routes multi-provider endpoints via per-provider baseUrls overrides", async () => {
+    const primary = await startFakeServer();
+    primary.setHandler((_req, res) => {
+      res.statusCode = 503;
+      res.end("unavailable");
+    });
+
+    const failover = await startFakeServer();
+    failover.setHandler((_req, res) => {
+      res.setHeader("content-type", "application/json");
+      res.end(anthropicMessage("failover response"));
+    });
+
+    const policy = compatPolicy();
+    policy.failover = { code: [{ provider: "anthropic", model: "claude-haiku-4-5" }] };
+
+    const router = createRouter(policy, {
+      env: ENV,
+      baseUrls: {
+        "openai-compat": primary.url,
+        anthropic: failover.url,
+      },
+      retry: { maxAttempts: 1, baseDelayMs: 1, factor: 1, maxDelayMs: 1, jitter: false },
+    });
+
+    const result = await router.complete(request());
+    expect(result).toMatchObject({
+      status: "SUCCESS",
+      content: "failover response",
+      provider: "anthropic",
+    });
+    expect(primary.hits).toBe(1);
+    expect(failover.hits).toBe(1);
+  });
+
+  it("pricing override takes precedence over default model pricing", async () => {
+    const fake = await startFakeServer();
+    fake.setHandler((_req, res) => {
+      res.setHeader("content-type", "application/json");
+      res.end(anthropicMessage("custom pricing test"));
+    });
+
+    const policy: RoutingPolicy = {
+      stages: {
+        code: { provider: "anthropic", model: "claude-3-5-sonnet" },
+        plan: { provider: "anthropic", model: "claude-3-5-sonnet" },
+        review: { provider: "anthropic", model: "claude-3-5-sonnet" },
+        judge: { provider: "anthropic", model: "claude-3-5-sonnet" },
+      },
+    };
+
+    const router = createRouter(policy, {
+      env: ENV,
+      baseUrls: { anthropic: fake.url },
+      pricing: {
+        "claude-3-5-sonnet": { inputPerMTok: 100.0, outputPerMTok: 100.0 },
+      },
+      retry: FAST_RETRY,
+    });
+
+    const result = await router.complete(request());
+    expect(result.status).toBe("SUCCESS");
+    if (result.status === "SUCCESS") {
+      expect(result.costUsd).toBeCloseTo(0.0019, 6);
+    }
+  });
 });
