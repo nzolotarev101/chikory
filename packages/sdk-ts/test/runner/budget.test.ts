@@ -27,6 +27,19 @@ describe("estimateNextStepCost", () => {
     expect(estimateNextStepCost([1, 2, 3, 4])).toBeCloseTo(3.75, 6);
   });
 
+  test("all zeros or mixed zero cost inputs handled correctly", () => {
+    expect(estimateNextStepCost([0, 0])).toBe(0);
+    expect(estimateNextStepCost([0, 0, 0, 0, 0])).toBe(0);
+    // Mean of [0, 10] is 5. 5 * 1.5 = 7.5
+    expect(estimateNextStepCost([0, 10])).toBeCloseTo(7.5, 6);
+  });
+
+  test("large history array uses only the last 5 elements", () => {
+    const largeArray = Array.from({ length: 100 }, (_, i) => (i < 95 ? 1000 : (i - 94) * 10)); // last 5: [10, 20, 30, 40, 50]
+    // Mean of [10, 20, 30, 40, 50] is 30. 30 * 1.5 = 45
+    expect(estimateNextStepCost(largeArray)).toBeCloseTo(45, 6);
+  });
+
   test("exactly 5 inputs cost estimation uses all 5 inputs", () => {
     // Mean of [1, 2, 3, 4, 5] is 3. 3 * 1.5 = 4.5
     expect(estimateNextStepCost([1, 2, 3, 4, 5])).toBeCloseTo(4.5, 6);
@@ -91,6 +104,19 @@ describe("estimateNextStepTokens", () => {
   test("fewer than 5 inputs token estimation uses all available inputs", () => {
     // Mean of [1000, 2000] is 1500. 1500 * 1.5 = 2250
     expect(estimateNextStepTokens([1000, 2000])).toBeCloseTo(2250, 6);
+  });
+
+  test("all zeros or mixed zero token inputs handled correctly", () => {
+    expect(estimateNextStepTokens([0, 0])).toBe(0);
+    expect(estimateNextStepTokens([0, 0, 0, 0, 0])).toBe(0);
+    // Mean of [0, 1000] is 500. 500 * 1.5 = 750
+    expect(estimateNextStepTokens([0, 1000])).toBeCloseTo(750, 6);
+  });
+
+  test("large history array token estimation uses only the last 5 elements", () => {
+    const largeArray = Array.from({ length: 100 }, (_, i) => (i < 95 ? 10000 : (i - 94) * 100)); // last 5: [100, 200, 300, 400, 500]
+    // Mean of [100, 200, 300, 400, 500] is 300. 300 * 1.5 = 450
+    expect(estimateNextStepTokens(largeArray)).toBeCloseTo(450, 6);
   });
 
   test("exactly 5 inputs token estimation uses all 5 inputs", () => {
