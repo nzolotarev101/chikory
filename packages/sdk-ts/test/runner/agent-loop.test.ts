@@ -825,7 +825,7 @@ describe.skipIf(address === null)("agent loop (WP-121)", () => {
   test("failing check diagnosis reaches the next step's feedback on a live run (WP-635)", async () => {
     const assertionMarker = "AssertionError: expected file-exists to be true (probe-wp635)";
     const authorSentence = "AC-1 FAIL: missing required component implementation";
-    const checkCommand = `echo "${assertionMarker}\n${authorSentence}" >&2; exit 1`;
+    const checkCommand = `sh -c 'echo "${assertionMarker}\n${authorSentence}" >&2; exit 1'`;
 
     const wire = await startFakeJudgeWire([
       judgeForm({ criteria: { "AC-1": true } }),

@@ -571,7 +571,7 @@ describe.skipIf(address === null)("verdict gating (WP-132)", () => {
   // code overrides the LLM form). These two tests share a spec; the ONLY
   // difference is whether the seam is armed — isolating the seam as the cause
   // of the catch.
-  const NO_MARKER_CHECK = "! grep -q CORRUPTED-BY-SEAM step-1.txt";
+  const NO_MARKER_CHECK = "sh -c '! grep -q CORRUPTED-BY-SEAM step-1.txt'";
 
   test("seedBadDiff DISARMED (control): the AC check passes, run seals SUCCESS", async () => {
     const wire = await startFakeJudgeWire([judgeForm({ criteria: { "AC-1": true } })]);

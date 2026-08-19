@@ -153,7 +153,7 @@ describe.skipIf(address === null)("AC-2: live regression suite repair brief & ru
 
   test("Scenario 2: declared regression_suite exits nonzero with unique marker -> seals FAILED with code-red reason, repair brief handed to EXECUTOR carries marker", async () => {
     const marker = `FAIL_MARKER_${randomUUID().slice(0, 8)}`;
-    const command = `echo "${marker}"; exit 1`;
+    const command = `sh -c 'echo "${marker}"; exit 1'`;
 
     const wire = await startFakeJudgeWire(
       [
@@ -208,7 +208,7 @@ describe.skipIf(address === null)("AC-2: live regression suite repair brief & ru
 
   test("Scenario 3: declared regression_suite passes (exit 0) -> seals SUCCESS, command executed exactly once, suite row on completion review only, generated file removed by check", async () => {
     const markerFile = `test_generated_marker_${randomUUID().slice(0, 8)}.tmp`;
-    const command = `touch ${markerFile} && exit 0`;
+    const command = `sh -c 'touch ${markerFile} && exit 0'`;
 
     const wire = await startFakeJudgeWire(
       [
@@ -335,7 +335,7 @@ describe.skipIf(address === null)("AC-2: live regression suite repair brief & ru
       repoUrl,
       cadence: 1,
       maxSteps: 4,
-      regressionSuite: `echo "${marker}"; exit 1`,
+      regressionSuite: `sh -c 'echo "${marker}"; exit 1'`,
       unattended: { escalation: "seal_resumable_failed" },
     });
 
@@ -383,7 +383,7 @@ describe.skipIf(address === null)("AC-2: live regression suite repair brief & ru
       repoUrl,
       cadence: 1,
       maxSteps: 4,
-      regressionSuite: "exit 0",
+      regressionSuite: "sh -c 'exit 0'",
       unattended: { escalation: "seal_resumable_failed" },
     });
 
@@ -448,7 +448,7 @@ describe.skipIf(address === null)("AC-2: live regression suite repair brief & ru
       cadence: 1,
       maxSteps: 4,
       // GREEN suite — the only thing condemning this run is the design finding.
-      regressionSuite: "exit 0",
+      regressionSuite: "sh -c 'exit 0'",
       unattended: { escalation: "seal_resumable_failed" },
     });
 
@@ -531,7 +531,7 @@ describe.skipIf(address === null)("AC-2: live regression suite repair brief & ru
           repoUrl: clean.repoUrl,
           cadence: 1,
           maxSteps: 4,
-          regressionSuite: "exit 0",
+          regressionSuite: "sh -c 'exit 0'",
         }),
       ),
     );
@@ -558,7 +558,7 @@ describe.skipIf(address === null)("AC-2: live regression suite repair brief & ru
           repoUrl: esc.repoUrl,
           cadence: 1,
           maxSteps: 4,
-          regressionSuite: "exit 0",
+          regressionSuite: "sh -c 'exit 0'",
           unattended: { escalation: "seal_resumable_failed" },
         }),
       ),

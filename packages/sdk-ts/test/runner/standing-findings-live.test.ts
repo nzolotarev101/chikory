@@ -385,7 +385,7 @@ describe.skipIf(address === null)("standing findings across incremental windows 
       repoUrl,
       cadence: 1,
       maxSteps: 4,
-      regressionSuite: "exit 0",
+      regressionSuite: "sh -c 'exit 0'",
     });
 
     const handle = await runner.start(spec);
@@ -444,7 +444,7 @@ describe.skipIf(address === null)("standing findings across incremental windows 
       repoUrl,
       cadence: 1,
       maxSteps: 4,
-      regressionSuite: "exit 0",
+      regressionSuite: "sh -c 'exit 0'",
     });
 
     const handle = await runner.start(spec);
