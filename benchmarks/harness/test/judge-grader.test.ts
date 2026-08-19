@@ -116,4 +116,11 @@ describe("makeJudgeGrader + commandComplete", () => {
       mockState.value = null;
     }
   });
+
+  it("safely substitutes {promptFile} as positional parameter $1 using replacer function", async () => {
+    const complete = commandComplete('echo "file is $1" && cat "$1"');
+    const result = await complete({ system: "SYS", user: "USR" });
+    expect(result).toContain("file is /");
+    expect(result).toContain("SYS\n\nUSR\n");
+  });
 });
