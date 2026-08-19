@@ -85,7 +85,12 @@ async function runShell(
     // `runBounded` rejects when the process cannot be spawned at all.
     return { code: null, timedOut: false, output: chunks.join("") };
   } finally {
-    logStream.end();
+    // `.end()` alone is fire-and-forget: the flush to disk is async, so a
+    // caller reading logPath right after runShell resolves can race an
+    // incomplete write (observed as an empty adapter.log under CI load).
+    await new Promise<void>((resolve, reject) => {
+      logStream.end((err?: Error | null) => (err ? reject(err) : resolve()));
+    });
   }
 }
 
