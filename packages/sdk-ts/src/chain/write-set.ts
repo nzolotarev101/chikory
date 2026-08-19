@@ -113,3 +113,95 @@ export function undeclaredWritePaths(node: PlanNode, changedPaths: string[]): st
         !declaredDirs.has(parentDirOf(path)),
     );
 }
+
+/**
+ * Directories the toolchain owns. A gitignored path under one of these is the
+ * output of a build, install or cache step rather than the node's own work.
+ *
+ * F-401 (dogfood-158): the first cut of this exemption listed `node_modules`
+ * alone, which is only the family the acceptance checks happened to drive. A
+ * real dogfood workspace also carries `packages/sdk-ts/dist` (604 files),
+ * `.venv` (1,906), `benchmarks/harness/dist` (64) and `.devbox` (31) — measured
+ * in `.chikory/runs/run-f3d47cf8-6d56-4c7b-85d1-fcfe185badef/workspace` — none
+ * of which appear in any writeSet. A boundary that fails every node that built
+ * the package or touched the Python venv is worse than the hole it closes.
+ *
+ * Deliberately NOT here: `benchmarks/results` and `benchmarks/runs`, the
+ * families dogfood-123 escaped 2.1 GiB into. Those are run output, not
+ * toolchain output, and stay inside the boundary.
+ */
+const TOOLCHAIN_PATH_SEGMENTS: ReadonlySet<string> = new Set([
+  // JS/TS dependency install + build output
+  "node_modules",
+  ".pnp",
+  "dist",
+  "build",
+  // Python virtualenvs, bytecode and caches
+  ".venv",
+  "venv",
+  "__pycache__",
+  ".pytest_cache",
+  ".mypy_cache",
+  ".ruff_cache",
+  "htmlcov",
+  // toolchain / runtime scratch
+  ".devbox",
+  ".temporal",
+  ".chikory",
+  // test + coverage output
+  "coverage",
+  "test-results",
+]);
+
+/** File suffixes the toolchain writes anywhere in the tree. */
+const TOOLCHAIN_FILE_SUFFIXES: readonly string[] = [
+  ".tsbuildinfo",
+  ".js.map",
+  ".d.ts.map",
+  ".pyc",
+  ".pyo",
+];
+
+/**
+ * Dependency-install, build and cache artifacts are toolchain output rather
+ * than the node's own work, and are exempt from write boundary failure when
+ * git ignores them unless explicitly declared.
+ *
+ * Matching is per path SEGMENT, never substring: `src/node_modules.ts` and
+ * `src/not_node_modules/file.ts` are the node's own work.
+ */
+export function isToolchainPath(path: string): boolean {
+  const segments = path.split("/");
+  if (segments.some((segment) => TOOLCHAIN_PATH_SEGMENTS.has(segment))) return true;
+  const file = segments[segments.length - 1] ?? "";
+  return TOOLCHAIN_FILE_SUFFIXES.some((suffix) => file.endsWith(suffix));
+}
+
+/**
+ * Format a list of undeclared paths for failure reason reporting, bounding
+ * the output so thousands of files in an ignored directory do not produce
+ * a multi-kilobyte reason string while still naming offending paths/directories.
+ */
+export function formatUndeclaredPaths(
+  paths: readonly string[],
+  maxListed = 10,
+  maxChars = 1_500,
+): string {
+  if (paths.length === 0) return "";
+  const listed: string[] = [];
+  let currentLen = 0;
+  for (let i = 0; i < paths.length; i++) {
+    const p = paths[i]!;
+    if (
+      listed.length >= maxListed ||
+      currentLen + p.length + (listed.length > 0 ? 2 : 0) > maxChars
+    ) {
+      const remaining = paths.length - i;
+      return `${listed.join(", ")}, ... (+${remaining} more)`;
+    }
+    listed.push(p);
+    currentLen += p.length + (listed.length > 1 ? 2 : 0);
+  }
+  return listed.join(", ");
+}
+

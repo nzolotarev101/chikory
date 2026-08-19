@@ -122,7 +122,11 @@ import {
   workspaceRepoCheckpointId,
   type WorkspaceRepo,
 } from "./workspace-repos.js";
-import { undeclaredWritePaths } from "../chain/write-set.js";
+import {
+  formatUndeclaredPaths,
+  isToolchainPath,
+  undeclaredWritePaths,
+} from "../chain/write-set.js";
 import { renderWriteBoundary } from "../chain/write-boundary.js";
 
 /**
@@ -2847,10 +2851,10 @@ export function createRunnerActivities(deps: RunnerActivityDeps) {
           }
           const ws = workspaceDir(deps.dataDir, input.runId);
           const repoChanges = await Promise.all(
-            writableRepos.map(async (workspaceRepo) => ({
-              workspaceRepo,
-              changedPaths: (
-                await git(workspaceRepoDir(ws, workspaceRepo), [
+            writableRepos.map(async (workspaceRepo) => {
+              const repoDir = workspaceRepoDir(ws, workspaceRepo);
+              const changedPaths = (
+                await git(repoDir, [
                   "diff",
                   "--name-only",
                   `${BASE_TAG}..HEAD`,
@@ -2858,8 +2862,49 @@ export function createRunnerActivities(deps: RunnerActivityDeps) {
               )
                 .split("\n")
                 .filter(Boolean)
-                .sort(),
-            })),
+                .sort();
+              const workingTreeDiff = (
+                await git(repoDir, [
+                  "diff",
+                  "--name-only",
+                  BASE_TAG,
+                ])
+              )
+                .split("\n")
+                .filter(Boolean);
+              const untrackedPaths = (
+                await git(repoDir, [
+                  "ls-files",
+                  "--others",
+                  "--exclude-standard",
+                ])
+              )
+                .split("\n")
+                .filter(Boolean);
+              const ignoredPaths = (
+                await git(repoDir, [
+                  "ls-files",
+                  "--others",
+                  "--ignored",
+                  "--exclude-standard",
+                ])
+              )
+                .split("\n")
+                .filter(Boolean);
+              const candidatePaths = [
+                ...new Set([
+                  ...changedPaths,
+                  ...workingTreeDiff,
+                  ...untrackedPaths,
+                  ...ignoredPaths.filter((path) => !isToolchainPath(path)),
+                ]),
+              ].sort();
+              return {
+                workspaceRepo,
+                changedPaths,
+                candidatePaths,
+              };
+            }),
           );
           if (repoChanges.every((repo) => repo.changedPaths.length === 0)) {
             return { status: "FAILED", reason: `node ${link.nodeId} produced no repository changes` };
@@ -2868,7 +2913,7 @@ export function createRunnerActivities(deps: RunnerActivityDeps) {
             link.writeSet === undefined
               ? []
               : repoChanges
-                  .flatMap(({ workspaceRepo, changedPaths }) =>
+                  .flatMap(({ workspaceRepo, candidatePaths }) =>
                     undeclaredWritePaths(
                       {
                         id: link.nodeId,
@@ -2878,7 +2923,7 @@ export function createRunnerActivities(deps: RunnerActivityDeps) {
                         writeSet: link.writeSet,
                         budgetUsd: spec.budgetUsd,
                       },
-                      changedPaths,
+                      candidatePaths,
                     ).map((path) =>
                       workspaceRepos.all.length === 1 ? path : `${workspaceRepo.relativePath}/${path}`,
                     ),
@@ -2887,7 +2932,7 @@ export function createRunnerActivities(deps: RunnerActivityDeps) {
           if (undeclared.length > 0) {
             return {
               status: "FAILED",
-              reason: `node ${link.nodeId} wrote outside its declared writeSet: ${undeclared.join(", ")}`,
+              reason: `node ${link.nodeId} wrote outside its declared writeSet: ${formatUndeclaredPaths(undeclared)}`,
             };
           }
 

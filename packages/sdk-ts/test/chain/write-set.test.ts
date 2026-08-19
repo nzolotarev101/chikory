@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  formatUndeclaredPaths,
+  isToolchainPath,
   renderWriteBoundary,
   serializeWriteConflicts,
   undeclaredWritePaths,
@@ -149,3 +151,65 @@ describe("renderWriteBoundary (F-218)", () => {
     ).toEqual(["docs/reports/brownfield-004-evidence.md"]);
   });
 });
+
+describe("isToolchainPath", () => {
+  it("recognizes top-level and nested node_modules paths as toolchain output", () => {
+    expect(isToolchainPath("node_modules")).toBe(true);
+    expect(isToolchainPath("node_modules/pkg/lib/util.js")).toBe(true);
+    expect(isToolchainPath("packages/sdk-ts/node_modules/vitest/index.js")).toBe(true);
+  });
+
+  it("does not match non-toolchain paths that contain node_modules as substring", () => {
+    expect(isToolchainPath("src/node_modules.ts")).toBe(false);
+    expect(isToolchainPath("src/not_node_modules/file.ts")).toBe(false);
+    expect(isToolchainPath("src/a.ts")).toBe(false);
+  });
+
+  // F-401 (dogfood-158 review): node_modules was the only family the acceptance
+  // checks drove, so it was the only one the first cut exempted. A real workspace
+  // carries all of these.
+  it("recognizes the other toolchain families a real workspace accumulates", () => {
+    expect(isToolchainPath("packages/sdk-ts/dist/chain/write-set.js")).toBe(true);
+    expect(isToolchainPath("benchmarks/harness/dist/index.js")).toBe(true);
+    expect(isToolchainPath(".venv/lib/python3.11/site-packages/pkg/mod.py")).toBe(true);
+    expect(isToolchainPath("packages/sdk-py/__pycache__/runner.cpython-311.pyc")).toBe(true);
+    expect(isToolchainPath(".ruff_cache/0.4.0/12345")).toBe(true);
+    expect(isToolchainPath(".devbox/gen/scripts/run.sh")).toBe(true);
+    expect(isToolchainPath(".chikory/runs/run-x/journal.db")).toBe(true);
+    expect(isToolchainPath("coverage/index.html")).toBe(true);
+    expect(isToolchainPath("packages/sdk-ts/tsconfig.tsbuildinfo")).toBe(true);
+  });
+
+  it("does not exempt run output — the family dogfood-123 escaped 2.1 GiB into", () => {
+    expect(isToolchainPath("benchmarks/results/p3/arm/summary.json")).toBe(false);
+    expect(isToolchainPath("benchmarks/runs/2026/workspace/big.bin")).toBe(false);
+    expect(isToolchainPath("results/big.txt")).toBe(false);
+    expect(isToolchainPath("lib/dist.ts")).toBe(false);
+    expect(isToolchainPath("lib/coverage.ts")).toBe(false);
+    expect(isToolchainPath("lib/not_node_modules/file.ts")).toBe(false);
+  });
+});
+
+describe("formatUndeclaredPaths", () => {
+  it("returns empty string for empty input", () => {
+    expect(formatUndeclaredPaths([])).toBe("");
+  });
+
+  it("formats a single path verbatim", () => {
+    expect(formatUndeclaredPaths(["results/big.txt"])).toBe("results/big.txt");
+  });
+
+  it("formats a small list as comma-separated", () => {
+    expect(formatUndeclaredPaths(["src/a.ts", "src/b.ts"])).toBe("src/a.ts, src/b.ts");
+  });
+
+  it("bounds a large list of 400 paths with count summary and stays compact", () => {
+    const paths = Array.from({ length: 400 }, (_, i) => `results/f${i}.txt`);
+    const formatted = formatUndeclaredPaths(paths);
+    expect(formatted).toContain("results/f0.txt");
+    expect(formatted).toContain("results");
+    expect(formatted).toContain("(+390 more)");
+    expect(formatted.length).toBeLessThan(1000);
+  });
+});
+

@@ -8,13 +8,12 @@ recover a run, and how to land the result as a normal PR.
 **Status (2026-08-19, bounded — update discipline: REPLACE this block, ≤15 lines;
 displaced prose moves verbatim to [`PLAN-HISTORY.md`](PLAN-HISTORY.md); per-run detail:
 `docs/reports/`; queue + course correction: `plan.md` §6/§7).**
-🟢 **dogfood-157 / WP-637 (a dependent node's prompt must say its predecessor's gate never ran) + WP-636 (the live chain record and the disk-restored one must agree) DELIVERED and LANDED** — `run-8b00e28a-3abf-4f91-bd92-4438c79087b0`, terminal SUCCESS, **2 steps, $0.1428/$20.00**, 11m 15s, AC **3/3** re-run green, harvest byte-IDENTICAL **7/7**, suite **1,603 → 1,609**, `docs/reports/dogfood-157.md`.
-🟢 **The successor's brief now names the check that never finished** — `inconclusive_check:` renders ABOVE the unbounded `changed_paths` (`src/chain/compaction-note.ts:39`–`:41`), so the 1,200-char clip cannot make the fix inert; the marker is attached at the SOURCE (`deriveNodeOutcome`, `src/chain/node-spec.ts:350`), so the live fold and `chainRecordFrom` agree without a special adapter.
-🟢 **All three designed traps rejected** — silence stays byte-identical for a clean predecessor, the bound holds with the marker intact on a 400-path input, and WP-618's canonical durable shape survives (persisted `outcome` stays clean, marker top-level: `src/chain/activities.ts:301`, `:312`).
-🟢 **Judge true-positive: 1, and it drove a repair — THIRD consecutive run.** Step 1 enriched the outcome with a local adapter inside `chainLoop`; AC-1 (folding the REAL `readNodeResult` outcome) went RED and `design_serves_overall_goal` named the consumed seam; step 2 moved the fix to the source and deleted the adapter.
-🟡 **F-399 (§8) HAND-FIXED this review** — the WP-521 seeded-fail drill branch folded a bare `{FAILED, HALT}` literal while the journal kept the marker, so live ≠ restored on the branch the heal/replan drills use (`src/chain/chain-loop.ts:339`, +1 test).
-ℹ️ **F-400 (§7)** `chikory trace`'s step table shows the completion review's `(0/0 criteria)` as the LAST step's verdict (`src/cli/trace.ts:183`) — read `--step <n>` for that step's real acceptance pass · **F-397/F-398 (§8)** recur: cost-meter-blind warning on a correctly-$0 executor; launch narration down to 5.7%.
-**NEXT HEADLINE = `dogfood-158` / WP-589 half (1)** — the progression gate reads ✅ PROGRESSING; P3 rung-5 (WP-530) remains WP-304's operator-run multi-hour benchmark arm and cannot be a spec. The write boundary is measured with `git diff --name-only` (`src/runner/activities.ts:2845`–`:2850`), so every gitignored write is invisible to it — re-measured TRUE at this review.
+🟢 **dogfood-158 / WP-589 half (1) (the write-boundary check must see gitignored writes) DELIVERED and LANDED** — `run-71087607-eca4-41ca-b73b-febb0f484b8e`, terminal SUCCESS, **2 steps, $0.1891/$20.00**, 16m 8s, AC **3/3** re-run green, harvest byte-IDENTICAL **5/5**, suite **1,610 → 1,663**, `docs/reports/dogfood-158.md`.
+🟢 **A node's writeSet is now a real boundary** — `publishChainHandoff` measures writes from four git streams including `git ls-files --others --ignored --exclude-standard` (`src/runner/activities.ts:2884`, `:2894`) and feeds `candidatePaths`, not `changedPaths`, to the unchanged F-218 admission rules. `RepoHandoff.changedPaths` does not widen, so the 1,200-char successor note is safe (F-365); the failure `reason` is capped at 10 paths / 1,500 chars.
+🟢 **Judge true-positive #4 in a row, and it drove the repair** — step 1 filtered the toolchain exemption over the WHOLE candidate set (a *tracked* `node_modules` write escaped); **all 3 ACs passed it**, only `design_serves_overall_goal` failed it, the concern rode into step 2 as `escalation_concerns_adjudicated`, and step 2 narrowed the filter.
+🔴 **F-401 (§8) HAND-FIXED this review** — the exemption listed only `node_modules`, the one family AC-1 drove. A real workspace carries **2,605 other ignored files** (`packages/sdk-ts/dist` 604, `.venv` 1,906, `benchmarks/harness/dist` 64, `.devbox` 31), so any node that built the package would have sealed FAILED. `isToolchainPath` now matches a named segment set + toolchain suffixes (`src/chain/write-set.ts:133`, `:173`); `benchmarks/results`/`runs` stay inside the boundary. +16 tests.
+🟡 **F-402 (§8) → WP-638** the ignored stream is a working-tree snapshot with no `BASE_TAG`, so an ignored file predating the node is reported as that node's write · ℹ️ **F-403 (§8)** the executor's committed tests were case-for-case copies of the ACs, inheriting their blind spot — a test-COUNT floor is satisfied by copies.
+**NEXT HEADLINE = `dogfood-159` / WP-628** — judge-check ignored-path isolation must cover MODIFY and DELETE, not only CREATE. Gate ⛔ STALLED with this run in the ledger (max steps 2 vs 3), which BINDS the headline to P3's ladder rung — but rung-5 (WP-530) is still WP-304's operator-run benchmark arm and cannot be a spec, so the verdict is unsatisfiable and recorded as such; F-401 was hand-fixed this sitting and does not headline. Premise re-measured TRUE: `snapshotWorkspace` stores an ignored entry as bare `{ path, status: "!!" }` with no hash and no content (`src/judge/hermeticity.ts:211`), so the modify branch cannot fire (`:138`) and the delete branch skips restore (`:149`).
 
 Related docs: [`docs/spec/task-spec.md`](spec/task-spec.md) (schema
 reference) · [`docs/TASK-PROTOCOL.md`](TASK-PROTOCOL.md) (WP etiquette, §7 is
@@ -998,6 +997,45 @@ broken (a false-green, not a follow-on fix).
   impossible because nothing is supposed to change.
 
 ## 8. Known P1 limitations (so you don't fight them)
+
+- **🔴 A FIX THAT INTRODUCES A SET WILL BE FITTED TO THE ONE MEMBER THE
+  ACCEPTANCE CHECK NAMED** (F-401, dogfood-158). WP-589 had to exempt "the
+  toolchain's own output" from the write boundary. The spec's example was
+  `node_modules/`; AC-1 case C instantiated `node_modules/`; the executor's nine
+  committed tests instantiated `node_modules/`; the judge argued about
+  `node_modules/` across four passes. The shipped `isToolchainPath` matched
+  exactly one path segment. A real chikory workspace
+  (`.chikory/runs/run-f3d47cf8-6d56-4c7b-85d1-fcfe185badef/workspace`) carries
+  **2,605 gitignored files that are not under `node_modules`** — `packages/sdk-ts/dist`
+  (604), `.venv` (1,906), `benchmarks/harness/dist` (64), `.devbox` (31) — so any
+  node that built the package would have sealed FAILED, the outcome the spec
+  itself called "strictly worse than the hole". Hand-fixed at the review
+  (`packages/sdk-ts/src/chain/write-set.ts:133`). **The rule: when a delivery
+  introduces a SET (an exemption list, an allowlist, a family of statuses),
+  enumerate the set from the real environment — `git ls-files --others --ignored`,
+  the actual `.gitignore`, the actual enum — and put every member in an AC. The
+  spec's example is a sample, never the set.**
+
+- **🟡 A "WHAT CHANGED" CHECK THAT READS A WORKING-TREE SNAPSHOT MEASURES STATE,
+  NOT CHANGE** (F-402, dogfood-158). `publishChainHandoff` reads its ignored-path
+  stream with `git ls-files --others --ignored --exclude-standard`
+  (`packages/sdk-ts/src/runner/activities.ts:2884`). Every other stream it reads
+  is anchored to `BASE_TAG`; this one is not, because `ls-files` has no
+  two-endpoint form. An ignored file that existed before the node ran is
+  therefore attributed to that node. Probe-confirmed: a fixture with a
+  pre-existing ignored file and a node that touched only `src/a.ts` sealed
+  FAILED naming the pre-existing file. Queued as WP-638. **The rule: a stream
+  with no base in it cannot answer a question about change; snapshot it at base
+  time and diff, or say plainly that it reports presence.**
+
+- **ℹ️ A TEST-COUNT FLOOR IS SATISFIED BY COPIES OF THE GRADING CHECKS**
+  (F-403, dogfood-158). AC-3 required the committed suite to grow by ≥4 tests, to
+  stop a behaviour being proved only by the generated grading checks (F-356). The
+  executor satisfied it with nine tests that restate AC-1's cases A–D and AC-2's
+  two cases one for one, so the committed suite inherited the ACs' blind spot
+  exactly — F-401 is invisible to all nine. The floor measures volume, not
+  independence. **The rule: pair a count floor with an instruction in the goal to
+  pin at least one input family the acceptance checks do not name.**
 
 - **🟡 A DURABLE SYSTEM WITH A LIVE REDUCER AND A REPLAY RECONSTRUCTOR HAS AS
   MANY BRANCHES AS THE REDUCER HAS OVERRIDES** (F-399, dogfood-157). WP-636 made

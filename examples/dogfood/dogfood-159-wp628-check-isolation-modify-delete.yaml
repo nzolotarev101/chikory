@@ -1,0 +1,509 @@
+# Plain: before the judge grades a run it executes each acceptance check in turn, and it puts the
+# workspace back between them so one check cannot poison the next. That repair only covers files a
+# check CREATED. If a check overwrites or deletes a file git was told to ignore — a log, a cached
+# JSON, a build artifact — the damage stands, and every later check is graded against a corrupted
+# tree. After this run a check that modifies or deletes a pre-existing ignored file is isolated too.
+# WP: WP-628 (judge-check ignored-path isolation must cover MODIFY and DELETE; F-360)
+# Ladder-rung: 0 (off-ladder - gate reads STALLED and binds to the rung, but P3 rung-5's
+#   remaining half is WP-304, operator-run and not expressible as a spec; see WHY)
+# Thesis-KPI: compounding error (CLAUDE.md) - 95% per-step becomes ~5% end-to-end over 60 steps.
+#   Measured as: can the gate that exists to catch a bad step be made to grade the WRONG TREE by
+#   the step before it. A judge whose evidence depends on check ORDER is not a gate.
+#
+# THE MEASURED PREMISE - read out of the code AND PROBED AT THIS REVIEW (F-203/F-342: measured,
+#   never transcribed). Reproduce the read with:
+#     sed -n '205,213p' packages/sdk-ts/src/judge/hermeticity.ts    # the bare ignored entry
+#     sed -n '136,156p' packages/sdk-ts/src/judge/hermeticity.ts    # the three comparison branches
+#     sed -n '249,257p' packages/sdk-ts/src/judge/evidence.ts       # the real batch loop
+#   `runCriteriaChecks` (packages/sdk-ts/src/judge/evidence.ts:222) runs the checks serially and
+#   calls `snapshotWorkspace` -> `planCheckSideEffectCleanup` -> `applyCleanupPlan` between each
+#   (`:253`-`:254`). `snapshotWorkspace` reads content and a sha256 for every path `git status
+#   --porcelain` reports, but stores every IGNORED path as the bare entry
+#   `{ path: relPath, status: "!!" }` with no hash and no content
+#   (packages/sdk-ts/src/judge/hermeticity.ts:211). Two consequences follow mechanically:
+#     * MODIFY is undetectable. The both-present branch restores only when
+#       `b.status !== a.status || (b.hash && a.hash && b.hash !== a.hash)`
+#       (packages/sdk-ts/src/judge/hermeticity.ts:138). For an ignored file the status is "!!"
+#       before and after and both hashes are undefined, so the condition is false for every
+#       overwrite, however large.
+#     * DELETE is detected and then deliberately skipped. The before-only branch reads
+#       `if (b.status.includes("!") && b.content === undefined)` and falls through with a comment
+#       (packages/sdk-ts/src/judge/hermeticity.ts:149), because there is nothing to restore FROM.
+#   dogfood-144 delivered the CREATE family and its AC graded only the CREATE family. It was armed
+#   in both directions and still shipped blind - the same failure dogfood-158 shipped one run later
+#   (F-401), where an exemption was fitted to the single family its AC named.
+#
+#   * THE FIRST TRAP IS COST, AND IT IS WHY THE BARE ENTRY EXISTS. A judge workspace is a real
+#     repo: `git ls-files --others --ignored --exclude-standard` returns 17,372 paths in
+#     `.chikory/runs/run-71087607-eca4-41ca-b73b-febb0f484b8e/workspace` and 27,477 in this repo
+#     (measured 2026-08-19). Snapshotting CONTENT for all of them, twice per check, is hundreds of
+#     megabytes of string churn per judge pass. A delivery that simply drops the special case and
+#     reads every ignored file will pass a small fixture and make every real judge pass unusable.
+#     AC-2 drives 1,200 ignored files of 64 KiB - 76.8 MiB - through a real three-check batch and
+#     puts a wall-clock bound on it. Detection is allowed to be cheap (a `stat` per path is
+#     O(inventory), not O(bytes)); it is RESTORATION that needs bytes, so a size or total budget on
+#     what is preserved is a legitimate design, provided the budget is not zero.
+#   * THE SECOND TRAP IS THE UNTOUCHED MAJORITY. Isolation must be a no-op for the ignored files a
+#     check never touched. A delivery that rewrites or re-checkouts every ignored path "to be safe"
+#     both blows the cost bound and churns a tree the executor legitimately owns. AC-1 and AC-2
+#     both carry an untouched ignored file and require it byte-identical, and AC-2 requires the
+#     batch to leave the 1,200-file tree intact.
+#   * THE THIRD TRAP IS GRADING THE FIX AT THE WRONG ALTITUDE. `planCheckSideEffectCleanup` is a
+#     pure function and it is easy to make its unit tests green while the batch still hands the
+#     next check a corrupted tree. AC-1 therefore asserts at the CONSUMED seam: the SECOND check in
+#     a real `runCriteriaChecks` batch reads the file the FIRST check destroyed and exits non-zero
+#     if it does not see the original bytes. The oracle is that check's own exit code.
+#   * NOT IN SCOPE: no change to what a check IS, to the rubric, the verdict arithmetic, the
+#     executor prompt, the write boundary (`src/chain/write-set.ts`, dogfood-158), the Python
+#     mirror or the TaskSpec contract. WP-623's tracked-path isolation and the per-check timeout
+#     keep working exactly as they do.
+#   * THE SUITE THIS RUN MUST NOT BREAK, MEASURED at the launch commit by running it under devbox
+#     (F-342 - run it yourself and read its own tail): 197 files passed | 2 skipped,
+#     1663 passed | 23 skipped (1686 total).
+#
+# PRECEDENCE - the design call plan.md left open is DECIDED HERE, so the run is not graded on a
+#   coin flip:
+#   1. REPAIR BEATS REPORTING for anything inside the preservation budget. The batch already
+#     repairs the CREATE family silently; a modify or delete that the implementation could have
+#     preserved must be put back, not merely announced.
+#   2. AN HONEST LIMIT BEATS A SILENT ONE. If a path is outside whatever budget the implementation
+#     chooses, the run must not pretend the tree is clean - say so in the check batch's own output
+#     or logs. What it must never do is restore nothing and report nothing.
+#   3. CHEAPNESS NEVER BUYS BLINDNESS. Whatever the budget, DETECTION covers every ignored path.
+#
+# Format: loose - the outcome (a later check is never graded against a tree an earlier check
+#   corrupted, at a cost a real workspace can pay) is fixed. Where the original bytes are kept, how
+#   change is detected, and how the budget is spelled are the executor's call. No AC greps a new
+#   symbol or field name (F-393).
+#
+# Launch mode: RUN (one seam, one package).
+#   CHIKORY_PREFLIGHT_ONLY=1 devbox run run-dogfood
+#   devbox run run-dogfood
+#
+# WHY THIS AND NOT THE LADDER RUNG (dogfood-158 review, 2026-08-19):
+#   `scripts/dogfood-progression.sh` reads **STALLED** with dogfood-158 in the ledger (max steps
+#   2 vs 3 over the trailing three), and a STALLED verdict BINDS the next headline to the current
+#   phase ladder rung. That rung cannot be run: P3's ladder is WP-530 (plan.md section 7) and its
+#   next rung, rung-5, is
+#   WP-304's OpenHands arm plus a corpus wide enough to separate 19 requirements at 95 percent
+#   confidence. Re-checked against plan.md section 7 at this review and still true: that is a
+#   quota-bound, multi-hour benchmark suite the OPERATOR runs by hand (dogfood-122's lesson), so it
+#   cannot be a spec, and has not been since dogfood-139 - which delivered rung-5's other half
+#   (WP-303) and left nothing agent-runnable on the ladder. The binding verdict is therefore
+#   UNSATISFIABLE by any spec, and is recorded as such rather than quietly reinterpreted. The 🔴
+#   friction this review opened (F-401) was HAND-FIXED in the same sitting per TASK-PROTOCOL
+#   section 4 and does not headline. WP-628 beats the remaining alternatives on thesis
+#   value: it is product code on the JUDGE pillar - Chikory's wedge is a judge in the inner loop,
+#   and a judge whose evidence depends on the order its checks ran in is not one. Its premise was
+#   re-measured AND read out of the code at this review. Rejected: WP-589 half (2) (real, but
+#   benchmark-CLI ergonomics - it removes a bad SPEC SHAPE, not a loop defect) - WP-638 (F-402,
+#   just queued, and its live reachability is low now that F-401's exemption covers the families a
+#   fresh clone actually carries) - WP-590 (F-265, adapter telemetry, track-B) - WP-634 (F-382,
+#   harness-meta, section 1.5 track-B) - WP-610/WP-620/WP-622 (all track-B sized).
+
+name: dogfood-159-wp628-check-isolation-modify-delete
+wp: WP-628
+
+goal: |
+  A judge-executed acceptance check must never be graded against a workspace that an earlier check
+  in the same batch corrupted — including when the corruption is to a file git was told to ignore.
+
+  Measured from the code. `runCriteriaChecks` (packages/sdk-ts/src/judge/evidence.ts:222) runs
+  the batch serially and restores the workspace between checks
+  (packages/sdk-ts/src/judge/evidence.ts:253-:254). The restore is driven by
+  snapshotWorkspace, which records content and a sha256 for every path git status --porcelain
+  reports but records each IGNORED path as the bare entry the bare entry { path, status: "!!" } — no hash, no
+  content (packages/sdk-ts/src/judge/hermeticity.ts:211). So the both-present comparison
+  (packages/sdk-ts/src/judge/hermeticity.ts:138) can never fire for an ignored file, however
+  large the overwrite, and the before-only branch deliberately falls through without restoring
+  (packages/sdk-ts/src/judge/hermeticity.ts:149). Isolation therefore covers exactly one of the
+  three ways a check can change a file.
+
+  Make this true.
+
+  1. **A check that OVERWRITES a pre-existing ignored file is isolated.** The next check in the
+     batch reads the original bytes, and the file holds the original bytes when the batch ends.
+  2. **A check that DELETES a pre-existing ignored file is isolated.** The next check finds the
+     file present with its original bytes, and it is present when the batch ends.
+  3. **The CREATE family keeps working.** A file a check created is still gone afterwards.
+
+  Three things must NOT change, and each is a trap this run is graded on:
+
+  1. **Isolation stays affordable.** A judge workspace really does carry tens of thousands of
+     ignored files — 17,372 in .chikory/runs/run-71087607-eca4-41ca-b73b-febb0f484b8e/workspace,
+     27,477 in this repo. Reading every ignored file's content, twice per check, is hundreds of
+     megabytes of churn per judge pass. Detection may be cheap — a `stat` per path is
+     O(inventory), not O(bytes). Preservation may carry a size or total budget. The budget may not
+     be zero, and it may not be silent: a path you chose not to preserve must be reported in the
+     batch's own output rather than passed off as a clean tree.
+  2. **The untouched majority is left exactly alone.** An ignored file no check touched is
+     byte-identical afterwards and is not rewritten, re-checked-out or deleted.
+  3. **WP-623's tracked-path isolation and the per-check timeout are untouched.** Checks still run
+     serially, still get their own timeout, and still report honest exit codes.
+
+  TypeScript stays strict ESM with named exports and no `any`. Do not touch the rubric, the verdict
+  arithmetic, what an acceptance check IS, the executor prompt, the chain write boundary
+  (packages/sdk-ts/src/chain/write-set.ts - that is dogfood-158's work), the Python mirror, or
+  the TaskSpec contract.
+
+  Pin your work with tests that live in the repo, beside the files they cover. A behaviour proved
+  only by the acceptance checks that grade this run is not pinned at all (F-356), and a repo test
+  copied verbatim from a grading check inherits its blind spots (F-360). **At least one committed
+  test must pin an input family these acceptance checks do not name** — dogfood-158 satisfied a
+  test-count floor with nine case-for-case copies of its own ACs and shipped a defect all nine were
+  blind to (F-403).
+
+  **The plausible-but-wrong delivery is the one that makes the pure planner's unit tests green.**
+  `planCheckSideEffectCleanup` is easy to fix in isolation; the batch that consumes it is where the
+  next check gets its tree. The other plausible-but-wrong delivery drops the bare-entry special
+  case and snapshots every ignored file's content, which passes a small fixture and makes a real
+  judge pass unusable. Both are graded.
+
+  Verify your work with FAST checks only: the package typecheck (`pnpm run typecheck` — NOT bare
+  tsc --noEmit, which does not cover the test/ tree, F-382), eslint over the files you touched,
+  and vitest over the directories you actually wrote into. Do NOT run the full vitest suite inside
+  a step — it does not fit the step time cap (F-345).
+
+repos:
+  - url: /Users/nikitazolotarev/repos/chikory
+    writable: true
+
+# The SDK suite is both the surface this run edits and the gate it must not break.
+# MEASURE it at the launch commit rather than trusting this line (F-342, dogfood-140).
+regression_suite: pnpm --filter @chikory/sdk exec vitest run
+check_timeout_ms: 180000
+
+acceptance_criteria:
+  - id: AC-1
+    description: >
+      THIS CHECK OWNS ITS ORACLE AND ASSERTS AT THE CONSUMED SEAM. It builds a real git workspace
+      with three pre-existing gitignored files, then calls the REAL `runCriteriaChecks` with a
+      three-check batch — no mocks. Check 1 overwrites one ignored file, deletes another, and
+      creates a third. Check 2 is the oracle: it reads the tree it was handed and exits non-zero
+      unless the overwritten file holds its ORIGINAL bytes, the deleted file is present with its
+      ORIGINAL bytes, the created file is gone, and the untouched file is unchanged. Check 3 proves
+      the batch also finishes clean. The assertion is check 2's own exit code, so a fix that only
+      corrects the pure planner cannot pass. The create family and the untouched file are asserted
+      in the same batch on the same object, so no family is graded alone (F-360/F-403).
+    check: |
+      cd packages/sdk-ts || exit 1
+      TARGET=test/judge/ac1-check-isolation-families.generated.test.ts
+      mkdir -p test/judge
+      rm -f "$TARGET"
+      cat > "$TARGET" <<'GENEOF'
+      import { execFile } from "node:child_process";
+      import { mkdtemp, mkdir, readFile, writeFile } from "node:fs/promises";
+      import { existsSync } from "node:fs";
+      import { tmpdir } from "node:os";
+      import { join } from "node:path";
+      import { promisify } from "node:util";
+
+      import { describe, expect, test } from "vitest";
+
+      import { runCriteriaChecks } from "../../src/judge/index.js";
+      import type { AcceptanceCriterion } from "../../src/types.js";
+
+      const exec = promisify(execFile);
+      const git = async (cwd: string, args: string[]): Promise<string> =>
+        (await exec("git", args, { cwd })).stdout.trim();
+
+      const ORIGINAL = "ORIGINAL-BYTES-DO-NOT-LOSE-ME";
+
+      describe("a check batch must not hand the next check a corrupted tree (WP-628)", () => {
+        test("modify, delete, create and untouched are all isolated in one real batch", async () => {
+          const ws = await mkdtemp(join(tmpdir(), "ac1-iso-"));
+          await git(ws, ["init", "-b", "main"]);
+          await git(ws, ["config", "user.email", "t@t"]);
+          await git(ws, ["config", "user.name", "t"]);
+          await mkdir(join(ws, "src"), { recursive: true });
+          await writeFile(join(ws, "src/a.ts"), "export const a = 1;\n");
+          await writeFile(join(ws, ".gitignore"), "results/\n");
+          await git(ws, ["add", "-A"]);
+          await git(ws, ["commit", "-m", "base"]);
+
+          // three PRE-EXISTING ignored files: one to overwrite, one to delete, one to leave alone
+          await mkdir(join(ws, "results"), { recursive: true });
+          await writeFile(join(ws, "results/overwritten.txt"), ORIGINAL);
+          await writeFile(join(ws, "results/deleted.txt"), ORIGINAL);
+          await writeFile(join(ws, "results/untouched.txt"), ORIGINAL);
+
+          const criteria: AcceptanceCriterion[] = [
+            {
+              id: "VANDAL",
+              description: "one check corrupts the ignored tree",
+              check: [
+                "printf CORRUPTED > results/overwritten.txt",
+                "rm -f results/deleted.txt",
+                "printf NEW > results/created.txt",
+                "exit 0",
+              ].join("\n"),
+            },
+            {
+              id: "ORACLE",
+              description: "the next check must be graded against the ORIGINAL tree",
+              check: [
+                'EXPECT="' + ORIGINAL + '"',
+                'GOT=$(cat results/overwritten.txt 2>/dev/null || echo MISSING)',
+                'if [ "$GOT" != "$EXPECT" ]; then echo "MODIFY not isolated: overwritten.txt is [$GOT]"; exit 1; fi',
+                'if [ ! -f results/deleted.txt ]; then echo "DELETE not isolated: deleted.txt is gone"; exit 1; fi',
+                'GOT2=$(cat results/deleted.txt)',
+                'if [ "$GOT2" != "$EXPECT" ]; then echo "DELETE restored the wrong bytes: [$GOT2]"; exit 1; fi',
+                'if [ -f results/created.txt ]; then echo "CREATE not cleaned: created.txt survived into the next check"; exit 1; fi',
+                'GOT3=$(cat results/untouched.txt)',
+                'if [ "$GOT3" != "$EXPECT" ]; then echo "untouched.txt was churned: [$GOT3]"; exit 1; fi',
+                "echo ORACLE-OK",
+                "exit 0",
+              ].join("\n"),
+            },
+            {
+              id: "TAIL",
+              description: "a third check still runs and still reports honestly",
+              check: "exit 0",
+            },
+          ];
+
+          const runs = await runCriteriaChecks({ workspaceDir: ws, criteria, checkTimeoutMs: 60_000 });
+
+          expect(runs.map((r) => r.criterionId)).toEqual(["VANDAL", "ORACLE", "TAIL"]);
+          const oracle = runs.find((r) => r.criterionId === "ORACLE")!;
+          expect(
+            oracle.exitCode,
+            "the SECOND check in the batch was graded against the tree the FIRST check left behind: " +
+              oracle.output.slice(0, 600),
+          ).toBe(0);
+          expect(runs.find((r) => r.criterionId === "TAIL")!.exitCode).toBe(0);
+
+          // and the batch leaves the workspace as it found it
+          expect(
+            (await readFile(join(ws, "results/overwritten.txt"), "utf8")),
+            "after the batch, the overwritten ignored file must hold its original bytes",
+          ).toBe(ORIGINAL);
+          expect(
+            existsSync(join(ws, "results/deleted.txt")) &&
+              (await readFile(join(ws, "results/deleted.txt"), "utf8")),
+            "after the batch, the deleted ignored file must be back with its original bytes",
+          ).toBe(ORIGINAL);
+          expect(
+            existsSync(join(ws, "results/created.txt")),
+            "after the batch, a file a check created must be gone (WP-625 create family)",
+          ).toBe(false);
+          expect(
+            (await readFile(join(ws, "results/untouched.txt"), "utf8")),
+            "an ignored file no check touched must be left exactly alone",
+          ).toBe(ORIGINAL);
+        }, 120_000);
+      });
+      GENEOF
+      pnpm exec vitest run "$TARGET"
+      ST=$?
+      rm -f "$TARGET"
+      if [ "$ST" -ne 0 ]; then
+        echo "AC-1 FAIL: a check in the batch was graded against a tree an earlier check corrupted, or a family regressed. vitest exited $ST"
+        exit 1
+      fi
+      echo "AC-1 OK: modify, delete, create and untouched are all isolated at the consumed seam"
+
+  - id: AC-2
+    description: >
+      THIS CHECK COLLIDES CORRECTNESS WITH COST, AND IT MEASURES COST AS A SCALING RATIO RATHER
+      THAN A CLOCK — a wall-clock ceiling does not discriminate here, because reading 307 MB off a
+      warm SSD costs about 2 s (measured at this review). It runs the SAME three-check batch
+      through the REAL `runCriteriaChecks` twice, over two fixtures with the SAME file count
+      (1,200 ignored files) and 64x different total bytes (4 KiB vs 256 KiB each; 4.7 MB vs
+      307 MB). Both must isolate the modify family, and the big fixture must not cost meaningfully
+      more than the small one — an implementation whose snapshot is proportional to ignored BYTES
+      rather than to the ignored INVENTORY fails the ratio. Measured at this review: HEAD 0.98x
+      (flat, but it does not isolate at all), a budgeted reference 0.60x, an unbudgeted
+      read-everything reference 3.13x. It also requires the 1,200-file tree intact and
+      byte-identical afterwards, and puts an absolute hang guard on each batch.
+    check: |
+      cd packages/sdk-ts || exit 1
+      TARGET=test/judge/ac2-check-isolation-cost.generated.test.ts
+      mkdir -p test/judge
+      rm -f "$TARGET"
+      cat > "$TARGET" <<'GENEOF'
+      import { execFile } from "node:child_process";
+      import { mkdtemp, mkdir, readFile, readdir, writeFile } from "node:fs/promises";
+      import { tmpdir } from "node:os";
+      import { join } from "node:path";
+      import { promisify } from "node:util";
+
+      import { describe, expect, test } from "vitest";
+
+      import { runCriteriaChecks } from "../../src/judge/index.js";
+      import type { AcceptanceCriterion } from "../../src/types.js";
+
+      const exec = promisify(execFile);
+      const git = async (cwd: string, args: string[]): Promise<string> =>
+        (await exec("git", args, { cwd })).stdout.trim();
+
+      const COUNT = 1200;
+      const ORIGINAL = "ORIGINAL-0000";
+
+      interface BatchResult {
+        elapsedMs: number;
+        oracleExit: number;
+        oracleOutput: string;
+        dir: string;
+      }
+
+      async function runBatch(kib: number): Promise<BatchResult> {
+        const ws = await mkdtemp(join(tmpdir(), "ac2-iso-"));
+        await git(ws, ["init", "-b", "main"]);
+        await git(ws, ["config", "user.email", "t@t"]);
+        await git(ws, ["config", "user.name", "t"]);
+        await mkdir(join(ws, "src"), { recursive: true });
+        await writeFile(join(ws, "src/a.ts"), "export const a = 1;\n");
+        await writeFile(join(ws, ".gitignore"), "results/\n");
+        await git(ws, ["add", "-A"]);
+        await git(ws, ["commit", "-m", "base"]);
+
+        await mkdir(join(ws, "results"), { recursive: true });
+        const filler = "x".repeat(kib * 1024);
+        for (let i = 0; i < COUNT; i += 1) {
+          await writeFile(join(ws, "results/f" + i + ".bin"), i === 0 ? ORIGINAL : filler);
+        }
+
+        const criteria: AcceptanceCriterion[] = [
+          {
+            id: "VANDAL",
+            description: "corrupt exactly one of the 1,200",
+            check: "printf CORRUPTED > results/f0.bin\nexit 0",
+          },
+          {
+            id: "ORACLE",
+            description: "the next check must still see the original bytes",
+            check: [
+              'EXPECT="' + ORIGINAL + '"',
+              'GOT=$(cat results/f0.bin 2>/dev/null || echo MISSING)',
+              'if [ "$GOT" != "$EXPECT" ]; then echo "MODIFY not isolated at scale: f0.bin is [$GOT]"; exit 1; fi',
+              "echo ORACLE-OK",
+              "exit 0",
+            ].join("\n"),
+          },
+          { id: "TAIL", description: "third check", check: "exit 0" },
+        ];
+
+        const startedAt = Date.now();
+        const runs = await runCriteriaChecks({ workspaceDir: ws, criteria, checkTimeoutMs: 60_000 });
+        const elapsedMs = Date.now() - startedAt;
+        const oracle = runs.find((r) => r.criterionId === "ORACLE")!;
+        return { elapsedMs, oracleExit: oracle.exitCode, oracleOutput: oracle.output, dir: ws };
+      }
+
+      describe("isolation must stay affordable on a real ignored inventory (WP-628)", () => {
+        test("cost tracks the ignored INVENTORY, not the ignored BYTES", async () => {
+          const small = await runBatch(4);
+          const big = await runBatch(256);
+
+          expect(
+            small.oracleExit,
+            "at 1,200 small ignored files the modify family must be isolated: " +
+              small.oracleOutput.slice(0, 400),
+          ).toBe(0);
+          expect(
+            big.oracleExit,
+            "at 1,200 ignored files of 256 KiB the modify family must be isolated: " +
+              big.oracleOutput.slice(0, 400),
+          ).toBe(0);
+
+          const ratio = big.elapsedMs / Math.max(small.elapsedMs, 1);
+          expect(
+            ratio,
+            "same file COUNT, 64x the BYTES (4.7 MB -> 307 MB). A snapshot proportional to bytes " +
+              "makes every judge pass on a real workspace unusable — it carries 17,372 ignored " +
+              "files. small=" + small.elapsedMs + "ms big=" + big.elapsedMs + "ms ratio=" +
+              ratio.toFixed(2) + "x",
+          ).toBeLessThan(2);
+
+          expect(
+            big.elapsedMs,
+            "absolute hang guard: isolation must not become the slowest thing in a judge pass",
+          ).toBeLessThan(45_000);
+
+          const entries = await readdir(join(big.dir, "results"));
+          expect(
+            entries.length,
+            "the batch must leave the ignored tree intact — no file the checks never touched may be deleted",
+          ).toBe(COUNT);
+          expect(
+            await readFile(join(big.dir, "results/f0.bin"), "utf8"),
+            "after the batch the corrupted file holds its original bytes",
+          ).toBe(ORIGINAL);
+          expect(
+            (await readFile(join(big.dir, "results/f1199.bin"), "utf8")).length,
+            "an untouched 256 KiB ignored file must be byte-identical, not truncated or rewritten",
+          ).toBe(256 * 1024);
+        }, 170_000);
+      });
+      GENEOF
+      pnpm exec vitest run "$TARGET"
+      ST=$?
+      rm -f "$TARGET"
+      if [ "$ST" -ne 0 ]; then
+        echo "AC-2 FAIL: isolation broke at scale, cost grew with ignored BYTES rather than inventory, the untouched tree was churned, or the batch hung. vitest exited $ST"
+        exit 1
+      fi
+      echo "AC-2 OK: the modify family is isolated at 1,200 ignored files and cost tracks inventory, not bytes"
+
+  - id: AC-3
+    description: >
+      Hygiene and the traps that are cheaper to grep than to drive: strict typecheck over src AND
+      test (F-382), eslint over the isolation modules, dogfood-158's write-boundary exemption still
+      present and still segment-scoped, WP-623's serial-with-cleanup batch still in place, and the
+      DECLARED regression suite green AND grown by at least 4 committed tests (F-356).
+    check: |
+      cd packages/sdk-ts || exit 1
+      pnpm run typecheck || { echo "AC-3 FAIL: strict typecheck is red (this covers test/ too — F-382)"; exit 1; }
+      pnpm exec eslint src/judge/hermeticity.ts src/judge/evidence.ts || { echo "AC-3 FAIL: eslint is red on the modules this WP touches"; exit 1; }
+
+      grep -qE 'export function isToolchainPath' src/chain/write-set.ts || {
+        echo "AC-3 FAIL: trap — dogfood-158's write-boundary toolchain exemption was removed. This WP does not touch the chain write boundary."
+        exit 1
+      }
+      grep -qE '"\.devbox"' src/chain/write-set.ts || {
+        echo "AC-3 FAIL: trap — F-401's measured exemption set lost a member. A real workspace carries .devbox, .venv and dist; do not narrow it back to node_modules."
+        exit 1
+      }
+      grep -qE 'export async function runCriteriaChecks' src/judge/evidence.ts || {
+        echo "AC-3 FAIL: trap — the real batch entry point was renamed or removed. This run changes how the tree is RESTORED, not what the batch IS."
+        exit 1
+      }
+      grep -qE 'export function planCheckSideEffectCleanup' src/judge/hermeticity.ts || {
+        echo "AC-3 FAIL: trap — the cleanup planner was removed rather than corrected."
+        exit 1
+      }
+
+      OUT=$(pnpm --filter @chikory/sdk exec vitest run 2>&1)
+      ST=$?
+      echo "$OUT" | tail -25
+      if [ "$ST" -ne 0 ]; then
+        echo "AC-3 FAIL: the DECLARED regression suite is RED (vitest exited $ST)"
+        exit 1
+      fi
+      N=$(echo "$OUT" | grep -oE "Tests +[0-9]+ passed" | grep -oE "[0-9]+" | head -1)
+      echo "committed suite tests passing: ${N:-UNPARSEABLE} (floor 1667, measured baseline 1663)"
+      if [ -z "$N" ]; then
+        echo "AC-3 FAIL: could not read a test count out of the vitest summary"
+        exit 1
+      fi
+      if [ "$N" -lt 1667 ]; then
+        echo "AC-3 FAIL: durability floor not met — the committed suite did not grow by at least 4 tests. A behaviour proved only by the generated grading checks is not pinned at all (F-356)."
+        exit 1
+      fi
+      echo "AC-3 OK: strict typecheck and lint green, dogfood-158 and WP-623 plumbing intact, DECLARED suite green AND larger"
+
+budget_usd: 20
+max_steps: 6
+
+agent_classes:
+  executor: executor-default
+  judge: judge-default
+
+judge:
+  cadence: 1
+
+# F-322 (dogfood-135): without this, a converged out-of-rubric escalation parks overnight for a
+# human instead of auto-sealing.
+unattended:
+  escalation: seal_resumable_failed
