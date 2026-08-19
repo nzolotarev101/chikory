@@ -9,17 +9,19 @@ function getAddedDiffLines(diff: string): string[] {
 
 /**
  * WP-215 security rubric / secret-scan judge evidence primitive.
- * Scans only added unified-diff lines, excluding +++ file headers.
+ * Scans only added unified-diff lines, excluding +++ file headers and allowlisted example secrets.
  */
 export function scanDiffForSecrets(diff: string): string[] {
   const labels = new Set<string>();
 
   for (const line of getAddedDiffLines(diff)) {
-    if (AWS_ACCESS_KEY_PATTERN.test(line)) {
+    const awsAccessKeyMatch = line.match(AWS_ACCESS_KEY_PATTERN);
+    if (awsAccessKeyMatch !== null && !isExampleSecret(awsAccessKeyMatch[0])) {
       labels.add("aws-access-key");
     }
 
-    if (OPENAI_KEY_PATTERN.test(line)) {
+    const openAiKeyMatch = line.match(OPENAI_KEY_PATTERN);
+    if (openAiKeyMatch !== null && !isExampleSecret(openAiKeyMatch[0])) {
       labels.add("openai-key");
     }
   }
