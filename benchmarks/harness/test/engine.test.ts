@@ -420,6 +420,25 @@ describe("security vulnerability secure cleanup check", () => {
     expect(matchingDirs.length).toBe(0);
   });
 
+  it("getTargetPackageJson cleans up temp directory securely on failure", () => {
+    const task = {
+      id: "security-pkg-cleanup-test",
+      class: "brownfield",
+      repo: { url: "https://invalid.example/repo", ref: "main" },
+    } as unknown as BenchmarkTask;
+
+    const dummyWorkspace = mkdtempSync(join(tmpdir(), "workspace-pkg-cleanup-test-"));
+    const result = getTargetPackageJson(task, dummyWorkspace);
+    expect(result).toBeNull();
+
+    // The temporary directory created next to dummyWorkspace should have been cleaned up
+    const parentDir = join(dummyWorkspace, "..");
+    const tempDirPrefix = "temp-git-security-pkg-cleanup-test-";
+    const files = fs.readdirSync(parentDir);
+    const matchingDirs = files.filter(f => f.startsWith(tempDirPrefix));
+    expect(matchingDirs.length).toBe(0);
+  });
+
   it("ensures no shell execution of rm -rf is present in engine.ts", () => {
     const engineSrcPath = join(import.meta.dirname, "..", "src", "engine.ts");
     const content = fs.readFileSync(engineSrcPath, "utf8");
