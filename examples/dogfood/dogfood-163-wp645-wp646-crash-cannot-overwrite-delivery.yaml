@@ -307,8 +307,9 @@ acceptance_criteria:
       THIS CHECK ASSERTS AT THE CONSUMED SEAM — the tree the operator is handed. It drives the REAL
       agent loop (real Temporal dev server, real workflow bundle, real judge-pass sequencing, a
       purpose-built executor, fake judge wire) and then reads the run's workspace off disk. Scenario A
-      delivers a good file at step 1 and then CRASHES at step 2 after deleting it and writing a
-      half-edit, and requires the good file to survive and the half-edit not to; it also requires the
+      delivers a good file at step 1 and then CRASHES at the FINAL step after deleting it and writing
+      a half-edit — measured on HEAD the workspace is left holding the half-edit with the delivered
+      file gone — and requires the good file to survive and the half-edit not to; it also requires the
       FAILED terminal to name a checkpoint the journal flags lastGood. Scenario B fails on max_steps
       with a DELIVERED, PROCEED-verdicted final step and requires that step's file to survive, so a
       delivery cannot buy Scenario A by rewinding every failed run.
@@ -468,8 +469,12 @@ acceptance_criteria:
         test(
           "A: a crash after a delivered step leaves the delivered tree - B: a delivered final step on a FAILED run survives",
           async () => {
-            // A — attempt 1 delivers, attempt 2 crashes after deleting it.
-            const a = await driveRun(2, 3);
+            // A — attempt 1 delivers, attempt 2 crashes after deleting it, and the
+            // crash is the LAST step, exactly as in dogfood-162. Two steps also keeps
+            // verdict rule 3 (three consecutive criterion failures -> HALT) from firing:
+            // its remediation rollback would clean the workspace for an unrelated
+            // reason and this scenario would pass without the fix.
+            const a = await driveRun(2, 2);
             const detailA =
               " A: status=" + a.status + " ws=" + a.ws + " terminals=" + JSON.stringify(a.terminals) +
               " lastGoodIds=" + JSON.stringify(a.goodCheckpointIds);
