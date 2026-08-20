@@ -8,13 +8,15 @@ recover a run, and how to land the result as a normal PR.
 **Status (2026-08-20, bounded — update discipline: REPLACE this block, ≤15 lines;
 displaced prose moves verbatim to [`PLAN-HISTORY.md`](PLAN-HISTORY.md); per-run detail:
 `docs/reports/`; queue + course correction: `plan.md` §6/§7).**
-🟡 **dogfood-161 / WP-643 (the loop recognises a complaint it has already heard, however it is worded) DELIVERED from a FAILED run, landed at review** — `run-eef8a03d-c6b6-4165-9738-d002cef3d56d`, terminal **FAILED (resumable)**, **4 steps, $0.4229/$20.00** (judge share 100%), 48m 13s, AC **3/3** re-measured green, harvest byte-IDENTICAL **2/2**, suite **1,767 → 1,782 passed | 23 skipped**, `docs/reports/dogfood-161.md`. F-412 CLOSED.
-🟢 **LIVE-PROVEN on prose nobody fitted it to** — this run's own four completion reviews restate ONE complaint against four revisions of the code. Through the real accumulating history (`src/workflow/agent-loop.ts:263`, pushed at `:1406`): byte-equality granted a repair attempt on all four; the delivered instrument (`src/workflow/completion-review.ts:478`) **stops at review #2**. Pinned at `test/runner/completion-review.test.ts:922`.
-🔴 **The run sealed FAILED, and it was RIGHT** — the final completion review named a *falsifiable counterexample* with concrete inputs, and this review ran it through the delivered function and got the wrong answer back. **Judge true-positives ×4**: three repaired in-run, the fourth probe-confirmed and unrepaired.
-🟡 **F-416 + F-417 (§8) → WP-644** — the instrument recognises **2 of 6** restatements of one complaint, and soundness is gone: `flushBatchWriter` "drops metadata on retry" vs "loses the checksum on retry" compares as the SAME objection (`completion-review.ts:560`); measured false-positive rate over 298 real cross-run pairs is **1.3%** (byte-equality: 0%). 🟡 **F-418** → track-B: reviews #1→#4 each faulted a *different* shortcut in the *then-current* code and the executor removed each in turn — the run was converging while the objection stayed the same.
-🟡 **F-419 (§7) HAND-FIXED** — a FAILED acceptance check printed 8 lines and persisted none, so AC-3's red suite reported counts and not the failing test's name. Full output now lands at `.chikory/review/ac-<run-id>-<AC>.log` with hoisted failure lines (`scripts/dogfood-verify.sh:218`). ℹ️ **F-422 HAND-FIXED** (stale `MAX_PROGRESS_GRANTS` docstring). 🟡 F-420 (§8) → track-B: one flaky test in the declared suite, 1 red in 4 observations of 1,802, name lost to F-419. 🟡 F-421 (§8) → track-B: step 4 killed at the 10m cap with 0 output tokens, waiting on a backgrounded full suite the goal forbade (F-345 recurrence).
-**Standing lesson: grade the delivery on prose it could not have fitted to.** Nine hand-authored keyword lists passed 3/3 ACs and 13 self-authored tests. What found both real gaps was replaying the run's OWN judge output through the delivered function — the review's cheapest and sharpest instrument, because that prose did not exist when the code was written.
-**NEXT HEADLINE = `dogfood-162` / WP-644** — make the repeat decision defensible in BOTH directions on prose it was not fitted to. Gate ✅ PROGRESSING, so the rung does not bind; P3 rung-5's remainder (WP-304) is still operator-run and not spec-expressible.
+🔴 **dogfood-162 / WP-644 (the loop tells "you already said that" from "that's new") FAILED — NOTHING LANDED, harvest reverted** — `run-75794008-83a8-4ca8-893d-ae3000df754a`, 6 steps, $0.4781/$20.00, 46m 58s, AC **0/3** on the harvested tree (`docs/reports/dogfood-162.md`).
+🔴 **A finished delivery was overwritten by a crashed step.** At step 5 the tree passed all three ACs and grew the declared suite to **1,787 passed** (baseline 1,782, floor 1,786) — checkpoint `@28`, `lastGood: true`. The completion review then bought a repair grant; step 6's `agy` crashed mid-write (transcript 64 B: `Error: Agent execution terminated due to error.`), its 12,589-byte half-edit was committed as `eb4d24a`, judged 0/3 and sealed. The harvest took that tree: **7 failed** / 1,780 passed.
+🔴 **F-423 (§8) → WP-645** — an executor CRASH is not `infraFailed`. `isInfraStepFailure` (`packages/sdk-ts/src/runner/strike-accounting.ts:38`) knows only cap-kills; the flag is set only on `proc.timedOut` (`packages/sdk-ts/src/executors/step.ts:241`), so a crash's partial writes are committed, judged and kept.
+🔴 **F-424 (§8) → WP-646** — a FAILED seal records `lastCheckpoint` (`@35`, `lastGood: false`), not the `lastGood` checkpoint (`@28`). The flag is journaled and never read at the seal, so `harvest.sh` lands the worst tree the run reached.
+🔴 **F-425 (§8) → WP-644 stays open** — F-416 live-proven, self-referentially: this run's completion reviews #1 (idx 6) and #2 (idx 29) restate one complaint in two vocabularies, and the live comparator answers `false` on BOTH rubric ids. That miss bought the fatal repair grant. The step-5 delivery answers `true` — WP-644 would have sealed this run at step 5.
+🔴 **F-426 (§8) → WP-647** — the step-5 delivery was unshippable too, and three owned-oracle ACs passed it. Over **1,432 cross-run objection pairs from 25 journals** it calls **44.06%** the same objection vs the incumbent's **1.82%**. AC-1's whole negative population was two hand-picked pairs.
+🟡 **F-427 (§8) → track-B** — the committed durability-floor test labelled invented prose (`db/pool.ts`, `auth/jwt.ts`) as "real judge findings". 🟡 **F-428 (§8) → track-B**, folded into F-421: the goal forbade backgrounding a suite verbatim and 2 of 6 steps still ended on "I have started running… and will report the results upon completion".
+**Standing lesson: an owned oracle is only as sound as its negative population.** Three checks that each own their oracle, all green, on a comparator 24× less sound than the code it replaced. A recall floor needs a false-positive ceiling measured on a corpus the delivery cannot enumerate, graded in the same check.
+**NEXT HEADLINE = `dogfood-163` / WP-645 + WP-646** — a crashed step must not be able to overwrite a finished delivery. WP-644 + WP-647 stay queued for `dogfood-164`. Gate ✅ PROGRESSING (max steps 6 vs 4 trailing; harness-meta 0/3); P3 rung-5's remainder is still WP-304's operator-run benchmark arm.
 
 Related docs: [`docs/spec/task-spec.md`](spec/task-spec.md) (schema
 reference) · [`docs/TASK-PROTOCOL.md`](TASK-PROTOCOL.md) (WP etiquette, §7 is
@@ -2233,3 +2235,41 @@ broken (a false-green, not a follow-on fix).
   clock, and a repair grant, spent on nothing. A prohibition in the goal text is
   not a control. Assume any spec whose regression suite takes minutes will lose
   one step this way, and size `max_steps` accordingly.
+
+- **🔴 A CRASHED STEP'S HALF-WRITTEN FILES BECOME THE RUN'S ANSWER** (F-423 →
+  WP-645, dogfood-162). The harness classes a step the agent never got to finish
+  as an infra failure so it spends no strike — but `isInfraStepFailure`
+  (`packages/sdk-ts/src/runner/strike-accounting.ts:38`) recognises only a
+  wall-clock cap kill, and `infraFailed` is set in exactly one place,
+  `proc.timedOut` (`packages/sdk-ts/src/executors/step.ts:241`). When the CLI
+  itself dies the adapter returns `ok: false, retriable: true` with no flag
+  (`packages/sdk-ts/src/executors/gemini-cli.ts:87`). dogfood-162 step 6's
+  transcript was 64 bytes — `Error: Agent execution terminated due to error.` —
+  and the 12,589 bytes it had already written were committed as
+  `eb4d24a chikory: step 5`, judged 0/3, and sealed as the terminal state.
+  Until WP-645 lands: after any run that ends on a step with **0 output tokens
+  and a nonzero diff**, diff the workspace's last two `chikory: step N` commits
+  before trusting the harvest.
+
+- **🔴 A FAILED SEAL POINTS AT THE LAST CHECKPOINT, NOT `lastGood`** (F-424 →
+  WP-646, dogfood-162). Every checkpoint carries a `lastGood` boolean and the
+  terminal entry records `lastCheckpoint`, which is simply the most recent one.
+  In dogfood-162 that was `@35` (`lastGood: false`, 7 red tests) while `@28`
+  (`lastGood: true`) held a tree passing all three ACs with the suite at 1,787.
+  `scripts/harvest.sh` takes the run workspace as it stands, so the review
+  harvested the worse tree. Until WP-646 lands: on any FAILED run, read the
+  journal's checkpoints for the last `"lastGood":true` entry and diff its
+  `gitCommits` SHA against the workspace HEAD before reviewing —
+  `sqlite3 .chikory/runs/<id>/journal.db "select payload_json from journal_entries where kind='checkpoint'"`.
+
+- **🔴 AN OWNED ORACLE IS ONLY AS SOUND AS ITS NEGATIVE POPULATION** (F-426 →
+  WP-647, dogfood-162). dogfood-162's AC-1 graded a recall floor over six real
+  objection pairs and a soundness floor over **two** hand-picked invented-identifier
+  pairs, in one check, on the theory that neither floor could then be bought with
+  the other. Two negatives cannot hold that line: the delivery met the 5-of-6
+  recall floor and passed both negatives while calling **44.06%** of 1,432 real
+  cross-run objection pairs the same objection, against the incumbent's **1.82%**.
+  All three ACs, the typecheck, the lint and the full 1,787-test suite were green
+  on it. When an AC asserts a rate, grade the rate on a corpus the delivery cannot
+  enumerate — for judge prose, every `pass: false` justification in
+  `.chikory/runs/*/journal.db`, paired across runs on the same rubric id.

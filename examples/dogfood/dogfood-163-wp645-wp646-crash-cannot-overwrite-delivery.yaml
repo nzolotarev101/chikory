@@ -1,0 +1,593 @@
+# Plain: last run the agent finished the job at step 5 of 6 — every check green, the whole suite
+# green and bigger — and then the loop asked for one more revision, that attempt CRASHED halfway
+# through writing a file, and the half-written file became the run's final answer. After this run a
+# crashed step cannot overwrite finished work, and a failed run hands back the best state it reached.
+# WP: WP-645 (a crashed step is an infra failure, not delivered work) + WP-646 (a FAILED seal hands
+#   over its lastGood tree, not its last one) — F-423, F-424
+# Ladder-rung: 0 (off-ladder — P3 rung-5's remaining half is WP-304, an operator-run quota-bound
+#   benchmark arm, not expressible as a spec. The gate reads PROGRESSING, so the rung does not bind.)
+# Thesis-KPI: durable execution (CLAUDE.md). Measured as: work the run finished and verified survives
+#   the run failing. Per-step reliability is 94.7% against a 99%+ target; dogfood-162 is what the
+#   missing 5% costs — a complete, independently re-verified delivery destroyed at step 6 of 6.
+#
+# THE MEASURED PREMISE — read at the dogfood-162 review from that run's own journal (F-203/F-342:
+#   measured, never transcribed). Reproduce with:
+#     sqlite3 .chikory/runs/run-75794008-83a8-4ca8-893d-ae3000df754a/journal.db \
+#       "select idx,kind,tokens_out,payload_json from journal_entries where kind in ('checkpoint','terminal','step')"
+#     sed -n '36,44p'   packages/sdk-ts/src/runner/strike-accounting.ts   # what counts as infra
+#     sed -n '227,248p' packages/sdk-ts/src/executors/step.ts             # the ONLY place the flag is set
+#     sed -n '63,90p'   packages/sdk-ts/src/executors/gemini-cli.ts       # the crash path, unflagged
+#     sed -n '318,335p' packages/sdk-ts/src/workflow/agent-loop.ts        # the seal, and `:1235`
+#
+#   TWO DEFECTS, INDEPENDENT, BOTH LIVE:
+#
+#     F-423 — A CRASH IS NOT AN INFRA FAILURE. `isInfraStepFailure`
+#       (`packages/sdk-ts/src/runner/strike-accounting.ts:38`) exists so a step the agent never got
+#       to finish is not judged as its work. It recognises exactly two things: `infraFailed === true`,
+#       and the legacy `step exceeded maxSeconds=` reason prefix. `infraFailed` is set in exactly one
+#       place for a CLI step — `proc.timedOut` (`packages/sdk-ts/src/executors/step.ts:241`). When the
+#       CLI process itself dies the adapter returns `ok: false, retriable: true` with NO flag
+#       (`packages/sdk-ts/src/executors/gemini-cli.ts:87`). dogfood-162 step 6: transcript 64 bytes,
+#       `Error: Agent execution terminated due to error.`, **0 output tokens** — and the 12,589 bytes
+#       it had already written were committed as `eb4d24a chikory: step 5`, judged 0/3, and sealed.
+#
+#     F-424 — THE SEAL RECORDS THE LAST CHECKPOINT, NOT THE GOOD ONE. `agent-loop.ts:326` reads
+#       `checkpoints[checkpoints.length - 1]?.id`. `lastGoodCheckpointId` is maintained three lines
+#       of scope away (`:221`, assigned at `:1235`) and is not consulted. dogfood-162 sealed on `@35`
+#       (`lastGood: false`) while `@28` (`lastGood: true`, workspace `1306432`) held a tree that
+#       passes all three of that run's acceptance checks with the declared suite at 1,787 passed.
+#       `scripts/harvest.sh` takes the workspace as it stands, so the review harvested 7 red tests
+#       over a green delivery. `lastGood` itself is computed correctly
+#       (`verdict.kind === "PROCEED" && record.status === "SUCCESS"`, `agent-loop.ts:1188`) — it is
+#       written to the journal and then never read at the seal.
+#
+#   * THE FIRST TRAP IS ADDING THE CRASH STRING TO A LIST, AND IT CANNOT PASS. Making
+#     `isInfraStepFailure` also match `"agy produced no response"` fixes one adapter's one message.
+#     AC-1 grades an INVENTED crash reason — `zqfloober harness aborted: vrqualmic fault 0x5b` — that
+#     no list can contain, carrying the STRUCTURE of a crash (a step that produced no output at all),
+#     and requires it classed infra. It also grades a genuine agent failure whose reason string
+#     contains the word "crash" and requires it classed NOT infra, so a substring match fails both ways.
+#   * THE SECOND TRAP IS FLAGGING THE CRASH AND STOPPING THERE. The strike was not what dogfood-162
+#     lost — it lost the COMMITTED HALF-EDIT. AC-2 asserts on the workspace tree the operator is
+#     handed, not on a counter.
+#   * THE THIRD TRAP IS REWINDING EVERY FAILED RUN. A FAILED run whose last step delivered real work
+#     under a PROCEED verdict must still hand that work over — `lastGood` is exactly that predicate,
+#     and it is already computed. AC-2 Scenario B drives a run that fails on `max_steps` with a
+#     DELIVERED, PROCEED-verdicted final step and requires that step's file to survive. Both
+#     directions are graded in the same check, so neither can be bought with the other (F-426).
+#   * NOT IN SCOPE: no change to what `lastGood` MEANS (`agent-loop.ts:1188`), to the judge prompt or
+#     `JudgeForm`, to the rubric ids, to `heal/gate-repair.ts` routing (WP-542/F-207 — no LLM-verdict
+#     gate may exit), to `completion-review.ts` (WP-644 is dogfood-164's, deliberately not bundled),
+#     to the chain mirror, to the Python mirror, to the TaskSpec contract, or to
+#     `src/judge/hermeticity.ts`.
+#   * `chikory resume` READS `failure.lastCheckpoint` — decide what a resume should now resume FROM
+#     and keep `test/chain/*` and the resume-drill guards green. AC-3 grades that.
+#   * THE SUITE THIS RUN MUST NOT BREAK, MEASURED at the launch commit under devbox (F-342 — run it
+#     yourself and read its own tail): 204 files passed | 2 skipped, 1,782 passed | 23 skipped.
+#     **One test in that suite is flaky (F-420): 1 red in 4 observations of the same tree.** If AC-3
+#     reds with exactly one failure, read `.chikory/review/ac-<run-id>-AC-3.log` for the name first.
+#
+# PRECEDENCE — the design calls plan.md leaves open are DECIDED HERE:
+#   1. FINISHED WORK WINS. A step that produced no output never overwrites a step that did.
+#   2. A FAILED RUN IS NOT AN EMPTY RUN. It hands back the best state it reached and says which
+#      checkpoint that is. Silently rewinding a good final step is the same defect with the sign flipped.
+#   3. THE CLASSIFICATION IS STRUCTURAL. "Did the agent produce an answer?" is a property of the step
+#      record. It is not a list of vendor error strings, and a new adapter must inherit it for free.
+#
+# Format: loose — the outcome is fixed (a crashed step cannot overwrite finished work; a FAILED run
+#   hands over its lastGood tree). HOW a crash is recognised, and whether the seal rewinds the
+#   workspace or names a different checkpoint, are the executor's call. No AC greps a new symbol (F-393).
+#
+# Launch mode: RUN (one seam, one package).
+#   CHIKORY_PREFLIGHT_ONLY=1 devbox run run-dogfood
+#   devbox run run-dogfood
+#
+# WHY THIS AND NOT THE LADDER RUNG (dogfood-162 review, 2026-08-20):
+#   `scripts/dogfood-progression.sh` reads ✅ PROGRESSING with dogfood-162 in the ledger (max steps 6
+#   vs 4 over the trailing three; harness-meta headlines 0/3), so the verdict does NOT bind the
+#   headline to the ladder rung. It would not have mattered: P3's ladder is WP-530 (plan.md §7) and
+#   rung-5's remaining half is WP-304's OpenHands arm plus a corpus wide enough to separate 19
+#   requirements at 95% confidence — a quota-bound, multi-hour benchmark the OPERATOR runs by hand
+#   (dogfood-122's lesson), so it cannot be a spec, and has not been since dogfood-139 delivered
+#   rung-5's other half (WP-303). WP-645+WP-646 are product code on the durable-execution pillar and
+#   are the direct residue of the run just reviewed — the run that had the answer in hand at step 5
+#   of 6 and sealed on a crash instead. Deliberately NOT bundled: WP-644 + WP-647 (the repeat
+#   decision and its corpus-ceiling oracle) go to dogfood-164 — fixing the comparator on a loop that
+#   can still lose a finished delivery just re-runs this loss, and 6 steps is not room for four WPs.
+
+name: dogfood-163-wp645-wp646-crash-cannot-overwrite-delivery
+wp: WP-645
+
+goal: |
+  A step whose executor died without producing an answer must not be able to overwrite work the run
+  already finished, and a run that fails must hand the operator the best state it reached.
+
+  Measured from `run-75794008-83a8-4ca8-893d-ae3000df754a`'s own journal at the dogfood-162 review.
+
+  - Step 6's `agy` process crashed. Its transcript is 64 bytes — `Error: Agent execution terminated
+    due to error.` — and it recorded **0 output tokens**. The 12,589 bytes it had already written
+    were committed as `eb4d24a chikory: step 5`, judged 0/3, and sealed as the run's answer.
+  - The step before it passed all three acceptance checks and grew the declared suite from 1,782 to
+    1,787 passing. That tree is checkpoint `@28`, flagged `lastGood: true`, workspace `1306432`.
+  - The terminal entry records `lastCheckpoint: …@35` — `lastGood: false`. The good checkpoint id was
+    live in scope at the seal and was not read.
+
+  Make this true.
+
+  1. **A crashed step is an infrastructure failure, like a step killed at its wall-clock cap.**
+     `isInfraStepFailure` (packages/sdk-ts/src/runner/strike-accounting.ts:38) today recognises only
+     the cap kill, and `infraFailed` is set in exactly one place — `proc.timedOut`
+     (packages/sdk-ts/src/executors/step.ts:241). A step that produced no answer at all must be
+     recognised structurally, not by matching one adapter's error string, so a new adapter inherits
+     it for free. A step that DID answer and reported failure is the agent's failure and stays one.
+  2. **A crashed step's partial writes are not the run's delivery.** After a crash, the tree the
+     operator is handed must be the tree the last delivered step produced.
+  3. **A FAILED run hands back its `lastGood` state and says which checkpoint that is.** The flag is
+     already computed correctly at agent-loop.ts:1188 and journaled at every checkpoint; the seal at
+     agent-loop.ts:326 takes `checkpoints[checkpoints.length - 1]` instead.
+  4. **A FAILED run whose last step delivered real work under a PROCEED verdict keeps that work.**
+     Rewinding every failed run is the same defect with the sign flipped.
+
+  `chikory resume` reads `failure.lastCheckpoint`. Decide what a resume should resume from and keep
+  the resume-drill and chain guards green.
+
+  Three things must NOT change, and each is a trap this run is graded on:
+
+  1. **Adding the crash string to a keyword list cannot be the answer.** The graded crash uses an
+     invented reason no list can contain, and a genuine agent failure whose reason contains the word
+     "crash" must stay classed as the agent's failure.
+  2. **Flagging the crash without protecting the tree is half a fix.** dogfood-162 did not lose a
+     strike; it lost a committed half-edit. The tree is what is graded.
+  3. **`lastGood` keeps its meaning** (`verdict.kind === "PROCEED" && record.status === "SUCCESS"`,
+     agent-loop.ts:1188), `heal/gate-repair.ts` routing stands (no LLM-verdict gate may exit,
+     WP-542/F-207), and the judge prompt, `JudgeForm`, the rubric ids,
+     packages/sdk-ts/src/workflow/completion-review.ts, the chain mirror, the Python mirror, the
+     TaskSpec contract and packages/sdk-ts/src/judge/hermeticity.ts are all out of scope.
+
+  TypeScript stays strict ESM with named exports and no `any`.
+
+  Pin your work with tests that live in the repo, beside the files they cover. A behaviour proved
+  only by the acceptance checks that grade this run is not pinned at all (F-356), and a repo test
+  copied case-for-case from a grading check inherits its blind spots (F-403). **At least one
+  committed test must drive a crash shape these acceptance criteria do not name.**
+
+  Verify your work with FAST checks only: the package typecheck (`pnpm run typecheck` — NOT bare
+  tsc --noEmit, which does not cover the test/ tree, F-382), eslint over the files you touched, and
+  vitest over the directories you actually wrote into. Do NOT run the full vitest suite inside a
+  step, and do NOT background one and wait for it — dogfood-162 ended 2 of its 6 steps on "I have
+  started running … and will report the results upon completion" (F-421/F-345/F-428).
+
+repos:
+  - url: /Users/nikitazolotarev/repos/chikory
+    writable: true
+
+# The SDK suite is both the surface this run edits and the gate it must not break.
+# MEASURE it at the launch commit rather than trusting this line (F-342, dogfood-140).
+regression_suite: pnpm --filter @chikory/sdk exec vitest run
+check_timeout_ms: 180000
+
+acceptance_criteria:
+  - id: AC-1
+    description: >
+      THIS CHECK OWNS ITS ORACLE AND GRADES BOTH DIRECTIONS AT ONCE. Its positive population is
+      crash-shaped step records — the REAL one from run-75794008 taken out of that journal, the real
+      wall-clock cap kill, and one carrying an INVENTED reason string no keyword list can contain —
+      and every one must be classed as an infrastructure failure. Its negative population is genuine
+      agent failures, including one whose reason string contains the word "crash" and one that failed
+      after producing a real summary and output tokens, and every one must stay classed as the
+      agent's failure. It then asserts the strike counter agrees with the classification, and calls
+      the predicate five times to pin determinism.
+    check: |
+      cd packages/sdk-ts || exit 1
+      TARGET=test/runner/ac1-crash-is-infra.generated.test.ts
+      rm -f "$TARGET"
+      cat > "$TARGET" <<'GENEOF'
+      import { describe, expect, test } from "vitest";
+
+      import { advanceStrikeCount, isInfraStepFailure } from "../../src/index.js";
+
+      /**
+       * The two fields the classifier is documented to read, plus whatever else a
+       * StepRecord carries. Each case is built from a real journal shape.
+       */
+      const rec = (over: Record<string, unknown>) => ({
+        status: "FAILED" as const,
+        summary: "",
+        toolCalls: 0,
+        tokens: { input: 11539, output: 0 },
+        costUsd: 0,
+        costEstimated: true,
+        durationMs: 192_000,
+        ...over,
+      });
+
+      // ── POSITIVE POPULATION: the agent never produced an answer ──────────
+      // run-75794008-83a8-4ca8-893d-ae3000df754a step 6, verbatim. Transcript was
+      // 64 bytes: "--- stderr ---\nError: Agent execution terminated due to error."
+      const REAL_CRASH = rec({
+        summary: "agy produced no response (empty print output)",
+        failure: { reason: "agy produced no response (empty print output)", retriable: true },
+        tokens: { input: 11539, output: 0 },
+      });
+
+      // The wall-clock cap kill, which is already classed infra today.
+      const CAP_KILL = rec({
+        summary: "step killed: exceeded maxSeconds",
+        failure: { reason: "step exceeded maxSeconds=600; killed after 602.9s (1.00x cap)", retriable: true },
+        tokens: { input: 8000, output: 0 },
+      });
+
+      // A crash from an adapter nobody has written yet. No list contains these words.
+      const INVENTED_CRASH = rec({
+        summary: "",
+        failure: { reason: "zqfloober harness aborted: vrqualmic fault 0x5b", retriable: true },
+        tokens: { input: 4210, output: 0 },
+      });
+
+      // ── NEGATIVE POPULATION: the agent answered, and its answer was failure ──
+      // Contains the word "crash". A substring match fails here.
+      const AGENT_FAILURE_SAYING_CRASH = rec({
+        summary: "I could not fix the parser: the new test still crashes on the empty-input case, and I have run out of ideas for this step.",
+        failure: { reason: "executor reported failure: the fix still crashes the parser test", retriable: true },
+        tokens: { input: 9000, output: 640 },
+      });
+
+      const AGENT_FAILURE_PLAIN = rec({
+        summary: "scripted attempt 2: failed",
+        failure: { reason: "scripted failure at attempt 2", retriable: true },
+        tokens: { input: 100, output: 50 },
+      });
+
+      const DELIVERED = rec({
+        status: "SUCCESS" as const,
+        summary: "scripted attempt 3: ok",
+        tokens: { input: 100, output: 50 },
+      });
+
+      const POSITIVES: [string, ReturnType<typeof rec>][] = [
+        ["run-75794008 step 6 (the real crash)", REAL_CRASH],
+        ["wall-clock cap kill", CAP_KILL],
+        ["an adapter that does not exist yet", INVENTED_CRASH],
+      ];
+      const NEGATIVES: [string, ReturnType<typeof rec>][] = [
+        ["agent failure whose prose contains 'crash'", AGENT_FAILURE_SAYING_CRASH],
+        ["ordinary agent failure", AGENT_FAILURE_PLAIN],
+      ];
+
+      describe("a crashed step is an infrastructure failure (WP-645)", () => {
+        test("every crash-shaped record is classed infra, whatever the adapter called it", () => {
+          for (const [label, record] of POSITIVES) {
+            expect(
+              isInfraStepFailure(record as never),
+              "a step that produced NO answer is a step the agent never got to finish - judging its partial writes as delivered work is what destroyed dogfood-162's verified delivery (F-423). Case: " +
+                label,
+            ).toBe(true);
+          }
+        });
+
+        test("a step that ANSWERED and failed stays the agent's failure", () => {
+          for (const [label, record] of NEGATIVES) {
+            expect(
+              isInfraStepFailure(record as never),
+              "the agent produced a real summary and output tokens explaining its failure. Laundering that into an infra failure hides a spinning agent and is the F-246 defect with the sign flipped. Case: " +
+                label,
+            ).toBe(false);
+          }
+          expect(isInfraStepFailure(DELIVERED as never), "a SUCCESS step is never an infra failure").toBe(false);
+        });
+
+        test("the strike counter agrees with the classification", () => {
+          for (const [, record] of POSITIVES) {
+            expect(advanceStrikeCount(2, record as never), "an infra failure neither adds nor resets a strike").toBe(2);
+          }
+          for (const [, record] of NEGATIVES) {
+            expect(advanceStrikeCount(2, record as never), "a genuine failure spends a strike").toBe(3);
+          }
+          expect(advanceStrikeCount(2, DELIVERED as never), "delivered work clears the streak").toBe(0);
+        });
+
+        test("pure: the same record gives the same answer every time", () => {
+          const first = [...POSITIVES, ...NEGATIVES].map(([, r]) => isInfraStepFailure(r as never));
+          for (let i = 0; i < 5; i += 1) {
+            expect([...POSITIVES, ...NEGATIVES].map(([, r]) => isInfraStepFailure(r as never))).toEqual(first);
+          }
+        });
+      });
+      GENEOF
+      pnpm exec vitest run "$TARGET"
+      ST=$?
+      rm -f "$TARGET"
+      if [ "$ST" -ne 0 ]; then
+        echo "AC-1 FAIL: a crashed step is still classed as delivered work (F-423), or the classification was bought with a keyword list that also swallowed a genuine agent failure. vitest exited $ST"
+        exit 1
+      fi
+      echo "AC-1 OK: crash-shaped records class infra (including an invented one), answered failures stay the agent's, and the strike counter agrees"
+  - id: AC-2
+    description: >
+      THIS CHECK ASSERTS AT THE CONSUMED SEAM — the tree the operator is handed. It drives the REAL
+      agent loop (real Temporal dev server, real workflow bundle, real judge-pass sequencing, a
+      purpose-built executor, fake judge wire) and then reads the run's workspace off disk. Scenario A
+      delivers a good file at step 1 and then CRASHES at step 2 after deleting it and writing a
+      half-edit, and requires the good file to survive and the half-edit not to; it also requires the
+      FAILED terminal to name a checkpoint the journal flags lastGood. Scenario B fails on max_steps
+      with a DELIVERED, PROCEED-verdicted final step and requires that step's file to survive, so a
+      delivery cannot buy Scenario A by rewinding every failed run.
+    check: |
+      cd packages/sdk-ts || exit 1
+      TARGET=test/runner/ac2-crash-cannot-overwrite-live.generated.test.ts
+      rm -f "$TARGET"
+      cat > "$TARGET" <<'GENEOF'
+      import { randomUUID } from "node:crypto";
+      import { existsSync } from "node:fs";
+      import { mkdtemp, rm, unlink, writeFile } from "node:fs/promises";
+      import { tmpdir } from "node:os";
+      import { join } from "node:path";
+
+      import { afterEach, describe, expect, inject, test } from "vitest";
+
+      import { createRunnerWorker, createTemporalRunner, Journal, journalPath, workspaceDir } from "../../src/index.js";
+      import type { AdapterRegistry, ArtifactStore, ExecutorAdapter, StepRecord } from "../../src/index.js";
+      import {
+        initSourceRepo,
+        judgeForm,
+        makeJudgedSpec,
+        startFakeJudgeWire,
+        TERMINAL_STATUSES,
+        waitFor,
+      } from "./helpers.js";
+
+      const address = inject("temporalAddress");
+      const bundlePath = inject("workflowBundlePath");
+
+      const cleanups: (() => Promise<unknown> | unknown)[] = [];
+      afterEach(async () => {
+        while (cleanups.length > 0) await cleanups.pop()!();
+      });
+
+      const GOOD = "delivered.txt";
+      const HALF = "half-written.txt";
+
+      /**
+       * The scripted adapter in helpers.ts writes nothing when a step fails, so it
+       * cannot express the shape that cost dogfood-162 its delivery: a step that
+       * FAILS and leaves bytes behind. This one can.
+       */
+      function crashingRegistry(crashAtAttempt: number | null): AdapterRegistry {
+        let attempt = 0;
+        const adapter = (ctx: { store: ArtifactStore }): ExecutorAdapter =>
+          ({
+            name: "crashy",
+            modelFamily: "anthropic",
+            async runStep(input): Promise<StepRecord> {
+              attempt += 1;
+              const crashing = attempt === crashAtAttempt;
+              if (crashing) {
+                // Exactly dogfood-162 step 6: bytes on disk, no answer produced.
+                if (existsSync(join(input.workspaceDir, GOOD))) await unlink(join(input.workspaceDir, GOOD));
+                await writeFile(join(input.workspaceDir, HALF), "half an edit\n");
+              } else {
+                await writeFile(join(input.workspaceDir, GOOD), `delivered at attempt ${attempt}\n`);
+              }
+              const diffRef = await ctx.store.put(crashing ? "half a diff" : `diff ${attempt}`, {
+                kind: "diff",
+                summary: `attempt ${attempt} diff`,
+              });
+              const transcriptRef = await ctx.store.put(
+                crashing ? "\n--- stderr ---\nError: Agent execution terminated due to error." : `transcript ${attempt}`,
+                { kind: "transcript", summary: `attempt ${attempt} transcript` },
+              );
+              const base = {
+                diffRef,
+                transcriptRef,
+                toolCalls: crashing ? 0 : 1,
+                tokens: crashing ? { input: 11539, output: 0 } : { input: 100, output: 50 },
+                costUsd: 0,
+                costEstimated: false,
+                durationMs: 10,
+              };
+              return crashing
+                ? {
+                    ...base,
+                    status: "FAILED",
+                    summary: "agy produced no response (empty print output)",
+                    failure: { reason: "agy produced no response (empty print output)", retriable: true },
+                  }
+                : { ...base, status: "SUCCESS", summary: `attempt ${attempt}: ok` };
+            },
+          });
+        return { crashy: adapter };
+      }
+
+      interface Outcome {
+        status: string;
+        ws: string;
+        terminals: { status: string; reason?: string; lastCheckpoint?: string }[];
+        goodCheckpointIds: string[];
+      }
+
+      async function driveRun(crashAtAttempt: number | null, maxSteps: number): Promise<Outcome> {
+        const wire = await startFakeJudgeWire([judgeForm({ criteria: { "AC-1": false } })]);
+        cleanups.push(() => wire.close());
+
+        const tmp = await mkdtemp(join(tmpdir(), "ac2-crash-"));
+        cleanups.push(() => rm(tmp, { recursive: true, force: true }));
+        const repoUrl = await initSourceRepo(join(tmp, "src"), {});
+        const dataDir = join(tmp, "data");
+        const taskQueue = `tq-${randomUUID()}`;
+        const worker = await createRunnerWorker({
+          adapters: crashingRegistry(crashAtAttempt),
+          address: address!,
+          taskQueue,
+          dataDir,
+          workflowBundlePath: bundlePath!,
+          routerOptions: { baseUrls: { "openai-compat": wire.url } },
+        });
+        const workerDone = worker.run();
+        const runner = createTemporalRunner({ address: address!, taskQueue, dataDir });
+        cleanups.push(async () => {
+          worker.shutdown();
+          await workerDone;
+          await runner.close();
+        });
+
+        const spec = makeJudgedSpec({ repoUrl, cadence: 1, maxSteps, budgetUsd: 20 });
+        const handle = await runner.start({ ...spec, executor: { adapter: "crashy", family: "anthropic" } });
+        const report = await waitFor(
+          async () => {
+            const r = await handle.status();
+            return TERMINAL_STATUSES.includes(r.status) ? r : undefined;
+          },
+          { timeoutMs: 240_000, what: "run to reach a terminal status" },
+        );
+        const journal = new Journal(journalPath(dataDir, handle.runId));
+        try {
+          return {
+            status: report.status,
+            ws: workspaceDir(dataDir, handle.runId),
+            terminals: journal.entries("terminal").map((e) => e.payload as Outcome["terminals"][number]),
+            goodCheckpointIds: journal
+              .entries("checkpoint")
+              .map((e) => e.payload as { id: string; lastGood: boolean })
+              .filter((c) => c.lastGood)
+              .map((c) => c.id),
+          };
+        } finally {
+          journal.close();
+        }
+      }
+
+      function findFile(root: string, name: string): boolean {
+        // The workspace holds one clone per repo; the spec declares one.
+        for (const sub of ["", "chikory", "src", "repo", "repo-0"]) {
+          if (existsSync(join(root, sub, name))) return true;
+        }
+        return false;
+      }
+
+      describe("a crashed step cannot overwrite a finished delivery (WP-645/WP-646)", () => {
+        test(
+          "A: a crash after a delivered step leaves the delivered tree - B: a delivered final step on a FAILED run survives",
+          async () => {
+            // A — attempt 1 delivers, attempt 2 crashes after deleting it.
+            const a = await driveRun(2, 3);
+            const detailA =
+              " A: status=" + a.status + " ws=" + a.ws + " terminals=" + JSON.stringify(a.terminals) +
+              " lastGoodIds=" + JSON.stringify(a.goodCheckpointIds);
+            expect(
+              findFile(a.ws, GOOD),
+              "the step BEFORE the crash delivered this file under a judged verdict. A step that produced no answer at all must not be able to delete it - this is exactly what destroyed dogfood-162's verified delivery." +
+                detailA,
+            ).toBe(true);
+            expect(
+              findFile(a.ws, HALF),
+              "the crashed step's half-written bytes are not the run's delivery. dogfood-162 committed 12,589 of them as `chikory: step 5` and sealed on them." +
+                detailA,
+            ).toBe(false);
+            const lastA = a.terminals.at(-1)!;
+            expect(
+              a.goodCheckpointIds.includes(lastA.lastCheckpoint ?? " "),
+              "the FAILED seal must name a checkpoint the journal flags lastGood. dogfood-162 named `@35` (lastGood: false) while `@28` (lastGood: true) held the green delivery." +
+                detailA,
+            ).toBe(true);
+
+            // B — nothing crashes; the run simply exhausts max_steps with the final
+            // step DELIVERED under a PROCEED verdict. Its work must survive.
+            const b = await driveRun(null, 2);
+            const detailB =
+              " B: status=" + b.status + " ws=" + b.ws + " terminals=" + JSON.stringify(b.terminals) +
+              " lastGoodIds=" + JSON.stringify(b.goodCheckpointIds);
+            expect(b.status, "the judge never passes AC-1, so this run exhausts max_steps." + detailB).toBe("FAILED");
+            expect(
+              findFile(b.ws, GOOD),
+              "a FAILED run whose steps all DELIVERED must hand that work over. Rewinding every failed run is the same defect with the sign flipped, and it is how a delivery buys Scenario A cheaply." +
+                detailB,
+            ).toBe(true);
+          },
+          300_000,
+        );
+      });
+      GENEOF
+      pnpm exec vitest run "$TARGET"
+      ST=$?
+      rm -f "$TARGET"
+      if [ "$ST" -ne 0 ]; then
+        echo "AC-2 FAIL: either a crashed step's half-written bytes are still the tree the operator is handed (or it deleted the delivered file), or the FAILED seal still names a non-lastGood checkpoint, or the delivery bought that by rewinding a FAILED run whose final step delivered real work. vitest exited $ST"
+        exit 1
+      fi
+      echo "AC-2 OK: the crash cannot overwrite the delivered tree, the FAILED seal names a lastGood checkpoint, and a delivered final step still survives a FAILED run"
+  - id: AC-3
+    description: >
+      THE TRAP RAIL AND THE DURABILITY FLOOR. Strict typecheck over src AND test (F-382), eslint over
+      the touched modules, then greps that the out-of-scope surfaces this WP must not disturb are
+      still present, then the committed durable-execution guards (resume drill, chain sealing,
+      strike accounting), then the DECLARED regression suite green AND larger by at least four tests
+      — a behaviour proved only by these grading checks is not pinned at all (F-356).
+    check: |
+      cd packages/sdk-ts || exit 1
+      pnpm run typecheck || { echo "AC-3 FAIL: strict typecheck is red (this covers test/ too — F-382)"; exit 1; }
+      pnpm exec eslint src/runner/strike-accounting.ts src/executors/step.ts src/workflow/agent-loop.ts || { echo "AC-3 FAIL: eslint is red on the modules this WP touches"; exit 1; }
+
+      grep -qE 'export function isInfraStepFailure' src/runner/strike-accounting.ts || {
+        echo "AC-3 FAIL: trap — the classifier was deleted rather than corrected. This WP changes WHAT counts as an infra failure, not whether the concept exists."
+        exit 1
+      }
+      grep -qE 'export function advanceStrikeCount' src/runner/strike-accounting.ts || {
+        echo "AC-3 FAIL: trap — the strike counter the CG-1 loop-breaker reads was removed."
+        exit 1
+      }
+      grep -qE 'export function markInfraFailedPass' src/runner/strike-accounting.ts || {
+        echo "AC-3 FAIL: trap — markInfraFailedPass was removed; an infra-flagged pass must suppress the STRIKE and never the finding."
+        exit 1
+      }
+      grep -qE 'export const MAX_GATE_REPAIR_ATTEMPTS' src/heal/gate-repair.ts || {
+        echo "AC-3 FAIL: trap — the gate-repair route lost its bound. No LLM-verdict gate may exit (WP-542/F-207), and this WP does not touch that path."
+        exit 1
+      }
+      grep -qE 'export function areMateriallySameObjections' src/workflow/completion-review.ts || {
+        echo "AC-3 FAIL: trap — completion-review.ts was disturbed. WP-644 is dogfood-164's work and is explicitly out of scope here."
+        exit 1
+      }
+      grep -qE 'export function ignoredPreservePriority' src/judge/hermeticity.ts || {
+        echo "AC-3 FAIL: trap — dogfood-159's judge-check isolation was disturbed. This WP does not touch that path."
+        exit 1
+      }
+
+      pnpm exec vitest run test/runner/resume-drill-seam.test.ts test/cli/chain-resume-drill-seam.test.ts test/chain/advance.test.ts || {
+        echo "AC-3 FAIL: trap — a committed durable-execution guard is RED. The resume drill must still resume from a sealed checkpoint with zero re-execution, and no chain incarnation may end un-sealed (WP-543/F-208)."
+        exit 1
+      }
+
+      OUT=$(pnpm --filter @chikory/sdk exec vitest run 2>&1)
+      ST=$?
+      echo "$OUT" | grep -nE '(^|[[:space:]])(FAIL|×|✕|AssertionError)' | head -n 20
+      echo "$OUT" | tail -6
+      if [ "$ST" -ne 0 ]; then
+        echo "AC-3 FAIL: the DECLARED regression suite is RED (vitest exited $ST). One test in this suite is known flaky (F-420, 1 red in 4 observations) — the failing test's NAME is printed above and the full output is kept by the review harness."
+        exit 1
+      fi
+      N=$(echo "$OUT" | grep -oE "Tests +[0-9]+ passed" | grep -oE "[0-9]+" | head -1)
+      echo "committed suite tests passing: ${N:-UNPARSEABLE} (floor 1786, measured baseline 1782)"
+      if [ -z "$N" ]; then
+        echo "AC-3 FAIL: could not read a test count out of the vitest summary"
+        exit 1
+      fi
+      if [ "$N" -lt 1786 ]; then
+        echo "AC-3 FAIL: durability floor not met — the committed suite did not grow by at least 4 tests. A behaviour proved only by the generated grading checks is not pinned at all (F-356)."
+        exit 1
+      fi
+      echo "AC-3 OK: strict typecheck and lint green, out-of-scope surfaces intact, durable-execution guards green, DECLARED suite green AND larger"
+
+budget_usd: 20
+max_steps: 6
+
+agent_classes:
+  executor: executor-default
+  judge: judge-default
+
+judge:
+  cadence: 1
+
+# F-322 (dogfood-135): without this, a converged out-of-rubric escalation parks overnight for a
+# human instead of auto-sealing.
+unattended:
+  escalation: seal_resumable_failed
