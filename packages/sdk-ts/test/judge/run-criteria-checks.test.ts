@@ -128,24 +128,49 @@ describe("runCriteriaChecks (WP-561)", () => {
     expect(runs[0]?.exitCode).toBe(0);
   });
 
-  it("prevents shell command injection when executing acceptance check criteria", async () => {
-    const injectionFile = join(dir, "injected.txt");
+  /**
+   * F-410 (dogfood-159 review). These two replace tests that asserted a tokenized `check` — a
+   * contract under which a multi-line body became arguments to its own first word. The judge
+   * then recorded exit 0 for a check that never ran: a vacuous PASS on every acceptance
+   * criterion, which is the worst possible failure of a gate. A `check` is a shell script.
+   */
+  it("a multi-line check body runs as a shell script, side effects and all", async () => {
     const runs = await runCriteriaChecks({
       workspaceDir: dir,
-      criteria: [criterion("AC-INJECT", `echo safe; touch ${injectionFile}`)],
+      criteria: [
+        criterion(
+          "AC-SHELL",
+          [
+            "echo hello > out.txt",
+            'if [ ! -f out.txt ]; then echo "MISSING"; exit 1; fi',
+            "N=$(wc -c < out.txt)",
+            'echo "AC OK: wrote $N bytes"',
+            "exit 0",
+          ].join("\n"),
+        ),
+      ],
     });
-    expect(existsSync(injectionFile)).toBe(false);
-    expect(runs[0]?.exitCode).toBe(0);
-    expect(runs[0]?.output).toContain("touch");
+    expect(runs[0]?.exitCode, runs[0]?.output).toBe(0);
+    expect(
+      runs[0]?.output,
+      "the body must EXECUTE, not be echoed back as arguments to its own first word",
+    ).toContain("AC OK: wrote 6 bytes");
+    // The file itself is gone: WP-625/WP-628 isolation cleans up what a check created. The
+    // check's own output is the proof that it ran.
   });
 
-  it("handles malformed check command strings cleanly", async () => {
+  it("a check whose assertion fails still exits non-zero — a gate must be able to say no", async () => {
     const runs = await runCriteriaChecks({
       workspaceDir: dir,
-      criteria: [criterion("AC-BAD", "echo 'unmatched quote")],
+      criteria: [
+        criterion(
+          "AC-RED",
+          ['if [ ! -f definitely-absent.txt ]; then echo "ABSENT"; exit 1; fi', "exit 0"].join("\n"),
+        ),
+      ],
     });
     expect(runs[0]?.exitCode).toBe(1);
-    expect(runs[0]?.output).toContain("invalid check command");
+    expect(runs[0]?.output).toContain("ABSENT");
   });
 
   it("benchmarks sequential execution of checks with delay", async () => {

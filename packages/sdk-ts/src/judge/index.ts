@@ -75,11 +75,17 @@ export { scanDiffForNewDependencies } from "./scan-dependencies.js";
 export { scanDiffForLayeringViolations } from "./scan-layering.js";
 export {
   applyCleanupPlan,
+  DEFAULT_MAX_IGNORED_FILE_PRESERVE_BYTES,
+  DEFAULT_MAX_TOTAL_IGNORED_PRESERVE_BYTES,
+  ignoredPreservePriority,
   parseDirtySnapshot,
   planCheckSideEffectCleanup,
   snapshotWorkspace,
   type CheckSideEffectCleanupPlan,
+  type CleanupResult,
   type GitDirtyEntry,
+  type ParsedDirtyEntry,
+  type SnapshotWorkspaceOptions,
   type WorkspaceDirtySnapshot,
 } from "./hermeticity.js";
 

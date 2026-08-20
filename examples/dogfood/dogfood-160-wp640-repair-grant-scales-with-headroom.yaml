@@ -1,0 +1,630 @@
+# Plain: when the judge's final review finds a design problem, the run gets one chance to fix it.
+# One, total — no matter how much of the run is left. dogfood-159 used its chance on the first
+# problem, hit a SECOND, different problem, and gave up with three of six steps and 98% of its
+# budget unspent. A person typed `resume` an hour and forty minutes later and the run fixed it in
+# three minutes. After this run, a run that is still finding NEW problems keeps working; a run that
+# keeps finding the SAME problem still stops.
+# WP: WP-640 (the completion-review repair grant must scale with the run's remaining headroom; F-408)
+# Ladder-rung: 0 (off-ladder — the gate reads STALLED and binds to the rung, but P3 rung-5's
+#   remaining half is WP-304, operator-run and not expressible as a spec; see WHY)
+# Thesis-KPI: durable execution + unattended horizon (CLAUDE.md). Measured as: can a run that is
+#   funded, permitted and capable of healing itself be stopped by a constant, and made to wait for
+#   a human. A loop that needs a person to say "keep going" has no horizon.
+#
+# THE MEASURED PREMISE — read out of the code AND out of dogfood-159's journal at this review
+#   (F-203/F-342: measured, never transcribed). Reproduce the read with:
+#     sed -n '15,17p'     packages/sdk-ts/src/workflow/completion-review.ts   # the constant
+#     sed -n '79,81p'     packages/sdk-ts/src/workflow/completion-review.ts   # the exhaustion test
+#     sed -n '1346,1379p' packages/sdk-ts/src/workflow/agent-loop.ts          # grant, then seal
+#   And the journal (dogfood-159, `run-ec5c4bb8-de16-4c28-beba-a8cd09795fa1`):
+#     sqlite3 .chikory/runs/run-ec5c4bb8-de16-4c28-beba-a8cd09795fa1/journal.db \
+#       "select idx, kind, substr(ts,12,8) from journal_entries order by idx"
+#
+#   `MAX_COMPLETION_REVIEWS = 2` (`packages/sdk-ts/src/workflow/completion-review.ts:16`) — an
+#   initial review plus ONE re-review. `decideCompletionReview` skips as soon as
+#   `state.reviewAttemptsUsed >= MAX_COMPLETION_REVIEWS` (`:79`), and the seal site treats that
+#   skip as the end of the road: `canRetry` is false, so the run seals
+#   `FAILED (resumable)` with "completion review: unresolved finding on a converged step"
+#   (`packages/sdk-ts/src/workflow/agent-loop.ts:1374`). Nothing in that path reads the number of
+#   steps left, the budget left, or whether the finding is the SAME one.
+#
+#   MEASURED, dogfood-159: the run held `max_steps: 6` and `budget_usd: 20`. It spent its grant
+#   after step 1. Step 2's completion review raised a DIFFERENT objection — pass #2 objected that
+#   binary content was round-tripped through UTF-8 and that a deleted unpreserved path produced no
+#   plan entry; pass #4 objected that budget selection was unstable between snapshots — and at
+#   21:37:24 the run sealed FAILED with **3 of 6 steps and 98.3% of the budget unspent**
+#   (j-idx 15). A hand-typed resume at 23:17:16 (j-idx 16, `control_event
+#   {event:"resume", source:"failed_seal"}`) produced step 3, which cleared the finding in 3m 12s
+#   and sealed SUCCESS at 23:23:49. **1h 39m 52s — 81% of the run's 2h 2m wall clock — was a human
+#   the loop did not need.**
+#
+#   * THE FIRST TRAP IS THE OBVIOUS FIX, AND IT IS FORBIDDEN. Raising `MAX_COMPLETION_REVIEWS` to
+#     a larger constant satisfies the headline case and re-opens F-223…F-226 (plan-gate
+#     oscillation), whose whole lesson is "repeated gate gaps are oscillation — never raise the
+#     cap". A run whose review keeps returning the SAME objection must still stop, and it must
+#     stop just as fast as it does today. AC-2 collides the two: the same check that requires a
+#     run finding NEW problems to continue also requires a run finding the SAME problem to seal
+#     FAILED within the bound it already has.
+#   * THE SECOND TRAP IS KEYING "SAME" ON THE RUBRIC ID. It is the natural implementation and it
+#     is wrong on the very run that motivated this WP: dogfood-159's pass #2 and pass #4 both
+#     failed `design_serves_overall_goal`, with completely different objections. An implementation
+#     that compares rubric ids alone would have sealed that run FAILED exactly as HEAD did. AC-1
+#     therefore repeats the ID and varies only the justification, and its oracle is the run's own
+#     terminal status.
+#   * THE THIRD TRAP IS FIXING THE PURE FUNCTION. `decideCompletionReview` is pure and easy to
+#     make green in isolation while `agent-loop.ts` still hands it a constant and still seals.
+#     Both ACs drive the REAL agent loop — real Temporal dev server, real workflow bundle, real
+#     judge-pass sequencing, scripted executor and a fake judge wire (the established
+#     `test/runner/helpers.ts` harness, no LLM-layer mock: CLAUDE.md). The oracle is the terminal
+#     entry the run writes for itself.
+#   * THE FIFTH TRAP WAS FOUND BY ARMING THIS SPEC, AND IT IS THE SUBTLE ONE. The objection you
+#     compare must be the COMPLETION REVIEW'S OWN, not the merged set. `mergeDesignFindings`
+#     unions the review's rubric rows with the SEALING verdict's, and the sealing verdict's
+#     failing rows legitimately change from step to step — so a signature taken over the merged
+#     set reads "new finding" on a run that is plainly oscillating. The first reference
+#     implementation written at this review did exactly that, and broke the committed guard
+#     `test/runner/sealing-design-repair-live.test.ts` ("UNREPAIRED … seals FAILED naming item
+#     after EXACTLY 2 review passes" — it got 3). Narrowing the comparison to the review's own
+#     failing rows made all three ACs and the whole suite green. AC-3 runs the DECLARED suite, so
+#     this trap is graded.
+#   * THE SIXTH TRAP IS SPENDING THE HEADROOM YOU DO NOT HAVE. The grant may never let a run
+#     exceed `max_steps` or its budget. AC-2 runs its oscillating scenario at the SAME `maxSteps`
+#     as the passing one, so a delivery cannot pass by quietly overrunning the cap.
+#   * NOT IN SCOPE: no change to what a completion review IS, to the rubric ids, to
+#     `mergeDesignFindings`, to `buildCompletionReviewBrief`, to the judge prompt, to
+#     `heal/gate-repair.ts` routing (WP-542/F-207 — no LLM-verdict gate may exit), to the chain
+#     mirror (`src/chain/completion-review.ts`), to the Python mirror, or to the TaskSpec contract.
+#     dogfood-159's judge-check isolation (`src/judge/hermeticity.ts`) is untouched.
+#   * THE SUITE THIS RUN MUST NOT BREAK, MEASURED at the launch commit by running it under devbox
+#     (F-342 — run it yourself and read its own tail): 204 files passed | 2 skipped,
+#     1,745 passed | 23 skipped (1,768 total). RE-MEASURED after this review rebased onto 15
+#     outside PRs and hand-fixed F-410. It already contains the anti-oscillation guard this
+#     run must keep green — `test/runner/deterministic-rubric-live.test.ts` Scenario 3 drives a
+#     review that returns the SAME two failing rubric ids on every pass and requires the run to
+#     seal FAILED (resumable) with BOTH ids named in the terminal `reason`.
+#
+# PRECEDENCE — the design calls plan.md leaves open are DECIDED HERE, so the run is not graded on
+#   a coin flip:
+#   1. A NEW FINDING IS PROGRESS. An attempt is spent only when the objection the review returns
+#      is materially the one the previous attempt was given. A different objection means the last
+#      repair worked and the review moved on.
+#   2. HEADROOM IS A CEILING, NEVER A FLOOR. Whatever the rule grants, it may never exceed the
+#      steps or budget the spec allows. A run with no headroom gets no grant, however new the
+#      finding.
+#   3. AN OSCILLATING RUN STOPS AT TODAY'S BOUND. Making progress buys more; repeating yourself
+#      buys nothing, and buys it no more slowly than it does now.
+#
+# Format: loose — the outcome is fixed (a run that keeps finding NEW problems keeps working while
+#   it has headroom; a run that keeps finding the SAME problem stops as fast as it does today).
+#   How "same finding" is decided, where the grant is computed, and how headroom is read are the
+#   executor's call. No AC greps a new symbol or field name (F-393).
+#
+# Launch mode: RUN (one seam, one package).
+#   CHIKORY_PREFLIGHT_ONLY=1 devbox run run-dogfood
+#   devbox run run-dogfood
+#
+# WHY THIS AND NOT THE LADDER RUNG (dogfood-159 review, 2026-08-20):
+#   `scripts/dogfood-progression.sh` reads **STALLED** with dogfood-159 in the ledger (max steps
+#   3 vs 3, rung 0 vs 0, resumes 0, loose 3 vs 3 over the trailing three), and a STALLED verdict
+#   BINDS the next headline to the current phase ladder rung. That rung cannot be run: P3's ladder
+#   is WP-530 (plan.md §7) and its next rung, rung-5, is WP-304's OpenHands arm plus a corpus wide
+#   enough to separate 19 requirements at 95% confidence — a quota-bound, multi-hour benchmark
+#   suite the OPERATOR runs by hand (dogfood-122's lesson), so it cannot be a spec, and has not
+#   been since dogfood-139 delivered rung-5's other half (WP-303). The binding verdict is
+#   UNSATISFIABLE by any spec and is recorded as such rather than quietly reinterpreted. Note the
+#   sharp irony this review measured: dogfood-159 DID move the resume axis — it recovered from a
+#   sealed FAILED state — and the gate scored it 0 because a `failed_seal` resume is invisible to
+#   the ledger (F-409 → WP-641). The 🔴 friction this review opened (F-404) was HAND-FIXED in the
+#   same sitting per TASK-PROTOCOL §4 and does not headline. WP-640 beats the remaining
+#   alternatives on thesis value: it is product code on the DURABLE-EXECUTION pillar — Chikory
+#   exists to make long-horizon agent runs reliable, and F-408 is the first measured case of the
+#   loop refusing work it was funded and permitted to do, at a cost of 81% of a run's wall clock.
+#   Rejected: WP-639 (F-407, real, but a narrow detection gap on one path family — no horizon
+#   effect) · WP-641 (F-409, the measurement fix, harness-meta and §1.5 track-B) · WP-589 half (2)
+#   (benchmark-CLI ergonomics — a bad SPEC SHAPE, not a loop defect) · WP-638 (F-402, low live
+#   reachability) · WP-590/WP-610/WP-620/WP-622/WP-634 (all track-B sized).
+
+name: dogfood-160-wp640-repair-grant-scales-with-headroom
+wp: WP-640
+
+goal: |
+  A run must not seal FAILED for want of a repair attempt while it still has the steps and budget
+  to make one — and a run that keeps hitting the same wall must still stop.
+
+  Measured from the code. The completion-review cap is the constant 2
+  (packages/sdk-ts/src/workflow/completion-review.ts:16) — an initial completion review plus one
+  re-review. `decideCompletionReview` skips as soon as the attempts already used reach it
+  (packages/sdk-ts/src/workflow/completion-review.ts:79), and the seal site turns that skip into a
+  terminal: the retry flag goes false and the run seals FAILED (resumable) with "completion review:
+  unresolved finding on a converged step" (packages/sdk-ts/src/workflow/agent-loop.ts:1374).
+  Nothing on that path reads how many steps are left, how much budget is left, or whether the
+  objection is the SAME one the last attempt was given.
+
+  Measured from a real run. dogfood-159 (`run-ec5c4bb8-de16-4c28-beba-a8cd09795fa1`) held
+  max_steps 6 and budget 20 USD. It spent its grant after step 1; step 2's review raised a
+  DIFFERENT objection; the run sealed FAILED at 21:37:24 with 3 of 6 steps and 98.3% of budget
+  unspent. A human typed resume 1h 39m 52s later, and step 3 cleared the finding in 3m 12s.
+
+  Make this true.
+
+  1. **A run still finding NEW problems keeps working.** When the completion review comes back
+     with an objection that is not the one the last repair attempt was given, and the run still
+     has steps and budget, the run gets another attempt instead of sealing FAILED.
+  2. **"New" is decided on the objection, not on its label.** The two objections that stopped
+     dogfood-159 carried the SAME rubric id and completely different text. An implementation that
+     compares only rubric ids does not fix that run.
+  3. **A run repeating itself stops, exactly as fast as it does today.** When the review keeps
+     returning materially the same objection, the run seals FAILED (resumable) within the bound it
+     already has. Making progress buys more attempts; repeating yourself buys none.
+
+  Three things must NOT change, and each is a trap this run is graded on:
+
+  1. **The bound is not raised.** Turning the completion-review cap into a bigger constant, or
+     removing it while steps remain, satisfies (1) and destroys (3) — that is exactly the
+     oscillation F-223…F-226 forbids. The existing guard in
+     packages/sdk-ts/test/runner/deterministic-rubric-live.test.ts (Scenario 3) drives a review
+     that returns the same two failing rubric ids on every pass and requires a FAILED (resumable)
+     seal naming both ids. It must stay green untouched.
+  2. **Headroom is a ceiling, never a floor.** No grant may let a run exceed `max_steps` or its
+     budget. A run with no headroom gets no attempt, however new the finding.
+  3. **The rest of the gate is untouched.** `heal/gate-repair.ts` routing stands (no LLM-verdict
+     gate may exit, WP-542/F-207); `mergeDesignFindings` and `buildCompletionReviewBrief` keep
+     their behaviour; the chain mirror (packages/sdk-ts/src/chain/completion-review.ts), the
+     judge prompt, the rubric ids, the Python mirror and the TaskSpec contract are not touched.
+
+  TypeScript stays strict ESM with named exports and no `any`. The decision must stay pure and
+  replay-safe — it is read inside a Temporal workflow, so no clocks, no randomness, no I/O.
+
+  Pin your work with tests that live in the repo, beside the files they cover. A behaviour proved
+  only by the acceptance checks that grade this run is not pinned at all (F-356), and a repo test
+  copied case-for-case from a grading check inherits its blind spots (F-403). **At least one
+  committed test must pin an input family these acceptance criteria do not name.**
+
+  **The plausible-but-wrong delivery is the one that raises the constant.** The second is the one
+  that fixes the pure decision function while `agent-loop.ts` still hands it a constant and still
+  seals. The third compares rubric ids and calls two different objections the same finding. All
+  three are graded.
+
+  Verify your work with FAST checks only: the package typecheck (`pnpm run typecheck` — NOT bare
+  tsc --noEmit, which does not cover the test/ tree, F-382), eslint over the files you touched,
+  and vitest over the directories you actually wrote into. Do NOT run the full vitest suite inside
+  a step — it does not fit the step time cap (F-345).
+
+repos:
+  - url: /Users/nikitazolotarev/repos/chikory
+    writable: true
+
+# The SDK suite is both the surface this run edits and the gate it must not break.
+# MEASURE it at the launch commit rather than trusting this line (F-342, dogfood-140).
+regression_suite: pnpm --filter @chikory/sdk exec vitest run
+check_timeout_ms: 180000
+
+acceptance_criteria:
+  - id: AC-1
+    description: >
+      THIS CHECK OWNS ITS ORACLE AND ASSERTS AT THE CONSUMED SEAM — it drives the REAL agent loop
+      (real Temporal dev server, real workflow bundle, real judge-pass sequencing, scripted
+      executor, fake judge wire) and reads the run's own terminal entry. It replays dogfood-159
+      exactly: max_steps 6, and a completion review that fails the SAME rubric id twice with
+      DIFFERENT objection text, then comes back clean. The run must take a third step and seal
+      SUCCESS. A delivery that compares rubric ids rather than objections seals FAILED here, as
+      HEAD does. The assertion is the journal's terminal status and step count, so a fix to the
+      pure decision function alone cannot pass.
+    check: |
+      cd packages/sdk-ts || exit 1
+      TARGET=test/runner/ac1-repair-grant-new-finding.generated.test.ts
+      rm -f "$TARGET"
+      cat > "$TARGET" <<'GENEOF'
+      import { randomUUID } from "node:crypto";
+      import { mkdtemp, rm } from "node:fs/promises";
+      import { tmpdir } from "node:os";
+      import { join } from "node:path";
+
+      import { afterEach, describe, expect, inject, test } from "vitest";
+
+      import {
+        createRunnerWorker,
+        createTemporalRunner,
+        Journal,
+        journalPath,
+        RUBRIC_DESIGN_SERVES_OVERALL_GOAL,
+        type JudgeForm,
+        type RunStatusReport,
+      } from "../../src/index.js";
+      import {
+        completionReviewForm,
+        initSourceRepo,
+        judgeForm,
+        makeJudgedSpec,
+        scriptedRegistry,
+        startFakeJudgeWire,
+        TERMINAL_STATUSES,
+        waitFor,
+        type FakeJudgeWire,
+      } from "./helpers.js";
+
+      const address = inject("temporalAddress");
+      const bundlePath = inject("workflowBundlePath");
+
+      const cleanups: (() => Promise<unknown> | unknown)[] = [];
+      afterEach(async () => {
+        while (cleanups.length > 0) await cleanups.pop()!();
+      });
+
+      /** A completion-review form failing one rubric id with the GIVEN objection text. */
+      function reviewFailing(id: string, justification: string): JudgeForm {
+        const base = completionReviewForm({ rubricFails: [id] });
+        return {
+          ...base,
+          rubricResults: base.rubricResults.map((row) =>
+            row.id === id ? { ...row, pass: false, justification } : row,
+          ),
+        };
+      }
+
+      async function setup(wire: FakeJudgeWire) {
+        const tmp = await mkdtemp(join(tmpdir(), "ac1-grant-"));
+        cleanups.push(() => rm(tmp, { recursive: true, force: true }));
+        const repoUrl = await initSourceRepo(join(tmp, "src"), {});
+        const dataDir = join(tmp, "data");
+        const taskQueue = `tq-${randomUUID()}`;
+        const worker = await createRunnerWorker({
+          adapters: scriptedRegistry,
+          address: address!,
+          taskQueue,
+          dataDir,
+          workflowBundlePath: bundlePath!,
+          routerOptions: { baseUrls: { "openai-compat": wire.url } },
+        });
+        const workerDone = worker.run();
+        const runner = createTemporalRunner({ address: address!, taskQueue, dataDir });
+        cleanups.push(async () => {
+          worker.shutdown();
+          await workerDone;
+          await runner.close();
+        });
+        return { repoUrl, dataDir, runner };
+      }
+
+      describe("a run still finding NEW problems must not stop while it has headroom (WP-640)", () => {
+        test("same rubric id, DIFFERENT objection, then clean — the run works on and seals SUCCESS", async () => {
+          // Judge pass 1 withholds the criterion so the run takes a second step: a first-verdict
+          // seal with a clean rubric SKIPS the completion review entirely, and this test must
+          // reach that path (the `firstPassWithheld` discipline in deterministic-rubric-live).
+          const wire = await startFakeJudgeWire(
+            [
+              judgeForm({ criteria: { "AC-1": false } }),
+              judgeForm({ criteria: { "AC-1": true } }),
+              judgeForm({ criteria: { "AC-1": true } }),
+              judgeForm({ criteria: { "AC-1": true } }),
+              judgeForm({ criteria: { "AC-1": true } }),
+              judgeForm({ criteria: { "AC-1": true } }),
+            ],
+            {
+              // dogfood-159's exact shape: the SAME rubric id objected to twice, different text.
+              reviewForms: [
+                reviewFailing(
+                  RUBRIC_DESIGN_SERVES_OVERALL_GOAL,
+                  "objection one: ignored bytes are round-tripped through UTF-8, so a binary artifact is not byte-preserved",
+                ),
+                reviewFailing(
+                  RUBRIC_DESIGN_SERVES_OVERALL_GOAL,
+                  "objection two: budget selection is unstable between snapshots, so an untouched file is reported as corrupted",
+                ),
+                completionReviewForm(),
+                completionReviewForm(),
+              ],
+            },
+          );
+          cleanups.push(() => wire.close());
+          const { dataDir, repoUrl, runner } = await setup(wire);
+
+          const handle = await runner.start(
+            makeJudgedSpec({ repoUrl, cadence: 1, maxSteps: 6, budgetUsd: 20 }),
+          );
+          const report: RunStatusReport = await waitFor(
+            async () => {
+              const r = await handle.status();
+              return TERMINAL_STATUSES.includes(r.status) ? r : undefined;
+            },
+            { timeoutMs: 240_000, what: "run to reach a terminal status" },
+          );
+
+          const journal = new Journal(journalPath(dataDir, handle.runId));
+          try {
+            const terminals = journal
+              .entries("terminal")
+              .map((e) => e.payload as { status: string; reason?: string });
+            const steps = journal.entries("step").length;
+            const detail = " terminals=" + JSON.stringify(terminals) + " steps=" + steps;
+
+            expect(
+              terminals.some((t) => t.status === "FAILED"),
+              "the run had steps and budget left and the review raised a DIFFERENT objection each time — it must not seal FAILED for want of an attempt." +
+                detail,
+            ).toBe(false);
+            expect(report.status, "terminal status." + detail).toBe("SUCCESS");
+            expect(
+              steps,
+              "the second, DIFFERENT objection must buy another step (HEAD stops at 3)." + detail,
+            ).toBeGreaterThanOrEqual(4);
+            expect(steps, "and must never overrun max_steps." + detail).toBeLessThanOrEqual(6);
+          } finally {
+            journal.close();
+          }
+        }, 280_000);
+      });
+      GENEOF
+      pnpm exec vitest run "$TARGET"
+      ST=$?
+      rm -f "$TARGET"
+      if [ "$ST" -ne 0 ]; then
+        echo "AC-1 FAIL: a run with headroom left sealed FAILED on a NEW objection, or the grant is keyed on the rubric id rather than the objection. vitest exited $ST"
+        exit 1
+      fi
+      echo "AC-1 OK: a different objection buys another attempt, and the run seals SUCCESS"
+
+  - id: AC-2
+    description: >
+      THIS CHECK COLLIDES THE TWO INVARIANTS SO NEITHER CAN BE SATISFIED ALONE, on the same real
+      agent loop and at the SAME max_steps 6. Scenario A: the review objects to a DIFFERENT rubric
+      id on each pass, then comes back clean — the run must seal SUCCESS and take a fourth step.
+      Scenario B: the review returns materially the SAME objection on every pass — the run must
+      seal FAILED (resumable) within the bound it has today (3 steps), without overrunning
+      max_steps. A delivery that raises or removes the cap passes A and fails B; a delivery that
+      leaves the cap alone passes B and fails A. Both scenarios are graded in one check on one
+      loop, so no family is graded alone (F-360/F-403).
+    check: |
+      cd packages/sdk-ts || exit 1
+      TARGET=test/runner/ac2-repair-grant-bound-collision.generated.test.ts
+      rm -f "$TARGET"
+      cat > "$TARGET" <<'GENEOF'
+      import { randomUUID } from "node:crypto";
+      import { mkdtemp, rm } from "node:fs/promises";
+      import { tmpdir } from "node:os";
+      import { join } from "node:path";
+
+      import { afterEach, describe, expect, inject, test } from "vitest";
+
+      import {
+        createRunnerWorker,
+        createTemporalRunner,
+        Journal,
+        journalPath,
+        RUBRIC_CUMULATIVE_DESIGN_COHERENT,
+        RUBRIC_DESIGN_SERVES_OVERALL_GOAL,
+        type JudgeForm,
+      } from "../../src/index.js";
+      import {
+        completionReviewForm,
+        initSourceRepo,
+        judgeForm,
+        makeJudgedSpec,
+        scriptedRegistry,
+        startFakeJudgeWire,
+        TERMINAL_STATUSES,
+        waitFor,
+      } from "./helpers.js";
+
+      const address = inject("temporalAddress");
+      const bundlePath = inject("workflowBundlePath");
+
+      const cleanups: (() => Promise<unknown> | unknown)[] = [];
+      afterEach(async () => {
+        while (cleanups.length > 0) await cleanups.pop()!();
+      });
+
+      function reviewFailing(id: string, justification: string): JudgeForm {
+        const base = completionReviewForm({ rubricFails: [id] });
+        return {
+          ...base,
+          rubricResults: base.rubricResults.map((row) =>
+            row.id === id ? { ...row, pass: false, justification } : row,
+          ),
+        };
+      }
+
+      interface Outcome {
+        status: string;
+        steps: number;
+        terminals: { status: string; reason?: string; resumable?: boolean }[];
+      }
+
+      async function driveRun(reviewForms: JudgeForm[]): Promise<Outcome> {
+        const wire = await startFakeJudgeWire(
+          [
+            judgeForm({ criteria: { "AC-1": false } }),
+            judgeForm({ criteria: { "AC-1": true } }),
+            judgeForm({ criteria: { "AC-1": true } }),
+            judgeForm({ criteria: { "AC-1": true } }),
+            judgeForm({ criteria: { "AC-1": true } }),
+            judgeForm({ criteria: { "AC-1": true } }),
+          ],
+          { reviewForms },
+        );
+        cleanups.push(() => wire.close());
+
+        const tmp = await mkdtemp(join(tmpdir(), "ac2-grant-"));
+        cleanups.push(() => rm(tmp, { recursive: true, force: true }));
+        const repoUrl = await initSourceRepo(join(tmp, "src"), {});
+        const dataDir = join(tmp, "data");
+        const taskQueue = `tq-${randomUUID()}`;
+        const worker = await createRunnerWorker({
+          adapters: scriptedRegistry,
+          address: address!,
+          taskQueue,
+          dataDir,
+          workflowBundlePath: bundlePath!,
+          routerOptions: { baseUrls: { "openai-compat": wire.url } },
+        });
+        const workerDone = worker.run();
+        const runner = createTemporalRunner({ address: address!, taskQueue, dataDir });
+        cleanups.push(async () => {
+          worker.shutdown();
+          await workerDone;
+          await runner.close();
+        });
+
+        const handle = await runner.start(
+          makeJudgedSpec({ repoUrl, cadence: 1, maxSteps: 6, budgetUsd: 20 }),
+        );
+        const report = await waitFor(
+          async () => {
+            const r = await handle.status();
+            return TERMINAL_STATUSES.includes(r.status) ? r : undefined;
+          },
+          { timeoutMs: 240_000, what: "run to reach a terminal status" },
+        );
+        const journal = new Journal(journalPath(dataDir, handle.runId));
+        try {
+          return {
+            status: report.status,
+            steps: journal.entries("step").length,
+            terminals: journal
+              .entries("terminal")
+              .map((e) => e.payload as Outcome["terminals"][number]),
+          };
+        } finally {
+          journal.close();
+        }
+      }
+
+      describe("progress buys attempts; repetition buys none (WP-640)", () => {
+        test("A: different objections keep the run working — B: the same objection still stops it fast", async () => {
+          // A — a genuinely different finding on each pass, then clean.
+          const a = await driveRun([
+            reviewFailing(
+              RUBRIC_DESIGN_SERVES_OVERALL_GOAL,
+              "objection A1: the design does not serve the goal because the consumed batch seam is unfixed",
+            ),
+            reviewFailing(
+              RUBRIC_CUMULATIVE_DESIGN_COHERENT,
+              "objection A2: the cumulative abstractions do not compose for budget-exceeded inputs",
+            ),
+            completionReviewForm(),
+            completionReviewForm(),
+          ]);
+          const detailA =
+            " A: status=" + a.status + " steps=" + a.steps + " terminals=" + JSON.stringify(a.terminals);
+          expect(
+            a.status,
+            "a run answering NEW objections with headroom left must reach SUCCESS." + detailA,
+          ).toBe("SUCCESS");
+          expect(
+            a.steps,
+            "the second, different objection must buy another step (HEAD stops at 3)." + detailA,
+          ).toBeGreaterThanOrEqual(4);
+
+          // B — materially the same objection, every pass, at the SAME max_steps.
+          const sameText =
+            "objection B: the design does not serve the goal because the consumed batch seam is unfixed";
+          const b = await driveRun([
+            reviewFailing(RUBRIC_DESIGN_SERVES_OVERALL_GOAL, sameText),
+            reviewFailing(RUBRIC_DESIGN_SERVES_OVERALL_GOAL, sameText),
+            reviewFailing(RUBRIC_DESIGN_SERVES_OVERALL_GOAL, sameText),
+            reviewFailing(RUBRIC_DESIGN_SERVES_OVERALL_GOAL, sameText),
+            reviewFailing(RUBRIC_DESIGN_SERVES_OVERALL_GOAL, sameText),
+            reviewFailing(RUBRIC_DESIGN_SERVES_OVERALL_GOAL, sameText),
+          ]);
+          const detailB =
+            " B: status=" + b.status + " steps=" + b.steps + " terminals=" + JSON.stringify(b.terminals);
+          expect(
+            b.status,
+            "an oscillating run must still seal FAILED — the cap was raised or removed (F-223…F-226)." + detailB,
+          ).toBe("FAILED");
+          expect(
+            b.steps,
+            "repeating the SAME objection must buy no extra steps: today this seals after 3." + detailB,
+          ).toBeLessThanOrEqual(3);
+          const lastB = b.terminals.at(-1)!;
+          expect(
+            lastB.resumable,
+            "the oscillating seal stays operator-resumable." + detailB,
+          ).toBe(true);
+        }, 320_000);
+      });
+      GENEOF
+      pnpm exec vitest run "$TARGET"
+      ST=$?
+      rm -f "$TARGET"
+      if [ "$ST" -ne 0 ]; then
+        echo "AC-2 FAIL: either a run answering NEW objections still stalls, or the anti-oscillation bound was raised/removed (F-223…F-226). vitest exited $ST"
+        exit 1
+      fi
+      echo "AC-2 OK: progress buys attempts and repetition buys none, on the same loop at the same max_steps"
+
+  - id: AC-3
+    description: >
+      Hygiene and the traps that are cheaper to grep than to drive: strict typecheck over src AND
+      test (F-382), eslint over the modules this WP touches, dogfood-159's isolation work still
+      present, the chain mirror and the gate-repair route untouched, the committed
+      anti-oscillation guard still green, and the DECLARED regression suite green AND grown by at
+      least 4 committed tests (F-356).
+    check: |
+      cd packages/sdk-ts || exit 1
+      pnpm run typecheck || { echo "AC-3 FAIL: strict typecheck is red (this covers test/ too — F-382)"; exit 1; }
+      pnpm exec eslint src/workflow/completion-review.ts src/workflow/agent-loop.ts || { echo "AC-3 FAIL: eslint is red on the modules this WP touches"; exit 1; }
+
+      grep -qE 'export function ignoredPreservePriority' src/judge/hermeticity.ts || {
+        echo "AC-3 FAIL: trap — dogfood-159's budget-priority fix (F-404) was removed. This WP does not touch judge-check isolation."
+        exit 1
+      }
+      grep -qE 'statHash' src/judge/hermeticity.ts || {
+        echo "AC-3 FAIL: trap — dogfood-159's F-406 fix lost its comparator. This WP does not touch judge-check isolation."
+        exit 1
+      }
+      grep -qE 'export function decideCompletionReview' src/workflow/completion-review.ts || {
+        echo "AC-3 FAIL: trap — the pure decision was deleted rather than corrected. This run changes WHEN an attempt is granted, not what the review IS."
+        exit 1
+      }
+      grep -qE 'export function mergeDesignFindings' src/workflow/completion-review.ts || {
+        echo "AC-3 FAIL: trap — mergeDesignFindings was removed; every objection raised at seal time must still reach the brief (F-180)."
+        exit 1
+      }
+      grep -qE 'export function buildCompletionReviewBrief' src/workflow/completion-review.ts || {
+        echo "AC-3 FAIL: trap — buildCompletionReviewBrief was removed; the objection the review raised must still reach the executor's brief."
+        exit 1
+      }
+      grep -qE 'export const MAX_GATE_REPAIR_ATTEMPTS' src/heal/gate-repair.ts || {
+        echo "AC-3 FAIL: trap — the gate-repair route lost its bound. No LLM-verdict gate may exit (WP-542/F-207), and this WP does not touch that path."
+        exit 1
+      }
+
+      pnpm exec vitest run test/runner/deterministic-rubric-live.test.ts || {
+        echo "AC-3 FAIL: trap — the committed anti-oscillation guard is RED. A review returning the SAME failing rubric ids on every pass must still seal FAILED (resumable) with both ids named in the terminal reason."
+        exit 1
+      }
+
+      OUT=$(pnpm --filter @chikory/sdk exec vitest run 2>&1)
+      ST=$?
+      echo "$OUT" | tail -25
+      if [ "$ST" -ne 0 ]; then
+        echo "AC-3 FAIL: the DECLARED regression suite is RED (vitest exited $ST)"
+        exit 1
+      fi
+      N=$(echo "$OUT" | grep -oE "Tests +[0-9]+ passed" | grep -oE "[0-9]+" | head -1)
+      echo "committed suite tests passing: ${N:-UNPARSEABLE} (floor 1749, measured baseline 1745)"
+      if [ -z "$N" ]; then
+        echo "AC-3 FAIL: could not read a test count out of the vitest summary"
+        exit 1
+      fi
+      if [ "$N" -lt 1749 ]; then
+        echo "AC-3 FAIL: durability floor not met — the committed suite did not grow by at least 4 tests. A behaviour proved only by the generated grading checks is not pinned at all (F-356)."
+        exit 1
+      fi
+      echo "AC-3 OK: strict typecheck and lint green, dogfood-159 and gate-repair plumbing intact, anti-oscillation guard green, DECLARED suite green AND larger"
+
+budget_usd: 20
+max_steps: 6
+
+agent_classes:
+  executor: executor-default
+  judge: judge-default
+
+judge:
+  cadence: 1
+
+# F-322 (dogfood-135): without this, a converged out-of-rubric escalation parks overnight for a
+# human instead of auto-sealing. F-408 is the sharper version of the same disease.
+unattended:
+  escalation: seal_resumable_failed

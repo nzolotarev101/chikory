@@ -14,7 +14,6 @@ import { promisify } from "node:util";
 import { scrubExecutorEnv } from "../executors/env.js";
 import { runBounded } from "../executors/process.js";
 import { clearStaleIndexLock } from "../executors/workspace.js";
-import { splitCommand } from "../util/command.js";
 import type {
   AcceptanceCriterion,
   ArtifactStore,
@@ -193,33 +192,15 @@ async function runCheck(
       : join(workspaceDir, repo.relativePath)
     : workspaceDir;
 
-  let parts: string[];
-  try {
-    parts = splitCommand(criterion.check!);
-  } catch (err) {
-    return {
-      criterionId: criterion.id,
-      command: criterion.check!,
-      exitCode: 1,
-      output: `invalid check command: ${err instanceof Error ? err.message : String(err)}`,
-      durationMs: 0,
-      infraFailed: false,
-    };
-  }
-
-  if (parts.length === 0) {
-    return {
-      criterionId: criterion.id,
-      command: criterion.check!,
-      exitCode: 1,
-      output: "empty check command",
-      durationMs: 0,
-      infraFailed: false,
-    };
-  }
-
-  const [executable, ...args] = parts;
-  const bounded = await runBounded(executable!, args, {
+  // F-410 (dogfood-159 review): an acceptance-criterion `check` IS a shell script — that is the
+  // field's contract, and every dogfood spec writes multi-line bodies with `if`, `$(…)`,
+  // redirects and heredocs. #90 tokenized it and exec'd the first word directly, which did not
+  // add a security boundary (its own fixtures pass `sh -c "…"`, the identical capability) and
+  // silently turned every such check into a vacuous PASS: `splitCommand` made the whole script
+  // arguments to `echo`, which ignores them and exits 0, so the judge recorded
+  // "judge-executed check … exited 0" for a check that never ran. Measured at this review against
+  // the real `runCriteriaChecks`. `splitCommand` stays where its contract fits (`cli/land.ts`).
+  const bounded = await runBounded("/bin/sh", ["-c", criterion.check!], {
     cwd: checkCwd,
     env: scrubExecutorEnv(process.env, []),
     maxSeconds: timeoutMs / 1000,
@@ -274,14 +255,33 @@ export async function runCriteriaChecks(input: {
     beforeSnapshots.set(repo.dir, snapshotResults[idx]!);
   });
 
-  const cleanup = async () => {
+  // F-405: report an unrepairable corruption on the check that caused it, once. The BEFORE
+  // snapshot never advances, so every later cleanup keeps seeing the same damage.
+  const reportedUnpreserved = new Map<string, Set<string>>();
+  const cleanup = async (): Promise<string[]> => {
+    const allWarnings: string[] = [];
     await Promise.all(
       reposToSnapshot.map(async (repo) => {
         const before = beforeSnapshots.get(repo.dir);
         const after = await snapshotWorkspace(repo.dir);
-        await applyCleanupPlan(repo.dir, planCheckSideEffectCleanup(before ?? "", after), before);
+        let reported = reportedUnpreserved.get(repo.dir);
+        if (reported === undefined) {
+          reported = new Set<string>();
+          reportedUnpreserved.set(repo.dir, reported);
+        }
+        const result = await applyCleanupPlan(
+          repo.dir,
+          planCheckSideEffectCleanup(before ?? "", after),
+          before,
+          reported,
+        );
+        for (const relPath of result.unpreserved) reported.add(relPath);
+        if (result.warnings.length > 0) {
+          allWarnings.push(...result.warnings);
+        }
       }),
     );
+    return allWarnings;
   };
 
   try {
@@ -295,7 +295,11 @@ export async function runCriteriaChecks(input: {
         input.workspaceRepos ?? [],
       );
       runs.push(run);
-      await cleanup();
+      const warnings = await cleanup();
+      if (warnings.length > 0) {
+        const warningText = warnings.join("\n");
+        run.output = bound(run.output ? `${run.output}\n${warningText}` : warningText, 64 * 1024);
+      }
     }
   } finally {
     await cleanup();
@@ -369,15 +373,28 @@ export async function collectEvidence(input: CollectEvidenceInput): Promise<Coll
       beforeSnapshots.set(r.dir, snapshotResults[idx]!);
     });
 
-    const cleanup = async () => {
+    // F-405: same report-once rule on the judge path — see runCriteriaChecks above.
+    const reportedUnpreserved = new Map<string, Set<string>>();
+    const cleanup = async (): Promise<string[]> => {
+      const allWarnings: string[] = [];
       await Promise.all(
         reposToSnapshot.map(async (r) => {
           const before = beforeSnapshots.get(r.dir);
           const after = await snapshotWorkspace(r.dir);
           const plan = planCheckSideEffectCleanup(before ?? "", after);
-          await applyCleanupPlan(r.dir, plan, before);
+          let reported = reportedUnpreserved.get(r.dir);
+          if (reported === undefined) {
+            reported = new Set<string>();
+            reportedUnpreserved.set(r.dir, reported);
+          }
+          const result = await applyCleanupPlan(r.dir, plan, before, reported);
+          for (const relPath of result.unpreserved) reported.add(relPath);
+          if (result.warnings.length > 0) {
+            allWarnings.push(...result.warnings);
+          }
         }),
       );
+      return allWarnings;
     };
 
     try {
@@ -391,7 +408,11 @@ export async function collectEvidence(input: CollectEvidenceInput): Promise<Coll
           input.workspaceRepos ?? [],
         );
         checkRuns.push(run);
-        await cleanup();
+        const warnings = await cleanup();
+        if (warnings.length > 0) {
+          const warningText = warnings.join("\n");
+          run.output = bound(run.output ? `${run.output}\n${warningText}` : warningText, 64 * 1024);
+        }
       }
 
       if (input.regressionSuite) {
@@ -405,7 +426,14 @@ export async function collectEvidence(input: CollectEvidenceInput): Promise<Coll
           input.checkTimeoutMs ?? DEFAULT_CHECK_TIMEOUT_MS,
           input.workspaceRepos ?? [],
         );
-        await cleanup();
+        const warnings = await cleanup();
+        if (warnings.length > 0) {
+          const warningText = warnings.join("\n");
+          regressionSuiteRun.output = bound(
+            regressionSuiteRun.output ? `${regressionSuiteRun.output}\n${warningText}` : warningText,
+            64 * 1024,
+          );
+        }
       }
     } finally {
       await cleanup();

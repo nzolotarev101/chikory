@@ -113,4 +113,127 @@ describe("planCheckSideEffectCleanup pure decision planner", () => {
     expect(plan.toDelete).toEqual([]);
     expect(plan.toRestore).toEqual([]);
   });
+
+  it("check-modified ignored path with preserved content yields a restore", () => {
+    const before = [
+      { path: "dist/bundle.js", status: "!!", hash: "hash-original", content: "const a = 1;" },
+    ];
+    const after = [
+      { path: "dist/bundle.js", status: "!!", hash: "hash-modified", content: "const a = 2;" },
+    ];
+
+    const plan = planCheckSideEffectCleanup(before, after);
+
+    expect(plan.toDelete).toEqual([]);
+    expect(plan.toRestore).toEqual(["dist/bundle.js"]);
+  });
+
+  it("check-deleted ignored path with preserved content yields a restore", () => {
+    const before = [
+      { path: "dist/bundle.js", status: "!!", hash: "hash-original", content: "const a = 1;" },
+    ];
+    const after: { path: string; status: string; hash?: string; content?: string }[] = [];
+
+    const plan = planCheckSideEffectCleanup(before, after);
+
+    expect(plan.toDelete).toEqual([]);
+    expect(plan.toRestore).toEqual(["dist/bundle.js"]);
+  });
+
+  it("check-modified unpreserved ignored path yields a restore and unrestored entry", () => {
+    const before = [{ path: "dist/large.bin", status: "!!", hash: "hash-stat-1" }];
+    const after = [{ path: "dist/large.bin", status: "!!", hash: "hash-stat-2" }];
+
+    const plan = planCheckSideEffectCleanup(before, after);
+
+    expect(plan.toDelete).toEqual([]);
+    expect(plan.toRestore).toEqual(["dist/large.bin"]);
+    expect(plan.unrestored).toEqual(["dist/large.bin"]);
+  });
+
+  it("check-deleted unpreserved ignored path yields a restore and unrestored entry", () => {
+    const before = [{ path: "dist/large.bin", status: "!!", hash: "hash-stat-1" }];
+    const after: { path: string; status: string; hash?: string }[] = [];
+
+    const plan = planCheckSideEffectCleanup(before, after);
+
+    expect(plan.toDelete).toEqual([]);
+    expect(plan.toRestore).toEqual(["dist/large.bin"]);
+    expect(plan.unrestored).toEqual(["dist/large.bin"]);
+  });
+
+  it("check-modified zero-byte empty ignored file yields a restore", () => {
+    const before = [
+      { path: "dist/empty.log", status: "!!", hash: "hash-empty", content: "" },
+    ];
+    const after = [
+      { path: "dist/empty.log", status: "!!", hash: "hash-written", content: "log output\n" },
+    ];
+
+    const plan = planCheckSideEffectCleanup(before, after);
+
+    expect(plan.toDelete).toEqual([]);
+    expect(plan.toRestore).toEqual(["dist/empty.log"]);
+  });
+
+  it("check-truncated non-empty ignored file yields a restore", () => {
+    const before = [
+      { path: "dist/app.log", status: "!!", hash: "hash-data", content: "server logs..." },
+    ];
+    const after = [
+      { path: "dist/app.log", status: "!!", hash: "hash-empty", content: "" },
+    ];
+
+    const plan = planCheckSideEffectCleanup(before, after);
+
+    expect(plan.toDelete).toEqual([]);
+    expect(plan.toRestore).toEqual(["dist/app.log"]);
+  });
+
+  it("preserves binary Uint8Array/Buffer content across snapshot and plan", () => {
+    const binaryData = new Uint8Array([0xff, 0xfe, 0x00, 0x01, 0x80, 0xc0]);
+    const before = [
+      { path: "dist/binary.dat", status: "!!", hash: "hash-bin-1", content: binaryData },
+    ];
+    const after = [
+      { path: "dist/binary.dat", status: "!!", hash: "hash-bin-2", content: new Uint8Array([0x00]) },
+    ];
+
+    const plan = planCheckSideEffectCleanup(before, after);
+
+    expect(plan.toDelete).toEqual([]);
+    expect(plan.toRestore).toEqual(["dist/binary.dat"]);
+    expect(plan.unrestored).toEqual([]);
+  });
+});
+
+describe("the preservation budget line must not read as a change (F-406)", () => {
+  it("an untouched ignored file that crossed the budget line yields nothing", () => {
+    // The BEFORE snapshot kept this file's bytes; by the AFTER snapshot some other preserved
+    // file shrank, the budget re-partitioned, and this one fell outside it. Nothing about the
+    // file itself changed, so `statHash` is identical and the planner must stay silent.
+    const before = [
+      { path: "node_modules/.pnpm/dep/index.js", status: "!!", hash: "sha-of-content", statHash: "stat-abc", content: "module.exports = 1;" },
+    ];
+    const after = [
+      { path: "node_modules/.pnpm/dep/index.js", status: "!!", hash: "stat-abc", statHash: "stat-abc" },
+    ];
+
+    const plan = planCheckSideEffectCleanup(before, after);
+
+    expect(plan.toRestore).toEqual([]);
+    expect(plan.unrestored).toEqual([]);
+  });
+
+  it("a REAL change to a file that also crossed the budget line is still caught", () => {
+    const before = [
+      { path: "dist/app.js", status: "!!", hash: "sha-of-content", statHash: "stat-abc", content: "original" },
+    ];
+    const after = [{ path: "dist/app.js", status: "!!", hash: "stat-xyz", statHash: "stat-xyz" }];
+
+    const plan = planCheckSideEffectCleanup(before, after);
+
+    expect(plan.toRestore).toEqual(["dist/app.js"]);
+    expect(plan.unrestored).toEqual([]);
+  });
 });

@@ -5,15 +5,16 @@ This is the complete operating manual for executing Phase 2+ work packages
 task spec for a WP (every field explained), how to launch, supervise, and
 recover a run, and how to land the result as a normal PR.
 
-**Status (2026-08-19, bounded — update discipline: REPLACE this block, ≤15 lines;
+**Status (2026-08-20, bounded — update discipline: REPLACE this block, ≤15 lines;
 displaced prose moves verbatim to [`PLAN-HISTORY.md`](PLAN-HISTORY.md); per-run detail:
 `docs/reports/`; queue + course correction: `plan.md` §6/§7).**
-🟢 **dogfood-158 / WP-589 half (1) (the write-boundary check must see gitignored writes) DELIVERED and LANDED** — `run-71087607-eca4-41ca-b73b-febb0f484b8e`, terminal SUCCESS, **2 steps, $0.1891/$20.00**, 16m 8s, AC **3/3** re-run green, harvest byte-IDENTICAL **5/5**, suite **1,610 → 1,663**, `docs/reports/dogfood-158.md`.
-🟢 **A node's writeSet is now a real boundary** — `publishChainHandoff` measures writes from four git streams including `git ls-files --others --ignored --exclude-standard` (`src/runner/activities.ts:2884`, `:2894`) and feeds `candidatePaths`, not `changedPaths`, to the unchanged F-218 admission rules. `RepoHandoff.changedPaths` does not widen, so the 1,200-char successor note is safe (F-365); the failure `reason` is capped at 10 paths / 1,500 chars.
-🟢 **Judge true-positive #4 in a row, and it drove the repair** — step 1 filtered the toolchain exemption over the WHOLE candidate set (a *tracked* `node_modules` write escaped); **all 3 ACs passed it**, only `design_serves_overall_goal` failed it, the concern rode into step 2 as `escalation_concerns_adjudicated`, and step 2 narrowed the filter.
-🔴 **F-401 (§8) HAND-FIXED this review** — the exemption listed only `node_modules`, the one family AC-1 drove. A real workspace carries **2,605 other ignored files** (`packages/sdk-ts/dist` 604, `.venv` 1,906, `benchmarks/harness/dist` 64, `.devbox` 31), so any node that built the package would have sealed FAILED. `isToolchainPath` now matches a named segment set + toolchain suffixes (`src/chain/write-set.ts:133`, `:173`); `benchmarks/results`/`runs` stay inside the boundary. +16 tests.
-🟡 **F-402 (§8) → WP-638** the ignored stream is a working-tree snapshot with no `BASE_TAG`, so an ignored file predating the node is reported as that node's write · ℹ️ **F-403 (§8)** the executor's committed tests were case-for-case copies of the ACs, inheriting their blind spot — a test-COUNT floor is satisfied by copies.
-**NEXT HEADLINE = `dogfood-159` / WP-628** — judge-check ignored-path isolation must cover MODIFY and DELETE, not only CREATE. Gate ⛔ STALLED with this run in the ledger (max steps 2 vs 3), which BINDS the headline to P3's ladder rung — but rung-5 (WP-530) is still WP-304's operator-run benchmark arm and cannot be a spec, so the verdict is unsatisfiable and recorded as such; F-401 was hand-fixed this sitting and does not headline. Premise re-measured TRUE: `snapshotWorkspace` stores an ignored entry as bare `{ path, status: "!!" }` with no hash and no content (`src/judge/hermeticity.ts:211`), so the modify branch cannot fire (`:138`) and the delete branch skips restore (`:149`).
+🟢 **dogfood-159 / WP-628 (judge-check ignored-path isolation covers MODIFY and DELETE) DELIVERED and LANDED** — `run-ec5c4bb8-de16-4c28-beba-a8cd09795fa1`, terminal SUCCESS, **3 steps, $0.3358/$20.00**, 2h 2m wall (**1h 40m idle**), AC **3/3** re-run green, harvest byte-IDENTICAL **5/5**, suite **1,745 passed | 23 skipped** (204 files, after rebasing onto 15 outside PRs), `docs/reports/dogfood-159.md`. F-360 CLOSED.
+🟢 **A check can no longer hand the next check a wrecked tree** — `snapshotWorkspace` `stat`s every ignored path (O(inventory), no bytes) and preserves content under a 64 KiB-per-file / 32 MiB-total budget (`src/judge/hermeticity.ts:11`, `:12`); unpreserved paths keep a `stat:size:mtime:inode` fingerprint so change is still DETECTED, and an unrepairable change is reported into the batch's own `CheckRun.output`. Content is `Uint8Array`, so binaries round-trip byte-identical. 2.3 s per batch on a real 17,372-path workspace.
+🟢 **Judge true-positives ×4, all repaired in-run — FIFTH consecutive healing run** — all 3 ACs were green at step 1 and only `design_serves_overall_goal` caught UTF-8 round-tripping, a deleted unpreserved path yielding no plan entry, and budget-exceeded corruption reaching only `console.warn`.
+🔴 **F-410 (§8) HAND-FIXED AT LANDING — the most severe class we have seen.** An outside PR (`5bed806`, #90) replaced `runCheck`'s `/bin/sh -c` with tokenize-and-exec-first-word. Every dogfood AC is a multi-line shell script, so the script became **arguments to its own first word** and **exited 0 without running** — a vacuous PASS on every criterion of every run. Measured against the real `runCriteriaChecks`. Restored (`src/judge/evidence.ts:203`); the two tests that encoded the vacuous pass replaced by two that pin the real contract. 🟡 F-411 → **WP-642**: arming runs checks through bash, the judge through `runCheck` — a green arming pass could not see it.
+🔴 **F-404 (§8) HAND-FIXED** — the 32 MiB budget was allocated in `git ls-files` lexical order, so `node_modules/.pnpm` took **9,459 of 9,467** preserved paths and every project-owned artifact got none (probed on a real judge workspace: `NOT ISOLATED`). `ignoredPreservePriority` now orders project-owned paths first (`src/judge/hermeticity.ts:57`); re-probed `ISOLATED`, 2,287 ms vs 2,313 ms. 🟡 **F-406 HAND-FIXED** — `hash` was not comparable across the MOVING budget boundary (3 false reports); every entry now carries `statHash` (`:63`, `:210`). 🟡 **F-405 HAND-FIXED** — an unrepairable corruption was re-reported to every LATER check.
+🟡 F-407 → **WP-639** (884/17,372 ignored paths are symlinks to dirs, dropped by the `isFile()` gate) · 🟡 F-408 (§8) → **WP-640** (the repair grant is 1 per run regardless of headroom: sealed FAILED at 3/6 steps with 98.3% of budget unspent, then waited 1h 39m 52s for a hand-typed `resume` that fixed it in 3m 12s) · 🟡 F-409 (§8) → **WP-641** (a `failed_seal` resume is invisible to `chikory trace` and `scripts/dogfood-verify.sh:163`, so the ledger recorded `resumes 0` for a run that resumed).
+**NEXT HEADLINE = `dogfood-160` / WP-640** — the repair grant must scale with the run's remaining headroom instead of being a constant. Gate ⛔ STALLED, which BINDS the headline to P3's ladder rung — but rung-5 (WP-530) is still WP-304's operator-run benchmark arm and cannot be a spec, so the verdict is unsatisfiable and recorded as such. **ARMED 3/3 both ways** (AC-1 5s/5s · AC-2 4s/8s · AC-3 83s/82s, worst case 69% of the 120 s judge cap); both behavioural ACs drive the REAL agent loop and read the run's own terminal entry.
 
 Related docs: [`docs/spec/task-spec.md`](spec/task-spec.md) (schema
 reference) · [`docs/TASK-PROTOCOL.md`](TASK-PROTOCOL.md) (WP etiquette, §7 is
@@ -2111,3 +2112,50 @@ broken (a false-green, not a follow-on fix).
   act. Reach is limited — a green full-suite run is 17,403 bytes, so this needs
   roughly 20+ failing test blocks — but if you are writing a check that runs a
   broad suite, pipe it through `tail -N` rather than relying on the bound.
+
+- **A budget makes the ORDER of your inputs the untested variable (🔴 F-404,
+  dogfood-159).** When a delivery introduces a preservation, spend or retention
+  budget, a fixture that puts every input in one flat directory cannot see which
+  inputs WIN that budget. dogfood-159's isolation fix allocated 32 MiB in
+  `git ls-files` lexical order; on a real 17,372-path judge workspace
+  `node_modules/.pnpm` took **9,459 of 9,467** preserved paths and every
+  project-owned artifact got none, so the feature did not fire where it mattered.
+  Both ACs passed. If the delivery under test carries a budget, one AC must build
+  a fixture where two classes of input COMPETE for it, and assert the one you
+  care about wins.
+
+- **Two hashes of different kinds are not comparable, and a budget line moves
+  (🟡 F-406, dogfood-159).** If your snapshot records a content hash for cheap
+  inputs and a metadata fingerprint for expensive ones, any change in the cheap
+  set re-partitions the boundary — and an untouched input reads as changed
+  because it swapped hash KINDS between snapshots. Record the metadata
+  fingerprint for BOTH classes and compare like with like
+  (`packages/sdk-ts/src/judge/hermeticity.ts:210`).
+
+- **A run can seal FAILED with most of its budget and steps unspent (🟡 F-408,
+  dogfood-159).** The completion-review repair grant is one per run
+  (`packages/sdk-ts/src/workflow/agent-loop.ts:1348`), not one per unit of
+  headroom. If a second, DIFFERENT design finding lands, the run seals FAILED
+  (resumable) even at step 2 of 6 with 98% of budget left, and then waits for a
+  human. Recover it with `chikory run resume <run-id>` — the reopen restores the
+  last checkpoint and carries the seal's own diagnosis into the next step, so no
+  work is lost. Do NOT relaunch. Until WP-640 lands, check on a converged run
+  rather than assuming an unattended seal means the run is finished.
+
+- **An acceptance-criterion `check` is a shell script, and it must stay one
+  (🔴 F-410, dogfood-159).** `runCheck` runs `/bin/sh -c` with the body
+  (`packages/sdk-ts/src/judge/evidence.ts:203`). An outside PR briefly replaced
+  that with tokenize-and-exec-the-first-word; every multi-line check then became
+  arguments to its own first word and **exited 0 without running** — a vacuous
+  PASS on every criterion. If you ever see a check pass while its side effect
+  provably did not happen, check this line first. Note the asymmetry that hid it:
+  `dogfood-arm.sh` runs check bodies through bash, the judge runs them through
+  `runCheck`, so a fully green arming pass proves nothing about the judge path
+  until WP-642 lands.
+
+- **`chikory trace` does not show that a run resumed (🟡 F-409, dogfood-159).**
+  A `failed_seal` reopen is journaled but not rendered: the header of a resumed
+  run reads a flat `SUCCESS · N steps`. To see it, read the journal directly —
+  `sqlite3 .chikory/runs/<run-id>/journal.db "select idx, kind, ts from
+  journal_entries order by idx"` — and look for a `terminal` entry followed by a
+  `control_event`. The gap between their timestamps is the human-latency stall.
