@@ -226,7 +226,8 @@ describe.skipIf(address === null)("verdict gating (WP-132)", () => {
     ]);
     // The covering checkpoint was written before the seal — resumable state.
     expect(report.checkpoints).toHaveLength(4);
-    expect(report.failure?.lastCheckpoint).toBe(report.checkpoints[3]!.id);
+    // WP-646: the FAILED seal names the lastGood checkpoint (checkpoint 1), not the failing remediation attempt.
+    expect(report.failure?.lastCheckpoint).toBe(report.checkpoints[1]!.id);
 
     const journal = new Journal(journalPath(dataDir, handle.runId));
     try {

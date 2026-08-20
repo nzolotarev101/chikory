@@ -8,15 +8,13 @@ recover a run, and how to land the result as a normal PR.
 **Status (2026-08-20, bounded — update discipline: REPLACE this block, ≤15 lines;
 displaced prose moves verbatim to [`PLAN-HISTORY.md`](PLAN-HISTORY.md); per-run detail:
 `docs/reports/`; queue + course correction: `plan.md` §6/§7).**
-🔴 **dogfood-162 / WP-644 (the loop tells "you already said that" from "that's new") FAILED — NOTHING LANDED, harvest reverted** — `run-75794008-83a8-4ca8-893d-ae3000df754a`, 6 steps, $0.4781/$20.00, 46m 58s, AC **0/3** on the harvested tree (`docs/reports/dogfood-162.md`).
-🔴 **A finished delivery was overwritten by a crashed step.** At step 5 the tree passed all three ACs and grew the declared suite to **1,787 passed** (baseline 1,782, floor 1,786) — checkpoint `@28`, `lastGood: true`. The completion review then bought a repair grant; step 6's `agy` crashed mid-write (transcript 64 B: `Error: Agent execution terminated due to error.`), its 12,589-byte half-edit was committed as `eb4d24a`, judged 0/3 and sealed. The harvest took that tree: **7 failed** / 1,780 passed.
-🔴 **F-423 (§8) → WP-645** — an executor CRASH is not `infraFailed`. `isInfraStepFailure` (`packages/sdk-ts/src/runner/strike-accounting.ts:38`) knows only cap-kills; the flag is set only on `proc.timedOut` (`packages/sdk-ts/src/executors/step.ts:241`), so a crash's partial writes are committed, judged and kept.
-🔴 **F-424 (§8) → WP-646** — a FAILED seal records `lastCheckpoint` (`@35`, `lastGood: false`), not the `lastGood` checkpoint (`@28`). The flag is journaled and never read at the seal, so `harvest.sh` lands the worst tree the run reached.
-🔴 **F-425 (§8) → WP-644 stays open** — F-416 live-proven, self-referentially: this run's completion reviews #1 (idx 6) and #2 (idx 29) restate one complaint in two vocabularies, and the live comparator answers `false` on BOTH rubric ids. That miss bought the fatal repair grant. The step-5 delivery answers `true` — WP-644 would have sealed this run at step 5.
-🔴 **F-426 (§8) → WP-647** — the step-5 delivery was unshippable too, and three owned-oracle ACs passed it. Over **1,432 cross-run objection pairs from 25 journals** it calls **44.06%** the same objection vs the incumbent's **1.82%**. AC-1's whole negative population was two hand-picked pairs.
-🟡 **F-427 (§8) → track-B** — the committed durability-floor test labelled invented prose (`db/pool.ts`, `auth/jwt.ts`) as "real judge findings". 🟡 **F-428 (§8) → track-B**, folded into F-421: the goal forbade backgrounding a suite verbatim and 2 of 6 steps still ended on "I have started running… and will report the results upon completion".
-**Standing lesson: an owned oracle is only as sound as its negative population.** Three checks that each own their oracle, all green, on a comparator 24× less sound than the code it replaced. A recall floor needs a false-positive ceiling measured on a corpus the delivery cannot enumerate, graded in the same check.
-**NEXT HEADLINE = `dogfood-163` / WP-645 + WP-646** — a crashed step must not be able to overwrite a finished delivery. WP-644 + WP-647 stay queued for `dogfood-164`. Gate ✅ PROGRESSING (max steps 6 vs 4 trailing; harness-meta 0/3); P3 rung-5's remainder is still WP-304's operator-run benchmark arm.
+🟢 **dogfood-163 / WP-645 + WP-646 (a crashed step cannot overwrite finished work) DELIVERED AND LANDED** — `run-12dfe421-7633-4199-9e3c-18bc32a410c5`, 2 steps, $0.2189/$20.00, 21m 52s, AC **3/3** re-run green, harvest byte-**IDENTICAL 10/10**, declared suite **1,788 passed** (baseline 1,782, floor 1,786) (`docs/reports/dogfood-163.md`).
+🔴 **…and the loop sealed it FAILED on evidence it had already retracted.** Judge pass #4 reported *"deterministic architecture scan found no layering violations"* with all 5 rubric rows green; 17 ms later the run sealed `completion review: deterministic rubric failure — no_architecture_violations`, with **4 of 6 steps and 98.9% of budget unspent**.
+🔴 **F-429 (§8) → WP-648** — a deterministic rubric row cannot be retracted. `mergeDesignFindings` (`packages/sdk-ts/src/workflow/completion-review.ts:665`) skips passing rows outright (`:672`), so the review's re-measurement on a WIDER diff can never clear the sealing pass's FAIL, and `sealFromRubricFails` (`packages/sdk-ts/src/workflow/agent-loop.ts:375`) seals FAILED with no appeal. The stale row also read as a repeated objection (`completion-review.ts:613`), so the anti-oscillation bound denied a grant for a finding already **fixed**.
+🔴 **F-430 (§8) → WP-649** — `scanDiffForLayeringViolations` (`packages/sdk-ts/src/judge/scan-layering.ts:93`) reads added lines only (`:100`) with no baseline, so RESTORING a line already on HEAD scores as a new forbidden edge. Measured over all 146 committed `src/**/*.ts`: **11 pre-existing forbidden lines in 6 files**, including `packages/sdk-ts/src/workflow/agent-loop.ts:47` — the file the campaign edits most.
+🟡 **F-428 (§8) recurred a 3rd time, now costed** — the goal forbade backgrounding a suite *verbatim*; step 1's entire summary is three "I have launched … I will wait" lines including the full declared suite, and it was killed at `606.7s` of a `600s` cap for 129 output tokens: **10m 7s of a 21m 52s run**. That churn is what F-430 turned into a fatal seal.
+**Standing lesson: a gate that cannot take yes for an answer is not a stricter gate.** It converts every true positive into a permanent one — a compounding-error mechanism inside the loop built to remove them. This is the 4th consecutive FAILED seal and the first that is not defensible: 160/161/162 failed on findings that were real and unfixed; 163 failed on one it had fixed and re-measured.
+**NEXT HEADLINE = `dogfood-164` / WP-648 + WP-649** — a deterministic gate must be able to clear its own re-measurement. Gate ✅ PROGRESSING (harness-meta 0/3, cap intact); P3 rung-5's remainder is still WP-304's operator-run benchmark arm. WP-644 + WP-647 slip to `dogfood-165`.
 
 Related docs: [`docs/spec/task-spec.md`](spec/task-spec.md) (schema
 reference) · [`docs/TASK-PROTOCOL.md`](TASK-PROTOCOL.md) (WP etiquette, §7 is
@@ -2273,3 +2271,43 @@ broken (a false-green, not a follow-on fix).
   on it. When an AC asserts a rate, grade the rate on a corpus the delivery cannot
   enumerate — for judge prose, every `pass: false` justification in
   `.chikory/runs/*/journal.db`, paired across runs on the same rubric id.
+
+- **🔴 A DETERMINISTIC GATE MUST BE ABLE TO TAKE YES FOR AN ANSWER** (F-429 →
+  WP-648, dogfood-163). The completion review re-ran the architecture scan on the
+  run's CUMULATIVE diff and reported *"deterministic architecture scan found no
+  layering violations"*, all five rubric rows green (judge pass #4, journal idx 13).
+  17 ms later the run sealed `completion review: deterministic rubric failure —
+  no_architecture_violations`. `mergeDesignFindings`
+  (`packages/sdk-ts/src/workflow/completion-review.ts:665`) unions the failing rows
+  of the sealing pass with the review's and skips **passing** rows outright
+  (`:672`), so a PASS can never clear a FAIL of the same id. That union is right for
+  LLM design opinions, which drift; it is wrong for the three programs in
+  `DETERMINISTIC_RUBRIC_IDS` (`packages/sdk-ts/src/judge/rubric.ts:28`), which are
+  re-measured on a strictly wider diff and are the only rows with no appeal
+  (`packages/sdk-ts/src/workflow/agent-loop.ts:375`). Second-order: the stale row
+  read as a *repeated* objection (`completion-review.ts:613`), so the
+  anti-oscillation bound denied a repair grant for a finding already fixed — the run
+  died with 4 of 6 steps and 98.9% of budget unspent. **When you add a
+  deterministic gate, ask which measurement wins when two disagree, and make the
+  later, wider one authoritative.**
+
+- **🔴 A SCAN WITH NO BASELINE CANNOT TELL "INTRODUCED" FROM "RESTORED"** (F-430 →
+  WP-649, dogfood-163). `scanDiffForLayeringViolations`
+  (`packages/sdk-ts/src/judge/scan-layering.ts:93`) inspects **added lines only**
+  (`:100`). A `+` line that merely restores text already present on HEAD is scored
+  exactly like one that introduces a forbidden edge. dogfood-163's step 2 narrowed
+  an import back to `packages/sdk-ts/src/workflow/agent-loop.ts:47` **verbatim**;
+  the scanner returns `["workflow→runner"]` on the step-scoped diff and `[]` on the
+  cumulative one, and because the row is deterministic that false positive is an
+  unappealable FAILED seal. Measured over all 146 committed
+  `packages/sdk-ts/src/**/*.ts`: **11 pre-existing forbidden lines in 6 files** —
+  `agent-loop.ts:47`/`:20`/`:45`/`:69`/`:98`,
+  `packages/sdk-ts/src/workflow/index.ts:8`,
+  `packages/sdk-ts/src/judge/harness.ts:10`,
+  `packages/sdk-ts/src/executors/prompt.ts:8`,
+  `packages/sdk-ts/src/planner/plan-repair.ts:26`,
+  `packages/sdk-ts/src/runner/branch.ts:9`. Note `src/chain/` is folded into the
+  `runner` layer (`scan-layering.ts:22`). The edges are real — the codebase does
+  violate its declared layer order — but a gate that condemns a step for not
+  deleting a pre-existing violation is unsatisfiable by any step that touches the
+  file. **A diff-scoped rule needs the pre-image, not an allowlist.**

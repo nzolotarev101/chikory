@@ -45,6 +45,7 @@ import {
 import { calibrateContextWindow, resolveContextWindowForSpec } from "../runner/context-window.js";
 // Pure (no I/O, no clock) — workflow-bundle safe.
 import { advanceStrikeCount } from "../runner/strike-accounting.js";
+import { isInfraStepFailure } from "../executors/infra-failure.js";
 import type {
   ArtifactRef,
   ChainNodeHandoff,
@@ -323,7 +324,10 @@ export async function agentLoop(spec: TaskSpec): Promise<RunStatus> {
       inconclusiveCheck?: string;
     },
   ): Promise<RunStatus> {
-    const lastCheckpoint = checkpoints[checkpoints.length - 1]?.id ?? "";
+    const lastCheckpoint =
+      terminal === "FAILED" && lastGoodCheckpointId !== undefined
+        ? lastGoodCheckpointId
+        : (checkpoints[checkpoints.length - 1]?.id ?? "");
     let handoff: ChainNodeHandoff | undefined;
     if (terminal === "SUCCESS" && spec.chainLink !== undefined) {
       const published = await activities.publishChainHandoff({ runId });
@@ -332,6 +336,9 @@ export async function agentLoop(spec: TaskSpec): Promise<RunStatus> {
     }
     if (terminal === "FAILED") {
       failure = { reason: reason ?? "unknown", lastCheckpoint };
+      if (lastGoodCheckpointId !== undefined) {
+        await activities.restoreCheckpoint({ runId, checkpointId: lastGoodCheckpointId });
+      }
     }
     if (opts?.inconclusiveCheck !== undefined) {
       inconclusiveCheck = opts.inconclusiveCheck;
@@ -930,6 +937,17 @@ export async function agentLoop(spec: TaskSpec): Promise<RunStatus> {
     });
     const limitParkTerminal = await parkForLimitReset(record.limitParkResponse);
     if (limitParkTerminal !== undefined) return limitParkTerminal;
+
+    // F-423 (WP-645): a crashed / infra-failed step's partial writes must not
+    // overwrite finished delivery. Restore the workspace to the last good checkpoint.
+    if (isInfraStepFailure(record) && lastGoodCheckpointId !== undefined) {
+      await activities.restoreCheckpoint({ runId, checkpointId: lastGoodCheckpointId });
+      const restoredCheckpoint = checkpoints.find((c) => c.id === lastGoodCheckpointId);
+      const restoredCommit = restoredCheckpoint
+        ? Object.values(restoredCheckpoint.gitCommits)[0]
+        : undefined;
+      if (restoredCommit !== undefined) sinceCommit = restoredCommit;
+    }
 
     // WP-244 deterministic judge-catch seam (dogfood/test-only). Right after
     // the chosen step's executor runs, overwrite a workspace file with

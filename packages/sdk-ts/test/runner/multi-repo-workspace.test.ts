@@ -779,7 +779,9 @@ describe.skipIf(address === null)("multi-repo workspace setup", () => {
     try {
       const checkpoints = failedJournal.entries("checkpoint").map((entry) => entry.payload as Checkpoint);
       expect(checkpoints).toHaveLength(4);
-      sealedCheckpoint = checkpoints[checkpoints.length - 1]!;
+      const terminalPayload = failedJournal.entries("terminal")[0]!.payload as { status: string; lastCheckpoint: string };
+      sealedCheckpoint = checkpoints.find((entry) => entry.id === terminalPayload.lastCheckpoint)!;
+      expect(sealedCheckpoint).toBeDefined();
       expect(Object.keys(sealedCheckpoint.gitCommits).sort()).toEqual([
         "service-api",
         "service-worker",

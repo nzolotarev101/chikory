@@ -206,6 +206,49 @@ describe("isInfraStepFailure", () => {
   it("does not flag a step that succeeded", () => {
     expect(isInfraStepFailure(step("SUCCESS"))).toBe(false);
   });
+
+  it("flags a crashed step with 0 output tokens structurally as an infra failure (WP-645)", () => {
+    // Uncaught exception / heap allocation failure where no tokens were emitted
+    expect(
+      isInfraStepFailure({
+        status: "FAILED",
+        summary: "",
+        tokens: { input: 3400, output: 0 },
+        failure: { reason: "fatal error: v8 heap out of memory allocation failure", retriable: true },
+      }),
+    ).toBe(true);
+
+    // Process terminated abruptly with non-zero exit and empty output
+    expect(
+      isInfraStepFailure({
+        status: "FAILED",
+        summary: "",
+        tokens: { input: 1200, output: 0 },
+        failure: { reason: "executor exited with SIGSEGV (signal 11)", retriable: true },
+      }),
+    ).toBe(true);
+  });
+
+  it("does NOT flag an agent failure that outputted tokens even if error text mentions crash or kill", () => {
+    // Genuine agent failure where the agent completed its turn and diagnosed a crash in the code
+    expect(
+      isInfraStepFailure({
+        status: "FAILED",
+        summary: "I could not resolve the segmentation fault in the native bindings module.",
+        tokens: { input: 5000, output: 320 },
+        failure: { reason: "executor reported failure: tests still crash with segfault", retriable: true },
+      }),
+    ).toBe(false);
+
+    expect(
+      isInfraStepFailure({
+        status: "FAILED",
+        summary: "The step was killed by a test runner subprocess inside bash, but here is my diagnosis.",
+        tokens: { input: 2000, output: 150 },
+        failure: { reason: "executor reported failure: killed by test suite", retriable: true },
+      }),
+    ).toBe(false);
+  });
 });
 
 describe("markInfraFailedPass", () => {
@@ -290,10 +333,25 @@ describe("advanceStrikeCount / consecutiveStrikeTail (CG-1)", () => {
   });
 
   it("the tail agrees with the live loop for every prefix — a resume must not disagree", () => {
-    const steps = [substantive, capKill, substantive, quotaPark, substantive, ok, substantive];
+    const crashStep = {
+      status: "FAILED" as const,
+      tokens: { input: 2500, output: 0 },
+      failure: { reason: "adapter process terminated abruptly", retriable: true },
+    };
+    const steps = [substantive, capKill, crashStep, substantive, quotaPark, substantive, ok, crashStep, substantive];
     for (let i = 0; i <= steps.length; i++) {
       const prefix = steps.slice(0, i);
       expect(consecutiveStrikeTail(prefix)).toBe(prefix.reduce(advanceStrikeCount, 0));
     }
+  });
+
+  it("skips crashed steps with 0 output tokens during strike advancement", () => {
+    const crashStep = {
+      status: "FAILED" as const,
+      tokens: { input: 1000, output: 0 },
+      failure: { reason: "syntax error in CLI output parsing", retriable: true },
+    };
+    expect(advanceStrikeCount(1, crashStep)).toBe(1);
+    expect(consecutiveStrikeTail([substantive, crashStep])).toBe(1);
   });
 });

@@ -1,0 +1,667 @@
+# Plain: last run finished the job and the loop failed it anyway. The judge complained about one
+# thing at step 1, the agent fixed it, the judge re-checked and said "no problem found" — and the
+# run was then failed on that same complaint, with 4 of its 6 steps and 98.9% of its budget unused.
+# After this run, a check that re-measures clean can clear its own earlier complaint, and the
+# architecture check stops reporting a line the agent merely put back the way it found it.
+# WP: WP-648 (a deterministic rubric row the completion review re-measured as PASS must be able to
+#   clear the sealing pass's FAIL) + WP-649 (the architecture scan must distinguish an edge the diff
+#   INTRODUCED from one it merely restored) — F-429, F-430
+# Ladder-rung: 0 (off-ladder — P3 rung-5's remaining half is WP-304, an operator-run quota-bound
+#   benchmark arm, not expressible as a spec. The gate reads PROGRESSING, so the rung does not bind.)
+# Thesis-KPI: Agent-as-a-Judge in the inner loop (CLAUDE.md). Measured as: a gate that condemns can
+#   also acquit on its own re-measurement. Per-step reliability is 94.9% against a 99%+ target, and
+#   dogfood-163 is the first of four consecutive FAILED seals that was NOT defensible.
+#
+# THE MEASURED PREMISE — read at the dogfood-163 review from that run's own journal and artifacts
+#   (F-203/F-342: measured, never transcribed). Reproduce with:
+#     devbox run -- pnpm chikory trace run-12dfe421-7633-4199-9e3c-18bc32a410c5 --step 2
+#     sed -n '660,680p' packages/sdk-ts/src/workflow/completion-review.ts   # mergeDesignFindings
+#     sed -n '585,625p' packages/sdk-ts/src/workflow/completion-review.ts   # the repeated-objection skip
+#     sed -n '375,400p' packages/sdk-ts/src/workflow/agent-loop.ts          # sealFromRubricFails
+#     sed -n '26,33p'   packages/sdk-ts/src/judge/rubric.ts                 # DETERMINISTIC_RUBRIC_IDS
+#     sed -n '88,123p'  packages/sdk-ts/src/judge/scan-layering.ts          # added-lines-only scan
+#
+#   TWO DEFECTS, INDEPENDENT, BOTH LIVE, BOTH REQUIRED — fixing either alone still loses the run:
+#
+#     F-429 — A DETERMINISTIC ROW CANNOT BE RETRACTED. dogfood-163's completion review re-ran the
+#       architecture scan over the run's CUMULATIVE diff and reported "deterministic architecture
+#       scan found no layering violations", with all five of its rubric rows green (judge pass #4,
+#       journal idx 13). 17 ms later the run sealed
+#       `completion review: deterministic rubric failure — no_architecture_violations`.
+#       `mergeDesignFindings` (`packages/sdk-ts/src/workflow/completion-review.ts:665`) unions the
+#       FAILING rows of the sealing verdict with the review's, and its filter (`:672`) reads
+#       `if (result.pass || seen.has(result.id)) continue;` — a PASSING row is skipped outright, so
+#       it can never clear a failing row of the same id. That union is DELIBERATE AND CORRECT for
+#       LLM-judged design rows; its own doc comment names the trap it exists for. It is wrong for
+#       the three programs in `DETERMINISTIC_RUBRIC_IDS` (`packages/sdk-ts/src/judge/rubric.ts:28`),
+#       which are RE-MEASURED by the review on a strictly WIDER diff and are the only rows with no
+#       appeal: `sealFromRubricFails` (`packages/sdk-ts/src/workflow/agent-loop.ts:375`, filter at
+#       `:378`) seals FAILED unconditionally on them. Second-order: the stale row also read as a
+#       REPEATED objection (`completion-review.ts:613`), so the F-223…F-226 anti-oscillation bound
+#       denied a repair grant for a finding that had already been fixed.
+#
+#     F-430 — THE SCAN CANNOT TELL "INTRODUCED" FROM "RESTORED".
+#       `scanDiffForLayeringViolations` (`packages/sdk-ts/src/judge/scan-layering.ts:93`) inspects
+#       ADDED lines only (`:100`) and holds no pre-image, so a `+` line that merely restores text
+#       already present is scored exactly like one that introduces a forbidden edge. dogfood-163's
+#       step 1 widened an import; its step 2 narrowed it back to
+#       `packages/sdk-ts/src/workflow/agent-loop.ts:47` VERBATIM and moved the new symbol to a lower
+#       layer. Scanning that run's own two artifacts: the step-scoped diff returns
+#       `["workflow→runner"]`, the cumulative diff returns `[]`. Because the row is deterministic,
+#       that false positive is an unappealable FAILED seal. MEASURED blast radius over all 146
+#       committed `packages/sdk-ts/src/**/*.ts`: 11 pre-existing forbidden lines in 6 files —
+#       `agent-loop.ts:47`/`:20`/`:45`/`:69`/`:98`, `packages/sdk-ts/src/workflow/index.ts:8`,
+#       `packages/sdk-ts/src/judge/harness.ts:10`, `packages/sdk-ts/src/executors/prompt.ts:8`,
+#       `packages/sdk-ts/src/planner/plan-repair.ts:26`, `packages/sdk-ts/src/runner/branch.ts:9`.
+#       `agent-loop.ts` is the most-edited file of the whole campaign.
+#
+#   * THE FIRST TRAP IS DELETING OR MUZZLING THE GATE, AND IT CANNOT PASS. Dropping
+#     `no_architecture_violations` from `DETERMINISTIC_RUBRIC_IDS`, allowlisting the six files,
+#     scanning only the cumulative diff, or making the scan advisory all make the symptom vanish and
+#     the gate useless. AC-1 grades a RECALL FLOOR over an enumerated corpus — every file
+#     `git ls-files` reports — requiring a genuinely new forbidden import to be caught in EVERY one
+#     of them, in the same check as the false-positive ceiling, so neither can be bought with the
+#     other (F-426). AC-2 Scenario B drives a live run whose forbidden edge is never removed and
+#     requires it to STILL seal FAILED.
+#   * THE SECOND TRAP IS "THE LATER VERDICT ALWAYS WINS". Making the completion review able to clear
+#     ANY row re-opens exactly the hole `mergeDesignFindings` was written to close — an independent
+#     second review coming back clean silently dropping a real objection. AC-2 Scenario C fails an
+#     LLM-judged row at the sealing pass, returns an ALL-GREEN completion review, and requires the
+#     objection to survive to the seal.
+#   * THE THIRD TRAP IS FIXING ONE DEFECT AND CALLING IT DONE. With only WP-649 the scan stops
+#     false-flagging but any future disagreement between two deterministic measurements is still
+#     unretractable; with only WP-648 the executor still burns a repair grant chasing a phantom
+#     violation. AC-1 grades the scan and AC-2 grades the seal, separately.
+#   * NOT IN SCOPE: the judge prompt, the `JudgeForm` type, the rubric IDS themselves (add none,
+#     remove none), `heal/gate-repair.ts` routing (WP-542/F-207 — no LLM-verdict gate may exit),
+#     `areMateriallySameObjections` (`completion-review.ts`, WP-644 is dogfood-165's work),
+#     `packages/sdk-ts/src/judge/hermeticity.ts` (dogfood-159's check isolation),
+#     `packages/sdk-ts/src/executors/infra-failure.ts` and the WP-645/WP-646 crash-protection path
+#     that landed at the dogfood-163 review, the chain mirror, the Python mirror, or the TaskSpec
+#     contract.
+#   * THE EXPORTED CALL SHAPE STAYS: `scanDiffForLayeringViolations(diff: string): string[]` must
+#     keep working as a ONE-ARGUMENT call and must be correct for any diff that carries its own
+#     pre-image, because that is exactly how the production seam calls it
+#     (`packages/sdk-ts/src/judge/evidence.ts:336`). You MAY add optional parameters, and you MAY
+#     thread richer base-tree context through `collectEvidence` — but the one-argument call must not
+#     become wrong.
+
+name: dogfood-164-wp648-wp649-gate-must-take-yes
+wp: WP-648
+
+goal: |
+  A quality gate that condemns must also be able to acquit on its own re-measurement, and a check
+  that reports on a diff must report what the diff DID, not what the file already contained.
+
+  Measured from `run-12dfe421-7633-4199-9e3c-18bc32a410c5`'s own journal and artifacts at the
+  dogfood-163 review.
+
+  - The run's final completion review re-ran the deterministic architecture scan over the
+    CUMULATIVE diff and reported "deterministic architecture scan found no layering violations",
+    all five rubric rows green (judge pass #4, journal idx 13). 17 ms later the run sealed
+    completion review: deterministic rubric failure — no_architecture_violations, with 4 of 6
+    steps and 98.9% of its $20 budget unspent. The delivery was correct: 3/3 acceptance checks and
+    a 1,788-test suite, green, byte-identical on harvest.
+  - The row that condemned it was raised by the step-scoped pass on a diff whose only relevant
+    added line — `import { advanceStrikeCount } from "../runner/strike-accounting.js";` — is
+    byte-identical to `packages/sdk-ts/src/workflow/agent-loop.ts:47`, which has been committed on
+    `main` throughout. The step RESTORED it; the scan reported it as INTRODUCED.
+
+  Make this true.
+
+  1. **A deterministic rubric row the completion review re-measures as PASS clears the sealing
+     pass's FAIL for that same row.** The review measures the same program over a strictly wider
+     diff, so its answer is the more authoritative one. `mergeDesignFindings`
+     (packages/sdk-ts/src/workflow/completion-review.ts:665) is where the two answers meet.
+  2. **An LLM-judged design row keeps the union it has today.** A second, independent review coming
+     back clean must NOT silently drop an objection the sealing verdict raised — that is the trap
+     `mergeDesignFindings` exists for, and it is named in its own doc comment. Only the
+     deterministic set changes.
+  3. **The architecture scan reports edges the diff INTRODUCED.** An added line whose forbidden edge
+     is already present on the pre-image side of the same file in the same diff is not a new
+     violation. A removal is not a violation. A genuinely new forbidden import still is, and must
+     still be reported at step scope, not only at completion.
+  4. **The gate is not softened anywhere else.** A run that really does introduce a forbidden edge
+     and never removes it still seals FAILED, deterministically, with no appeal.
+
+  Decide what happens when the two measurements disagree in the OTHER direction — the sealing pass
+  passes a deterministic row and the review fails it — and say so in the code.
+
+  Three things must NOT change, and each is a trap this run is graded on:
+
+  1. **Deleting or muzzling the gate cannot be the answer.** Removing
+     `no_architecture_violations` from `DETERMINISTIC_RUBRIC_IDS`, allowlisting the six files that
+     already carry forbidden edges, scanning only the cumulative diff, or downgrading the row to
+     advisory all make the symptom vanish and the gate worthless. AC-1 grades a recall floor over
+     every file `git ls-files` reports, in the same check as the false-positive ceiling.
+  2. **"The later verdict always wins" cannot be the answer.** AC-2 Scenario C fails an LLM-judged
+     row at the sealing pass, returns an all-green completion review, and requires the objection to
+     survive to the seal.
+  3. **The exported call shape stays.** scanDiffForLayeringViolations(diff: string): string[] must
+     keep working as a ONE-ARGUMENT call and must be correct for any diff that carries its own
+     pre-image — that is how the production seam calls it
+     (packages/sdk-ts/src/judge/evidence.ts:336). Optional extra parameters are allowed;
+     threading base-tree context through collectEvidence is allowed; making the one-argument call
+     wrong is not. `heal/gate-repair.ts` routing stands (WP-542/F-207), the rubric ids are
+     unchanged (add none, remove none), and `areMateriallySameObjections`,
+     packages/sdk-ts/src/judge/hermeticity.ts, packages/sdk-ts/src/executors/infra-failure.ts,
+     the chain mirror, the Python mirror and the TaskSpec contract are all out of scope.
+
+  TypeScript stays strict ESM with named exports and no `any`.
+
+  Pin your work with tests that live in the repo, beside the files they cover. A behaviour proved
+  only by the acceptance checks that grade this run is not pinned at all (F-356), and a repo test
+  copied case-for-case from a grading check inherits its blind spots (F-403). **At least one
+  committed test must drive a diff shape these acceptance criteria do not name.**
+
+  Verify your work with FAST checks only: the package typecheck (`pnpm run typecheck` — NOT bare
+  tsc --noEmit, which does not cover the test/ tree, F-382), eslint over the files you touched, and
+  vitest over the directories you actually wrote into. Do NOT run the full vitest suite inside a
+  step, and do NOT background one and wait for it — dogfood-163's step 1 did exactly that and was
+  killed at 606.7s of its 600s cap having produced 129 output tokens (F-421/F-345/F-428).
+
+repos:
+  - url: /Users/nikitazolotarev/repos/chikory
+    writable: true
+
+# The SDK suite is both the surface this run edits and the gate it must not break.
+# MEASURE it at the launch commit rather than trusting this line (F-342, dogfood-140).
+regression_suite: pnpm --filter @chikory/sdk exec vitest run
+check_timeout_ms: 180000
+
+acceptance_criteria:
+  - id: AC-1
+    description: >
+      THE SCAN OWNS ITS ORACLE, AND BOTH FLOORS ARE GRADED IN ONE CHECK SO NEITHER CAN BE BOUGHT
+      WITH THE OTHER (F-426). It drives the real built `scanDiffForLayeringViolations` through its
+      one-argument production call shape. The FALSE-POSITIVE CEILING is measured over an enumerated
+      corpus the delivery cannot hand-fit — every file `git ls-files` reports under
+      packages/sdk-ts/src — by synthesising, for each, the diff shape that cost dogfood-163 its run
+      (two adjacent lines reordered, so every added line is also present on the pre-image side):
+      ZERO of them may report a violation. The RECALL FLOOR is measured over the SAME enumerated
+      corpus by appending one genuinely new forbidden import to each file: EVERY one must be
+      reported. It also grades the byte-exact hunk from the run's own step-2 artifact, a
+      removal-only diff, and a pure addition with no pre-image evidence at all.
+    check: |
+      cd packages/sdk-ts || exit 1
+      TARGET=test/judge/ac1-introduced-vs-restored.generated.test.ts
+      mkdir -p test/judge
+      rm -f "$TARGET"
+      cat > "$TARGET" <<'GENEOF'
+      import { execFileSync } from "node:child_process";
+      import { readFileSync } from "node:fs";
+      import { describe, expect, test } from "vitest";
+
+      import { scanDiffForLayeringViolations } from "../../src/judge/index.js";
+
+      const REPO = execFileSync("git", ["rev-parse", "--show-toplevel"], { encoding: "utf8" }).trim();
+
+      /** A unified diff header for one file, exactly as `git diff` emits it. */
+      function header(path: string): string[] {
+        return [`diff --git a/${path} b/${path}`, "index 1111111..2222222 100644", `--- a/${path}`, `+++ b/${path}`];
+      }
+
+      /**
+       * The dogfood-163 shape, generalised: two adjacent lines swap places. Every ADDED
+       * line is also present on the pre-image side of the very same hunk, so nothing here
+       * was introduced. `git diff` emits exactly this for a reordered import block.
+       */
+      function reorderDiff(path: string, lines: string[], at: number): string {
+        const a = lines[at]!;
+        const b = lines[at + 1] ?? "";
+        const ctxBefore = lines.slice(Math.max(0, at - 2), at);
+        const ctxAfter = lines.slice(at + 2, at + 4);
+        return [
+          ...header(path),
+          `@@ -${Math.max(1, at - 1)},6 +${Math.max(1, at - 1)},6 @@`,
+          ...ctxBefore.map((l) => ` ${l}`),
+          `-${a}`,
+          `-${b}`,
+          `+${b}`,
+          `+${a}`,
+          ...ctxAfter.map((l) => ` ${l}`),
+        ].join("\n");
+      }
+
+      /** A pure addition of one import no file in the repo has. Nothing can call this restored. */
+      const PROBE = 'import { __ac1Probe } from "src/cli/__ac1_probe_target.js";';
+      function additionDiff(path: string, lines: string[]): string {
+        return [
+          ...header(path),
+          "@@ -1,3 +1,4 @@",
+          `+${PROBE}`,
+          ...lines.slice(0, 3).map((l) => ` ${l}`),
+        ].join("\n");
+      }
+
+      /** Only removals. Deleting a forbidden import cannot be a new violation. */
+      function removalDiff(path: string, line: string): string {
+        return [...header(path), "@@ -1,1 +1,0 @@", `-${line}`].join("\n");
+      }
+
+      function srcFiles(): string[] {
+        return execFileSync("git", ["ls-files", "packages/sdk-ts/src"], { cwd: REPO, encoding: "utf8" })
+          .split("\n")
+          .filter((f) => f.endsWith(".ts"));
+      }
+
+      describe("the architecture scan reports what the diff INTRODUCED (WP-649)", () => {
+        test("the byte-exact hunk that cost dogfood-163 its run reports nothing", () => {
+          const diff = [
+            ...header("packages/sdk-ts/src/workflow/agent-loop.ts"),
+            "@@ -44,7 +44,8 @@ import {",
+            ' } from "../runner/pacing.js";',
+            ' import { calibrateContextWindow, resolveContextWindowForSpec } from "../runner/context-window.js";',
+            " // Pure (no I/O, no clock) — workflow-bundle safe.",
+            '-import { advanceStrikeCount, isInfraStepFailure } from "../runner/strike-accounting.js";',
+            '+import { advanceStrikeCount } from "../runner/strike-accounting.js";',
+            '+import { isInfraStepFailure } from "../executors/infra-failure.js";',
+            " import type {",
+            "   ArtifactRef,",
+          ].join("\n");
+          expect(
+            scanDiffForLayeringViolations(diff),
+            "this is `99816e9865e4`, dogfood-163's step-2 diff, verbatim. The one added runner import is " +
+              "byte-identical to packages/sdk-ts/src/workflow/agent-loop.ts:47 on main, and the pre-image side " +
+              "of this very hunk carries the same edge twice. The step RESTORED it. Reporting it FAILED a run " +
+              "whose delivery was green, with 4 of 6 steps and 98.9% of budget unspent.",
+          ).toEqual([]);
+        });
+
+        test("removing a forbidden import is not a violation", () => {
+          expect(
+            scanDiffForLayeringViolations(
+              removalDiff(
+                "packages/sdk-ts/src/workflow/agent-loop.ts",
+                'import { advanceStrikeCount } from "../runner/strike-accounting.js";',
+              ),
+            ),
+            "a diff that only DELETES a forbidden edge has made the layering strictly better.",
+          ).toEqual([]);
+        });
+
+        test("a pure addition with no pre-image evidence is still a violation", () => {
+          const path = "packages/sdk-ts/src/judge/rubric.ts";
+          const lines = readFileSync(`${REPO}/${path}`, "utf8").split("\n");
+          expect(
+            scanDiffForLayeringViolations(additionDiff(path, lines)),
+            "nothing in this diff says the edge pre-existed, and nothing in the repo imports " +
+              "src/cli/__ac1_probe_target.js. A scan that answers [] here has stopped scanning.",
+          ).toEqual(["judge→cli"]);
+        });
+
+        test("BOTH FLOORS over the enumerated corpus: 0 false positives AND 100% recall", () => {
+          const files = srcFiles();
+          expect(files.length, "git ls-files returned no TypeScript sources — the corpus is empty").toBeGreaterThan(100);
+
+          const falsePositives: string[] = [];
+          const missed: string[] = [];
+          let ceilingCases = 0;
+          let recallCases = 0;
+
+          for (const path of files) {
+            const lines = readFileSync(`${REPO}/${path}`, "utf8").split("\n");
+
+            // CEILING — reorder every adjacent pair in the file's first 120 lines (where
+            // imports live). Nothing is introduced, so nothing may be reported.
+            for (let i = 0; i < Math.min(lines.length - 1, 120); i++) {
+              if (!/\b(?:import|export|require)\b/.test(lines[i]!)) continue;
+              ceilingCases += 1;
+              const got = scanDiffForLayeringViolations(reorderDiff(path, lines, i));
+              if (got.length > 0) falsePositives.push(`${path}:${i + 1} -> ${got.join(",")} :: ${lines[i]!.trim()}`);
+            }
+
+            // RECALL — every non-cli file gains one genuinely new import of the top layer.
+            if (path.includes("/src/cli/")) continue;
+            recallCases += 1;
+            if (scanDiffForLayeringViolations(additionDiff(path, lines)).length === 0) missed.push(path);
+          }
+
+          expect(
+            falsePositives.slice(0, 12),
+            `FALSE-POSITIVE CEILING BUSTED: ${falsePositives.length} of ${ceilingCases} reorder cases across ` +
+              `${files.length} enumerated files reported a violation the diff did not introduce. This is the ` +
+              `defect that failed dogfood-163, measured on a corpus the delivery cannot hand-fit.`,
+          ).toEqual([]);
+          expect(
+            missed.slice(0, 12),
+            `RECALL FLOOR BUSTED: ${missed.length} of ${recallCases} files did NOT report a genuinely new ` +
+              `forbidden import. A ceiling bought by muzzling the scan is worth nothing — both floors are ` +
+              `graded here so neither can be paid for with the other (F-426).`,
+          ).toEqual([]);
+          expect(ceilingCases, "the ceiling corpus is too small to mean anything").toBeGreaterThan(300);
+          expect(recallCases, "the recall corpus is too small to mean anything").toBeGreaterThan(100);
+        });
+      });
+      GENEOF
+      pnpm exec vitest run "$TARGET"
+      ST=$?
+      rm -f "$TARGET"
+      if [ "$ST" -ne 0 ]; then
+        echo "AC-1 FAIL: the architecture scan still cannot tell an edge the diff INTRODUCED from one it merely RESTORED, or it bought that by no longer catching a genuinely new forbidden import. vitest exited $ST"
+        exit 1
+      fi
+      echo "AC-1 OK: 0 false positives and 100% recall over the enumerated git ls-files corpus, and the dogfood-163 hunk reports nothing"
+  - id: AC-2
+    description: >
+      THIS CHECK ASSERTS AT THE CONSUMED SEAM — the run's terminal state. It drives the REAL agent
+      loop (real Temporal dev server, real workflow bundle, real judge-pass sequencing, real
+      deterministic scan over a real git diff, scripted executor, fake judge wire). Scenario A
+      replays dogfood-163: a step introduces a forbidden edge, the next step removes it and restores
+      the file to its committed text, and the run must NOT be sealed FAILED on
+      `no_architecture_violations`. Scenario B introduces a forbidden edge and never removes it, and
+      must STILL seal FAILED on that row — so A cannot be bought by softening the gate. Scenario C
+      fails an LLM-judged rubric row at the sealing pass and returns an ALL-GREEN completion review,
+      and the objection must still reach the seal — so A cannot be bought by "the later verdict
+      always wins", which is the hole `mergeDesignFindings` was written to close.
+    check: |
+      cd packages/sdk-ts || exit 1
+      TARGET=test/runner/ac2-gate-takes-yes-live.generated.test.ts
+      rm -f "$TARGET"
+      cat > "$TARGET" <<'GENEOF'
+      import { randomUUID } from "node:crypto";
+      import { mkdtemp, rm, writeFile } from "node:fs/promises";
+      import { tmpdir } from "node:os";
+      import { join } from "node:path";
+
+      import { afterEach, describe, expect, inject, test } from "vitest";
+
+      import { createRunnerWorker, createTemporalRunner, Journal, journalPath } from "../../src/index.js";
+      import type { AdapterRegistry, ArtifactStore, ExecutorAdapter, JudgeForm, StepRecord } from "../../src/index.js";
+      import {
+        completionReviewForm,
+        initSourceRepo,
+        judgeForm,
+        makeJudgedSpec,
+        startFakeJudgeWire,
+        TERMINAL_STATUSES,
+        waitFor,
+      } from "./helpers.js";
+
+      const address = inject("temporalAddress");
+      const bundlePath = inject("workflowBundlePath");
+
+      const cleanups: (() => Promise<unknown> | unknown)[] = [];
+      afterEach(async () => {
+        while (cleanups.length > 0) await cleanups.pop()!();
+      });
+
+      const LOOP = "src/workflow/loop.ts";
+      // The committed baseline ALREADY carries a workflow->runner edge, exactly as
+      // packages/sdk-ts/src/workflow/agent-loop.ts:47 does on main. That is the whole point:
+      // the restored line is one the repo already had.
+      const BASE_LOOP = [
+        'import { alpha } from "../runner/alpha.js";',
+        "export const loop = () => alpha();",
+        "",
+      ].join("\n");
+      // A GENUINELY new edge: a runner module the file did not import before.
+      const DIRTY_LOOP = [
+        'import { alpha } from "../runner/alpha.js";',
+        'import { beta } from "../runner/beta.js";',
+        "export const loop = () => alpha() + beta();",
+        "",
+      ].join("\n");
+
+      /** Writes real bytes into the workspace so the deterministic scan sees a real git diff. */
+      function scriptedRegistry(contentByAttempt: string[]): AdapterRegistry {
+        let attempt = 0;
+        const adapter = (ctx: { store: ArtifactStore }): ExecutorAdapter =>
+          ({
+            name: "scripted",
+            modelFamily: "anthropic",
+            async runStep(input): Promise<StepRecord> {
+              attempt += 1;
+              const content = contentByAttempt[Math.min(attempt - 1, contentByAttempt.length - 1)]!;
+              await writeFile(join(input.workspaceDir, LOOP), content);
+              return {
+                diffRef: await ctx.store.put(`diff ${attempt}`, { kind: "diff", summary: `attempt ${attempt}` }),
+                transcriptRef: await ctx.store.put(`transcript ${attempt}`, {
+                  kind: "transcript",
+                  summary: `attempt ${attempt}`,
+                }),
+                status: "SUCCESS",
+                summary: `attempt ${attempt}: wrote ${LOOP}`,
+                toolCalls: 1,
+                tokens: { input: 100, output: 50 },
+                costUsd: 0,
+                costEstimated: false,
+                durationMs: 10,
+              };
+            },
+          });
+        return { scripted: adapter };
+      }
+
+      interface Outcome {
+        status: string;
+        terminals: { status: string; reason?: string }[];
+        rubricFailIds: string[][];
+      }
+
+      async function driveRun(
+        contentByAttempt: string[],
+        forms: JudgeForm[],
+        reviewForms: JudgeForm[],
+        maxSteps: number,
+      ): Promise<Outcome> {
+        const wire = await startFakeJudgeWire(forms, { reviewForms });
+        cleanups.push(() => wire.close());
+
+        const tmp = await mkdtemp(join(tmpdir(), "ac2-gate-yes-"));
+        cleanups.push(() => rm(tmp, { recursive: true, force: true }));
+        const repoUrl = await initSourceRepo(join(tmp, "src"), {
+          [LOOP]: BASE_LOOP,
+          "src/runner/alpha.ts": "export const alpha = () => 1;\n",
+          "src/runner/beta.ts": "export const beta = () => 2;\n",
+        });
+        const dataDir = join(tmp, "data");
+        const taskQueue = `tq-${randomUUID()}`;
+        const worker = await createRunnerWorker({
+          adapters: scriptedRegistry(contentByAttempt),
+          address: address!,
+          taskQueue,
+          dataDir,
+          workflowBundlePath: bundlePath!,
+          routerOptions: { baseUrls: { "openai-compat": wire.url } },
+        });
+        const workerDone = worker.run();
+        const runner = createTemporalRunner({ address: address!, taskQueue, dataDir });
+        cleanups.push(async () => {
+          worker.shutdown();
+          await workerDone;
+          await runner.close();
+        });
+
+        const spec = makeJudgedSpec({ repoUrl, cadence: 1, maxSteps, budgetUsd: 20 });
+        const handle = await runner.start({ ...spec, executor: { adapter: "scripted", family: "anthropic" } });
+        const report = await waitFor(
+          async () => {
+            const r = await handle.status();
+            return TERMINAL_STATUSES.includes(r.status) ? r : undefined;
+          },
+          { timeoutMs: 240_000, what: "run to reach a terminal status" },
+        );
+        const journal = new Journal(journalPath(dataDir, handle.runId));
+        try {
+          return {
+            status: report.status,
+            terminals: journal.entries("terminal").map((e) => e.payload as Outcome["terminals"][number]),
+            rubricFailIds: journal.entries("judge").map((e) => {
+              const p = e.payload as { form: { rubricResults: { id: string; pass: boolean }[] } };
+              return p.form.rubricResults.filter((r) => !r.pass).map((r) => r.id);
+            }),
+          };
+        } finally {
+          journal.close();
+        }
+      }
+
+      const ARCH = "no_architecture_violations";
+      const detail = (o: Outcome) =>
+        " status=" + o.status + " terminals=" + JSON.stringify(o.terminals) +
+        " rubricFailsPerPass=" + JSON.stringify(o.rubricFailIds);
+
+      describe("a deterministic gate must be able to take yes for an answer (WP-648/WP-649)", () => {
+        test(
+          "A: introduced then restored does not seal FAILED - B: introduced and kept still does - C: an LLM row survives a clean review",
+          async () => {
+            // A — dogfood-163 replayed. Attempt 1 adds a genuinely new forbidden edge;
+            // attempt 2 restores the file to its committed text, so the CUMULATIVE diff is
+            // clean while the step-scoped diff re-emits a line the repo already had.
+            const a = await driveRun(
+              [DIRTY_LOOP, BASE_LOOP],
+              [judgeForm({ criteria: { "AC-1": false } }), judgeForm({ criteria: { "AC-1": true } })],
+              [completionReviewForm()],
+              4,
+            );
+            expect(
+              (a.terminals.at(-1)?.reason ?? "").includes(ARCH),
+              "the run put the file back exactly as it found it, and the completion review's own " +
+                "re-measurement over the cumulative diff says so. Sealing on `" + ARCH + "` here is " +
+                "dogfood-163: a green delivery failed on a complaint the run had already retracted." +
+                detail(a),
+            ).toBe(false);
+
+            // B — the forbidden edge is introduced and NEVER removed. The gate must still bite.
+            const b = await driveRun(
+              [DIRTY_LOOP],
+              [judgeForm({ criteria: { "AC-1": true } })],
+              [completionReviewForm()],
+              2,
+            );
+            expect(
+              b.status === "FAILED" && (b.terminals.at(-1)?.reason ?? "").includes(ARCH),
+              "this run really does add a forbidden layering edge and never takes it back. If it " +
+                "does not seal FAILED on `" + ARCH + "`, scenario A was bought by muzzling the gate " +
+                "rather than by teaching it what a diff introduced." +
+                detail(b),
+            ).toBe(true);
+
+            // C — an LLM-judged row fails at the sealing pass; the completion review is ALL
+            // GREEN. The objection must survive: dropping it is the exact hole
+            // `mergeDesignFindings` was written to close.
+            const c = await driveRun(
+              [BASE_LOOP],
+              [judgeForm({ criteria: { "AC-1": true }, rubricFails: ["scope_matches_instruction"] })],
+              [completionReviewForm()],
+              3,
+            );
+            expect(
+              c.status,
+              "an LLM-judged objection raised at the sealing pass must not be cleared by a second, " +
+                "independent review that happens to come back clean. `mergeDesignFindings` unions " +
+                "those on purpose; only the deterministic rows may be retracted. A SUCCESS here means " +
+                "the fix was `the later verdict always wins`." +
+                detail(c),
+            ).toBe("FAILED");
+            expect(
+              (c.terminals.at(-1)?.reason ?? "").includes("scope_matches_instruction"),
+              "the surviving objection must be NAMED in the seal reason, not silently folded away." +
+                detail(c),
+            ).toBe(true);
+          },
+          600_000,
+        );
+      });
+      GENEOF
+      pnpm exec vitest run "$TARGET"
+      ST=$?
+      rm -f "$TARGET"
+      if [ "$ST" -ne 0 ]; then
+        echo "AC-2 FAIL: either a run that restored a file to its committed text still seals FAILED on no_architecture_violations, or the gate was softened so a genuinely new forbidden edge no longer seals FAILED, or an LLM-judged objection is now silently cleared by a clean completion review. vitest exited $ST"
+        exit 1
+      fi
+      echo "AC-2 OK: a retracted deterministic row no longer seals the run, a real violation still does, and an LLM row still survives a clean review"
+  - id: AC-3
+    description: >
+      THE TRAP RAIL AND THE DURABILITY FLOOR. Strict typecheck over src AND test (F-382), eslint
+      over the touched modules, then greps that the out-of-scope surfaces this WP must not disturb
+      are still present AND that the rubric id set was neither shrunk nor padded, then the committed
+      judge/durable-execution guards, then the DECLARED regression suite green AND larger by at
+      least four tests — a behaviour proved only by these grading checks is not pinned at all
+      (F-356).
+    check: |
+      cd packages/sdk-ts || exit 1
+      pnpm run typecheck || { echo "AC-3 FAIL: strict typecheck is red (this covers test/ too — F-382)"; exit 1; }
+      pnpm exec eslint src/judge/scan-layering.ts src/judge/rubric.ts src/judge/evidence.ts src/workflow/completion-review.ts src/workflow/agent-loop.ts || { echo "AC-3 FAIL: eslint is red on the modules this WP touches"; exit 1; }
+
+      grep -qE 'export function scanDiffForLayeringViolations' src/judge/scan-layering.ts || {
+        echo "AC-3 FAIL: trap — the scan was deleted rather than corrected. This WP changes WHAT the scan reports, not whether it exists."
+        exit 1
+      }
+      grep -qE 'export const DETERMINISTIC_RUBRIC_IDS' src/judge/rubric.ts || {
+        echo "AC-3 FAIL: trap — DETERMINISTIC_RUBRIC_IDS was removed. The unappealable set is the point; it may not be dissolved."
+        exit 1
+      }
+      grep -qE '"no_architecture_violations"' src/judge/rubric.ts || {
+        echo "AC-3 FAIL: trap — no_architecture_violations was dropped from the deterministic set. That makes the symptom vanish and the gate worthless."
+        exit 1
+      }
+      grep -qE '"no_secrets_introduced"' src/judge/rubric.ts || {
+        echo "AC-3 FAIL: trap — no_secrets_introduced was dropped from the deterministic set."
+        exit 1
+      }
+      grep -qE 'export function mergeDesignFindings' src/workflow/completion-review.ts || {
+        echo "AC-3 FAIL: trap — mergeDesignFindings was removed rather than corrected. The union it performs for LLM rows must survive."
+        exit 1
+      }
+      grep -qE 'export function areMateriallySameObjections' src/workflow/completion-review.ts || {
+        echo "AC-3 FAIL: trap — the WP-643/WP-644 objection comparator was disturbed. It is dogfood-165's work and is out of scope here."
+        exit 1
+      }
+      grep -qE 'export const MAX_GATE_REPAIR_ATTEMPTS' src/heal/gate-repair.ts || {
+        echo "AC-3 FAIL: trap — the gate-repair route lost its bound. No LLM-verdict gate may exit (WP-542/F-207), and this WP does not touch that path."
+        exit 1
+      }
+      grep -qE 'export function isInfraStepFailure' src/executors/infra-failure.ts || {
+        echo "AC-3 FAIL: trap — dogfood-163's WP-645 crash classifier was disturbed. This WP does not touch that path."
+        exit 1
+      }
+      grep -qE 'export function ignoredPreservePriority' src/judge/hermeticity.ts || {
+        echo "AC-3 FAIL: trap — dogfood-159's judge-check isolation was disturbed. This WP does not touch that path."
+        exit 1
+      }
+
+      RUBRIC_N=$(grep -cE '^\s+id: "' src/judge/rubric.ts)
+      echo "rubric item declarations: ${RUBRIC_N}"
+
+      pnpm exec vitest run test/runner/deterministic-rubric-live.test.ts test/runner/completion-review.test.ts test/runner/resume-drill-seam.test.ts test/chain/advance.test.ts || {
+        echo "AC-3 FAIL: trap — a committed judge or durable-execution guard is RED. The anti-oscillation bound, the completion-review merge contract, the resume drill and chain sealing (WP-543/F-208) must all still hold."
+        exit 1
+      }
+
+      OUT=$(pnpm --filter @chikory/sdk exec vitest run 2>&1)
+      ST=$?
+      echo "$OUT" | grep -nE '(^|[[:space:]])(FAIL|×|✕|AssertionError)' | head -n 20
+      echo "$OUT" | tail -6
+      if [ "$ST" -ne 0 ]; then
+        echo "AC-3 FAIL: the DECLARED regression suite is RED (vitest exited $ST). One test in this suite is known flaky (F-420, 1 red in 4 observations) — the failing test's NAME is printed above and the full output is kept by the review harness."
+        exit 1
+      fi
+      N=$(echo "$OUT" | grep -oE "Tests +[0-9]+ passed" | grep -oE "[0-9]+" | head -1)
+      echo "committed suite tests passing: ${N:-UNPARSEABLE} (floor 1792, measured baseline 1788)"
+      if [ -z "$N" ]; then
+        echo "AC-3 FAIL: could not read a test count out of the vitest summary"
+        exit 1
+      fi
+      if [ "$N" -lt 1792 ]; then
+        echo "AC-3 FAIL: durability floor not met — the committed suite did not grow by at least 4 tests. A behaviour proved only by the generated grading checks is not pinned at all (F-356)."
+        exit 1
+      fi
+      echo "AC-3 OK: strict typecheck and lint green, out-of-scope surfaces intact, rubric set intact, judge + durable-execution guards green, DECLARED suite green AND larger"
+
+budget_usd: 20
+max_steps: 6
+
+agent_classes:
+  executor: executor-default
+  judge: judge-default
+
+judge:
+  cadence: 1
+
+# F-322 (dogfood-135): without this, a converged out-of-rubric escalation parks overnight for a
+# human instead of auto-sealing.
+unattended:
+  escalation: seal_resumable_failed

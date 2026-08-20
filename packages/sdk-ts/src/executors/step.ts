@@ -14,6 +14,7 @@ import { runBounded } from "./process.js";
 import { assertGitWorkspace, captureWorkspaceDiff, sourceRepoDirtyPaths } from "./workspace.js";
 
 export const SPAN_STEP = "chikory.step";
+export { isInfraStepFailure, LEGACY_CAP_KILL_PREFIX } from "./infra-failure.js";
 
 /**
  * WP-221 completion-marker protocol (vendor-neutral). The step prompt
@@ -280,11 +281,13 @@ export async function runCliStep(opts: CliStepOptions): Promise<StepRecord> {
         ? ` (executor exit ${proc.exitCode}${proc.stderr ? `: ${proc.stderr.slice(0, 1000)}` : ""})`
         : "";
     const failure = parsed.failure ?? { reason: "executor reported failure", retriable: false };
+    const infraFailed = parsed.tokens.output === 0;
     record = {
       ...base,
       status: "FAILED",
       summary: base.summary || failure.reason,
       failure: { ...failure, reason: `${failure.reason}${exitCtx}` },
+      ...(infraFailed ? { infraFailed: true } : {}),
       // F-228 (WP-553): hand the raw stderr to the limit scheduler. A quota or
       // rate wall reads as an ordinary executor failure here — `agy`'s
       // "Individual quota reached … Resets in 1h0m8s" FAILED four consecutive

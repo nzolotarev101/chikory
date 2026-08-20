@@ -2054,7 +2054,7 @@ export function createRunnerActivities(deps: RunnerActivityDeps) {
             : [...checkpoints]
                 .reverse()
                 .find((checkpoint) => checkpoint.stepIndex === lastVerdictPayload.atStep);
-        const sinceCommit =
+        let sinceCommit =
           verdictCheckpoint === undefined
             ? input.baseCommit
             : (Object.values(verdictCheckpoint.gitCommits)[0] ?? input.baseCommit);
@@ -2083,6 +2083,7 @@ export function createRunnerActivities(deps: RunnerActivityDeps) {
           | {
               status?: string;
               reason?: string;
+              lastCheckpoint?: string;
               resumable?: boolean;
               remediation?: { attempts?: number; brief?: string };
             }
@@ -2101,12 +2102,19 @@ export function createRunnerActivities(deps: RunnerActivityDeps) {
           lastTerminalPayload?.status === "FAILED" &&
           lastTerminalPayload.resumable === true;
         if (atResumableSeal && checkpoints.length > 0) {
+          const targetCheckpointId =
+            lastTerminalPayload?.lastCheckpoint ?? checkpoints[checkpoints.length - 1]!.id;
           await restoreWorkspaceReposToCheckpoint({
             dataDir: deps.dataDir,
             runId: input.runId,
-            checkpointId: checkpoints[checkpoints.length - 1]!.id,
+            checkpointId: targetCheckpointId,
             workspaceRepos,
           });
+          const targetCheckpoint = checkpoints.find((c) => c.id === targetCheckpointId);
+          const targetCommit = targetCheckpoint
+            ? Object.values(targetCheckpoint.gitCommits)[0]
+            : undefined;
+          if (targetCommit !== undefined) sinceCommit = targetCommit;
         }
         let reopenedFeedback: string | undefined;
         if (atResumableSeal) {

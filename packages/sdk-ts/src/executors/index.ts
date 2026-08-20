@@ -7,6 +7,8 @@ export { applyLimitResponse, type ApplyLimitResponseInput } from "./limit-respon
 export {
   claimsCompleteFromSummary,
   COMPLETION_MARKER,
+  isInfraStepFailure,
+  LEGACY_CAP_KILL_PREFIX,
   runCliStep,
   SPAN_STEP,
   type CliStepOptions,
