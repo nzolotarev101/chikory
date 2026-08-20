@@ -41,7 +41,7 @@ async function main(): Promise<void> {
   if (result !== "Hello, Chikory!") {
     throw new Error(`SMOKE FAILED: unexpected workflow result: ${JSON.stringify(result)}`);
   }
-  console.log(`SMOKE OK: workflow returned ${JSON.stringify(result)}`);
+  process.stdout.write(JSON.stringify({ level: "info", message: "SMOKE OK", result }) + "\n");
 }
 
 main().catch((err) => {
