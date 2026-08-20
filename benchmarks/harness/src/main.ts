@@ -3,6 +3,7 @@
  * (`devbox run bench -- <command>`), never against host toolchains.
  */
 import { existsSync, mkdirSync, readFileSync, readdirSync, statSync, writeFileSync } from "node:fs";
+import { readFile } from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";
 import { parse as parseYaml } from "yaml";
 
@@ -666,19 +667,43 @@ export async function main(argv: string[], io = { out: console.log, err: console
         }
       }
 
-      for (const file of entries) {
-        if (!file.endsWith(".json")) continue;
-        if (file === "summary.json" || file.endsWith("-summary.json") || file === "comparison.json" || file === "leaderboard.json") {
-          continue;
+      const jsonFiles = entries.filter((file) => {
+        if (!file.endsWith(".json")) return false;
+        if (
+          file === "summary.json" ||
+          file.endsWith("-summary.json") ||
+          file === "comparison.json" ||
+          file === "leaderboard.json"
+        ) {
+          return false;
         }
-        const fullPath = join(resolvedResults, file);
-        try {
-          const parsed = JSON.parse(readFileSync(fullPath, "utf8"));
-          if (parsed && typeof parsed === "object" && typeof parsed.taskId === "string" && parsed.grading) {
-            taskResults.push(parsed as TaskResult);
+        return true;
+      });
+
+      const parsedResults = await Promise.all(
+        jsonFiles.map(async (file) => {
+          const fullPath = join(resolvedResults, file);
+          try {
+            const content = await readFile(fullPath, "utf8");
+            const parsed = JSON.parse(content);
+            if (
+              parsed &&
+              typeof parsed === "object" &&
+              typeof parsed.taskId === "string" &&
+              parsed.grading
+            ) {
+              return parsed as TaskResult;
+            }
+          } catch {
+            // Ignore invalid JSON files
           }
-        } catch {
-          // Ignore invalid JSON files
+          return null;
+        }),
+      );
+
+      for (const parsed of parsedResults) {
+        if (parsed) {
+          taskResults.push(parsed);
         }
       }
 
