@@ -706,18 +706,23 @@ export async function cmdStatus(
     ioPair.out(args.json ? "[]" : `no runs under ${runsDir}`);
     return 0;
   }
-  const rows: Array<{ runId: string } & RunStatusReport> = [];
-  for (const id of (await readdir(runsDir)).sort()) {
-    const path = journalPath(args.dataDir, id);
-    if (!existsSync(path)) continue;
-    const journal = new Journal(path);
-    try {
-      const report = reportFromJournal(journal);
-      if (report) rows.push({ runId: id, ...report });
-    } finally {
-      journal.close();
-    }
-  }
+  const runIds = (await readdir(runsDir)).sort();
+  const rowResults = await Promise.all(
+    runIds.map(async (id) => {
+      const path = journalPath(args.dataDir, id);
+      if (!existsSync(path)) return null;
+      const journal = new Journal(path);
+      try {
+        const report = reportFromJournal(journal);
+        return report ? { runId: id, ...report } : null;
+      } finally {
+        journal.close();
+      }
+    }),
+  );
+  const rows = rowResults.filter(
+    (row): row is { runId: string } & RunStatusReport => row !== null,
+  );
   if (args.json) {
     ioPair.out(JSON.stringify(rows));
   } else if (rows.length === 0) {
