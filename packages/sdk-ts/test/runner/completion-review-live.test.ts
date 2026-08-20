@@ -281,4 +281,203 @@ describe.skipIf(address === null)("run-completion holistic review", () => {
       journal.close();
     }
   }, 120_000);
+
+  test("AC-1 / dogfood-159: review fails SAME rubric id twice with DIFFERENT objection text, then clean => seals SUCCESS at step 3", async () => {
+    const wire = await startFakeJudgeWire(
+      [
+        judgeForm({
+          criteria: { "AC-1": true },
+          rubricFails: [RUBRIC_DESIGN_SERVES_OVERALL_GOAL],
+        }),
+        judgeForm({ criteria: { "AC-1": true } }),
+        judgeForm({ criteria: { "AC-1": true } }),
+      ],
+      {
+        reviewForms: [
+          completionReviewForm({
+            rubricFails: [RUBRIC_CUMULATIVE_DESIGN_COHERENT],
+            justifications: {
+              [RUBRIC_CUMULATIVE_DESIGN_COHERENT]: "Objection 1: duplicated parser helper in step 1",
+            },
+          }),
+          completionReviewForm({
+            rubricFails: [RUBRIC_CUMULATIVE_DESIGN_COHERENT],
+            justifications: {
+              [RUBRIC_CUMULATIVE_DESIGN_COHERENT]: "Objection 2: unhandled stream state in parser",
+            },
+          }),
+          completionReviewForm(),
+        ],
+      },
+    );
+    cleanups.push(() => wire.close());
+    const { repoUrl, dataDir, runner } = await setup(wire, {
+      claimsCompleteSteps: [1],
+      echoJudgeFeedback: true,
+    });
+    const spec = makeJudgedSpec({ repoUrl, cadence: 1, maxSteps: 6 });
+
+    const handle = await runner.start(spec);
+    const report = await awaitTerminal(handle);
+
+    expect(report.status).toBe("SUCCESS");
+    expect(wire.reviewHits).toBe(3);
+
+    const journal = new Journal(journalPath(dataDir, handle.runId));
+    try {
+      const terminal = journal.entries("terminal").at(-1)!.payload as { status: string };
+      expect(terminal.status).toBe("SUCCESS");
+      expect(journal.entries("step").length).toBe(3);
+    } finally {
+      journal.close();
+    }
+  }, 180_000);
+
+  test("AC-2 Scenario A: review fails a DIFFERENT rubric id on each pass, then comes back clean => seals SUCCESS at step 4", async () => {
+    const wire = await startFakeJudgeWire(
+      [
+        judgeForm({
+          criteria: { "AC-1": true },
+          rubricFails: [RUBRIC_DESIGN_SERVES_OVERALL_GOAL],
+        }),
+        judgeForm({ criteria: { "AC-1": true } }),
+        judgeForm({ criteria: { "AC-1": true } }),
+        judgeForm({ criteria: { "AC-1": true } }),
+      ],
+      {
+        reviewForms: [
+          completionReviewForm({
+            rubricFails: [RUBRIC_CUMULATIVE_DESIGN_COHERENT],
+            justifications: { [RUBRIC_CUMULATIVE_DESIGN_COHERENT]: "finding A: dup code" },
+          }),
+          completionReviewForm({
+            rubricFails: [RUBRIC_DESIGN_SERVES_OVERALL_GOAL],
+            justifications: { [RUBRIC_DESIGN_SERVES_OVERALL_GOAL]: "finding B: architecture flaw" },
+          }),
+          completionReviewForm({
+            rubricFails: [RUBRIC_CUMULATIVE_DESIGN_COHERENT],
+            justifications: { [RUBRIC_CUMULATIVE_DESIGN_COHERENT]: "finding C: new naming issue" },
+          }),
+          completionReviewForm(),
+        ],
+      },
+    );
+    cleanups.push(() => wire.close());
+    const { repoUrl, dataDir, runner } = await setup(wire, {
+      claimsCompleteSteps: [1],
+      echoJudgeFeedback: true,
+    });
+    const spec = makeJudgedSpec({ repoUrl, cadence: 1, maxSteps: 6 });
+
+    const handle = await runner.start(spec);
+    const report = await awaitTerminal(handle);
+
+    expect(report.status).toBe("SUCCESS");
+    expect(wire.reviewHits).toBe(4);
+
+    const journal = new Journal(journalPath(dataDir, handle.runId));
+    try {
+      const terminal = journal.entries("terminal").at(-1)!.payload as { status: string };
+      expect(terminal.status).toBe("SUCCESS");
+      expect(journal.entries("step").length).toBe(4);
+    } finally {
+      journal.close();
+    }
+  }, 180_000);
+
+  test("AC-2 Scenario B: review returns materially the SAME objection on every pass => seals FAILED (resumable) in 3 steps", async () => {
+    const SAME_OBJECTION = "Objection: non-converged state in transaction boundary";
+    const wire = await startFakeJudgeWire(
+      [
+        judgeForm({ criteria: { "AC-1": false } }),
+        judgeForm({ criteria: { "AC-1": true } }),
+        judgeForm({ criteria: { "AC-1": true } }),
+      ],
+      {
+        reviewForms: [
+          completionReviewForm({
+            rubricFails: [RUBRIC_DESIGN_SERVES_OVERALL_GOAL],
+            justifications: { [RUBRIC_DESIGN_SERVES_OVERALL_GOAL]: SAME_OBJECTION },
+          }),
+          completionReviewForm({
+            rubricFails: [RUBRIC_DESIGN_SERVES_OVERALL_GOAL],
+            justifications: { [RUBRIC_DESIGN_SERVES_OVERALL_GOAL]: SAME_OBJECTION },
+          }),
+        ],
+      },
+    );
+    cleanups.push(() => wire.close());
+    const { repoUrl, dataDir, runner } = await setup(wire, { echoJudgeFeedback: true });
+    const spec = makeJudgedSpec({ repoUrl, cadence: 1, maxSteps: 6 });
+
+    const handle = await runner.start(spec);
+    const report = await awaitTerminal(handle);
+
+    expect(report.status).toBe("FAILED");
+
+    const journal = new Journal(journalPath(dataDir, handle.runId));
+    try {
+      const terminal = journal.entries("terminal").at(-1)!.payload as {
+        status: string;
+        reason?: string;
+        resumable?: boolean;
+      };
+      expect(terminal.status).toBe("FAILED");
+      expect(terminal.resumable).toBe(true);
+      expect(terminal.reason).toContain(RUBRIC_DESIGN_SERVES_OVERALL_GOAL);
+      // Stops within 3 steps without overrunning maxSteps (6).
+      expect(journal.entries("step").length).toBe(3);
+    } finally {
+      journal.close();
+    }
+  }, 180_000);
+
+  test("headroom ceiling: a new objection cannot grant a repair attempt when maxSteps is reached", async () => {
+    const wire = await startFakeJudgeWire(
+      [
+        judgeForm({
+          criteria: { "AC-1": true },
+          rubricFails: [RUBRIC_DESIGN_SERVES_OVERALL_GOAL],
+        }),
+        judgeForm({ criteria: { "AC-1": true } }),
+      ],
+      {
+        reviewForms: [
+          completionReviewForm({
+            rubricFails: [RUBRIC_CUMULATIVE_DESIGN_COHERENT],
+            justifications: { [RUBRIC_CUMULATIVE_DESIGN_COHERENT]: "finding 1" },
+          }),
+          completionReviewForm({
+            rubricFails: [RUBRIC_CUMULATIVE_DESIGN_COHERENT],
+            justifications: { [RUBRIC_CUMULATIVE_DESIGN_COHERENT]: "finding 2 (new)" },
+          }),
+        ],
+      },
+    );
+    cleanups.push(() => wire.close());
+    const { repoUrl, dataDir, runner } = await setup(wire, {
+      claimsCompleteSteps: [1],
+      echoJudgeFeedback: true,
+    });
+    // maxSteps = 2: step 1 runs, review 1 grants repair (step 2), step 2 runs, review 2 finds new objection but stepIndex === maxSteps (2)
+    const spec = makeJudgedSpec({ repoUrl, cadence: 1, maxSteps: 2 });
+
+    const handle = await runner.start(spec);
+    const report = await awaitTerminal(handle);
+
+    expect(report.status).toBe("FAILED");
+
+    const journal = new Journal(journalPath(dataDir, handle.runId));
+    try {
+      const terminal = journal.entries("terminal").at(-1)!.payload as {
+        status: string;
+        reason?: string;
+        resumable?: boolean;
+      };
+      expect(terminal.status).toBe("FAILED");
+      expect(journal.entries("step").length).toBe(2);
+    } finally {
+      journal.close();
+    }
+  }, 180_000);
 });

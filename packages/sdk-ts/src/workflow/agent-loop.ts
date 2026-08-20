@@ -81,10 +81,12 @@ import { blockingConcerns, hasDestructiveRubricFailure } from "../judge/verdict.
 import { DETERMINISTIC_RUBRIC_IDS, isRubricItemSettledAgainstWholeDelivery } from "../judge/rubric.js";
 
 import {
+  areMateriallySameObjections,
   buildCompletionReviewBrief,
   decideCompletionReview,
   MAX_COMPLETION_REVIEWS,
   mergeDesignFindings,
+  type RubricResult,
 } from "./completion-review.js";
 import { decideSoakDelay } from "./soak.js";
 import { decideStepForcing } from "./step-forcing.js";
@@ -258,6 +260,11 @@ export async function agentLoop(spec: TaskSpec): Promise<RunStatus> {
   // stall to spend no completion-review grant — but capped at the same ceiling so the
   // stall path can never outlast the budget it stands in for.
   let stallRepairGrants = 0;
+  const attemptedReviewFindings: RubricResult[] = [];
+  let lastRepairFindings: RubricResult[] | undefined;
+  // Repair grants earned by a NEW objection. Each buys exactly one extra
+  // completion-review pass, bounded by MAX_PROGRESS_GRANTS (F-412/F-413).
+  let progressRepairGrants = 0;
   // Standing findings from earlier passes (both rubric failures and free-text concerns)
   // that survive across intervening clean passes until adjudicated at completion review.
   // Rubric findings are keyed by rubric ID so whole-delivery machine-settled items can be cleared,
@@ -1284,8 +1291,15 @@ export async function agentLoop(spec: TaskSpec): Promise<RunStatus> {
           // workflow local and resets on `chikory resume`; that is deliberate — a resume is
           // operator-initiated, and its worst case is two further stall grants.
           if (record.diffRef.bytes === 0 && sealingVerdictHasRubricFailures) {
+            const hasStepHeadroom = stepIndex < maxSteps;
+            const hasBudgetHeadroom =
+              !budgetBreached(spentUsd, budgetUsd, estimateNextStepCost(stepCosts)) &&
+              (spec.budgetTokens === undefined ||
+                !tokenBudgetBreached(spentTokens, spec.budgetTokens, estimateNextStepTokens(stepTokens)));
             const canRetry =
               stallRepairGrants < MAX_COMPLETION_REVIEWS &&
+              hasStepHeadroom &&
+              hasBudgetHeadroom &&
               decideCompletionReview({
                 sealingDiffBase,
                 baseCommit,
@@ -1294,7 +1308,10 @@ export async function agentLoop(spec: TaskSpec): Promise<RunStatus> {
                 hasRegressionSuite: Boolean(spec.regressionSuite),
                 hasEscalationConcerns: hasStanding,
                 hasStandingFindings: hasStanding,
-              }).action === "review" && stepIndex < maxSteps;
+                hasStepHeadroom,
+                hasBudgetHeadroom,
+                progressGrantsUsed: progressRepairGrants,
+              }).action === "review";
             if (canRetry) {
               stallRepairGrants += 1;
               judgeFeedback = buildCompletionReviewBrief({
@@ -1317,6 +1334,11 @@ export async function agentLoop(spec: TaskSpec): Promise<RunStatus> {
             );
           }
 
+          const hasStepHeadroom = stepIndex <= maxSteps;
+          const hasBudgetHeadroom =
+            !budgetBreached(spentUsd, budgetUsd, estimateNextStepCost(stepCosts)) &&
+            (spec.budgetTokens === undefined ||
+              !tokenBudgetBreached(spentTokens, spec.budgetTokens, estimateNextStepTokens(stepTokens)));
           const review = decideCompletionReview({
             sealingDiffBase,
             baseCommit,
@@ -1325,6 +1347,11 @@ export async function agentLoop(spec: TaskSpec): Promise<RunStatus> {
             hasRegressionSuite: Boolean(spec.regressionSuite),
             hasEscalationConcerns: hasStanding,
             hasStandingFindings: hasStanding,
+            hasStepHeadroom,
+            hasBudgetHeadroom,
+            attemptedFindings: attemptedReviewFindings,
+            lastAttemptedFindings: lastRepairFindings,
+            progressGrantsUsed: progressRepairGrants,
           });
           if (review.action === "review") {
             completionReviewAttempts += 1;
@@ -1348,6 +1375,11 @@ export async function agentLoop(spec: TaskSpec): Promise<RunStatus> {
             // or raised at the sealing pass) earns exactly one bounded repair attempt if steps remain.
             // A repair that does not resolve the finding still seals FAILED (resumable).
             if (designFails.length > 0) {
+              const retryStepHeadroom = stepIndex < maxSteps;
+              const retryBudgetHeadroom =
+                !budgetBreached(spentUsd, budgetUsd, estimateNextStepCost(stepCosts)) &&
+                (spec.budgetTokens === undefined ||
+                  !tokenBudgetBreached(spentTokens, spec.budgetTokens, estimateNextStepTokens(stepTokens)));
               const canRetry =
                 decideCompletionReview({
                   sealingDiffBase,
@@ -1357,8 +1389,25 @@ export async function agentLoop(spec: TaskSpec): Promise<RunStatus> {
                   hasRegressionSuite: Boolean(spec.regressionSuite),
                   hasEscalationConcerns: hasStanding,
                   hasStandingFindings: hasStanding,
-                }).action === "review" && stepIndex < maxSteps;
+                  currentFindings: designFails,
+                  attemptedFindings: attemptedReviewFindings,
+                  lastAttemptedFindings: lastRepairFindings,
+                  hasStepHeadroom: retryStepHeadroom,
+                  hasBudgetHeadroom: retryBudgetHeadroom,
+                  progressGrantsUsed: progressRepairGrants,
+                }).action === "review";
               if (canRetry) {
+                // Every grant issued here buys exactly one further review pass.
+                // Grant #1 is already covered by MAX_COMPLETION_REVIEWS's built-in
+                // re-review, so the counter raises the ceiling only from grant #2 on.
+                progressRepairGrants += 1;
+                const reviewRubricFails = reviewVerdict.form.rubricResults.filter((r) => !r.pass);
+                for (const fail of [...designFails, ...reviewRubricFails, ...sealingRubricFails]) {
+                  if (!attemptedReviewFindings.some((att) => areMateriallySameObjections(fail, att))) {
+                    attemptedReviewFindings.push(fail);
+                  }
+                }
+                lastRepairFindings = [...designFails];
                 judgeFeedback = buildCompletionReviewBrief({
                   ...reviewVerdict.form,
                   rubricResults: designFails,

@@ -15,6 +15,24 @@ import type { JudgeForm } from "../types.js";
 /** Initial review + one re-review after the bounded design-fix retry. */
 export const MAX_COMPLETION_REVIEWS = 2;
 
+/**
+ * Ceiling on how many EXTRA review passes a run may earn by showing progress
+ * (F-412, dogfood-160 review). `areMateriallySameObjections` is sound but
+ * INCOMPLETE — it recognises a repeat only when the judge restates the objection
+ * verbatim, and a real LLM judge does not. Measured on two real completion-review
+ * pairs at this review (normalised content-word Jaccard, stopwords dropped):
+ *
+ *   run-de555224 review #1 vs #2 — the SAME complaint, reworded  → 0.109
+ *   run-ec5c4bb8 review #1 vs #2 — two DIFFERENT complaints      → 0.077
+ *
+ * The two populations overlap, so no prose threshold separates them and the
+ * comparator cannot be made complete cheaply (→ WP-643). Until it is, the
+ * progress exemption must fail CLOSED: a judge that rewords the same objection
+ * every pass earns at most this many extra attempts, never the run's whole
+ * headroom.
+ */
+export const MAX_PROGRESS_GRANTS = 2;
+
 /** A brief must ride inside step context without rotting it (CM-3 discipline). */
 const COMPLETION_BRIEF_MAX_CHARS = 2000;
 
@@ -37,7 +55,7 @@ export interface CompletionReviewState {
    * `sealingVerdictHasRubricFailures: rubricResults.some((r) => !r.pass)`,
    * which wins when both are given.
    */
-  rubricResults?: ReadonlyArray<{ pass: boolean }>;
+  rubricResults?: ReadonlyArray<{ pass: boolean; id?: string; justification?: string }>;
   /**
    * Whether the spec has a declared `regression_suite` command.
    * When true on a first-verdict seal, the completion review MUST run to execute
@@ -54,6 +72,35 @@ export interface CompletionReviewState {
    * Whether the run has standing findings from earlier passes or the sealing pass.
    */
   hasStandingFindings?: boolean;
+  /**
+   * The failing rubric items / objections from the current completion review (or sealing pass).
+   */
+  currentFindings?: ReadonlyArray<RubricResult>;
+  /**
+   * Objections that have already been given a repair attempt in this run.
+   */
+  attemptedFindings?: ReadonlyArray<RubricResult | { id: string; justification: string }>;
+  /**
+   * The objections given to the immediate last repair attempt.
+   */
+  lastAttemptedFindings?: ReadonlyArray<RubricResult | { id: string; justification: string }>;
+  /**
+   * Whether the run still has step headroom (stepIndex < maxSteps).
+   */
+  hasStepHeadroom?: boolean;
+  /**
+   * Whether the run has budget headroom (!budgetBreached).
+   */
+  hasBudgetHeadroom?: boolean;
+  /**
+   * Remaining steps before reaching maxSteps.
+   */
+  remainingSteps?: number;
+  /**
+   * Repair grants already earned by a NEW (non-repeated) objection. Each one
+   * buys exactly one extra review pass, up to `MAX_PROGRESS_GRANTS`.
+   */
+  progressGrantsUsed?: number;
 }
 
 export type CompletionReviewDecision =
@@ -62,6 +109,35 @@ export type CompletionReviewDecision =
 
 /** One filled rubric row of a judge form. */
 export type RubricResult = JudgeForm["rubricResults"][number];
+
+/**
+ * Decides whether two objections are materially the same: same rubric id and
+ * the same justification text once trimmed.
+ *
+ * SOUND BUT INCOMPLETE (F-412). A `true` here is always a genuine repeat; a
+ * `false` is NOT evidence of progress, because a judge that restates the same
+ * complaint in different words reads as new. See `MAX_PROGRESS_GRANTS` for the
+ * measurement and for the bound that contains the incompleteness.
+ */
+export function areMateriallySameObjections(
+  a: RubricResult | { id: string; justification: string },
+  b: RubricResult | { id: string; justification: string },
+): boolean {
+  if (a.id !== b.id) return false;
+  return a.justification.trim() === b.justification.trim();
+}
+
+/**
+ * Returns true if any finding in `current` matches an objection that was already attempted.
+ */
+export function hasRepeatedObjection(
+  current: ReadonlyArray<RubricResult | { id: string; justification: string }>,
+  attempted: ReadonlyArray<RubricResult | { id: string; justification: string }>,
+): boolean {
+  return current.some((curr) =>
+    attempted.some((att) => areMateriallySameObjections(curr, att)),
+  );
+}
 
 function extractHasRubricFailures(state: CompletionReviewState): boolean {
   if (typeof state.sealingVerdictHasRubricFailures === "boolean") {
@@ -76,9 +152,55 @@ function extractHasRubricFailures(state: CompletionReviewState): boolean {
 export function decideCompletionReview(
   state: CompletionReviewState,
 ): CompletionReviewDecision {
-  if (state.reviewAttemptsUsed >= MAX_COMPLETION_REVIEWS) {
+  if (state.hasStepHeadroom === false || (typeof state.remainingSteps === "number" && state.remainingSteps <= 0)) {
+    return { action: "skip", reason: "step headroom exhausted" };
+  }
+  if (state.hasBudgetHeadroom === false) {
+    return { action: "skip", reason: "budget headroom exhausted" };
+  }
+
+  const currentFails: ReadonlyArray<RubricResult> = state.currentFindings ??
+    (Array.isArray(state.rubricResults)
+      ? (state.rubricResults.filter(
+          (r): r is RubricResult =>
+            !r.pass &&
+            typeof (r as { id?: unknown }).id === "string" &&
+            typeof (r as { justification?: unknown }).justification === "string",
+        ) as ReadonlyArray<RubricResult>)
+      : []);
+
+  // F-414: the two histories are UNIONED, not selected between. `??` made
+  // `lastAttemptedFindings` unreachable, because every agent-loop call site
+  // passes an always-defined `attemptedFindings` array.
+  const attempted: ReadonlyArray<RubricResult | { id: string; justification: string }> = [
+    ...(state.attemptedFindings ?? []),
+    ...(state.lastAttemptedFindings ?? []),
+  ];
+
+  if (
+    currentFails.length > 0 &&
+    attempted.length > 0 &&
+    hasRepeatedObjection(currentFails, attempted)
+  ) {
+    return {
+      action: "skip",
+      reason: "completion review: repeated objection on a converged step",
+    };
+  }
+
+  // F-413: the bound is UNCONDITIONAL. Gating it on an empty `attempted` list
+  // meant the agent loop — which always passes a non-empty list once one repair
+  // has been granted — never consulted it again, so the cap was live only until
+  // the first grant. Progress raises the ceiling by one pass per grant and no
+  // more, and `MAX_PROGRESS_GRANTS` caps the raise itself.
+  const progressGrants = Math.min(
+    Math.max(state.progressGrantsUsed ?? 0, 0),
+    MAX_PROGRESS_GRANTS,
+  );
+  if (state.reviewAttemptsUsed >= MAX_COMPLETION_REVIEWS + progressGrants) {
     return { action: "skip", reason: "completion reviews exhausted" };
   }
+
   const isFirstVerdictSeal = state.sealingDiffBase === state.baseCommit;
   const failingRubric = extractHasRubricFailures(state);
 

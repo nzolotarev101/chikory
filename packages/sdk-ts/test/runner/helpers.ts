@@ -363,7 +363,12 @@ export function judgeForm(opts: {
 
 /** Scripted completion-review `JudgeForm` (COMPLETION_REVIEW_RUBRIC ids + optional regression suite). */
 export function completionReviewForm(
-  opts: { rubricFails?: string[]; hasRegressionSuite?: boolean } = {},
+  opts: {
+    rubricFails?: string[];
+    hasRegressionSuite?: boolean;
+    justifications?: Record<string, string>;
+    justification?: string;
+  } = {},
 ): JudgeForm {
   const includeSuite =
     opts.hasRegressionSuite === true ||
@@ -376,7 +381,7 @@ export function completionReviewForm(
     rubricResults: rubric.map((r) => ({
       id: r.id,
       pass: !(opts.rubricFails ?? []).includes(r.id),
-      justification: "scripted completion review",
+      justification: opts.justifications?.[r.id] ?? opts.justification ?? "scripted completion review",
     })),
     concerns: [],
   };

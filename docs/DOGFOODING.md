@@ -8,13 +8,14 @@ recover a run, and how to land the result as a normal PR.
 **Status (2026-08-20, bounded — update discipline: REPLACE this block, ≤15 lines;
 displaced prose moves verbatim to [`PLAN-HISTORY.md`](PLAN-HISTORY.md); per-run detail:
 `docs/reports/`; queue + course correction: `plan.md` §6/§7).**
-🟢 **dogfood-159 / WP-628 (judge-check ignored-path isolation covers MODIFY and DELETE) DELIVERED and LANDED** — `run-ec5c4bb8-de16-4c28-beba-a8cd09795fa1`, terminal SUCCESS, **3 steps, $0.3358/$20.00**, 2h 2m wall (**1h 40m idle**), AC **3/3** re-run green, harvest byte-IDENTICAL **5/5**, suite **1,745 passed | 23 skipped** (204 files, after rebasing onto 15 outside PRs), `docs/reports/dogfood-159.md`. F-360 CLOSED.
-🟢 **A check can no longer hand the next check a wrecked tree** — `snapshotWorkspace` `stat`s every ignored path (O(inventory), no bytes) and preserves content under a 64 KiB-per-file / 32 MiB-total budget (`src/judge/hermeticity.ts:11`, `:12`); unpreserved paths keep a `stat:size:mtime:inode` fingerprint so change is still DETECTED, and an unrepairable change is reported into the batch's own `CheckRun.output`. Content is `Uint8Array`, so binaries round-trip byte-identical. 2.3 s per batch on a real 17,372-path workspace.
-🟢 **Judge true-positives ×4, all repaired in-run — FIFTH consecutive healing run** — all 3 ACs were green at step 1 and only `design_serves_overall_goal` caught UTF-8 round-tripping, a deleted unpreserved path yielding no plan entry, and budget-exceeded corruption reaching only `console.warn`.
-🔴 **F-410 (§8) HAND-FIXED AT LANDING — the most severe class we have seen.** An outside PR (`5bed806`, #90) replaced `runCheck`'s `/bin/sh -c` with tokenize-and-exec-first-word. Every dogfood AC is a multi-line shell script, so the script became **arguments to its own first word** and **exited 0 without running** — a vacuous PASS on every criterion of every run. Measured against the real `runCriteriaChecks`. Restored (`src/judge/evidence.ts:203`); the two tests that encoded the vacuous pass replaced by two that pin the real contract. 🟡 F-411 → **WP-642**: arming runs checks through bash, the judge through `runCheck` — a green arming pass could not see it.
-🔴 **F-404 (§8) HAND-FIXED** — the 32 MiB budget was allocated in `git ls-files` lexical order, so `node_modules/.pnpm` took **9,459 of 9,467** preserved paths and every project-owned artifact got none (probed on a real judge workspace: `NOT ISOLATED`). `ignoredPreservePriority` now orders project-owned paths first (`src/judge/hermeticity.ts:57`); re-probed `ISOLATED`, 2,287 ms vs 2,313 ms. 🟡 **F-406 HAND-FIXED** — `hash` was not comparable across the MOVING budget boundary (3 false reports); every entry now carries `statHash` (`:63`, `:210`). 🟡 **F-405 HAND-FIXED** — an unrepairable corruption was re-reported to every LATER check.
-🟡 F-407 → **WP-639** (884/17,372 ignored paths are symlinks to dirs, dropped by the `isFile()` gate) · 🟡 F-408 (§8) → **WP-640** (the repair grant is 1 per run regardless of headroom: sealed FAILED at 3/6 steps with 98.3% of budget unspent, then waited 1h 39m 52s for a hand-typed `resume` that fixed it in 3m 12s) · 🟡 F-409 (§8) → **WP-641** (a `failed_seal` resume is invisible to `chikory trace` and `scripts/dogfood-verify.sh:163`, so the ledger recorded `resumes 0` for a run that resumed).
-**NEXT HEADLINE = `dogfood-160` / WP-640** — the repair grant must scale with the run's remaining headroom instead of being a constant. Gate ⛔ STALLED, which BINDS the headline to P3's ladder rung — but rung-5 (WP-530) is still WP-304's operator-run benchmark arm and cannot be a spec, so the verdict is unsatisfiable and recorded as such. **ARMED 3/3 both ways** (AC-1 5s/5s · AC-2 4s/8s · AC-3 83s/82s, worst case 69% of the 120 s judge cap); both behavioural ACs drive the REAL agent loop and read the run's own terminal entry.
+🟡 **dogfood-160 / WP-640 (the completion-review repair grant scales with the run's remaining headroom) DELIVERED from a FAILED run, HAND-COMPLETED at review** — `run-de555224-1de9-491b-b809-6c063e621f86`, terminal **FAILED (resumable)**, **4 steps, $0.2995/$20.00** (judge share 100%), 30m 36s, AC **3/3** re-run green, harvest byte-IDENTICAL **5/5**, suite **1,745 → 1,767 passed | 23 skipped**, `docs/reports/dogfood-160.md`. F-408 CLOSED.
+🟢 **A run that keeps finding NEW problems keeps working** — a completion review returning an objection the last repair attempt was NOT given buys another attempt while steps and budget remain (`src/workflow/completion-review.ts:113`, `src/workflow/agent-loop.ts:267`); a run returning the SAME objection still seals FAILED (resumable) in 2 review passes, so the F-223…F-226 oscillation bound is intact.
+🔴 **The run sealed FAILED, and it was RIGHT** — 3/3 ACs, 1,763 suite tests, typecheck, lint and seven trap greps were all green on a delivery that had left the safety bound switched off. Only the LLM completion review over the cumulative diff saw it, and it said so twice. **Judge true-positives ×2, both probe-confirmed at the review.**
+🔴 **F-413 (§8) HAND-FIXED** — the `MAX_COMPLETION_REVIEWS` skip was gated on an empty attempted-findings list and every loop call site passes a non-empty one after the first grant, so the cap was live only until the first repair (probe: `{"action":"review"}` at `reviewAttemptsUsed: 99`). Now unconditional; progress raises it by one pass per grant (`src/workflow/completion-review.ts:191`).
+🔴 **F-412 (§8) HAND-FIXED** — "materially the same objection" was byte-exact equality on the judge's own prose. **This run is its own counterexample:** reviews #1 and #2 raised the same complaint in different words and the comparator scored it as progress. Measured Jaccard: reworded-repeat **0.109** vs genuinely-different **0.077** — the populations OVERLAP, so no prose threshold works. Contained by `MAX_PROGRESS_GRANTS = 2` (`:34`), not faked. 🟡 **F-414 HAND-FIXED** — `??` left the second objection history unreachable (`:172`).
+🟡 F-415 (§8) → track-B (`gemini-cli` steps bill $0.0000 against 7.3k–10.4k metered tokens; the budget gate governs judge spend only) · 🟡 F-411 → **WP-642** still open (arming runs checks through bash, the judge through `runCheck`).
+**Standing lesson: a scripted judge is a judge that never rewords.** Both graded ACs and the committed anti-oscillation guard drove a fake judge emitting byte-identical justification text on every pass — which is exactly why all three certified a comparator a real judge defeats. When an AC's oracle is an LLM's OUTPUT, vary the wording.
+**NEXT HEADLINE = `dogfood-161` / WP-643** — decide "is this the same objection?" with an instrument that is not a string metric. Gate ⛔ STALLED, which BINDS the headline to P3's ladder rung — but rung-5 (WP-530) is still WP-304's operator-run benchmark arm and cannot be a spec, so the verdict is unsatisfiable and recorded as such.
 
 Related docs: [`docs/spec/task-spec.md`](spec/task-spec.md) (schema
 reference) · [`docs/TASK-PROTOCOL.md`](TASK-PROTOCOL.md) (WP etiquette, §7 is
@@ -998,6 +999,47 @@ broken (a false-green, not a follow-on fix).
   impossible because nothing is supposed to change.
 
 ## 8. Known P1 limitations (so you don't fight them)
+
+- **🔴 A SCRIPTED JUDGE IS A JUDGE THAT NEVER REWORDS — AN AC WHOSE ORACLE IS AN
+  LLM's OUTPUT MUST VARY THE WORDING** (F-412, dogfood-160). WP-640 had to decide
+  whether a completion review was re-raising the objection it already gave, or
+  raising a new one. The delivered test was
+  `a.justification.trim() === b.justification.trim()` — byte-exact equality on
+  LLM-authored prose. Both graded ACs and the committed anti-oscillation guard
+  (`packages/sdk-ts/test/runner/deterministic-rubric-live.test.ts`) drive a fake
+  judge wire that emits the SAME justification string on every pass, so all three
+  certified it. The run's own judge defeated it immediately: completion review #1
+  and #2 raised the same complaint — the empty-`attemptedFindings` cap bypass —
+  in completely different words. Measured at the review, normalised content-word
+  Jaccard: the reworded-repeat pair scores **0.109** and dogfood-159's
+  genuinely-different pair **0.077**. **The populations overlap**, so no prose
+  threshold separates them and no amount of tuning a similarity function will.
+  Contained for now by `MAX_PROGRESS_GRANTS = 2`
+  (`packages/sdk-ts/src/workflow/completion-review.ts:34`) so the incompleteness
+  cannot cost a whole run's headroom; the instrument itself is **WP-643**.
+  **The rule: when a check's oracle is what a model WROTE, the fixture must
+  restate it, not repeat it.**
+
+- **🔴 A BOUND THAT CONSULTS ITS OWN HISTORY CAN SWITCH ITSELF OFF** (F-413,
+  dogfood-160). The same WP gated the `reviewAttemptsUsed >= MAX_COMPLETION_REVIEWS`
+  skip behind `attempted === undefined || attempted.length === 0` — reasonable
+  in isolation, and it turned the RED regression test green. But every
+  `agent-loop.ts` call site passes `attemptedReviewFindings`, a `const` array
+  that is non-empty from the first repair grant onward, so the cap was consulted
+  only until the first repair and never again. Probed with the loop's real call
+  shape: `{"action":"review"}` at `reviewAttemptsUsed: 99`. **When you make a
+  bound conditional, enumerate the call sites and ask what each one actually
+  passes** — a unit test constructs the state it wants, the loop constructs the
+  state it has.
+
+- **🟡 EXECUTOR STEPS BILL $0.00 ON `gemini-cli` — THE BUDGET GATE GOVERNS JUDGE
+  SPEND ONLY** (F-415, dogfood-160). Every step in `run-de555224` recorded
+  `$0.0000` against 7.3k–10.4k metered tokens and the trace header prints
+  `⚠ cost meter blind (unpriced tokens)`. `gemini-cli` bills through CLI OAuth,
+  so there is no per-token price to apply. Benign at these budgets, but it means
+  **every `cost_usd` in `docs/reports/dogfood-ledger.csv` for a gemini-executed
+  run is judge spend only**, and a runaway executor would not trip the budget
+  gate. Read step cost as "judge cost", not "run cost".
 
 - **🔴 A FIX THAT INTRODUCES A SET WILL BE FITTED TO THE ONE MEMBER THE
   ACCEPTANCE CHECK NAMED** (F-401, dogfood-158). WP-589 had to exempt "the
