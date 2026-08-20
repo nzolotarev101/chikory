@@ -104,9 +104,9 @@ goal: |
 
   Measured from `run-75794008-83a8-4ca8-893d-ae3000df754a`'s own journal at the dogfood-162 review.
 
-  - Step 6's `agy` process crashed. Its transcript is 64 bytes — `Error: Agent execution terminated
-    due to error.` — and it recorded **0 output tokens**. The 12,589 bytes it had already written
-    were committed as `eb4d24a chikory: step 5`, judged 0/3, and sealed as the run's answer.
+  - Step 6's `agy` process crashed. Its transcript is 64 bytes — "Error: Agent execution terminated
+    due to error." — and it recorded **0 output tokens**. The 12,589 bytes it had already written
+    were committed as eb4d24a chikory: step 5, judged 0/3, and sealed as the run's answer.
   - The step before it passed all three acceptance checks and grew the declared suite from 1,782 to
     1,787 passing. That tree is checkpoint `@28`, flagged `lastGood: true`, workspace `1306432`.
   - The terminal entry records `lastCheckpoint: …@35` — `lastGood: false`. The good checkpoint id was
@@ -116,7 +116,7 @@ goal: |
 
   1. **A crashed step is an infrastructure failure, like a step killed at its wall-clock cap.**
      `isInfraStepFailure` (packages/sdk-ts/src/runner/strike-accounting.ts:38) today recognises only
-     the cap kill, and `infraFailed` is set in exactly one place — `proc.timedOut`
+     the cap kill, and the infra-failure flag is set in exactly one place — the wall-clock-timeout branch
      (packages/sdk-ts/src/executors/step.ts:241). A step that produced no answer at all must be
      recognised structurally, not by matching one adapter's error string, so a new adapter inherits
      it for free. A step that DID answer and reported failure is the agent's failure and stays one.
@@ -124,11 +124,11 @@ goal: |
      operator is handed must be the tree the last delivered step produced.
   3. **A FAILED run hands back its `lastGood` state and says which checkpoint that is.** The flag is
      already computed correctly at agent-loop.ts:1188 and journaled at every checkpoint; the seal at
-     agent-loop.ts:326 takes `checkpoints[checkpoints.length - 1]` instead.
+     agent-loop.ts:326 takes the most recent checkpoint instead.
   4. **A FAILED run whose last step delivered real work under a PROCEED verdict keeps that work.**
      Rewinding every failed run is the same defect with the sign flipped.
 
-  `chikory resume` reads `failure.lastCheckpoint`. Decide what a resume should resume from and keep
+  `chikory resume` reads the terminal entry's lastCheckpoint. Decide what a resume should resume from and keep
   the resume-drill and chain guards green.
 
   Three things must NOT change, and each is a trap this run is graded on:
@@ -138,9 +138,9 @@ goal: |
      "crash" must stay classed as the agent's failure.
   2. **Flagging the crash without protecting the tree is half a fix.** dogfood-162 did not lose a
      strike; it lost a committed half-edit. The tree is what is graded.
-  3. **`lastGood` keeps its meaning** (`verdict.kind === "PROCEED" && record.status === "SUCCESS"`,
+  3. **`lastGood` keeps its meaning** (a PROCEED verdict over a delivered step,
      agent-loop.ts:1188), `heal/gate-repair.ts` routing stands (no LLM-verdict gate may exit,
-     WP-542/F-207), and the judge prompt, `JudgeForm`, the rubric ids,
+     WP-542/F-207), and the judge prompt, the judge form type, the rubric ids,
      packages/sdk-ts/src/workflow/completion-review.ts, the chain mirror, the Python mirror, the
      TaskSpec contract and packages/sdk-ts/src/judge/hermeticity.ts are all out of scope.
 
@@ -490,7 +490,7 @@ acceptance_criteria:
             ).toBe(false);
             const lastA = a.terminals.at(-1)!;
             expect(
-              a.goodCheckpointIds.includes(lastA.lastCheckpoint ?? " "),
+              a.goodCheckpointIds.includes(lastA.lastCheckpoint ?? "(none)"),
               "the FAILED seal must name a checkpoint the journal flags lastGood. dogfood-162 named `@35` (lastGood: false) while `@28` (lastGood: true) held the green delivery." +
                 detailA,
             ).toBe(true);
