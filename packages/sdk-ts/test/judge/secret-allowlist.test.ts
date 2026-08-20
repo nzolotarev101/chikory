@@ -13,10 +13,10 @@ describe("secret example allowlist (WP-253)", () => {
     expect(isExampleSecret(nonExampleAwsKey)).toBe(false);
   });
 
-  it("keeps example keys in evidence scan while excluding them from real-secret scan", () => {
+  it("excludes example keys from both secret scan and real-secret scan", () => {
     const diff = '+const k = "' + "AKIA" + 'IOSFODNN7EXAMPLE";';
 
-    expect(scanDiffForSecrets(diff)).toEqual(["aws-access-key"]);
+    expect(scanDiffForSecrets(diff)).toEqual([]);
     expect(scanDiffForRealSecrets(diff)).toEqual([]);
   });
 
