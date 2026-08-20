@@ -53,7 +53,7 @@ describe("judge acceptance check hermeticity live e2e", () => {
     const criterion: AcceptanceCriterion = {
       id: "AC-R4-PROBE",
       description: "brownfield-003 R4 probe check",
-      check: "echo 'Probe addition' >> existing.txt && echo 'Probe created' > probe-created.txt",
+      check: "sh -c \"echo 'Probe addition' >> existing.txt && echo 'Probe created' > probe-created.txt\"",
     };
 
     // 4. Run real judge evidence collection

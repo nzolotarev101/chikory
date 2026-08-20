@@ -656,7 +656,7 @@ describe.skipIf(address === null)("multi-repo workspace setup", () => {
         description: "repo B check runs in repo B",
         repo: "service-worker",
         check:
-          "printf 'check-cwd:%s\\n' \"$PWD\" && test -f worker.txt && test ! -f service-worker/worker.txt && test ! -f api.txt",
+          "sh -c \"printf 'check-cwd:%s\\n' \\\"$PWD\\\" && test -f worker.txt && test ! -f service-worker/worker.txt && test ! -f api.txt\"",
       },
     ];
 

@@ -266,7 +266,7 @@ describe("runJudgePass (WP-131)", () => {
     });
 
     const { verdict, collected } = await runJudgePass(
-      input({ criteria: [{ id: "AC-1", description: "check fails", check: "exit 7" }] }),
+      input({ criteria: [{ id: "AC-1", description: "check fails", check: "sh -c \"exit 7\"" }] }),
     );
 
     expect(collected.checkRuns).toHaveLength(1);

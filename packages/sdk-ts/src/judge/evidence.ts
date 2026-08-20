@@ -14,6 +14,7 @@ import { promisify } from "node:util";
 import { scrubExecutorEnv } from "../executors/env.js";
 import { runBounded } from "../executors/process.js";
 import { clearStaleIndexLock } from "../executors/workspace.js";
+import { splitCommand } from "../util/command.js";
 import type {
   AcceptanceCriterion,
   ArtifactStore,
@@ -191,7 +192,34 @@ async function runCheck(
       ? workspaceDir
       : join(workspaceDir, repo.relativePath)
     : workspaceDir;
-  const bounded = await runBounded("/bin/sh", ["-c", criterion.check!], {
+
+  let parts: string[];
+  try {
+    parts = splitCommand(criterion.check!);
+  } catch (err) {
+    return {
+      criterionId: criterion.id,
+      command: criterion.check!,
+      exitCode: 1,
+      output: `invalid check command: ${err instanceof Error ? err.message : String(err)}`,
+      durationMs: 0,
+      infraFailed: false,
+    };
+  }
+
+  if (parts.length === 0) {
+    return {
+      criterionId: criterion.id,
+      command: criterion.check!,
+      exitCode: 1,
+      output: "empty check command",
+      durationMs: 0,
+      infraFailed: false,
+    };
+  }
+
+  const [executable, ...args] = parts;
+  const bounded = await runBounded(executable!, args, {
     cwd: checkCwd,
     env: scrubExecutorEnv(process.env, []),
     maxSeconds: timeoutMs / 1000,

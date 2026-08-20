@@ -4,7 +4,10 @@ import { resolve } from "node:path";
 
 import { Journal } from "../journal/journal.js";
 import { journalPath, workspaceDir } from "../runner/paths.js";
+import { splitCommand } from "../util/command.js";
 import type { CliDeps, CommonFlags } from "./commands.js";
+
+export { splitCommand };
 
 interface LandArgs extends CommonFlags {
   runId: string;
@@ -26,46 +29,6 @@ export const VERIFY_COMMANDS: readonly string[] = [
   "devbox run typecheck",
   "devbox run test",
 ];
-
-export function splitCommand(command: string): string[] {
-  const args: string[] = [];
-  let current = "";
-  let inDoubleQuotes = false;
-  let inSingleQuotes = false;
-  let escaped = false;
-
-  for (let i = 0; i < command.length; i++) {
-    const char = command[i];
-
-    if (escaped) {
-      current += char;
-      escaped = false;
-    } else if (char === "\\") {
-      escaped = true;
-    } else if (char === '"' && !inSingleQuotes) {
-      inDoubleQuotes = !inDoubleQuotes;
-    } else if (char === "'" && !inDoubleQuotes) {
-      inSingleQuotes = !inSingleQuotes;
-    } else if (char === " " && !inDoubleQuotes && !inSingleQuotes) {
-      if (current !== "") {
-        args.push(current);
-        current = "";
-      }
-    } else {
-      current += char;
-    }
-  }
-
-  if (current !== "") {
-    args.push(current);
-  }
-
-  if (inDoubleQuotes || inSingleQuotes || escaped) {
-    throw new Error("Unmatched quotes or trailing backslash in command string");
-  }
-
-  return args;
-}
 
 function git(cwd: string, args: string[], input?: string): string {
   return execFileSync("git", ["-C", cwd, ...args], {

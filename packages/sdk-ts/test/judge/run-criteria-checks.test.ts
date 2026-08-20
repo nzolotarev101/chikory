@@ -111,7 +111,7 @@ describe("runCriteriaChecks (WP-561)", () => {
     // attributed to the node and ride into its first diff.
     await runCriteriaChecks({
       workspaceDir: dir,
-      criteria: [criterion("AC-1", "touch side-effect.txt && test -f landed.txt")],
+      criteria: [criterion("AC-1", "sh -c \"touch side-effect.txt && test -f landed.txt\"")],
     });
     expect(existsSync(join(dir, "side-effect.txt"))).toBe(false);
   });
@@ -128,14 +128,34 @@ describe("runCriteriaChecks (WP-561)", () => {
     expect(runs[0]?.exitCode).toBe(0);
   });
 
+  it("prevents shell command injection when executing acceptance check criteria", async () => {
+    const injectionFile = join(dir, "injected.txt");
+    const runs = await runCriteriaChecks({
+      workspaceDir: dir,
+      criteria: [criterion("AC-INJECT", `echo safe; touch ${injectionFile}`)],
+    });
+    expect(existsSync(injectionFile)).toBe(false);
+    expect(runs[0]?.exitCode).toBe(0);
+    expect(runs[0]?.output).toContain("touch");
+  });
+
+  it("handles malformed check command strings cleanly", async () => {
+    const runs = await runCriteriaChecks({
+      workspaceDir: dir,
+      criteria: [criterion("AC-BAD", "echo 'unmatched quote")],
+    });
+    expect(runs[0]?.exitCode).toBe(1);
+    expect(runs[0]?.output).toContain("invalid check command");
+  });
+
   it("benchmarks sequential execution of checks with delay", async () => {
     const startTime = performance.now();
     const runs = await runCriteriaChecks({
       workspaceDir: dir,
       criteria: [
-        criterion("AC-1", "sleep 0.5 && test -f landed.txt"),
-        criterion("AC-2", "sleep 0.5 && test -f landed.txt"),
-        criterion("AC-3", "sleep 0.5 && test -f landed.txt"),
+        criterion("AC-1", "sh -c \"sleep 0.5 && test -f landed.txt\""),
+        criterion("AC-2", "sh -c \"sleep 0.5 && test -f landed.txt\""),
+        criterion("AC-3", "sh -c \"sleep 0.5 && test -f landed.txt\""),
       ],
     });
     const durationMs = performance.now() - startTime;
