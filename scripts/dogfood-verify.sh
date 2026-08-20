@@ -215,11 +215,29 @@ while IFS=$'\t' read -r _tag ID CHECK_B64; do
   if [ "$RC" -eq 0 ]; then STAT="PASS"; else STAT="FAIL"; AC_FAILED=1; fi
   AC_ROWS="${AC_ROWS}${ID}	${STAT}	${RC}
 "
+  # F-419 (dogfood-161): the tail below is a SUMMARY, not the evidence. A red
+  # VERIFY-SUITE check prints its counts in the last lines and the failing test's
+  # NAME hundreds of lines earlier, so `tail -n 8` threw away the only thing the
+  # reviewer needed. Persist the full output the way `dogfood-arm.sh` already
+  # does, and print the path.
+  AC_LOG=".chikory/review/ac-$RUN_ID-$ID.log"
+  mkdir -p "$(dirname "$AC_LOG")"
+  printf '%s\n' "$OUT" > "$AC_LOG"
   echo "**$ID — $STAT** (exit $RC)"
   echo '```'
   echo "\$ $CHECK"
   printf '%s\n' "$OUT" | grep -vE '^\(node:|ExperimentalWarning|--trace-warnings|Running script|webpack |Workflow bundle|optional modules|__temporal|asset workflow|modules by path|runtime modules|\+ [0-9]+ modules|\[built\]' | tail -n 8
   echo '```'
+  if [ "$RC" -ne 0 ]; then
+    # The failure lines, hoisted out of the full log so a red check names what broke.
+    echo "_failure lines (full output: \`$AC_LOG\`)_"
+    echo '```'
+    grep -nE '(^|[[:space:]])(FAIL|×|✕|AssertionError|Error:|error TS[0-9]|SyntaxError|Cannot find module)' "$AC_LOG" \
+      | grep -vE 'ExperimentalWarning|--trace-warnings' | head -n 20
+    echo '```'
+  else
+    echo "_full output: \`$AC_LOG\`_"
+  fi
   echo
 done <<< "$CHECK_LINES"
 

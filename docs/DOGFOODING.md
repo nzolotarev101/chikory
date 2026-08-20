@@ -8,14 +8,13 @@ recover a run, and how to land the result as a normal PR.
 **Status (2026-08-20, bounded — update discipline: REPLACE this block, ≤15 lines;
 displaced prose moves verbatim to [`PLAN-HISTORY.md`](PLAN-HISTORY.md); per-run detail:
 `docs/reports/`; queue + course correction: `plan.md` §6/§7).**
-🟡 **dogfood-160 / WP-640 (the completion-review repair grant scales with the run's remaining headroom) DELIVERED from a FAILED run, HAND-COMPLETED at review** — `run-de555224-1de9-491b-b809-6c063e621f86`, terminal **FAILED (resumable)**, **4 steps, $0.2995/$20.00** (judge share 100%), 30m 36s, AC **3/3** re-run green, harvest byte-IDENTICAL **5/5**, suite **1,745 → 1,767 passed | 23 skipped**, `docs/reports/dogfood-160.md`. F-408 CLOSED.
-🟢 **A run that keeps finding NEW problems keeps working** — a completion review returning an objection the last repair attempt was NOT given buys another attempt while steps and budget remain (`src/workflow/completion-review.ts:113`, `src/workflow/agent-loop.ts:267`); a run returning the SAME objection still seals FAILED (resumable) in 2 review passes, so the F-223…F-226 oscillation bound is intact.
-🔴 **The run sealed FAILED, and it was RIGHT** — 3/3 ACs, 1,763 suite tests, typecheck, lint and seven trap greps were all green on a delivery that had left the safety bound switched off. Only the LLM completion review over the cumulative diff saw it, and it said so twice. **Judge true-positives ×2, both probe-confirmed at the review.**
-🔴 **F-413 (§8) HAND-FIXED** — the `MAX_COMPLETION_REVIEWS` skip was gated on an empty attempted-findings list and every loop call site passes a non-empty one after the first grant, so the cap was live only until the first repair (probe: `{"action":"review"}` at `reviewAttemptsUsed: 99`). Now unconditional; progress raises it by one pass per grant (`src/workflow/completion-review.ts:191`).
-🔴 **F-412 (§8) HAND-FIXED** — "materially the same objection" was byte-exact equality on the judge's own prose. **This run is its own counterexample:** reviews #1 and #2 raised the same complaint in different words and the comparator scored it as progress. Measured Jaccard: reworded-repeat **0.109** vs genuinely-different **0.077** — the populations OVERLAP, so no prose threshold works. Contained by `MAX_PROGRESS_GRANTS = 2` (`:34`), not faked. 🟡 **F-414 HAND-FIXED** — `??` left the second objection history unreachable (`:172`).
-🟡 F-415 (§8) → track-B (`gemini-cli` steps bill $0.0000 against 7.3k–10.4k metered tokens; the budget gate governs judge spend only) · 🟡 F-411 → **WP-642** still open (arming runs checks through bash, the judge through `runCheck`).
-**Standing lesson: a scripted judge is a judge that never rewords.** Both graded ACs and the committed anti-oscillation guard drove a fake judge emitting byte-identical justification text on every pass — which is exactly why all three certified a comparator a real judge defeats. When an AC's oracle is an LLM's OUTPUT, vary the wording.
-**NEXT HEADLINE = `dogfood-161` / WP-643** — decide "is this the same objection?" with an instrument that is not a string metric. Gate ⛔ STALLED, which BINDS the headline to P3's ladder rung — but rung-5 (WP-530) is still WP-304's operator-run benchmark arm and cannot be a spec, so the verdict is unsatisfiable and recorded as such.
+🟡 **dogfood-161 / WP-643 (the loop recognises a complaint it has already heard, however it is worded) DELIVERED from a FAILED run, landed at review** — `run-eef8a03d-c6b6-4165-9738-d002cef3d56d`, terminal **FAILED (resumable)**, **4 steps, $0.4229/$20.00** (judge share 100%), 48m 13s, AC **3/3** re-measured green, harvest byte-IDENTICAL **2/2**, suite **1,767 → 1,782 passed | 23 skipped**, `docs/reports/dogfood-161.md`. F-412 CLOSED.
+🟢 **LIVE-PROVEN on prose nobody fitted it to** — this run's own four completion reviews restate ONE complaint against four revisions of the code. Through the real accumulating history (`src/workflow/agent-loop.ts:263`, pushed at `:1406`): byte-equality granted a repair attempt on all four; the delivered instrument (`src/workflow/completion-review.ts:478`) **stops at review #2**. Pinned at `test/runner/completion-review.test.ts:922`.
+🔴 **The run sealed FAILED, and it was RIGHT** — the final completion review named a *falsifiable counterexample* with concrete inputs, and this review ran it through the delivered function and got the wrong answer back. **Judge true-positives ×4**: three repaired in-run, the fourth probe-confirmed and unrepaired.
+🟡 **F-416 + F-417 (§8) → WP-644** — the instrument recognises **2 of 6** restatements of one complaint, and soundness is gone: `flushBatchWriter` "drops metadata on retry" vs "loses the checksum on retry" compares as the SAME objection (`completion-review.ts:560`); measured false-positive rate over 298 real cross-run pairs is **1.3%** (byte-equality: 0%). 🟡 **F-418** → track-B: reviews #1→#4 each faulted a *different* shortcut in the *then-current* code and the executor removed each in turn — the run was converging while the objection stayed the same.
+🟡 **F-419 (§7) HAND-FIXED** — a FAILED acceptance check printed 8 lines and persisted none, so AC-3's red suite reported counts and not the failing test's name. Full output now lands at `.chikory/review/ac-<run-id>-<AC>.log` with hoisted failure lines (`scripts/dogfood-verify.sh:218`). ℹ️ **F-422 HAND-FIXED** (stale `MAX_PROGRESS_GRANTS` docstring). 🟡 F-420 (§8) → track-B: one flaky test in the declared suite, 1 red in 4 observations of 1,802, name lost to F-419. 🟡 F-421 (§8) → track-B: step 4 killed at the 10m cap with 0 output tokens, waiting on a backgrounded full suite the goal forbade (F-345 recurrence).
+**Standing lesson: grade the delivery on prose it could not have fitted to.** Nine hand-authored keyword lists passed 3/3 ACs and 13 self-authored tests. What found both real gaps was replaying the run's OWN judge output through the delivered function — the review's cheapest and sharpest instrument, because that prose did not exist when the code was written.
+**NEXT HEADLINE = `dogfood-162` / WP-644** — make the repeat decision defensible in BOTH directions on prose it was not fitted to. Gate ✅ PROGRESSING, so the rung does not bind; P3 rung-5's remainder (WP-304) is still operator-run and not spec-expressible.
 
 Related docs: [`docs/spec/task-spec.md`](spec/task-spec.md) (schema
 reference) · [`docs/TASK-PROTOCOL.md`](TASK-PROTOCOL.md) (WP etiquette, §7 is
@@ -997,6 +996,17 @@ broken (a false-green, not a follow-on fix).
   `runCliStep` and never produced a false RED. Structural greps belong on the
   **traps** (a neighbouring contract that must NOT move), where a false RED is
   impossible because nothing is supposed to change.
+
+- **A FAILED acceptance check now keeps its full output — read it, don't re-run
+  the suite (🟡 F-419, dogfood-161).** The evidence pack prints only the last 8
+  lines of each check, and vitest puts the failing test's NAME hundreds of lines
+  above its summary, so a red VERIFY-SUITE check used to report counts and no
+  cause. Every check's complete output is now written to
+  `.chikory/review/ac-<run-id>-<AC>.log` (`scripts/dogfood-verify.sh:218`), the
+  path is printed under each result, and a red check additionally prints its
+  hoisted failure lines. When an AC goes red, open that log FIRST — the failing
+  assertion is in it. `dogfood-arm.sh` has always done this for arming passes
+  (`.chikory/review/arm-<spec>-<pass>-<AC>.log`); the two are now symmetric.
 
 ## 8. Known P1 limitations (so you don't fight them)
 
@@ -2201,3 +2211,25 @@ broken (a false-green, not a follow-on fix).
   `sqlite3 .chikory/runs/<run-id>/journal.db "select idx, kind, ts from
   journal_entries order by idx"` — and look for a `terminal` entry followed by a
   `control_event`. The gap between their timestamps is the human-latency stall.
+
+- **🟡 One test in the SDK suite is flaky (F-420, dogfood-161).** Measured at the
+  same tree, four consecutive runs of `pnpm --filter @chikory/sdk exec vitest run`:
+  one red (`1 failed | 1778 passed | 23 skipped`) then three green
+  (`1779 passed | 23 skipped`), same 1,802-test total — so it is one flaky test,
+  not a missing file. The name was lost to F-419 (now fixed, so the next
+  occurrence names itself). The red observation is the only one that ran directly
+  after two live-Temporal acceptance checks, which points at a timing-sensitive
+  live test under load. **Do not treat a single red suite run as authoritative
+  when the failure count is 1** — re-run it before spending a review on it, and
+  read `.chikory/review/ac-<run-id>-<AC>.log` for the name.
+
+- **🟡 An executor will background a long suite and then burn the whole step cap
+  waiting for it (F-421, dogfood-161; F-345 recurrence).** dogfood-161's goal
+  said, in as many words, *"Do NOT run the full vitest suite inside a step — it
+  does not fit the step time cap"*. Step 3's summary opens *"I have initiated the
+  live Temporal runner test suite ... in the background and am waiting for the
+  results"*; step 4 then recorded 10k input tokens, **0 output tokens**, and
+  `step killed: exceeded maxSeconds` after **10m 0s** — 21% of the run's wall
+  clock, and a repair grant, spent on nothing. A prohibition in the goal text is
+  not a control. Assume any spec whose regression suite takes minutes will lose
+  one step this way, and size `max_steps` accordingly.

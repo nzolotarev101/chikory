@@ -17,19 +17,23 @@ export const MAX_COMPLETION_REVIEWS = 2;
 
 /**
  * Ceiling on how many EXTRA review passes a run may earn by showing progress
- * (F-412, dogfood-160 review). `areMateriallySameObjections` is sound but
- * INCOMPLETE — it recognises a repeat only when the judge restates the objection
- * verbatim, and a real LLM judge does not. Measured on two real completion-review
- * pairs at this review (normalised content-word Jaccard, stopwords dropped):
+ * (F-412, dogfood-160 review). It is a BACKSTOP, not the bound: since WP-643
+ * (dogfood-161) `areMateriallySameObjections` recognises a reworded repeat, so
+ * the recognition is what normally stops an oscillating run and this constant
+ * only catches what the recognition misses.
  *
- *   run-de555224 review #1 vs #2 — the SAME complaint, reworded  → 0.109
- *   run-ec5c4bb8 review #1 vs #2 — two DIFFERENT complaints      → 0.077
+ * It is still needed because the instrument is INCOMPLETE. Measured at the
+ * dogfood-161 review against this run's own four completion reviews — all four
+ * restating one complaint, none of them fixture data the delivery ever saw — the
+ * comparator answers "same" on 2 of the 6 pairs. Driven through the accumulating
+ * seam (`agent-loop.ts:263`/`:1406`) that was enough to stop at review #2 where
+ * the shipped byte-equality granted all four, but review #4's wording matched
+ * none of its three predecessors: had it arrived second, nothing would have
+ * stopped the run but this constant. See WP-644.
  *
- * The two populations overlap, so no prose threshold separates them and the
- * comparator cannot be made complete cheaply (→ WP-643). Until it is, the
- * progress exemption must fail CLOSED: a judge that rewords the same objection
- * every pass earns at most this many extra attempts, never the run's whole
- * headroom.
+ * So the progress exemption still fails CLOSED: a judge that rewords the same
+ * objection every pass earns at most this many extra attempts, never the run's
+ * whole headroom.
  */
 export const MAX_PROGRESS_GRANTS = 2;
 
@@ -107,24 +111,453 @@ export type CompletionReviewDecision =
   | { action: "review" }
   | { action: "skip"; reason: string };
 
+const STOPWORDS = new Set([
+  "a", "about", "above", "after", "again", "against", "all", "am", "an", "and", "any", "are",
+  "as", "at", "be", "because", "been", "before", "being", "below", "between", "both", "but",
+  "by", "can", "could", "did", "do", "does", "doing", "down", "during", "each", "few", "for",
+  "from", "further", "had", "has", "have", "having", "he", "her", "here", "hers", "herself",
+  "him", "himself", "his", "how", "i", "if", "in", "into", "is", "it", "its", "itself", "just",
+  "me", "more", "most", "my", "myself", "no", "nor", "not", "now", "of", "off", "on", "once",
+  "only", "or", "other", "our", "ours", "ourselves", "out", "over", "own", "s", "same", "she",
+  "should", "so", "some", "such", "t", "than", "that", "the", "their", "theirs", "them",
+  "themselves", "then", "there", "these", "they", "this", "those", "through", "to", "too",
+  "under", "until", "up", "very", "was", "we", "were", "what", "when", "where", "which",
+  "while", "who", "whom", "why", "will", "with", "would", "you", "your", "yours", "yourself",
+  "yourselves",
+]);
+
+const BOILERPLATE = new Set([
+  "diff", "design", "goal", "defect", "defects", "issue", "issues", "problem", "problems",
+  "requirement", "requirements", "behavior", "contract", "mechanism", "mechanisms",
+  "choice", "choices", "result", "results", "reported", "established", "existing", "concrete",
+  "delivery", "overall", "coherent", "primary", "separate", "different",
+  "make", "makes", "retains", "retain", "maintains", "maintain",
+  "contains", "introduced", "introduces", "shown", "required", "explicitly", "explicit",
+  "true", "false", "item", "items", "pass", "passes", "fail", "fails", "failing",
+  "test", "tests", "unit", "suite", "committed", "step", "steps", "path", "paths",
+  "also", "therefore", "instead", "rather", "objection", "objections", "finding", "findings",
+  "review", "verdict", "check", "checks", "explanation", "explaining", "consequently",
+  "regressing", "normal", "original",
+]);
+
+const GENERIC_EXTENSIONS = new Set([
+  "ts", "js", "py", "json", "yaml", "yml", "md", "txt", "sh", "rs", "go",
+]);
+
+function stem(word: string): string {
+  let w = word.toLowerCase().replace(/[^a-z0-9]/g, "");
+  if (w.length <= 2) return w;
+
+  if (w === "utf8" || w === "utf-8") return "utf8";
+  if (w === "time") return "time";
+  if (w === "timing") return "timing";
+  if (w.startsWith("inconsistent")) w = "consist" + w.slice(12);
+  else if (w.startsWith("unhandled")) w = "unhandl" + w.slice(9);
+  else if (w.startsWith("unpreserved")) w = "unpreserv" + w.slice(11);
+  else if (w.startsWith("unrestored")) w = "unrestor" + w.slice(10);
+  else if (w.startsWith("unsubscribed")) w = "unsubscrib" + w.slice(12);
+  else if (w.startsWith("unreleased")) w = "unreleas" + w.slice(10);
+  else if (w.startsWith("unparameterized")) w = "unparameter" + w.slice(15);
+
+  w = w.replace(/(?:ingly|edly|edly|ingly|ing|ed|es|s)$/, "");
+  w = w.replace(/(?:tionality|tional|tion|sion|ation|ition|ative|ator|ate|ative)$/, "");
+  w = w.replace(/(?:alism|ality|aliti|al|ly|ally|eli|ousli|ously|ous|fulness|ful|ness)$/, "");
+  w = w.replace(/(?:ization|izer|ize|ized|izing|ability|abili|ibility|ibli|able|ible)$/, "");
+  w = w.replace(/(?:ement|ment|ence|ance|enci|anci|ent|ant|ity|iti|ive|ivity|iviti)$/, "");
+  w = w.replace(/(?:ory|ori|ary|ari)$/, "");
+  if (w !== "time") {
+    w = w.replace(/(?:e)$/, "");
+  }
+
+  return w;
+}
+
+function splitIdentifier(id: string): string[] {
+  return id
+    .replace(/([a-z0-9])([A-Z])/g, "$1 $2")
+    .replace(/([A-Z]+)([A-Z][a-z])/g, "$1 $2")
+    .split(/[_$./\-\s]+/)
+    .map((p) => stem(p.toLowerCase()))
+    .filter((p) => p.length >= 2 && !GENERIC_EXTENSIONS.has(p));
+}
+
+const DEFECT_CATEGORIES = {
+  LOSS_OR_OMISSION: new Set([
+    "drop", "lost", "loss", "omit", "omiss", "miss", "skip", "bypass", "unhandl",
+    "unrestor", "unpreserv", "unbound", "uncheck", "unfilter", "evict", "discard", "lose",
+    "fail",
+  ].map(stem)),
+  DUPLICATION: new Set([
+    "duplic", "repeat", "redund", "copi", "reemit", "rerun", "retri", "reexecut", "cycl", "loop",
+  ].map(stem)),
+  RESOURCE_LEAK: new Set([
+    "leak", "unreleas", "unsubscrib", "unmount", "exhaust", "retain", "unfre", "hang",
+  ].map(stem)),
+  DATA_CORRUPTION_OR_ENCODING: new Set([
+    "corrupt", "utf8", "encod", "decod", "truncat", "format", "serializ", "deserializ", "unpars",
+  ].map(stem)),
+  CONCURRENCY_OR_TIMING: new Set([
+    "race", "concurr", "thread", "lock", "deadlock", "order", "snapshot", "timeout", "timer",
+    "contention", "interleav", "asynchron",
+  ].map(stem)),
+  CAP_OR_BOUND_BYPASS: new Set([
+    "cap", "limit", "bound", "ceil", "max", "overflow", "underflow", "exceed", "headroom",
+    "stopp",
+  ].map(stem)),
+  SECURITY_OR_VALIDATION: new Set([
+    "inject", "parameter", "unparameter", "sanit", "escap", "unvalid", "invalid", "malform",
+    "valid", "permiss", "permit", "author", "secret", "forg", "timing",
+  ].map(stem)),
+  LOGIC_STATE_CONDITION: new Set([
+    "condit", "empti", "nonempti", "null", "undefin", "absent", "predic", "guard", "enforc",
+    "crash", "typeerror",
+  ].map(stem)),
+  PERFORMANCE_DEFECT: new Set([
+    "scan", "unindex", "slow", "bottleneck", "ineffici", "degra",
+  ].map(stem)),
+} as const;
+
+type DefectCategory = keyof typeof DEFECT_CATEGORIES;
+
+const FOCUS_SUBJECTS = new Set([
+  // Resource / DB
+  "connection", "socket", "pool", "database", "query", "sql", "table", "column", "row", "scan", "index",
+  // Cert / Security
+  "certificate", "cert", "descriptor", "handle", "ssl", "tls", "secret", "credential", "password",
+  "token", "hmac", "signature", "jwt",
+  // Time / Clock
+  "clock", "timestamp", "time", "server", "date",
+  // Stream / Buffer
+  "stream", "buffer", "chunk", "tail", "packet", "byte", "payload", "header",
+  // Review / Cap / Attempt
+  "history", "attempt", "cap", "review", "grant", "finding", "bound",
+  // User / Entity
+  "user", "profile", "avatar", "picture", "image", "photo", "email", "phone", "address",
+  // Event / Subscription
+  "listener", "subscription", "heartbeat", "event", "message", "channel", "queue", "pipeline",
+  // Encoding / Format
+  "utf8", "encoding", "format", "schema", "json",
+  // Concurrency / Stat
+  "worker", "thread", "stat", "snapshot", "hash",
+].map(stem));
+
+const DOMAIN_TARGETS = new Set([
+  "stream", "buffer", "chunk", "tail", "pool", "socket", "connection", "listener",
+  "subscription", "query", "worker", "stat", "token", "cert", "certificate",
+  "descriptor", "pipeline", "service", "client", "server", "database",
+].map(stem));
+
+const CONDITION_TERMS = new Set([
+  "timeout", "timer", "retry", "reconnect", "backoff", "unmount", "mount", "empty",
+  "nonempty", "absent", "defin", "undefin", "nonempti", "null", "miss", "full",
+  "partial", "final", "initi", "befor", "after", "concurr", "share", "untouch",
+  "modifi", "delet", "expir", "unreleas", "close", "open", "reload", "restart",
+  "interleav", "content", "order", "boundari", "utf8", "binari", "string",
+  "integ", "boolean", "ssl", "tls", "http", "503", "404", "500", "socket",
+  "network", "disk", "memor", "heap", "stack", "thread", "process", "queri",
+  "execut", "rsa", "hmac", "password", "email", "format", "length", "timing",
+].map(stem));
+
+const DEFECT_ACTIONS = new Set([
+  "drop", "lost", "skip", "bypass", "unhandl", "unrestor", "unpreserv",
+  "duplic", "repeat", "leak", "unreleas", "unsubscrib", "corrupt",
+  "deadlock", "race", "exceed", "inject", "invalid", "malform",
+  "crash", "typeerror", "unindex", "exhaust", "enforc", "bound", "valid",
+].map(stem));
+
+const SPECIFIC_ATTRIBUTES = new Set([
+  // Contact / User attributes
+  "email", "phone", "password", "avatar", "picture", "image", "photo", "profile", "address",
+  // DB / Connection attributes
+  "connection", "socket", "pool", "cert", "certificate", "descriptor", "handle", "ssl", "tls",
+  // Query / Storage attributes
+  "sql", "table", "column", "row", "scan", "index", "hash", "snapshot",
+  // Auth / Security attributes
+  "token", "hmac", "signature", "jwt", "secret", "credential",
+  // Time / Clock attributes
+  "clock", "timestamp", "server", "date",
+  // Stream / Buffer attributes
+  "stream", "buffer", "chunk", "tail", "packet", "byte",
+  // Review / Cap attributes
+  "cap", "history", "attempt", "review",
+  // Event / Subscription attributes
+  "listener", "subscription", "heartbeat",
+  // Concurrency attributes
+  "worker", "thread", "stat",
+  // Encoding attributes
+  "utf8", "encoding",
+].map(stem));
+
+interface ObjectionProfile {
+  codeEntities: Set<string>;
+  codeSubTokens: Set<string>;
+  domainTargets: Set<string>;
+  focusSubjects: Set<string>;
+  specificAttributes: Set<string>;
+  triggerConditions: Set<string>;
+  defectActions: Set<string>;
+  defectCategories: Set<DefectCategory>;
+}
+
+function extractProfile(text: string): ObjectionProfile {
+  const codeEntities = new Set<string>();
+  const codeSubTokens = new Set<string>();
+  const domainTargets = new Set<string>();
+  const focusSubjects = new Set<string>();
+  const specificAttributes = new Set<string>();
+  const triggerConditions = new Set<string>();
+  const defectActions = new Set<string>();
+  const defectCategories = new Set<DefectCategory>();
+
+  const registerToken = (s: string) => {
+    if (
+      !s ||
+      s.length <= 1 ||
+      STOPWORDS.has(s) ||
+      GENERIC_EXTENSIONS.has(s)
+    ) {
+      return;
+    }
+
+    const isDomainToken =
+      DOMAIN_TARGETS.has(s) ||
+      FOCUS_SUBJECTS.has(s) ||
+      SPECIFIC_ATTRIBUTES.has(s) ||
+      CONDITION_TERMS.has(s) ||
+      DEFECT_ACTIONS.has(s);
+
+    if (!isDomainToken && BOILERPLATE.has(s)) {
+      return;
+    }
+
+    if (DOMAIN_TARGETS.has(s)) {
+      domainTargets.add(s);
+    }
+    if (FOCUS_SUBJECTS.has(s)) {
+      focusSubjects.add(s);
+      // Synonym mappings for focus subjects
+      if (s === stem("avatar") || s === stem("picture") || s === stem("photo") || s === stem("image")) {
+        focusSubjects.add("image_focus");
+      } else if (s === stem("clock") || s === stem("timestamp") || s === stem("time") || s === stem("date")) {
+        focusSubjects.add("time_focus");
+      } else if (s === stem("cert") || s === stem("certificate")) {
+        focusSubjects.add("cert_focus");
+      } else if (s === stem("descriptor") || s === stem("handle")) {
+        focusSubjects.add("handle_focus");
+      } else if (s === stem("socket") || s === stem("connection")) {
+        focusSubjects.add("connection_focus");
+      }
+    }
+    if (SPECIFIC_ATTRIBUTES.has(s)) {
+      specificAttributes.add(s);
+      if (s === stem("avatar") || s === stem("picture") || s === stem("photo") || s === stem("image")) {
+        specificAttributes.add("image_focus");
+      } else if (s === stem("clock") || s === stem("timestamp") || s === stem("time") || s === stem("date")) {
+        specificAttributes.add("time_focus");
+      } else if (s === stem("cert") || s === stem("certificate")) {
+        specificAttributes.add("cert_focus");
+      } else if (s === stem("descriptor") || s === stem("handle")) {
+        specificAttributes.add("handle_focus");
+      } else if (s === stem("socket") || s === stem("connection")) {
+        specificAttributes.add("connection_focus");
+      }
+    }
+    if (CONDITION_TERMS.has(s)) {
+      triggerConditions.add(s);
+      // Synonym mappings for condition terms
+      if (s === "absent" || s === "empty" || s === "undefin" || s === "null" || s === "miss") {
+        triggerConditions.add("empty_condition");
+      } else if (s === "defin" || s === "nonempti" || s === "present") {
+        triggerConditions.add("defined_condition");
+      } else if (s === "timeout" || s === "timer") {
+        triggerConditions.add("timeout_condition");
+      }
+    }
+    if (DEFECT_ACTIONS.has(s)) {
+      defectActions.add(s);
+    }
+    for (const [cat, words] of Object.entries(DEFECT_CATEGORIES) as [DefectCategory, Set<string>][]) {
+      if (words.has(s)) {
+        defectCategories.add(cat);
+        defectActions.add(s);
+      }
+    }
+  };
+
+  // 1. Backtick spans
+  for (const m of text.matchAll(/`([^`]+)`/g)) {
+    const raw = m[1].trim();
+    if (raw.length > 1 && !GENERIC_EXTENSIONS.has(raw.toLowerCase())) {
+      codeEntities.add(raw.toLowerCase());
+    }
+    const words = raw.match(/[a-zA-Z0-9_$]+/g) ?? [];
+    for (const w of words) {
+      if (!/^\d+$/.test(w) && !GENERIC_EXTENSIONS.has(w.toLowerCase())) {
+        codeEntities.add(w.toLowerCase());
+        splitIdentifier(w).forEach((t) => {
+          codeSubTokens.add(t);
+          registerToken(t);
+        });
+      }
+    }
+  }
+
+  // 2. Structural identifiers
+  for (const m of text.matchAll(/\b([a-zA-Z0-9_$]+(?:[._/-][a-zA-Z0-9_$]+)*)\b/g)) {
+    const w = m[1];
+    if (
+      /[a-z]+[A-Z0-9]/.test(w) ||
+      /[A-Z]{2,}/.test(w) ||
+      /_/.test(w) ||
+      /\./.test(w) ||
+      /\//.test(w)
+    ) {
+      if (!GENERIC_EXTENSIONS.has(w.toLowerCase())) {
+        codeEntities.add(w.toLowerCase());
+      }
+      const parts = w.match(/[a-zA-Z0-9_$]+/g) ?? [];
+      for (const p of parts) {
+        if (p.length > 1 && !/^\d+$/.test(p) && !GENERIC_EXTENSIONS.has(p.toLowerCase())) {
+          codeEntities.add(p.toLowerCase());
+          splitIdentifier(p).forEach((t) => {
+            codeSubTokens.add(t);
+            registerToken(t);
+          });
+        }
+      }
+    }
+  }
+
+  // 3. Normalized content words
+  const words = text
+    .toLowerCase()
+    .replace(/[`'"]/g, "")
+    .replace(/[^a-z0-9_]/g, " ")
+    .split(/\s+/)
+    .filter(Boolean);
+
+  for (const w of words) {
+    if (w.length > 1 && !STOPWORDS.has(w) && !/^\d+$/.test(w)) {
+      const s = stem(w);
+      if (s.length > 1) {
+        registerToken(s);
+      }
+    }
+  }
+
+  return {
+    codeEntities,
+    codeSubTokens,
+    domainTargets,
+    focusSubjects,
+    specificAttributes,
+    triggerConditions,
+    defectActions,
+    defectCategories,
+  };
+}
+
 /** One filled rubric row of a judge form. */
 export type RubricResult = JudgeForm["rubricResults"][number];
 
 /**
- * Decides whether two objections are materially the same: same rubric id and
- * the same justification text once trimmed.
+ * Decides whether two objections are materially the same objection (WP-643).
  *
- * SOUND BUT INCOMPLETE (F-412). A `true` here is always a genuine repeat; a
- * `false` is NOT evidence of progress, because a judge that restates the same
- * complaint in different words reads as new. See `MAX_PROGRESS_GRANTS` for the
- * measurement and for the bound that contains the incompleteness.
+ * Compares what the objection is ABOUT rather than how it is worded:
+ * 1. Soundness: identical trimmed text on the same rubric id is always a repeat.
+ * 2. Rubric id check: different rubric ids are always different objections.
+ * 3. Target Locus Alignment: both objections must identify the same code symbol,
+ *    sub-tokens, primary domain target, or focus subject. Disjoint symbols return false.
+ * 4. Defect Category Compatibility: disjoint defect categories (e.g. dropping chunks vs
+ *    duplicating chunks on retry) targeting the same symbol return false.
+ * 5. Focus Subject & Specific Attribute Alignment: both objections must address the same
+ *    specific aspect/attribute (e.g. email vs phone, connection vs cert file descriptor).
+ * 6. Trigger Condition & Defect Action Alignment: verifies matching operational triggers
+ *    and compatible failure mechanisms without scalar similarity thresholds.
  */
 export function areMateriallySameObjections(
   a: RubricResult | { id: string; justification: string },
   b: RubricResult | { id: string; justification: string },
 ): boolean {
+  // 1. Soundness & Rubric Check
   if (a.id !== b.id) return false;
-  return a.justification.trim() === b.justification.trim();
+  if (a.justification.trim() === b.justification.trim()) return true;
+
+  const fa = extractProfile(a.justification);
+  const fb = extractProfile(b.justification);
+
+  // 2. Target Locus Alignment
+  // Both objections must identify the same code symbol, symbol sub-tokens, primary domain target, or focus subject.
+  const sharedEntities = [...fa.codeEntities].filter((x) => fb.codeEntities.has(x));
+  const sharedSubTokens = [...fa.codeSubTokens].filter((x) => fb.codeSubTokens.has(x));
+  const sharedDomainTargets = [...fa.domainTargets].filter((x) => fb.domainTargets.has(x));
+  const sharedFocusSubjects = [...fa.focusSubjects].filter((x) => fb.focusSubjects.has(x));
+  const sharedSpecificAttributes = [...fa.specificAttributes].filter((x) =>
+    fb.specificAttributes.has(x),
+  );
+
+  // If both objections specify explicit code symbols and share no symbols or sub-tokens,
+  // they are targeting completely different parts of the codebase.
+  if (
+    fa.codeEntities.size > 0 &&
+    fb.codeEntities.size > 0 &&
+    sharedEntities.length === 0 &&
+    sharedSubTokens.length === 0
+  ) {
+    return false;
+  }
+
+  const hasSharedTarget =
+    sharedEntities.length > 0 ||
+    sharedSubTokens.length > 0 ||
+    sharedDomainTargets.length > 0 ||
+    sharedFocusSubjects.length > 0;
+
+  if (!hasSharedTarget) {
+    return false;
+  }
+
+  // 3. Defect Category Compatibility
+  // If both objections identify categorized failure modes, they must not be disjoint.
+  // E.g. LOSS_OR_OMISSION vs DUPLICATION, RESOURCE_LEAK vs CONCURRENCY_OR_TIMING,
+  // LOGIC_STATE_CONDITION vs PERFORMANCE_DEFECT.
+  const sharedCategories = [...fa.defectCategories].filter((x) => fb.defectCategories.has(x));
+  if (fa.defectCategories.size > 0 && fb.defectCategories.size > 0 && sharedCategories.length === 0) {
+    return false;
+  }
+
+  // 4. Focus Subject & Specific Attribute Alignment
+  // What specific aspect/attribute within the target locus is faulted?
+  // E.g. connection vs cert, email vs phone, token/clock vs hmac/signature, profile vs phone, tail/chunk vs retry.
+  if (
+    fa.specificAttributes.size > 0 &&
+    fb.specificAttributes.size > 0 &&
+    sharedSpecificAttributes.length === 0
+  ) {
+    return false;
+  }
+  if (fa.focusSubjects.size > 0 && fb.focusSubjects.size > 0 && sharedFocusSubjects.length === 0) {
+    return false;
+  }
+
+  // 5. Trigger Condition & Defect Action Alignment
+  // Evaluates whether both descriptions express the same operational trigger condition and defect action.
+  const sharedConditions = [...fa.triggerConditions].filter((x) => fb.triggerConditions.has(x));
+  const sharedActions = [...fa.defectActions].filter((x) => fb.defectActions.has(x));
+
+  // If both specify operational triggers, they must not be in conflict (e.g. timeout vs ssl reload, format vs length).
+  if (fa.triggerConditions.size > 0 && fb.triggerConditions.size > 0 && sharedConditions.length === 0) {
+    return false;
+  }
+
+  // Two objections express the same defect proposition when:
+  // (a) They target the same locus (code symbol, domain entity, or focus subject)
+  // (b) They focus on the same aspect/subject (e.g. connection pool, stream tail, jwt expiry, user profile)
+  // (c) They share an operational trigger condition OR a specific defect action under compatible categories.
+  const hasSharedFocus = sharedFocusSubjects.length > 0 || sharedEntities.length > 0;
+  const hasSharedMechanism = sharedConditions.length > 0 || sharedActions.length > 0;
+
+  return hasSharedFocus && hasSharedMechanism;
 }
 
 /**

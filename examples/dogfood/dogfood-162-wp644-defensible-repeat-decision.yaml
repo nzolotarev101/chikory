@@ -1,0 +1,612 @@
+# Plain: the loop can now tell "you already said that" from "that's new" — but only just.
+# Measured at the dogfood-161 review it gets 2 of 6 restatements of one complaint right, and it
+# has started calling two DIFFERENT complaints the same one. After this run, the decision has to
+# hold up on wording nobody tuned it for: catch the restatement more often than it misses it, and
+# stop merging two complaints that fault different things in the same place.
+# WP: WP-644 (a repeat decision defensible in BOTH directions on prose it was not fitted to; F-416, F-417, F-418)
+# Ladder-rung: 0 (off-ladder — P3 rung-5's remaining half is WP-304, an operator-run quota-bound
+#   benchmark arm, not expressible as a spec. The gate reads PROGRESSING, so the rung does not bind.)
+# Thesis-KPI: durable execution + unattended horizon (CLAUDE.md). Measured as: can the loop tell
+#   progress from oscillation without a human reading the two objections. WP-643 made that decision
+#   about MEANING; this run makes it survive wording it was never shown.
+#
+# THE MEASURED PREMISE — read at the dogfood-161 review by replaying real judge output through the
+#   delivered function (F-203/F-342: measured, never transcribed). Reproduce the code read with:
+#     sed -n '478,561p' packages/sdk-ts/src/workflow/completion-review.ts   # the comparator
+#     sed -n '222,303p' packages/sdk-ts/src/workflow/completion-review.ts   # the nine lexicons
+#     sed -n '922,996p' packages/sdk-ts/test/runner/completion-review.test.ts  # the pinned probe
+#   And the source of the fixture, four completion reviews of the WP-643 run itself:
+#     sqlite3 .chikory/runs/run-eef8a03d-c6b6-4165-9738-d002cef3d56d/journal.db \
+#       "select payload_json from journal_entries where idx in (7,14,21,28)"
+#
+#   `areMateriallySameObjections` (`packages/sdk-ts/src/workflow/completion-review.ts:478`) profiles
+#   each objection into code entities, sub-tokens, a defect category, a focus subject and a trigger
+#   condition, then answers `hasSharedFocus && hasSharedMechanism` (`:560`). Every one of those
+#   dimensions is a hand-authored keyword list. Two measurements say the same thing:
+#
+#     INCOMPLETE — run-eef8a03d's four completion reviews restate ONE complaint (the comparator's
+#       lexical shortcuts collapse distinct objections) against four revisions of the code. Ground
+#       truth is "same" on all 6 pairs. The comparator answers same on **2 of 6**, and review #4's
+#       wording matches NONE of its three predecessors. The accumulating history
+#       (`packages/sdk-ts/src/workflow/agent-loop.ts:263`, pushed at `:1406`) rescued that run — it
+#       stops at review #2 — but only because of the order the wordings happened to arrive in.
+#
+#     UNSOUND — the comparator WP-643 replaced was sound: a `true` was always a genuine repeat.
+#       This one is not. Two objections on `flushBatchWriter`, one saying it "drops metadata on
+#       retry" and one "loses the checksum on retry", share a code entity, the LOSS_OR_OMISSION
+#       category and the `retry` condition, and neither `metadata` nor `checksum` is represented as
+#       a distinguishing thing — so `:560` answers **true** on two different defects. Measured over
+#       298 real cross-run objection pairs drawn from 13 journals, where the ground truth is
+#       unambiguously "different": **1.3% false positives**, against byte-equality's 0%.
+#
+#   * THE TRAP IS WIDENING THE LEXICONS, AND IT CANNOT PASS. Adding `metadata` and `checksum` to
+#     `SPECIFIC_ATTRIBUTES` (`:268`) fixes the one counterexample and nothing else. AC-1 states its
+#     negatives with INVENTED identifiers — `zqflooberWriter`, `wibbleTag`, `frobnitzSeal` — that no
+#     list can contain, and then re-runs every one of them under a consistent rename to a SECOND set
+#     of invented identifiers and requires byte-identical answers. A decision that depends on which
+#     words are in a list changes when the words change; a decision about structure does not.
+#   * THE SECOND TRAP IS BUYING RECALL WITH SOUNDNESS. Loosening the comparator until all six
+#     restatements match will also merge the invented-identifier pair AC-1 requires to stay
+#     different. Both floors are graded in the same check, so neither can be paid for with the other.
+#   * THE THIRD TRAP IS FIXING THE ORDER, NOT THE RECOGNITION. AC-2 drives the REAL agent loop with
+#     the same four real wordings PERMUTED so that review #4's text — the one that matches none of
+#     the others today — arrives FIRST. A delivery that still leans on the order the wordings happen
+#     to arrive in fails, because the accumulating history can no longer rescue it.
+#   * WHAT THE INSTRUMENT MAY READ: `{ id, justification }` and nothing else, unchanged from WP-643.
+#     It stays pure and replay-safe: read inside a Temporal workflow, so no clocks, no randomness,
+#     no network, no I/O, deterministic under replay.
+#   * NOT IN SCOPE: no change to the judge prompt or to `JudgeForm`, to the rubric ids, to what a
+#     completion review IS, to `mergeDesignFindings`, to `buildCompletionReviewBrief`, to
+#     `heal/gate-repair.ts` routing (WP-542/F-207 — no LLM-verdict gate may exit), to the chain
+#     mirror (`src/chain/completion-review.ts`), to the Python mirror, to the TaskSpec contract, or
+#     to `src/judge/hermeticity.ts`.
+#   * THE SUITE THIS RUN MUST NOT BREAK, MEASURED at the launch commit under devbox (F-342 — run it
+#     yourself and read its own tail): 204 files passed | 2 skipped, 1,782 passed | 23 skipped.
+#     It already contains the anti-oscillation guards this run must keep green —
+#     `test/runner/deterministic-rubric-live.test.ts`, `test/runner/sealing-design-repair-live.test.ts`
+#     and the dogfood-161 probe at `test/runner/completion-review.test.ts:922`. **One test in that
+#     suite is flaky (F-420): 1 red in 4 observations of the same tree.** If AC-3 reds with exactly
+#     one failure, read `.chikory/review/ac-<run-id>-AC-3.log` for the name before believing it.
+#
+# PRECEDENCE — the design calls plan.md leaves open are DECIDED HERE:
+#   1. SOUNDNESS FIRST. Two objections that are byte-identical are always the same objection, and
+#      two that fault DIFFERENT named things in the same place are never the same objection. The
+#      second half is the part WP-643 gave away.
+#   2. RECALL SECOND, AND IT IS NOT OPTIONAL. 2 of 6 is not a recognition, it is a coincidence.
+#   3. THE BOUND STILL EXISTS. `MAX_PROGRESS_GRANTS` may be kept, changed or removed — but it may
+#      not be what stops AC-2's permuted oscillation, and no grant may ever let a run exceed
+#      `max_steps` or its budget.
+#
+# Format: loose — the outcome is fixed (the decision survives wording it was not tuned for, in both
+#   directions). WHAT structure the instrument reads out of an objection, and how it represents the
+#   thing an objection faults, are the executor's call. No AC greps a new symbol or field name (F-393).
+#
+# Launch mode: RUN (one seam, one package).
+#   CHIKORY_PREFLIGHT_ONLY=1 devbox run run-dogfood
+#   devbox run run-dogfood
+#
+# WHY THIS AND NOT THE LADDER RUNG (dogfood-161 review, 2026-08-20):
+#   `scripts/dogfood-progression.sh` reads ✅ PROGRESSING with dogfood-161 in the ledger (max steps
+#   4 vs 2 over the trailing three), so the verdict does NOT bind the headline to the ladder rung.
+#   It would not have mattered: P3's ladder is WP-530 (plan.md §7) and rung-5's remaining half is
+#   WP-304's OpenHands arm plus a corpus wide enough to separate 19 requirements at 95% confidence —
+#   a quota-bound, multi-hour benchmark the OPERATOR runs by hand (dogfood-122's lesson), so it
+#   cannot be a spec, and has not been since dogfood-139 delivered rung-5's other half (WP-303).
+#   WP-644 is the direct residue of the run just reviewed: WP-643 shipped a recognition that is
+#   right 2 times in 6 and has started merging complaints that differ. Rejected: WP-641 (F-409) and
+#   WP-642 (F-411) — both harness-meta and §1.5 track-B · WP-639 (F-407) · WP-638 (F-402, low live
+#   reachability) · F-345 (a step cap the executor can burn by backgrounding a suite, F-421) —
+#   real, but a step-scheduling concern rather than the durable-execution decision this run turns.
+
+name: dogfood-162-wp644-defensible-repeat-decision
+wp: WP-644
+
+goal: |
+  The loop's answer to "have I already been told this?" must hold up on wording nobody tuned it
+  for — catching a restatement far more often than it misses one, and never merging two
+  complaints that fault different things in the same place.
+
+  Measured from the code and from real judge output at the dogfood-161 review.
+  `areMateriallySameObjections` (packages/sdk-ts/src/workflow/completion-review.ts:478) profiles an
+  objection into code entities, a defect category, a focus subject and a trigger condition — every
+  one of them a hand-authored keyword list — and answers hasSharedFocus && hasSharedMechanism
+  at :560.
+
+  - `run-eef8a03d-c6b6-4165-9738-d002cef3d56d` completion reviews #1–#4 (journal idx 7, 14, 21, 28)
+    restate ONE complaint against four revisions of the code. The correct answer is SAME on all six
+    pairs. The comparator answers SAME on **2 of 6**, and review #4's wording matches none of the
+    other three.
+  - Two objections that both fault `flushBatchWriter` on retry — one losing the batch metadata, one
+    losing the batch checksum — compare as the SAME objection. They are not. Over 298 real
+    cross-run objection pairs the false-positive rate is 1.3%, where the byte-equality this
+    replaced was 0%.
+
+  Make this true.
+
+  1. **A restatement is recognised far more often than not.** Of the six pairs those four real
+     reviews form, at least five must compare as the same objection.
+  2. **Two complaints that fault different named things are different objections.** Two objections
+     on the same symbol, in the same defect category, under the same trigger, differing only in
+     WHICH named thing is lost, must compare as different — and the two labelled pairs WP-643 was
+     graded on must keep their answers.
+  3. **The decision does not depend on which words are in a list.** Rename every invented
+     identifier in an objection pair, consistently, to a different invented identifier, and the
+     answer must not change.
+  4. **The loop's stopping behaviour survives the order.** A run whose completion review restates
+     one objection every pass must seal FAILED (resumable) with `max_steps` headroom left even when
+     the restatements arrive in the order that defeats the comparator today. A run answering
+     genuinely different objections must keep working and reach SUCCESS at the same `max_steps`.
+
+  The instrument may read `{ id, justification }` and nothing else — the shape every completion
+  review already produces. It must stay pure and replay-safe: it is read inside a Temporal
+  workflow, so no clocks, no randomness, no network, no I/O.
+
+  Three things must NOT change, and each is a trap this run is graded on:
+
+  1. **Widening the lexicons cannot be the answer.** Adding `metadata` and `checksum` to
+     SPECIFIC_ATTRIBUTES fixes one counterexample and nothing else. The graded negatives use
+     invented identifiers no list can contain, and are re-graded under a consistent rename.
+  2. **Recall may not be bought with soundness.** Loosening until all six restatements match also
+     merges the pair that must stay different. Both floors are graded together.
+  3. **The stopgap must not be doing the work.** MAX_PROGRESS_GRANTS may be kept, changed or
+     removed, but AC-2's permuted oscillation must stop with headroom left, so a constant cannot be
+     what stopped it. No grant may ever let a run exceed `max_steps` or its budget, and
+     `heal/gate-repair.ts` routing stands (no LLM-verdict gate may exit, WP-542/F-207). The judge
+     prompt, `JudgeForm`, the rubric ids, `mergeDesignFindings`, `buildCompletionReviewBrief`, the
+     chain mirror (packages/sdk-ts/src/chain/completion-review.ts), the Python mirror, the TaskSpec
+     contract and packages/sdk-ts/src/judge/hermeticity.ts are all out of scope.
+
+  TypeScript stays strict ESM with named exports and no `any`.
+
+  Pin your work with tests that live in the repo, beside the files they cover. A behaviour proved
+  only by the acceptance checks that grade this run is not pinned at all (F-356), and a repo test
+  copied case-for-case from a grading check inherits its blind spots (F-403). **At least one
+  committed test must pin an objection pair these acceptance criteria do not name, and it must use
+  real judge prose rather than prose you wrote for your own implementation.**
+
+  Verify your work with FAST checks only: the package typecheck (`pnpm run typecheck` — NOT bare
+  tsc --noEmit, which does not cover the test/ tree, F-382), eslint over the files you touched, and
+  vitest over the directories you actually wrote into. Do NOT run the full vitest suite inside a
+  step, and do NOT background one and wait for it — that is what killed step 4 of the last run
+  (F-421/F-345).
+
+repos:
+  - url: /Users/nikitazolotarev/repos/chikory
+    writable: true
+
+# The SDK suite is both the surface this run edits and the gate it must not break.
+# MEASURE it at the launch commit rather than trusting this line (F-342, dogfood-140).
+regression_suite: pnpm --filter @chikory/sdk exec vitest run
+check_timeout_ms: 180000
+
+acceptance_criteria:
+  - id: AC-1
+    description: >
+      THIS CHECK OWNS ITS ORACLE AND GRADES BOTH DIRECTIONS AT ONCE. Its positive population is the
+      six pairs formed by four REAL completion reviews taken verbatim out of run-eef8a03d's journal,
+      all restating one complaint; it requires at least five to compare as the same objection
+      (measured 2 today). Its negative population uses INVENTED identifiers no keyword list can
+      contain, and requires two objections that fault different named things in the same place under
+      the same trigger to stay different (measured: they merge today). Every case is then re-graded
+      under a consistent rename of the invented identifiers and must give byte-identical answers, so
+      a decision that keys on vocabulary is rejected by construction. It also re-grades the two
+      labelled pairs WP-643 was graded on, pins soundness on identical input, and asserts
+      determinism by calling the predicate five times.
+    check: |
+      cd packages/sdk-ts || exit 1
+      TARGET=test/runner/ac1-defensible-repeat.generated.test.ts
+      rm -f "$TARGET"
+      cat > "$TARGET" <<'GENEOF'
+      import { describe, expect, test } from "vitest";
+
+      import {
+        areMateriallySameObjections,
+        hasRepeatedObjection,
+        type RubricResult,
+      } from "../../src/workflow/completion-review.js";
+
+      const ID = "design_serves_overall_goal";
+      const row = (justification: string): RubricResult => ({ id: ID, pass: false, justification });
+
+      // ── POSITIVE POPULATION ──────────────────────────────────────────────
+      // run-eef8a03d-c6b6-4165-9738-d002cef3d56d, journal idx 7, 14, 21, 28 — the four
+      // completion reviews of the run that BUILT this comparator. Every one of them says
+      // the same thing: the comparator's lexical shortcuts collapse distinct objections.
+      // Verbatim; the code they fault changed under them, the complaint did not.
+      const RESTATEMENTS: string[] = [
+        "The diff still determines sameness through broad shortcuts and fixed similarity thresholds. In particular, one shared nontrivial code entity immediately returns true, so distinct defects involving the same symbol\u2014such as `flushBatchWriter` dropping a tail versus duplicating chunks\u2014would be collapsed. The shared-bigram and 0.30/0.60 token-overlap cutoffs are also similarity thresholds. This directly conflicts with the goal of deciding what an objection is about while preserving genuinely different objections as new.",
+        "The comparator remains an ad hoc lexical-classification system rather than a sound representation of what an objection is about. For example, two objections sharing a code entity and one stemmed defect action return true regardless of whether the action describes different failures; likewise, one shared defect bigram is sufficient, and another branch uses a fixed minimum of two shared non-entity tokens. The added categories handle selected counterexamples such as loss versus duplication, but do not generally prevent distinct defects involving the same symbol and action from collapsing. This is a real unfulfilled requirement because genuinely different objections must remain new, not merely the supplied examples.",
+        "The comparator remains a hand-built lexical-similarity heuristic rather than a sound representation of the objection proposition. It can return true from a shared target plus one shared condition and defect category, and its fallback explicitly uses fixed cutoffs of at least three shared mechanism tokens and 50% overlap. Distinct defects involving the same symbol, generic condition, and broad category can therefore be collapsed. This is the threshold/shortcut design the goal explicitly warns against, even though the selected examples pass.",
+        "The implementation removes the stated numeric thresholds, but still equates objections using a hand-built lexical profile that can collapse distinct propositions. For example, same-rubric objections that say `flushBatchWriter` \u201cdrops metadata on retry\u201d and \u201closes checksum on retry\u201d share a code entity, the LOSS_OR_OMISSION category, and the retry condition; neither metadata nor checksum is represented as a distinguishing focus or attribute. The final hasSharedFocus/hasSharedMechanism test therefore returns true even though the objections concern different lost data. This is a concrete structural failure of the goal that genuinely different objections remain new.",
+      ];
+
+      // ── NEGATIVE POPULATION ──────────────────────────────────────────────
+      // Invented identifiers. No keyword list contains them, and the second family is
+      // the SAME cases renamed — a decision about structure cannot tell them apart.
+      const rename = (s: string): string =>
+        s
+          .replace(/zqfloober/g, "vrqualmic")
+          .replace(/pendingLumen/g, "pendingSprocket")
+          .replace(/wibbleTag/g, "glorpMarker")
+          .replace(/frobnitzSeal/g, "quimbleStamp");
+
+      // SAME: one complaint, two wordings, invented symbols.
+      const SAME_A = "`zqflooberWriter` skips the flush when `pendingLumen` is not yet full, so the final chunk of the stream never reaches the consumed seam.";
+      const SAME_B = "The tail of the stream is lost at the consumed seam: because `pendingLumen` has not reached its threshold, `zqflooberWriter` never emits the last chunk.";
+
+      // DIFFERENT: same symbol, same defect category (loss), same trigger (retry).
+      // They differ ONLY in which named thing is lost. This is the judge's own
+      // counterexample from run-eef8a03d review #4, with the nouns made unguessable.
+      const DIFF_A = "`zqflooberWriter` drops the `wibbleTag` on retry, so the re-sent batch arrives without its `wibbleTag`.";
+      const DIFF_B = "`zqflooberWriter` drops the `frobnitzSeal` on retry, so the re-sent batch arrives without its `frobnitzSeal`.";
+
+      // ── the two labelled pairs WP-643 was graded on, condensed ───────────
+      const DE555224_1 = "The integration passes `attemptedFindings` as an always-defined array, while the original cap is enforced only when `attempted === undefined`. Consequently the normal agent-loop path bypasses `MAX_COMPLETION_REVIEWS` even when the array is empty, explaining the reported third review hit and regressing the established bounded-review behavior.";
+      const DE555224_2 = "The diff makes cap enforcement conditional on attempted findings being absent or empty, while nonempty history bypasses the fixed review-attempt cap. It also treats an empty history at the cap as exhausted. These choices do not coherently preserve the existing bounded sealing contract and can prematurely stop stalled repairs or permit extra reviews.";
+      const EC5CB8_1 = "Preserved ignored-file bytes are converted from Buffer to UTF-8 text and restored with writeFile(string), so non-UTF-8 files are not byte-preserved. For an ignored file excluded by the preservation budget and then deleted, the committed planner test explicitly expects no restore entry; applyCleanupPlan therefore neither restores it nor reports it.";
+      const EC5CB8_2 = "Aggregate-budget selection is performed inside 64 concurrent stat workers using shared totalPreservedBytes. Completion order can differ between the before and after snapshots, so an untouched boundary file may receive a content hash in one snapshot and a stat hash in the other. The planner then treats it as modified and may rewrite it or emit a false corruption warning.";
+
+      describe("the repeat decision holds up on wording it was not tuned for (WP-644)", () => {
+        test("recall: at least 5 of the 6 real restatements compare as the same objection", () => {
+          const answers: string[] = [];
+          let same = 0;
+          for (let i = 0; i < RESTATEMENTS.length; i += 1) {
+            for (let j = i + 1; j < RESTATEMENTS.length; j += 1) {
+              const verdict = areMateriallySameObjections(row(RESTATEMENTS[i]!), row(RESTATEMENTS[j]!));
+              answers.push(`#${i + 1}~#${j + 1}=${verdict}`);
+              if (verdict) same += 1;
+            }
+          }
+          expect(
+            same,
+            "run-eef8a03d's four completion reviews carry ONE complaint in four wordings. Reading five of these six pairs as new findings is the F-416 defect: recognition that depends on which wording arrived first is not recognition. Answers: " +
+              answers.join(" "),
+          ).toBeGreaterThanOrEqual(5);
+        });
+
+        test("soundness: two complaints faulting DIFFERENT named things are different objections", () => {
+          const verdict = areMateriallySameObjections(row(DIFF_A), row(DIFF_B));
+          expect(
+            verdict,
+            "same symbol, same loss, same retry trigger — and different things lost. Merging them strands a run that could have healed itself (F-417). This is the judge's own counterexample from the run that built this comparator.",
+          ).toBe(false);
+          expect(
+            areMateriallySameObjections(row(SAME_A), row(SAME_B)),
+            "one complaint in two wordings on invented symbols must still be a repeat — soundness may not be bought by calling everything new.",
+          ).toBe(true);
+        });
+
+        test("the answer does not depend on which words are in a list", () => {
+          const cases: [string, string][] = [
+            [SAME_A, SAME_B],
+            [DIFF_A, DIFF_B],
+            [SAME_A, DIFF_A],
+            [SAME_B, DIFF_B],
+          ];
+          for (const [a, b] of cases) {
+            const before = areMateriallySameObjections(row(a), row(b));
+            const after = areMateriallySameObjections(row(rename(a)), row(rename(b)));
+            expect(
+              after,
+              "renaming every invented identifier consistently changes no meaning, so it may change no answer. A decision that flips here is keyed on vocabulary, which is the trap this WP exists to reject. Pair: " +
+                a.slice(0, 60),
+            ).toBe(before);
+          }
+        });
+
+        test("the two labelled pairs WP-643 was graded on keep their answers", () => {
+          expect(
+            areMateriallySameObjections(row(DE555224_1), row(DE555224_2)),
+            "run-de555224 reviews #1 and #2 are one complaint restated — WP-643's positive.",
+          ).toBe(true);
+          expect(
+            areMateriallySameObjections(row(EC5CB8_1), row(EC5CB8_2)),
+            "run-ec5c4bb8 reviews #1 and #2 are two different complaints on one rubric id — WP-643's negative.",
+          ).toBe(false);
+        });
+
+        test("soundness on identity, and a different rubric id is a different objection", () => {
+          expect(areMateriallySameObjections(row(DIFF_A), row(DIFF_A))).toBe(true);
+          expect(
+            areMateriallySameObjections(row(SAME_A), { ...row(SAME_A), justification: "  " + SAME_A + "\n" }),
+            "whitespace is not meaning",
+          ).toBe(true);
+          expect(
+            areMateriallySameObjections(row(DIFF_A), { id: "no_architecture_violations", pass: false, justification: DIFF_A }),
+          ).toBe(false);
+          expect(hasRepeatedObjection([row(RESTATEMENTS[0]!)], []), "nothing attempted yet is never a repeat").toBe(false);
+        });
+
+        test("pure: the same inputs give the same answer every time", () => {
+          const first = RESTATEMENTS.map((r) => areMateriallySameObjections(row(r), row(DIFF_A)));
+          for (let i = 0; i < 5; i += 1) {
+            expect(RESTATEMENTS.map((r) => areMateriallySameObjections(row(r), row(DIFF_A)))).toEqual(first);
+            expect(areMateriallySameObjections(row(DIFF_A), row(DIFF_B))).toBe(false);
+            expect(areMateriallySameObjections(row(SAME_A), row(SAME_B))).toBe(true);
+          }
+        });
+      });
+      GENEOF
+      pnpm exec vitest run "$TARGET"
+      ST=$?
+      rm -f "$TARGET"
+      if [ "$ST" -ne 0 ]; then
+        echo "AC-1 FAIL: the decision does not hold up on wording it was not tuned for - too few real restatements recognised (F-416), two complaints faulting different named things merged (F-417), or an answer that moved when identifiers were renamed (the lexicon trap). vitest exited $ST"
+        exit 1
+      fi
+      echo "AC-1 OK: 5+/6 real restatements recognised, different named things stay different, and renaming identifiers changes no answer"
+  - id: AC-2
+    description: >
+      THIS CHECK ASSERTS AT THE CONSUMED SEAM — it drives the REAL agent loop (real Temporal dev
+      server, real workflow bundle, real judge-pass sequencing, scripted executor, fake judge wire)
+      and reads the run's own terminal entry. Scenario A replays run-eef8a03d's four REAL completion
+      reviews PERMUTED so that review #4 — the wording that today matches none of the other three —
+      arrives first, which is exactly the order the accumulating history cannot rescue. It requires
+      the run to seal FAILED (resumable) within the bound the natural order stops in, with steps left
+      over, so neither a constant nor the arrival order can be what stopped it. Scenario B answers two
+      genuinely DIFFERENT complaints on the SAME rubric id at the same max_steps and requires SUCCESS,
+      so recall cannot be bought with soundness.
+    check: |
+      cd packages/sdk-ts || exit 1
+      TARGET=test/runner/ac2-defensible-repeat-live.generated.test.ts
+      rm -f "$TARGET"
+      cat > "$TARGET" <<'GENEOF'
+      import { randomUUID } from "node:crypto";
+      import { mkdtemp, rm } from "node:fs/promises";
+      import { tmpdir } from "node:os";
+      import { join } from "node:path";
+
+      import { afterEach, describe, expect, inject, test } from "vitest";
+
+      import {
+        createRunnerWorker,
+        createTemporalRunner,
+        Journal,
+        journalPath,
+        RUBRIC_CUMULATIVE_DESIGN_COHERENT,
+        RUBRIC_DESIGN_SERVES_OVERALL_GOAL,
+        type JudgeForm,
+      } from "../../src/index.js";
+      import {
+        completionReviewForm,
+        initSourceRepo,
+        judgeForm,
+        makeJudgedSpec,
+        scriptedRegistry,
+        startFakeJudgeWire,
+        TERMINAL_STATUSES,
+        waitFor,
+      } from "./helpers.js";
+
+      const address = inject("temporalAddress");
+      const bundlePath = inject("workflowBundlePath");
+
+      const cleanups: (() => Promise<unknown> | unknown)[] = [];
+      afterEach(async () => {
+        while (cleanups.length > 0) await cleanups.pop()!();
+      });
+
+      function reviewFailing(id: string, justification: string): JudgeForm {
+        const base = completionReviewForm({ rubricFails: [id] });
+        return {
+          ...base,
+          rubricResults: base.rubricResults.map((row) =>
+            row.id === id ? { ...row, pass: false, justification } : row,
+          ),
+        };
+      }
+
+      interface Outcome {
+        status: string;
+        steps: number;
+        terminals: { status: string; reason?: string; resumable?: boolean }[];
+      }
+
+      async function driveRun(reviewForms: JudgeForm[]): Promise<Outcome> {
+        const wire = await startFakeJudgeWire(
+          [
+            judgeForm({ criteria: { "AC-1": false } }),
+            judgeForm({ criteria: { "AC-1": true } }),
+            judgeForm({ criteria: { "AC-1": true } }),
+            judgeForm({ criteria: { "AC-1": true } }),
+            judgeForm({ criteria: { "AC-1": true } }),
+            judgeForm({ criteria: { "AC-1": true } }),
+            judgeForm({ criteria: { "AC-1": true } }),
+          ],
+          { reviewForms },
+        );
+        cleanups.push(() => wire.close());
+
+        const tmp = await mkdtemp(join(tmpdir(), "ac2-defensible-"));
+        cleanups.push(() => rm(tmp, { recursive: true, force: true }));
+        const repoUrl = await initSourceRepo(join(tmp, "src"), {});
+        const dataDir = join(tmp, "data");
+        const taskQueue = `tq-${randomUUID()}`;
+        const worker = await createRunnerWorker({
+          adapters: scriptedRegistry,
+          address: address!,
+          taskQueue,
+          dataDir,
+          workflowBundlePath: bundlePath!,
+          routerOptions: { baseUrls: { "openai-compat": wire.url } },
+        });
+        const workerDone = worker.run();
+        const runner = createTemporalRunner({ address: address!, taskQueue, dataDir });
+        cleanups.push(async () => {
+          worker.shutdown();
+          await workerDone;
+          await runner.close();
+        });
+
+        const handle = await runner.start(
+          makeJudgedSpec({ repoUrl, cadence: 1, maxSteps: 6, budgetUsd: 20 }),
+        );
+        const report = await waitFor(
+          async () => {
+            const r = await handle.status();
+            return TERMINAL_STATUSES.includes(r.status) ? r : undefined;
+          },
+          { timeoutMs: 300_000, what: "run to reach a terminal status" },
+        );
+        const journal = new Journal(journalPath(dataDir, handle.runId));
+        try {
+          return {
+            status: report.status,
+            steps: journal.entries("step").length,
+            terminals: journal
+              .entries("terminal")
+              .map((e) => e.payload as Outcome["terminals"][number]),
+          };
+        } finally {
+          journal.close();
+        }
+      }
+      describe("the recognition survives the ORDER the restatements arrive in (WP-644)", () => {
+        test(
+          "A: one objection restated every pass, PERMUTED so the odd wording comes first, still stops with headroom — B: genuinely different objections on ONE rubric id reach SUCCESS",
+          async () => {
+            // A — run-eef8a03d's four real completion reviews, permuted to [#4, #1, #3, #2, #4].
+            // Review #4's wording is the one that today matches NONE of the other three, so
+            // leading with it defeats the accumulating history that rescued the real run.
+            // ONE complaint throughout: the comparator's lexical shortcuts collapse distinct
+            // objections. The loop must recognise that, in this order, and stop.
+            const a = await driveRun([
+              reviewFailing(RUBRIC_DESIGN_SERVES_OVERALL_GOAL, "The implementation removes the stated numeric thresholds, but still equates objections using a hand-built lexical profile that can collapse distinct propositions. For example, same-rubric objections that say `flushBatchWriter` \u201cdrops metadata on retry\u201d and \u201closes checksum on retry\u201d share a code entity, the LOSS_OR_OMISSION category, and the retry condition; neither metadata nor checksum is represented as a distinguishing focus or attribute. The final hasSharedFocus/hasSharedMechanism test therefore returns true even though the objections concern different lost data. This is a concrete structural failure of the goal that genuinely different objections remain new."),
+              // ^ real review #4
+              reviewFailing(RUBRIC_DESIGN_SERVES_OVERALL_GOAL, "The diff still determines sameness through broad shortcuts and fixed similarity thresholds. In particular, one shared nontrivial code entity immediately returns true, so distinct defects involving the same symbol\u2014such as `flushBatchWriter` dropping a tail versus duplicating chunks\u2014would be collapsed. The shared-bigram and 0.30/0.60 token-overlap cutoffs are also similarity thresholds. This directly conflicts with the goal of deciding what an objection is about while preserving genuinely different objections as new."),
+              // ^ real review #1
+              reviewFailing(RUBRIC_DESIGN_SERVES_OVERALL_GOAL, "The comparator remains a hand-built lexical-similarity heuristic rather than a sound representation of the objection proposition. It can return true from a shared target plus one shared condition and defect category, and its fallback explicitly uses fixed cutoffs of at least three shared mechanism tokens and 50% overlap. Distinct defects involving the same symbol, generic condition, and broad category can therefore be collapsed. This is the threshold/shortcut design the goal explicitly warns against, even though the selected examples pass."),
+              // ^ real review #3
+              reviewFailing(RUBRIC_DESIGN_SERVES_OVERALL_GOAL, "The comparator remains an ad hoc lexical-classification system rather than a sound representation of what an objection is about. For example, two objections sharing a code entity and one stemmed defect action return true regardless of whether the action describes different failures; likewise, one shared defect bigram is sufficient, and another branch uses a fixed minimum of two shared non-entity tokens. The added categories handle selected counterexamples such as loss versus duplication, but do not generally prevent distinct defects involving the same symbol and action from collapsing. This is a real unfulfilled requirement because genuinely different objections must remain new, not merely the supplied examples."),
+              // ^ real review #2
+              reviewFailing(RUBRIC_DESIGN_SERVES_OVERALL_GOAL, "The implementation removes the stated numeric thresholds, but still equates objections using a hand-built lexical profile that can collapse distinct propositions. For example, same-rubric objections that say `flushBatchWriter` \u201cdrops metadata on retry\u201d and \u201closes checksum on retry\u201d share a code entity, the LOSS_OR_OMISSION category, and the retry condition; neither metadata nor checksum is represented as a distinguishing focus or attribute. The final hasSharedFocus/hasSharedMechanism test therefore returns true even though the objections concern different lost data. This is a concrete structural failure of the goal that genuinely different objections remain new."),
+              // ^ real review #4
+            ]);
+            const detailA =
+              " A: status=" + a.status + " steps=" + a.steps + " terminals=" + JSON.stringify(a.terminals);
+            expect(
+              a.status,
+              "a run whose review RESTATES one objection every pass is oscillating and must seal FAILED, whatever order the restatements arrive in." + detailA,
+            ).toBe("FAILED");
+            expect(
+              a.steps,
+              "the permuted oscillation must stop within the same bound the natural order stops in (3), with max_steps=6 headroom LEFT — so what stopped it is the recognition, not a constant and not the order." +
+                detailA,
+            ).toBeLessThanOrEqual(3);
+            const lastA = a.terminals.at(-1)!;
+            expect(lastA.resumable, "the oscillating seal stays operator-resumable." + detailA).toBe(true);
+
+            // B — two genuinely different complaints from run-ec5c4bb8, both on the SAME
+            // rubric id (a UTF-8 round-trip corruption, then an unstable concurrent budget
+            // selection), then clean. An instrument that buys recall with soundness strands
+            // this run.
+            const b = await driveRun([
+              reviewFailing(RUBRIC_DESIGN_SERVES_OVERALL_GOAL, "Preserved ignored-file bytes are converted from Buffer to UTF-8 text and restored with writeFile(string), so non-UTF-8 files are not byte-preserved. For an ignored file excluded by the preservation budget and then deleted, the committed planner test explicitly expects no restore entry; applyCleanupPlan therefore neither restores it nor reports it."),
+              reviewFailing(RUBRIC_DESIGN_SERVES_OVERALL_GOAL, "Aggregate-budget selection is performed inside 64 concurrent stat workers using shared totalPreservedBytes. Completion order can differ between the before and after snapshots, so an untouched boundary file may receive a content hash in one snapshot and a stat hash in the other. The planner then treats it as modified and may rewrite it or emit a false corruption warning."),
+              completionReviewForm(),
+              completionReviewForm(),
+              completionReviewForm(),
+            ]);
+            const detailB =
+              " B: status=" + b.status + " steps=" + b.steps + " terminals=" + JSON.stringify(b.terminals);
+            expect(
+              b.status,
+              "two DIFFERENT complaints on one rubric id must each buy an attempt and the run must reach SUCCESS — an instrument that calls everything a repeat strands it." + detailB,
+            ).toBe("SUCCESS");
+            expect(
+              b.steps,
+              "the second, different objection must buy another step." + detailB,
+            ).toBeGreaterThanOrEqual(3);
+          },
+          420_000,
+        );
+      });
+      GENEOF
+      pnpm exec vitest run "$TARGET"
+      ST=$?
+      rm -f "$TARGET"
+      if [ "$ST" -ne 0 ]; then
+        echo "AC-2 FAIL: either a PERMUTED restatement oscillation ran on past the bound (the recognition still depends on which wording arrived first, or a constant is doing the stopping), or a run answering two genuinely different complaints on one rubric id was stranded. vitest exited $ST"
+        exit 1
+      fi
+      echo "AC-2 OK: the recognition stops the permuted oscillation and still lets genuine progress run, on the same loop at the same max_steps"
+  - id: AC-3
+    description: >
+      THE TRAP RAIL AND THE DURABILITY FLOOR. Strict typecheck over src AND test (F-382), eslint over
+      the touched modules, then greps that the out-of-scope surfaces this WP must not disturb are
+      still present, then the committed anti-oscillation guards, then the DECLARED regression suite
+      green AND larger by at least four tests — a behaviour proved only by these grading checks is
+      not pinned at all (F-356).
+    check: |
+      cd packages/sdk-ts || exit 1
+      pnpm run typecheck || { echo "AC-3 FAIL: strict typecheck is red (this covers test/ too — F-382)"; exit 1; }
+      pnpm exec eslint src/workflow/completion-review.ts src/workflow/agent-loop.ts || { echo "AC-3 FAIL: eslint is red on the modules this WP touches"; exit 1; }
+
+      grep -qE 'export function areMateriallySameObjections' src/workflow/completion-review.ts || {
+        echo "AC-3 FAIL: trap — the comparison was deleted rather than corrected. This WP changes HOW two objections are compared, not whether they are."
+        exit 1
+      }
+      grep -qE 'export function hasRepeatedObjection' src/workflow/completion-review.ts || {
+        echo "AC-3 FAIL: trap — the predicate decideCompletionReview calls was removed."
+        exit 1
+      }
+      grep -qE 'export function decideCompletionReview' src/workflow/completion-review.ts || {
+        echo "AC-3 FAIL: trap — the pure decision was deleted rather than corrected."
+        exit 1
+      }
+      grep -qE 'export function mergeDesignFindings' src/workflow/completion-review.ts || {
+        echo "AC-3 FAIL: trap — mergeDesignFindings was removed; every objection raised at seal time must still reach the brief (F-180)."
+        exit 1
+      }
+      grep -qE 'export function buildCompletionReviewBrief' src/workflow/completion-review.ts || {
+        echo "AC-3 FAIL: trap — buildCompletionReviewBrief was removed; the objection the review raised must still reach the executor's brief."
+        exit 1
+      }
+      grep -qE 'export const MAX_GATE_REPAIR_ATTEMPTS' src/heal/gate-repair.ts || {
+        echo "AC-3 FAIL: trap — the gate-repair route lost its bound. No LLM-verdict gate may exit (WP-542/F-207), and this WP does not touch that path."
+        exit 1
+      }
+      grep -qE 'export function ignoredPreservePriority' src/judge/hermeticity.ts || {
+        echo "AC-3 FAIL: trap — dogfood-159's judge-check isolation was disturbed. This WP does not touch that path."
+        exit 1
+      }
+
+      pnpm exec vitest run test/runner/deterministic-rubric-live.test.ts test/runner/sealing-design-repair-live.test.ts || {
+        echo "AC-3 FAIL: trap — a committed anti-oscillation guard is RED. A review returning the SAME failing rubric ids on every pass must still seal FAILED (resumable) naming both ids, and the unrepaired sealing path must still stop at EXACTLY 2 review passes."
+        exit 1
+      }
+
+      OUT=$(pnpm --filter @chikory/sdk exec vitest run 2>&1)
+      ST=$?
+      echo "$OUT" | grep -nE '(^|[[:space:]])(FAIL|×|✕|AssertionError)' | head -n 20
+      echo "$OUT" | tail -6
+      if [ "$ST" -ne 0 ]; then
+        echo "AC-3 FAIL: the DECLARED regression suite is RED (vitest exited $ST). One test in this suite is known flaky (F-420, 1 red in 4 observations) — the failing test's NAME is printed above and the full output is kept by the review harness."
+        exit 1
+      fi
+      N=$(echo "$OUT" | grep -oE "Tests +[0-9]+ passed" | grep -oE "[0-9]+" | head -1)
+      echo "committed suite tests passing: ${N:-UNPARSEABLE} (floor 1786, measured baseline 1782)"
+      if [ -z "$N" ]; then
+        echo "AC-3 FAIL: could not read a test count out of the vitest summary"
+        exit 1
+      fi
+      if [ "$N" -lt 1786 ]; then
+        echo "AC-3 FAIL: durability floor not met — the committed suite did not grow by at least 4 tests. A behaviour proved only by the generated grading checks is not pinned at all (F-356)."
+        exit 1
+      fi
+      echo "AC-3 OK: strict typecheck and lint green, out-of-scope surfaces intact, anti-oscillation guards green, DECLARED suite green AND larger"
+
+budget_usd: 20
+max_steps: 6
+
+agent_classes:
+  executor: executor-default
+  judge: judge-default
+
+judge:
+  cadence: 1
+
+# F-322 (dogfood-135): without this, a converged out-of-rubric escalation parks overnight for a
+# human instead of auto-sealing.
+unattended:
+  escalation: seal_resumable_failed

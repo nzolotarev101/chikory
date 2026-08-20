@@ -382,6 +382,232 @@ describe("areMateriallySameObjections", () => {
       ),
     ).toBe(true);
   });
+
+  it("recognises real judge reworded objections as the same objection (AC-1 / WP-643)", () => {
+    const r1 = {
+      id: "design_serves_overall_goal",
+      justification:
+        "The integration passes `attemptedFindings` as an always-defined array, while the original cap is enforced only when `attempted === undefined`. Consequently the normal agent-loop path bypasses `MAX_COMPLETION_REVIEWS` even when the array is empty, explaining the reported third review hit and regressing the established bounded-review behavior.",
+    };
+    const r2 = {
+      id: "design_serves_overall_goal",
+      justification:
+        "The diff makes cap enforcement conditional on attempted findings being absent or empty, while nonempty history bypasses the fixed review-attempt cap. It also treats an empty history at the cap as exhausted. These choices do not coherently preserve the existing bounded sealing contract and can prematurely stop stalled repairs or permit extra reviews.",
+    };
+    expect(areMateriallySameObjections(r1, r2)).toBe(true);
+    expect(areMateriallySameObjections(r2, r1)).toBe(true);
+  });
+
+  it("recognises real judge distinct objections on the same rubric id as different (AC-1 / WP-643)", () => {
+    const d1 = {
+      id: "design_serves_overall_goal",
+      justification:
+        "The diff contains concrete goal-breaking defects. Preserved ignored-file bytes are converted from Buffer to UTF-8 text and restored with writeFile(string), so non-UTF-8 files are not byte-preserved. For an ignored file excluded by the preservation budget and then deleted, the committed planner test explicitly expects no restore entry; applyCleanupPlan therefore neither restores it nor reports it. Modified unpreserved files only produce console.warn output, with no mechanism shown for adding the warning to the batch CheckRun output required by the goal.",
+    };
+    const d2 = {
+      id: "design_serves_overall_goal",
+      justification:
+        "The design bounds ignored-file reads and propagates unrestored-path warnings, but aggregate-budget selection is performed inside 64 concurrent stat workers using shared totalPreservedBytes. Completion order can differ between the before and after snapshots, so an untouched boundary file may receive a content hash in one snapshot and a stat hash in the other. The planner then treats it as modified and may rewrite it or emit a false corruption warning, violating the explicit requirement that untouched ignored files not be rewritten.",
+    };
+    expect(areMateriallySameObjections(d1, d2)).toBe(false);
+    expect(areMateriallySameObjections(d2, d1)).toBe(false);
+  });
+
+  it("recognises reworded stream buffer complaints as the same objection (AC-2)", () => {
+    const a = {
+      id: "design_serves_overall_goal",
+      justification:
+        "`flushBatchWriter` drops the final chunk because the flush is skipped when `pendingBuffer` is not full, so the consumed seam never receives the tail of the stream.",
+    };
+    const b = {
+      id: "design_serves_overall_goal",
+      justification:
+        "The tail of the stream is still lost at the consumed seam: `flushBatchWriter` only writes when `pendingBuffer` is full, so a final partial chunk is never emitted.",
+    };
+    expect(areMateriallySameObjections(a, b)).toBe(true);
+  });
+
+  it("recognises different defects concerning the same symbol as DIFFERENT (judge finding)", () => {
+    const dropTail = {
+      id: "design_serves_overall_goal",
+      justification:
+        "`flushBatchWriter` drops the final chunk because the flush is skipped when `pendingBuffer` is not full, so the consumed seam never receives the tail of the stream.",
+    };
+    const duplicateChunks = {
+      id: "design_serves_overall_goal",
+      justification:
+        "`flushBatchWriter` duplicates completed chunks when a retry occurs after a partial network write failure.",
+    };
+    expect(areMateriallySameObjections(dropTail, duplicateChunks)).toBe(false);
+    expect(areMateriallySameObjections(duplicateChunks, dropTail)).toBe(false);
+  });
+
+  it("recognises un-named domain objection pairs (connection pool leak vs sql injection)", () => {
+    const leakA = {
+      id: "design_serves_overall_goal",
+      justification:
+        "The database connection pool in `db/pool.ts` leaks connections when socket timeout occurs during query execution.",
+    };
+    const leakB = {
+      id: "design_serves_overall_goal",
+      justification:
+        "Connections in `db/pool.ts` are never released back to the database connection pool when a socket timeout happens, causing resource exhaustion.",
+    };
+    const sqlInjection = {
+      id: "design_serves_overall_goal",
+      justification:
+        "Raw SQL queries in `db/query.ts` do not parameterize user input, introducing SQL injection vulnerabilities.",
+    };
+    const deadlock = {
+      id: "design_serves_overall_goal",
+      justification:
+        "`db/pool.ts` deadlocks when acquiring a connection while another worker is resetting the SSL context.",
+    };
+
+    expect(areMateriallySameObjections(leakA, leakB)).toBe(true);
+    expect(areMateriallySameObjections(leakA, sqlInjection)).toBe(false);
+    expect(areMateriallySameObjections(leakA, deadlock)).toBe(false);
+  });
+
+  it("recognises un-named domain objection pairs (EventSource leak vs WebSocket heartbeat)", () => {
+    const eventSourceA = {
+      id: "design_serves_overall_goal",
+      justification:
+        "Memory leak in EventSource subscription: listeners are not unsubscribed on component unmount.",
+    };
+    const eventSourceB = {
+      id: "design_serves_overall_goal",
+      justification:
+        "EventSource connection listeners are never removed when unmounting, leaking memory.",
+    };
+    const websocketHeartbeat = {
+      id: "design_serves_overall_goal",
+      justification:
+        "Race condition in WebSocket heartbeat timer causes premature disconnection.",
+    };
+    const reconnectFailure = {
+      id: "design_serves_overall_goal",
+      justification:
+        "`EventSource` fails to reconnect with exponential backoff when HTTP 503 is returned.",
+    };
+
+    expect(areMateriallySameObjections(eventSourceA, eventSourceB)).toBe(true);
+    expect(areMateriallySameObjections(eventSourceA, websocketHeartbeat)).toBe(false);
+    expect(areMateriallySameObjections(eventSourceA, reconnectFailure)).toBe(false);
+  });
+
+  it("recognises distinct defects on the same symbol with the same defect verb as DIFFERENT", () => {
+    // Both defects occur in `db/pool.ts` and both use the verb "leak", but their triggers
+    // and conditions are entirely different (socket timeout vs SSL reload temporary cert).
+    const timeoutLeak = {
+      id: "design_serves_overall_goal",
+      justification:
+        "The database connection pool in `db/pool.ts` leaks connections when socket timeout occurs during query execution.",
+    };
+    const certFileLeak = {
+      id: "design_serves_overall_goal",
+      justification:
+        "`db/pool.ts` leaks file descriptors when temporary certificate files are generated during SSL reload.",
+    };
+
+    expect(areMateriallySameObjections(timeoutLeak, certFileLeak)).toBe(false);
+    expect(areMateriallySameObjections(certFileLeak, timeoutLeak)).toBe(false);
+  });
+
+  it("recognises reworded vs distinct defects in validation functions", () => {
+    const emailValidationA = {
+      id: "design_serves_overall_goal",
+      justification:
+        "`validateUser` fails to validate email format, allowing malformed email addresses.",
+    };
+    const emailValidationB = {
+      id: "design_serves_overall_goal",
+      justification:
+        "`validateUser` does not check email formatting, permitting invalid email strings.",
+    };
+    const passwordLength = {
+      id: "design_serves_overall_goal",
+      justification:
+        "`validateUser` does not check password length, allowing short passwords.",
+    };
+
+    expect(areMateriallySameObjections(emailValidationA, emailValidationB)).toBe(true);
+    expect(areMateriallySameObjections(emailValidationA, passwordLength)).toBe(false);
+  });
+
+  it("recognises reworded vs distinct defects in token authentication", () => {
+    const tokenExpiryA = {
+      id: "design_serves_overall_goal",
+      justification:
+        "In `auth/jwt.ts`, token expiration timestamp is checked against local machine clock instead of server time, allowing expired tokens.",
+    };
+    const tokenExpiryB = {
+      id: "design_serves_overall_goal",
+      justification:
+        "Expired tokens are accepted by `auth/jwt.ts` because token expiry check uses local machine clock instead of server timestamp.",
+    };
+    const hmacTimingAttack = {
+      id: "design_serves_overall_goal",
+      justification:
+        "In `auth/jwt.ts`, HMAC signature verification uses timing-unsafe string comparison, exposing timing attack vulnerability.",
+    };
+
+    expect(areMateriallySameObjections(tokenExpiryA, tokenExpiryB)).toBe(true);
+    expect(areMateriallySameObjections(tokenExpiryA, hmacTimingAttack)).toBe(false);
+  });
+
+  it("recognises reworded vs distinct defects in service error handling", () => {
+    const nullCrashA = {
+      id: "design_serves_overall_goal",
+      justification:
+        "`userService.ts` throws unhandled TypeError when user profile picture is null.",
+    };
+    const nullCrashB = {
+      id: "design_serves_overall_goal",
+      justification:
+        "`userService.ts` crashes with unhandled null reference when profile avatar image is missing.",
+    };
+    const unindexedSql = {
+      id: "design_serves_overall_goal",
+      justification:
+        "`userService.ts` performs un-indexed SQL scan when querying users by phone number.",
+    };
+
+    expect(areMateriallySameObjections(nullCrashA, nullCrashB)).toBe(true);
+    expect(areMateriallySameObjections(nullCrashA, unindexedSql)).toBe(false);
+  });
+
+  it("recognises distinct defects sharing generic conditions (format, final, retry) as DIFFERENT", () => {
+    // Both defects occur in `validateUser` and share the condition "format", but their
+    // focus subjects are different (email vs phone number).
+    const emailFormat = {
+      id: "design_serves_overall_goal",
+      justification:
+        "`validateUser` fails to validate email format, allowing malformed email addresses.",
+    };
+    const phoneFormat = {
+      id: "design_serves_overall_goal",
+      justification:
+        "`validateUser` fails to validate phone number format, allowing malformed phone numbers.",
+    };
+    expect(areMateriallySameObjections(emailFormat, phoneFormat)).toBe(false);
+    expect(areMateriallySameObjections(phoneFormat, emailFormat)).toBe(false);
+
+    // Both defects occur in `flushBatchWriter` and share the condition "final", but their
+    // propositions are different (dropping unfull tail buffer vs failing on final retry).
+    const unfullBufferFinal = {
+      id: "design_serves_overall_goal",
+      justification:
+        "`flushBatchWriter` drops the final chunk because the flush is skipped when `pendingBuffer` is not full.",
+    };
+    const finalRetryFailure = {
+      id: "design_serves_overall_goal",
+      justification:
+        "`flushBatchWriter` fails silently on final retry when network write fails repeatedly.",
+    };
+    expect(areMateriallySameObjections(unfullBufferFinal, finalRetryFailure)).toBe(false);
+    expect(areMateriallySameObjections(finalRetryFailure, unfullBufferFinal)).toBe(false);
+  });
 });
 
 describe("hasRepeatedObjection", () => {
@@ -583,15 +809,31 @@ describe("decideCompletionReview — the bound survives a repair history (F-412/
     ...extra,
   });
 
-  it("F-412: a REWORDED repeat cannot buy more than MAX_PROGRESS_GRANTS extra passes", () => {
-    // The comparator reads these two as different, so every pass looks like
-    // progress. The ceiling is what stops the run — not the comparator.
+  it("F-412 / WP-643: a REWORDED repeat is recognized as a repeat and stops immediately", () => {
+    // The comparator recognizes REWORDED_2 as the same objection as REWORDED_1,
+    // so the run stops as a repeated objection rather than burning grants.
+    const decision = decideCompletionReview(
+      withHeadroom({
+        reviewAttemptsUsed: 1,
+        currentFindings: [REWORDED_2],
+        attemptedFindings: [REWORDED_1],
+        progressGrantsUsed: 1,
+      }),
+    );
+    expect(decision.action).toBe("skip");
+    expect(decision.action === "skip" && decision.reason).toBe(
+      "completion review: repeated objection on a converged step",
+    );
+  });
+
+  it("F-412: genuinely new findings cannot buy more than MAX_PROGRESS_GRANTS extra passes", () => {
+    // When findings are genuinely distinct, MAX_PROGRESS_GRANTS still caps total passes.
     const atCeiling = decideCompletionReview(
       withHeadroom({
         reviewAttemptsUsed: MAX_COMPLETION_REVIEWS + MAX_PROGRESS_GRANTS,
-        currentFindings: [REWORDED_2],
-        attemptedFindings: [REWORDED_1],
-        progressGrantsUsed: 99, // a judge that reworded on every single pass
+        currentFindings: [fail("cumulative_design_coherent", "genuinely new objection B")],
+        attemptedFindings: [fail("design_serves_overall_goal", "distinct objection A")],
+        progressGrantsUsed: 99, // a judge that finds new problems on every pass
       }),
     );
     expect(atCeiling.action).toBe("skip");
@@ -653,5 +895,93 @@ describe("decideCompletionReview — the bound survives a repair history (F-412/
     expect(decision.action === "skip" && decision.reason).toBe(
       "completion review: repeated objection on a converged step",
     );
+  });
+});
+
+// ── F-416 (dogfood-161 review): unseen real prose, driven through the seam ────
+// `run-eef8a03d-c6b6-4165-9738-d002cef3d56d` — the WP-643 run itself — raised ONE
+// complaint in its four completion reviews: the comparator uses broad lexical
+// shortcuts that can collapse distinct objections. It restated that complaint
+// against different code every pass. Neither the acceptance checks nor the
+// committed tests the delivery authored ever saw this prose, which is exactly why
+// it is pinned here (F-403: a test copied from a grading check inherits its blind
+// spots).
+//
+// Measured at the review: pairwise, the comparator answers "same" on only 2 of the
+// 6 pairs, and review #4's wording matches NONE of its three predecessors. What
+// makes the loop stop anyway is the ACCUMULATING history at `agent-loop.ts:263`
+// (pushed at `:1406`) — this test drives that seam, because the pairwise answer is
+// not the behaviour the run feels.
+const EEF8A03D_REVIEWS: RubricResult[] = [
+  { id: "design_serves_overall_goal", pass: false, justification: "The diff still determines sameness through broad shortcuts and fixed similarity thresholds. In particular, one shared nontrivial code entity immediately returns true, so distinct defects involving the same symbol\u2014such as `flushBatchWriter` dropping a tail versus duplicating chunks\u2014would be collapsed. The shared-bigram and 0.30/0.60 token-overlap cutoffs are also similarity thresholds. This directly conflicts with the goal of deciding what an objection is about while preserving genuinely different objections as new." },
+  { id: "design_serves_overall_goal", pass: false, justification: "The comparator remains an ad hoc lexical-classification system rather than a sound representation of what an objection is about. For example, two objections sharing a code entity and one stemmed defect action return true regardless of whether the action describes different failures; likewise, one shared defect bigram is sufficient, and another branch uses a fixed minimum of two shared non-entity tokens. The added categories handle selected counterexamples such as loss versus duplication, but do not generally prevent distinct defects involving the same symbol and action from collapsing. This is a real unfulfilled requirement because genuinely different objections must remain new, not merely the supplied examples." },
+  { id: "design_serves_overall_goal", pass: false, justification: "The comparator remains a hand-built lexical-similarity heuristic rather than a sound representation of the objection proposition. It can return true from a shared target plus one shared condition and defect category, and its fallback explicitly uses fixed cutoffs of at least three shared mechanism tokens and 50% overlap. Distinct defects involving the same symbol, generic condition, and broad category can therefore be collapsed. This is the threshold/shortcut design the goal explicitly warns against, even though the selected examples pass." },
+  { id: "design_serves_overall_goal", pass: false, justification: "The implementation removes the stated numeric thresholds, but still equates objections using a hand-built lexical profile that can collapse distinct propositions. For example, same-rubric objections that say `flushBatchWriter` \u201cdrops metadata on retry\u201d and \u201closes checksum on retry\u201d share a code entity, the LOSS_OR_OMISSION category, and the retry condition; neither metadata nor checksum is represented as a distinguishing focus or attribute. The final hasSharedFocus/hasSharedMechanism test therefore returns true even though the objections concern different lost data. This is a concrete structural failure of the goal that genuinely different objections remain new." },
+];
+
+describe("the reworded-repeat instrument on prose it was not fitted to (F-416)", () => {
+  /** Mirrors `agent-loop.ts:263`/`:1406` — findings accumulate, repeats are not pushed. */
+  const passAtWhichTheLoopStops = (
+    reviews: ReadonlyArray<RubricResult>,
+    same: (a: RubricResult, b: RubricResult) => boolean,
+  ): number | null => {
+    const attempted: RubricResult[] = [];
+    for (let p = 0; p < reviews.length; p += 1) {
+      const current = reviews[p]!;
+      if (attempted.some((a) => same(current, a))) return p + 1;
+      attempted.push(current);
+    }
+    return null;
+  };
+
+  const byteEquality = (a: RubricResult, b: RubricResult): boolean =>
+    a.id === b.id && a.justification.trim() === b.justification.trim();
+
+  it("stops an oscillation the shipped string equality ran to the end of", () => {
+    expect(
+      passAtWhichTheLoopStops(EEF8A03D_REVIEWS, byteEquality),
+      "the comparator WP-643 replaced never recognised any of these four restatements, so every one bought another repair attempt — the F-412 defect, measured on a real run.",
+    ).toBeNull();
+    expect(
+      passAtWhichTheLoopStops(EEF8A03D_REVIEWS, areMateriallySameObjections),
+      "driven through the accumulating history, the instrument must stop this real oscillation at review #2. A regression here means a reworded repeat buys repair attempts again.",
+    ).toBe(2);
+  });
+
+  it("recognises at least the adjacent restatements pairwise", () => {
+    // Deliberately NOT 6/6: the review measured 2/6 and queued the gap as WP-644.
+    // This floor exists so the number can only move up. Raise it when it does.
+    let same = 0;
+    for (let i = 0; i < EEF8A03D_REVIEWS.length; i += 1) {
+      for (let j = i + 1; j < EEF8A03D_REVIEWS.length; j += 1) {
+        if (areMateriallySameObjections(EEF8A03D_REVIEWS[i]!, EEF8A03D_REVIEWS[j]!)) same += 1;
+      }
+    }
+    expect(
+      same,
+      "of the 6 pairs of one complaint restated four ways, the instrument recognised 2 at the dogfood-161 review; fewer than that is a regression.",
+    ).toBeGreaterThanOrEqual(2);
+  });
+
+  it("keeps two genuinely different complaints on one rubric id apart", () => {
+    // Both from `run-ec5c4bb8-de16-4c28-beba-a8cd09795fa1`, neither named by any
+    // acceptance check in this shape: a UTF-8 round-trip corruption and an
+    // unstable concurrent budget selection.
+    const corruption: RubricResult = {
+      id: "design_serves_overall_goal",
+      pass: false,
+      justification:
+        "Preserved ignored-file bytes are converted from Buffer to UTF-8 text and restored with writeFile(string), so non-UTF-8 files are not byte-preserved.",
+    };
+    const concurrency: RubricResult = {
+      id: "design_serves_overall_goal",
+      pass: false,
+      justification:
+        "Aggregate-budget selection runs inside 64 concurrent stat workers sharing totalPreservedBytes, so completion order can differ between the before and after snapshots and an untouched boundary file is treated as modified.",
+    };
+    expect(
+      areMateriallySameObjections(corruption, concurrency),
+      "calling two different complaints a repeat strands a run that could have healed itself — the error a similarity threshold makes.",
+    ).toBe(false);
   });
 });
