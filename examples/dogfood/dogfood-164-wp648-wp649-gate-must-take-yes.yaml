@@ -245,6 +245,19 @@ acceptance_criteria:
           .filter((f) => f.endsWith(".ts"));
       }
 
+      /**
+       * The recall floor only binds where the scan HAS a layer to reason about. Files
+       * outside the declared layer map (src/agents/, src/journal/, src/heal/, src/dataset/,
+       * src/index.ts, ...) have never been in the scan's remit and widening that remit is
+       * not this WP's job. cli is the top layer, so nothing above it can be forbidden.
+       */
+      const MAPPED_DIR = /\/src\/(?:util|providers|artifacts|executors|judge|planner|workflow|runner|chain)\//;
+      const MAPPED_FILE = /\/src\/(?:types|schemas|canonical-json|pricing|otel|router|runner)\.ts$/;
+      function inRecallCorpus(path: string): boolean {
+        if (path.includes("/src/cli/")) return false;
+        return MAPPED_DIR.test(path) || MAPPED_FILE.test(path);
+      }
+
       describe("the architecture scan reports what the diff INTRODUCED (WP-649)", () => {
         test("the byte-exact hunk that cost dogfood-163 its run reports nothing", () => {
           const diff = [
@@ -311,8 +324,9 @@ acceptance_criteria:
               if (got.length > 0) falsePositives.push(`${path}:${i + 1} -> ${got.join(",")} :: ${lines[i]!.trim()}`);
             }
 
-            // RECALL — every non-cli file gains one genuinely new import of the top layer.
-            if (path.includes("/src/cli/")) continue;
+            // RECALL — every file the layer map covers gains one genuinely new import of
+            // the top layer, and every single one of them must be reported.
+            if (!inRecallCorpus(path)) continue;
             recallCases += 1;
             if (scanDiffForLayeringViolations(additionDiff(path, lines)).length === 0) missed.push(path);
           }
@@ -345,24 +359,27 @@ acceptance_criteria:
   - id: AC-2
     description: >
       THIS CHECK ASSERTS AT THE CONSUMED SEAM — the run's terminal state. It drives the REAL agent
-      loop (real Temporal dev server, real workflow bundle, real judge-pass sequencing, real
+      loop (real Temporal dev server, real workflow bundle, real judge-pass sequencing, the real
       deterministic scan over a real git diff, scripted executor, fake judge wire). Scenario A
-      replays dogfood-163: a step introduces a forbidden edge, the next step removes it and restores
-      the file to its committed text, and the run must NOT be sealed FAILED on
-      `no_architecture_violations`. Scenario B introduces a forbidden edge and never removes it, and
-      must STILL seal FAILED on that row — so A cannot be bought by softening the gate. Scenario C
-      fails an LLM-judged rubric row at the sealing pass and returns an ALL-GREEN completion review,
-      and the objection must still reach the seal — so A cannot be bought by "the later verdict
-      always wins", which is the hole `mergeDesignFindings` was written to close.
+      replays dogfood-163 exactly: one file gains a genuinely new forbidden import while another has
+      its pre-existing forbidden import widened, the next step restores BOTH to their committed
+      text, and the run must NOT be sealed on no_architecture_violations. Scenario B introduces a
+      forbidden import and never removes it, and must STILL seal FAILED on that row — so A cannot be
+      bought by softening the gate. Scenario C fails an LLM-judged rubric row at the sealing pass
+      (design_serves_overall_goal — non-destructive, so it reaches a seal instead of rolling the step back)
+      and returns an ALL-GREEN completion review, and the objection must still be named in the seal
+      — so A cannot be bought by "the later verdict always wins", which is the hole
+      mergeDesignFindings was written to close.
     check: |
       cd packages/sdk-ts || exit 1
       TARGET=test/runner/ac2-gate-takes-yes-live.generated.test.ts
       rm -f "$TARGET"
       cat > "$TARGET" <<'GENEOF'
+      import { execFileSync } from "node:child_process";
       import { randomUUID } from "node:crypto";
-      import { mkdtemp, rm, writeFile } from "node:fs/promises";
+      import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
       import { tmpdir } from "node:os";
-      import { join } from "node:path";
+      import { dirname, join } from "node:path";
 
       import { afterEach, describe, expect, inject, test } from "vitest";
 
@@ -387,24 +404,42 @@ acceptance_criteria:
       });
 
       const LOOP = "src/workflow/loop.ts";
-      // The committed baseline ALREADY carries a workflow->runner edge, exactly as
-      // packages/sdk-ts/src/workflow/agent-loop.ts:47 does on main. That is the whole point:
-      // the restored line is one the repo already had.
-      const BASE_LOOP = [
-        'import { alpha } from "../runner/alpha.js";',
-        "export const loop = () => alpha();",
-        "",
-      ].join("\n");
-      // A GENUINELY new edge: a runner module the file did not import before.
-      const DIRTY_LOOP = [
-        'import { alpha } from "../runner/alpha.js";',
-        'import { beta } from "../runner/beta.js";',
-        "export const loop = () => alpha() + beta();",
-        "",
-      ].join("\n");
+      const OTHER = "src/workflow/other.ts";
+
+      /**
+       * The committed baseline. `loop.ts` ALREADY carries a workflow->runner edge, exactly as
+       * packages/sdk-ts/src/workflow/agent-loop.ts:47 does on main — that is the whole point:
+       * the line the restoring step re-emits is one the repo already had. `other.ts` has none.
+       */
+      const SEED: Record<string, string> = {
+        [LOOP]: 'import { alpha } from "../runner/alpha.js";\nexport const loop = () => alpha();\n',
+        [OTHER]: "export const other = () => 0;\n",
+        "src/runner/alpha.ts": "export const alpha = () => 1;\nexport const gamma = () => 3;\n",
+        "src/runner/beta.ts": "export const beta = () => 2;\n",
+      };
+
+      /** Step 1: `other.ts` gains a GENUINELY new forbidden import; `loop.ts` widens its existing one. */
+      const DIRTY: Record<string, string> = {
+        [LOOP]: 'import { alpha, gamma } from "../runner/alpha.js";\nexport const loop = () => alpha() + gamma();\n',
+        [OTHER]: 'import { beta } from "../runner/beta.js";\nexport const other = () => beta();\n',
+      };
+
+      /** Step 2: both files go back to their committed text, byte for byte. */
+      const RESTORE: Record<string, string> = { [LOOP]: SEED[LOOP]!, [OTHER]: SEED[OTHER]! };
+
+      /** A change that introduces nothing — used where the scan must stay silent. */
+      const BENIGN: Record<string, string> = { [OTHER]: "// benign\nexport const other = () => 0;\n" };
+
+      async function writeAll(root: string, files: Record<string, string>): Promise<void> {
+        for (const [rel, content] of Object.entries(files)) {
+          const path = join(root, rel);
+          await mkdir(dirname(path), { recursive: true });
+          await writeFile(path, content);
+        }
+      }
 
       /** Writes real bytes into the workspace so the deterministic scan sees a real git diff. */
-      function scriptedRegistry(contentByAttempt: string[]): AdapterRegistry {
+      function scriptedRegistry(byAttempt: Record<string, string>[]): AdapterRegistry {
         let attempt = 0;
         const adapter = (ctx: { store: ArtifactStore }): ExecutorAdapter =>
           ({
@@ -412,8 +447,7 @@ acceptance_criteria:
             modelFamily: "anthropic",
             async runStep(input): Promise<StepRecord> {
               attempt += 1;
-              const content = contentByAttempt[Math.min(attempt - 1, contentByAttempt.length - 1)]!;
-              await writeFile(join(input.workspaceDir, LOOP), content);
+              await writeAll(input.workspaceDir, byAttempt[Math.min(attempt - 1, byAttempt.length - 1)]!);
               return {
                 diffRef: await ctx.store.put(`diff ${attempt}`, { kind: "diff", summary: `attempt ${attempt}` }),
                 transcriptRef: await ctx.store.put(`transcript ${attempt}`, {
@@ -421,7 +455,7 @@ acceptance_criteria:
                   summary: `attempt ${attempt}`,
                 }),
                 status: "SUCCESS",
-                summary: `attempt ${attempt}: wrote ${LOOP}`,
+                summary: `attempt ${attempt}: wrote the workspace`,
                 toolCalls: 1,
                 tokens: { input: 100, output: 50 },
                 costUsd: 0,
@@ -440,25 +474,27 @@ acceptance_criteria:
       }
 
       async function driveRun(
-        contentByAttempt: string[],
+        byAttempt: Record<string, string>[],
         forms: JudgeForm[],
-        reviewForms: JudgeForm[],
         maxSteps: number,
       ): Promise<Outcome> {
-        const wire = await startFakeJudgeWire(forms, { reviewForms });
+        const wire = await startFakeJudgeWire(forms, { reviewForms: [completionReviewForm()] });
         cleanups.push(() => wire.close());
 
         const tmp = await mkdtemp(join(tmpdir(), "ac2-gate-yes-"));
         cleanups.push(() => rm(tmp, { recursive: true, force: true }));
-        const repoUrl = await initSourceRepo(join(tmp, "src"), {
-          [LOOP]: BASE_LOOP,
-          "src/runner/alpha.ts": "export const alpha = () => 1;\n",
-          "src/runner/beta.ts": "export const beta = () => 2;\n",
-        });
+        const repoDir = join(tmp, "src");
+        const repoUrl = await initSourceRepo(repoDir, {});
+        // `initSourceRepo`'s second argument is the scripted-adapter CONFIG, not a file map —
+        // the baseline has to be committed by hand, or the "restored" premise does not exist.
+        await writeAll(repoDir, SEED);
+        execFileSync("git", ["-C", repoDir, "add", "-A"]);
+        execFileSync("git", ["-C", repoDir, "commit", "-m", "seed the pre-existing layering edge"]);
+
         const dataDir = join(tmp, "data");
         const taskQueue = `tq-${randomUUID()}`;
         const worker = await createRunnerWorker({
-          adapters: scriptedRegistry(contentByAttempt),
+          adapters: scriptedRegistry(byAttempt),
           address: address!,
           taskQueue,
           dataDir,
@@ -480,7 +516,7 @@ acceptance_criteria:
             const r = await handle.status();
             return TERMINAL_STATUSES.includes(r.status) ? r : undefined;
           },
-          { timeoutMs: 240_000, what: "run to reach a terminal status" },
+          { timeoutMs: 90_000, what: "run to reach a terminal status" },
         );
         const journal = new Journal(journalPath(dataDir, handle.runId));
         try {
@@ -498,70 +534,68 @@ acceptance_criteria:
       }
 
       const ARCH = "no_architecture_violations";
+      // A NON-destructive LLM-judged row. `scope_matches_instruction` and
+      // `no_unrelated_deletions` are destructive (`packages/sdk-ts/src/judge/rubric.ts:69`),
+      // so they ROLLBACK the step and never reach a seal at all.
+      const DESIGN = "design_serves_overall_goal";
       const detail = (o: Outcome) =>
         " status=" + o.status + " terminals=" + JSON.stringify(o.terminals) +
         " rubricFailsPerPass=" + JSON.stringify(o.rubricFailIds);
 
       describe("a deterministic gate must be able to take yes for an answer (WP-648/WP-649)", () => {
         test(
-          "A: introduced then restored does not seal FAILED - B: introduced and kept still does - C: an LLM row survives a clean review",
+          "A: introduced then restored is not sealed on - B: introduced and kept still is - C: an LLM row survives a clean review",
           async () => {
-            // A — dogfood-163 replayed. Attempt 1 adds a genuinely new forbidden edge;
-            // attempt 2 restores the file to its committed text, so the CUMULATIVE diff is
-            // clean while the step-scoped diff re-emits a line the repo already had.
+            // A — dogfood-163 replayed. Step 1 genuinely adds a forbidden import; step 2 puts
+            // both files back exactly as it found them, so the CUMULATIVE diff is clean while
+            // the step-scoped diff re-emits a runner import the repo already had. Both passes
+            // report the same label, so step 2's objection reads as a REPEAT of step 1's and
+            // the anti-oscillation bound denies a second repair grant — exactly as in the run.
             const a = await driveRun(
-              [DIRTY_LOOP, BASE_LOOP],
-              [judgeForm({ criteria: { "AC-1": false } }), judgeForm({ criteria: { "AC-1": true } })],
-              [completionReviewForm()],
-              4,
-            );
-            expect(
-              (a.terminals.at(-1)?.reason ?? "").includes(ARCH),
-              "the run put the file back exactly as it found it, and the completion review's own " +
-                "re-measurement over the cumulative diff says so. Sealing on `" + ARCH + "` here is " +
-                "dogfood-163: a green delivery failed on a complaint the run had already retracted." +
-                detail(a),
-            ).toBe(false);
-
-            // B — the forbidden edge is introduced and NEVER removed. The gate must still bite.
-            const b = await driveRun(
-              [DIRTY_LOOP],
+              [DIRTY, RESTORE],
               [judgeForm({ criteria: { "AC-1": true } })],
-              [completionReviewForm()],
               2,
             );
             expect(
+              (a.terminals.at(-1)?.reason ?? "").includes(ARCH),
+              "step 2 put every file back exactly as it found it — the cumulative diff introduces " +
+                "nothing, and the completion review's own re-measurement says so. Sealing on `" + ARCH +
+                "` here IS dogfood-163: a green delivery condemned by a complaint the run had already " +
+                "retracted, with 4 of 6 steps and 98.9% of budget unspent." + detail(a),
+            ).toBe(false);
+
+            // B — the forbidden import is introduced and NEVER removed. The gate must still bite,
+            // deterministically, with no appeal. maxSteps 1 leaves no repair grant to muddy it.
+            const b = await driveRun([DIRTY], [judgeForm({ criteria: { "AC-1": true } })], 1);
+            expect(
               b.status === "FAILED" && (b.terminals.at(-1)?.reason ?? "").includes(ARCH),
-              "this run really does add a forbidden layering edge and never takes it back. If it " +
-                "does not seal FAILED on `" + ARCH + "`, scenario A was bought by muzzling the gate " +
-                "rather than by teaching it what a diff introduced." +
-                detail(b),
+              "this run really does add a forbidden layering edge to a file that had none, and never " +
+                "takes it back. If it does not seal FAILED on `" + ARCH + "`, scenario A was bought by " +
+                "muzzling the gate rather than by teaching it what a diff INTRODUCED." + detail(b),
             ).toBe(true);
 
-            // C — an LLM-judged row fails at the sealing pass; the completion review is ALL
-            // GREEN. The objection must survive: dropping it is the exact hole
+            // C — an LLM-judged row fails at the sealing pass and the completion review comes
+            // back ALL GREEN. The objection must survive: dropping it is the exact hole
             // `mergeDesignFindings` was written to close.
             const c = await driveRun(
-              [BASE_LOOP],
-              [judgeForm({ criteria: { "AC-1": true }, rubricFails: ["scope_matches_instruction"] })],
-              [completionReviewForm()],
-              3,
+              [BENIGN],
+              [judgeForm({ criteria: { "AC-1": true }, rubricFails: [DESIGN] })],
+              1,
             );
             expect(
               c.status,
               "an LLM-judged objection raised at the sealing pass must not be cleared by a second, " +
-                "independent review that happens to come back clean. `mergeDesignFindings` unions " +
-                "those on purpose; only the deterministic rows may be retracted. A SUCCESS here means " +
-                "the fix was `the later verdict always wins`." +
-                detail(c),
+                "independent review that happens to come back clean. `mergeDesignFindings` unions those " +
+                "on purpose; ONLY the deterministic rows may be retracted. A SUCCESS here means the fix " +
+                "was `the later verdict always wins`." + detail(c),
             ).toBe("FAILED");
             expect(
-              (c.terminals.at(-1)?.reason ?? "").includes("scope_matches_instruction"),
+              (c.terminals.at(-1)?.reason ?? "").includes(DESIGN),
               "the surviving objection must be NAMED in the seal reason, not silently folded away." +
                 detail(c),
             ).toBe(true);
           },
-          600_000,
+          300_000,
         );
       });
       GENEOF
@@ -569,7 +603,7 @@ acceptance_criteria:
       ST=$?
       rm -f "$TARGET"
       if [ "$ST" -ne 0 ]; then
-        echo "AC-2 FAIL: either a run that restored a file to its committed text still seals FAILED on no_architecture_violations, or the gate was softened so a genuinely new forbidden edge no longer seals FAILED, or an LLM-judged objection is now silently cleared by a clean completion review. vitest exited $ST"
+        echo "AC-2 FAIL: either a run that restored every file to its committed text is still sealed on no_architecture_violations, or the gate was softened so a genuinely new forbidden import no longer seals FAILED, or an LLM-judged objection is now silently cleared by a clean completion review. vitest exited $ST"
         exit 1
       fi
       echo "AC-2 OK: a retracted deterministic row no longer seals the run, a real violation still does, and an LLM row still survives a clean review"
