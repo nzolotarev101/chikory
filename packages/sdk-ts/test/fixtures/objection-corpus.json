@@ -1,0 +1,532 @@
+{
+  "meta": {
+    "what": "Every FAILING judge rubric justification (>=120 chars, deduped) this campaign has produced.",
+    "why": "The negative population for the repeat-objection comparator (WP-647). Two objections from DIFFERENT run families are never the same objection, so every cross-family pair is a labelled negative the delivery cannot enumerate or hand-fit.",
+    "extractedAt": "2026-08-21 (dogfood-164 review)",
+    "source": ".chikory/runs/*/journal.db — kind in ('judge','verdict'), form.rubricResults where pass === false",
+    "regenerate": "sqlite3 <journal.db> \"select payload_json from journal_entries where kind in ('judge','verdict');\" — see docs/reports/dogfood-164.md",
+    "journalsScanned": 47,
+    "runFamilies": 23,
+    "rows": 86,
+    "note": "runFamily collapses branch-run-<parentUuid>-step-N-xxxx onto its parent run — a branch run's journal replays the parent's judge passes, so a branch/parent pair is a DUPLICATE, not a negative.",
+    "excluded": "1 row(s) dropped because they quote committed packages/sdk-ts/src text — a judge justification that echoes a suite dump or the judge prompt would make the AC-3 anti-hard-code trap unsatisfiable. Dropped: run-ac06b2bf pre_existing_suite_still_green, a 49,293-char vitest dump, the lone member of its rubric id, so the cross-family pair count is unchanged."
+  },
+  "rows": [
+    {
+      "key": "bea79e104317",
+      "runId": "branch-run-838ae110-4d12-49cb-ad41-5f98a31828e7-step-5-2f201f9a",
+      "rubricId": "design_serves_overall_goal",
+      "justification": "Although the new command correctly prefers per-task files when present, it explicitly falls back to synthesizing TaskResult records from an existing aggregate summary, and also accepts an aggregate summary file as the sole results input. That conflicts with the overall requirement that stored per-task files are the evidence and the aggregate under suspicion must not be trusted as input. It also reconstructs requirement identities and satisfaction positions rather than preserving actual per-requirement evidence."
+    },
+    {
+      "key": "73845f54fc82",
+      "runId": "branch-run-838ae110-4d12-49cb-ad41-5f98a31828e7-step-5-2f201f9a",
+      "rubricId": "design_serves_overall_goal",
+      "justification": "The ledger is placed appropriately, but the evidence design is incomplete: the diff adds a probe.json allow-rule without committing any probe.json files, and the judge confirmed zero such tracked artifacts. Thus the verdicts lack the durable per-task evidence that the overall goal explicitly requires."
+    },
+    {
+      "key": "4e3be7aa51d2",
+      "runId": "branch-run-f57c3f17-a3d7-4273-b62f-82beb8c63a03-step-5-0de6d414",
+      "rubricId": "design_serves_overall_goal",
+      "justification": "The render-site strategy is coherent and preserves the single accumulator and raw suite evidence, but renderCompletionReviewConcerns does not actually guarantee its documented strict character budget for arbitrary inputs. A single concern is returned intact without any length check, and the overflow path always returns the oldest and newest entries intact even when those entries alone exceed maxChars. Because the function accepts unrestricted strings, the completion-review rendering remains unbounded for those cases, contrary to the overall requirement that no rendered evidence-path string be unbounded."
+    },
+    {
+      "key": "4e3be7aa51d2",
+      "runId": "branch-run-f57c3f17-a3d7-4273-b62f-82beb8c63a03-step-5-770afe4b",
+      "rubricId": "design_serves_overall_goal",
+      "justification": "The render-site strategy is coherent and preserves the single accumulator and raw suite evidence, but renderCompletionReviewConcerns does not actually guarantee its documented strict character budget for arbitrary inputs. A single concern is returned intact without any length check, and the overflow path always returns the oldest and newest entries intact even when those entries alone exceed maxChars. Because the function accepts unrestricted strings, the completion-review rendering remains unbounded for those cases, contrary to the overall requirement that no rendered evidence-path string be unbounded."
+    },
+    {
+      "key": "6b24e7cfb920",
+      "runId": "branch-run-f57c3f17-a3d7-4273-b62f-82beb8c63a03-step-5-770afe4b",
+      "rubricId": "design_serves_overall_goal",
+      "justification": "The verdict-side design bounds rationale while retaining access to the original form, but the completion-review renderer does not provide its claimed strict bound. For zero or one finding it bypasses maxChars entirely, and for multiple findings it always renders the oldest and newest in full even when those entries alone exceed maxChars. Thus an individually large finding remains unbounded at the render site, contrary to the overall goal."
+    },
+    {
+      "key": "223fa4f047a5",
+      "runId": "branch-run-f57c3f17-a3d7-4273-b62f-82beb8c63a03-step-5-770afe4b",
+      "rubricId": "design_serves_overall_goal",
+      "justification": "The new oversized-endpoint fallback explicitly truncates the oldest and newest findings, and its added test accepts only their HEAD markers. This contradicts the overall requirement that whenever findings are omitted, both oldest and newest findings survive intact and in full; with multiple oversized findings, the implementation both omits middle findings and clamps the endpoints."
+    },
+    {
+      "key": "3af8c73c6e28",
+      "runId": "branch-run-f57c3f17-a3d7-4273-b62f-82beb8c63a03-step-5-770afe4b",
+      "rubricId": "design_serves_overall_goal",
+      "justification": "The oversized-endpoint fallback in renderCompletionReviewConcerns calls clampText on the oldest and newest findings. With multiple oversized findings it also emits an omission notice, so entries are left out while the required surviving endpoints are truncated rather than preserved intact and in full. The added test verifies only endpoint HEAD markers, not complete endpoint preservation."
+    },
+    {
+      "key": "2e0581d778dc",
+      "runId": "branch-run-f57c3f17-a3d7-4273-b62f-82beb8c63a03-step-5-770afe4b",
+      "rubricId": "escalation_concerns_adjudicated",
+      "justification": "The standing concern is upheld by the diff: the base representation fallback divides the remaining character budget between the oldest and newest findings and clamps both, directly violating the requirement that omitted-middle cases retain those findings intact and in full."
+    },
+    {
+      "key": "6e879fb414c7",
+      "runId": "run-12dfe421-7633-4199-9e3c-18bc32a410c5",
+      "rubricId": "design_serves_overall_goal",
+      "justification": "The crash classification, checkpoint restoration, terminal checkpoint selection, and resume targeting all serve the behavioral goal, but the workflow layer obtains crash classification by extending a forbidden dependency on the runner layer. That module placement does not fit the stated architecture."
+    },
+    {
+      "key": "f70eeacf14c3",
+      "runId": "run-12dfe421-7633-4199-9e3c-18bc32a410c5",
+      "rubricId": "cumulative_design_coherent",
+      "justification": "The runtime and resume changes otherwise compose around the same last-good checkpoint concept, and the repeated token check supports both CLI normalization and adapter-independent classification. However, placing workflow-required classification in runner/strike-accounting.ts leaves the cumulative design dependent on a forbidden layer edge, so its overall module structure is not coherent."
+    },
+    {
+      "key": "1c67ecd8ebf9",
+      "runId": "run-12dfe421-7633-4199-9e3c-18bc32a410c5",
+      "rubricId": "escalation_concerns_adjudicated",
+      "justification": "The standing workflow→runner concern is upheld: the cumulative diff visibly imports and calls runner-layer crash-classification logic from workflow/agent-loop.ts, and the deterministic architecture scan reports that exact violation. No trusted check evidence contradicts the finding."
+    },
+    {
+      "key": "6a73716bb459",
+      "runId": "run-1f2a02e0-4615-47fa-8847-ea37c4164cfb",
+      "rubricId": "escalation_concerns_adjudicated",
+      "justification": "The standing concern states that one of two judge-executed checks failed for AC-2. This pass supplies no check-command results or passing regression-suite result, so there is no trusted green rerun that clears that reported failure; the criterion history ending in pass is not itself a passing check result."
+    },
+    {
+      "key": "8451b3bb8330",
+      "runId": "run-3ff7c55a-ba68-48af-a125-218236bbdbca",
+      "rubricId": "cumulative_design_coherent",
+      "justification": "The marker has two persisted representations: deriveNodeOutcome adds it inside outcome, while recordNodeSealed also adds it at the top level of the same node_sealed payload. Multiple sites then reconcile these duplicate sources with nullish-coalescing fallbacks. This creates redundant state and possible disagreement rather than one canonical representation; the tests even accept either location, so they do not prevent this inconsistency."
+    },
+    {
+      "key": "609bc4643d27",
+      "runId": "run-566ec246-86c9-46f3-933e-69a29806efb4",
+      "rubricId": "design_serves_overall_goal",
+      "justification": "The reconciliation abstraction is placed coherently, but its newly introduced spec parameter uses an all-optional projected criterion shape that rejects an ordinary criterion containing id without check. The resulting strict TypeScript failure demonstrates that the interface does not fit the repository's valid TaskSpec/test shapes."
+    },
+    {
+      "key": "3ef46502466b",
+      "runId": "run-5ab10621-fd38-420d-aff2-176486cf9f9a",
+      "rubricId": "escalation_concerns_adjudicated",
+      "justification": "The supplied concern is upheld: there is no check-result or other trusted evidence that the executor ran and reported each of the four required SDK pnpm scripts—build, lint, typecheck, and full vitest—with their actual counts. The cumulative code diff cannot establish completion of those verification commands."
+    },
+    {
+      "key": "00dbdaa8575b",
+      "runId": "run-6ac4329e-c172-4f85-b1fc-c0ef9fb60851",
+      "rubricId": "design_serves_overall_goal",
+      "justification": "The schema, probe logic, ledger identity hash, tests, and documentation are placed in appropriate existing modules and generally support patch-backed fixes. However, resolvePatchPath does not enforce the stated repository-relative, in-this-repository invariant: it accepts absolute or traversal paths and searches the process working directory before locating the task repository root, allowing an unrelated file to shadow the intended patch and making resolution environment-dependent."
+    },
+    {
+      "key": "ed99f1d2ab5b",
+      "runId": "run-6ac4329e-c172-4f85-b1fc-c0ef9fb60851",
+      "rubricId": "cumulative_design_coherent",
+      "justification": "The cumulative flow is mostly consistent, with getEffectiveFixRef shared by probing, skipping, and coverage counting. It nevertheless contains avoidable duplication because runProbe checks the missing/dual-source invariants immediately before getEffectiveFixRef repeats those checks, and the added task test leaves the unused withPatch variable as dead scaffolding; therefore the diff does not fully satisfy the rubric's explicit no-duplicated-logic and no-dead-code requirements."
+    },
+    {
+      "key": "aa6bf5d47b05",
+      "runId": "run-6ac4329e-c172-4f85-b1fc-c0ef9fb60851",
+      "rubricId": "design_serves_overall_goal",
+      "justification": "The new path-resolution design prevents the acceptance fixture's patch-backed task from being probed, causing AC-1 to fail before any discriminating ledger entry is produced. Additionally, findRepoRoot returns the filesystem root when no .git ancestor exists, so its claimed repository-containment boundary is not reliably a repository boundary in that case. These choices do not coherently preserve the required first-class, probeable gold-patch mechanism."
+    },
+    {
+      "key": "5ba71a19efff",
+      "runId": "run-6ac4329e-c172-4f85-b1fc-c0ef9fb60851",
+      "rubricId": "design_serves_overall_goal",
+      "justification": "The overall goal explicitly defines fix_patch as a repo-relative path to a patch in this repository. The diff instead replaces rejection of absolute paths with unconditional acceptance and changes the test to enshrine that behavior. This weakens the repository-boundary guarantee and permits an arbitrary external patch source, so the visible design does not safely implement the stated fix-source contract even though the supplied oracle—using absolute temporary paths—passes."
+    },
+    {
+      "key": "474fac8a0ba0",
+      "runId": "run-6ac4329e-c172-4f85-b1fc-c0ef9fb60851",
+      "rubricId": "design_serves_overall_goal",
+      "justification": "The goal requires repo.fix_patch to be repository-relative, but resolvePatchPath immediately accepts absolute paths, and the added test explicitly expects /tmp/absolute.patch to succeed despite its description saying absolute paths are rejected. This weakens the intended boundary and does not coherently serve the stated design."
+    },
+    {
+      "key": "ccc4d896fbb8",
+      "runId": "run-6ac4329e-c172-4f85-b1fc-c0ef9fb60851",
+      "rubricId": "cumulative_design_coherent",
+      "justification": "The cumulative design contains a direct contradiction between the path-policy test name and its assertion, while resolvePatchPath combines repository-relative resolution, ancestor searching, and unrestricted absolute-path handling. Patch resolution and existence validation are also repeated between getEffectiveFixRef and runProbe instead of being consolidated, leaving the introduced abstraction internally inconsistent."
+    },
+    {
+      "key": "60165df9346c",
+      "runId": "run-6b50d3f9-ef17-4ce4-9d45-dbb34422db54",
+      "rubricId": "design_serves_overall_goal",
+      "justification": "Although the functional checks pass, the workflow duplicates nearly the same record-remediation, checkpoint-restore, feedback, and state-transition block in both approval branches and introduces a separate rejection brief builder instead of funneling the new trigger through a shared existing remediation operation. That duplication conflicts with the stated design goal that the existing remediation mechanism gain a trigger rather than creating parallel healing orchestration."
+    },
+    {
+      "key": "b47f52f08fae",
+      "runId": "run-6b50d3f9-ef17-4ce4-9d45-dbb34422db54",
+      "rubricId": "design_serves_overall_goal",
+      "justification": "The pure rejection decision is correctly placed beside workflow decisions, exported publicly, and configured through TaskSpec. However, each rejection branch independently implements remediation recording, checkpoint restoration, feedback assignment, and state transitions instead of routing through one shared existing remediation trigger. That conflicts with the goal that rejection extend the existing heal mechanism rather than introduce parallel orchestration."
+    },
+    {
+      "key": "a0952b83a8fe",
+      "runId": "run-6b50d3f9-ef17-4ce4-9d45-dbb34422db54",
+      "rubricId": "cumulative_design_coherent",
+      "justification": "The cumulative design contains two nearly identical rejection-handling blocks in agent-loop.ts. The duplicated strike handling, remediation persistence, rollback, feedback, and state transition logic should be consolidated behind a shared workflow helper or unified control path; as written, the branches can drift and do not form one coherent remediation design."
+    },
+    {
+      "key": "20a4c3573d6b",
+      "runId": "run-71087607-eca4-41ca-b73b-febb0f484b8e",
+      "rubricId": "design_serves_overall_goal",
+      "justification": "The measurement and bounded reporting are coherently integrated, but the exemption is broader than the stated toolchain-output exception: candidatePaths filters every path containing a node_modules segment before admission checking, including tracked node_modules files or non-ignored node_modules content. Thus an undeclared tracked write under node_modules can bypass the boundary, re-opening the hole explicitly warned about rather than limiting the exemption to ignored dependency-install output."
+    },
+    {
+      "key": "85864edbd869",
+      "runId": "run-71087607-eca4-41ca-b73b-febb0f484b8e",
+      "rubricId": "design_serves_overall_goal",
+      "justification": "The widened measurement and bounded reporting serve the goal, but candidatePaths unconditionally removes every path with a node_modules segment before admission checking. Because this filter is not limited to ignored dependency-install output, an undeclared tracked or otherwise non-ignored write under node_modules bypasses enforcement, which reopens the write-boundary hole."
+    },
+    {
+      "key": "431175057f76",
+      "runId": "run-71087607-eca4-41ca-b73b-febb0f484b8e",
+      "rubricId": "escalation_concerns_adjudicated",
+      "justification": "The standing concern is upheld by the diff: isToolchainPath returns true solely from the presence of a node_modules path segment, and activities filters such paths before undeclaredWritePaths without checking whether they are ignored dependency-install artifacts. Therefore undeclared tracked node_modules writes can evade the boundary."
+    },
+    {
+      "key": "af9a7595e61c",
+      "runId": "run-75794008-83a8-4ca8-893d-ae3000df754a",
+      "rubricId": "design_serves_overall_goal",
+      "justification": "The diff improves the graded examples through structural identifier and operand extraction, but the general decision still materially depends on hand-authored vocabulary sets such as BOILERPLATE, GENERIC_CONTAINERS, SYNONYMS, CONDITION_TERMS, DEFECT_VERBS, and the retained defect categories. It also uses fixed lexical cutoffs (`sharedContent.length >= 3` and `>= 5`) as target/mechanism evidence. Thus unfamiliar wording can still change classification based on list membership or token overlap, preserving the same lexical-threshold design the overall goal explicitly sought to replace, even though the supplied acceptance populations pass."
+    },
+    {
+      "key": "f947341c6ad9",
+      "runId": "run-75794008-83a8-4ca8-893d-ae3000df754a",
+      "rubricId": "design_serves_overall_goal",
+      "justification": "The redesign adds structural entity and operand extraction, but its decisions still materially depend on hand-authored BOILERPLATE, GENERIC_CONTAINERS, SYNONYMS, CONDITION_TERMS, DEFECT_VERBS, and defect-category vocabularies. It also treats fixed shared-token counts of three and five as target and mechanism evidence. Consequently, unfamiliar wording or list membership can change classification, preserving the lexical-threshold behavior that the overall goal explicitly sought to eliminate."
+    },
+    {
+      "key": "54e35ee5823e",
+      "runId": "run-75794008-83a8-4ca8-893d-ae3000df754a",
+      "rubricId": "escalation_concerns_adjudicated",
+      "justification": "The standing design concern is upheld by the diff itself: vocabulary membership and fixed token-overlap cutoffs remain substantive inputs to the final decision. This is a delivered design defect relative to the stated wording-agnostic goal, not merely missing process evidence, so not every standing finding is cleared."
+    },
+    {
+      "key": "20bf6b856aab",
+      "runId": "run-75794008-83a8-4ca8-893d-ae3000df754a",
+      "rubricId": "design_serves_overall_goal",
+      "justification": "The replacement still relies on brittle numeric token rules such as frequency >=2, vocabulary size >=6, and shared-token count <=1, despite describing itself as avoiding arbitrary similarity thresholds. It can merge distinct propositions when differing operands appear only once and are not syntactically marked as entities, so the visible abstraction does not generally deliver the requested sound proposition-level distinction beyond the graded examples."
+    },
+    {
+      "key": "69f6adb8baab",
+      "runId": "run-75794008-83a8-4ca8-893d-ae3000df754a",
+      "rubricId": "design_serves_overall_goal",
+      "justification": "Although the graded cases pass, the design still bases proposition extraction on extensive hand-authored META_TOKENS, GENERIC_CONTAINER_TOKENS, GENERIC_VERB_TOKENS, CONDITION_TOKENS, and DEFECT_CATEGORIES lists. Thus behavior for untuned wording can still change according to whether words happen to appear in those lexicons, contrary to the overall requirement that the decision not depend on word lists."
+    },
+    {
+      "key": "6916a0bca6da",
+      "runId": "run-75794008-83a8-4ca8-893d-ae3000df754a",
+      "rubricId": "design_serves_overall_goal",
+      "justification": "The visible design change broadens the hand-authored suffix rule with the generic ending `at`. This can over-stem unrelated words such as `format`, `compat`, or `flat`, creating accidental lexical equivalence. Although the supplied behavioral checks pass, this vocabulary-tuned normalization does not convincingly support the goal of robust structural comparison on untuned wording, and the full regression suite remains red."
+    },
+    {
+      "key": "9d9e95bfaf68",
+      "runId": "run-75794008-83a8-4ca8-893d-ae3000df754a",
+      "rubricId": "design_serves_overall_goal",
+      "justification": "The replacement remains materially vocabulary-driven: META_TOKENS, GENERIC_CONTAINER_TOKENS, GENERIC_VERB_TOKENS, CONDITION_TOKENS, and DEFECT_CATEGORIES determine proposition contents and operands. The generic `at` stemming suffix can also conflate unrelated terms such as `format` and `form`. These visible choices do not coherently satisfy the overall requirement that classification hold for untuned wording and not depend on word-list membership."
+    },
+    {
+      "key": "be70df5ea03d",
+      "runId": "run-75794008-83a8-4ca8-893d-ae3000df754a",
+      "rubricId": "escalation_concerns_adjudicated",
+      "justification": "The standing design concerns are upheld by the delivered diff itself. Extensive hand-authored token/category sets still control extraction, and the widened `at` suffix creates a concrete over-stemming risk. Therefore not every standing finding can be cleared."
+    },
+    {
+      "key": "fdf209302b13",
+      "runId": "run-75794008-83a8-4ca8-893d-ae3000df754a",
+      "rubricId": "design_serves_overall_goal",
+      "justification": "The replacement remains a lexical similarity heuristic with repeated-token focal detection and fixed numeric overlap cutoffs of 0.28 and 0.35. More importantly, observed behavior regressed to 0 of 6 required real restatements and broke the retained WP-643 positive, while the live loop needed 5 rather than at most 3 steps. Thus the design does not provide the required wording-robust, order-independent recognition."
+    },
+    {
+      "key": "b5f635b08887",
+      "runId": "run-7faebdb5-7164-4931-9b9e-056b0d175091",
+      "rubricId": "escalation_concerns_adjudicated",
+      "justification": "The standing concern is upheld. Although recordStepSpan correctly omits tool.calls when toolCallsObserved is false, the cumulative test diff contains no focused assertion for that behavior. The goal required changed behavior to be pinned by repository tests beside the files it covers, so this telemetry branch remains an unfulfilled delivered testing requirement."
+    },
+    {
+      "key": "bea79e104317",
+      "runId": "run-838ae110-4d12-49cb-ad41-5f98a31828e7",
+      "rubricId": "design_serves_overall_goal",
+      "justification": "Although the new command correctly prefers per-task files when present, it explicitly falls back to synthesizing TaskResult records from an existing aggregate summary, and also accepts an aggregate summary file as the sole results input. That conflicts with the overall requirement that stored per-task files are the evidence and the aggregate under suspicion must not be trusted as input. It also reconstructs requirement identities and satisfaction positions rather than preserving actual per-requirement evidence."
+    },
+    {
+      "key": "48bbd1550026",
+      "runId": "run-83bf691d-75b5-4848-a182-6e66dcb6b857",
+      "rubricId": "design_serves_overall_goal",
+      "justification": "There are no implementation or design changes in the diff to serve the overall goal, and the checks demonstrate that the required rubric channel remains absent from parsing and the real workflow."
+    },
+    {
+      "key": "e4c00cece934",
+      "runId": "run-83bf691d-75b5-4848-a182-6e66dcb6b857",
+      "rubricId": "no_architecture_violations",
+      "justification": "The deterministic architecture scan explicitly reports a new core→judge dependency. The diff introduces it through src/types.ts importing RubricItem from src/judge/rubric.ts, so the required absence of forbidden layer dependencies is not shown."
+    },
+    {
+      "key": "24cc0c77a6b3",
+      "runId": "run-83bf691d-75b5-4848-a182-6e66dcb6b857",
+      "rubricId": "design_serves_overall_goal",
+      "justification": "The effective-rubric construction correctly reuses the existing judge seam and preserves the completion-review rubric, but placing the shared RubricItem type in the judge layer forces the core types module to depend on judge code. The architecture scan flags that direction, so the module placement is not coherent with the repository layering."
+    },
+    {
+      "key": "4c5255facf9e",
+      "runId": "run-83bf691d-75b5-4848-a182-6e66dcb6b857",
+      "rubricId": "no_architecture_violations",
+      "justification": "The deterministic architecture scan explicitly reports a newly introduced forbidden dependency, core→judge. The diff confirms that packages/sdk-ts/src/types.ts imports RubricItem from ./judge/rubric.js."
+    },
+    {
+      "key": "38956c43f0e5",
+      "runId": "run-83bf691d-75b5-4848-a182-6e66dcb6b857",
+      "rubricId": "cumulative_design_coherent",
+      "justification": "Although the runtime flow is internally consistent, the cumulative design places the shared RubricItem contract in the judge layer and makes the core types module depend on it. This contradicts the repository's enforced layer direction, as confirmed by the architecture scan, so the module placement does not form a fully coherent final design."
+    },
+    {
+      "key": "4f4f056a3f80",
+      "runId": "run-83bf691d-75b5-4848-a182-6e66dcb6b857",
+      "rubricId": "no_architecture_violations",
+      "justification": "The deterministic architecture scan reports an added core→judge dependency. The diff confirms packages/sdk-ts/src/types.ts now imports RubricItem from ./judge/rubric.js, so the evidence does not show an architecture-clean change."
+    },
+    {
+      "key": "d4fa33910350",
+      "runId": "run-83bf691d-75b5-4848-a182-6e66dcb6b857",
+      "rubricId": "design_serves_overall_goal",
+      "justification": "The rubric-extra flow otherwise reuses the existing rubric parameter and preserves the completion-review rubric, but its shared contract type is placed under the judge module and imported into core types. That reverses the preferable dependency direction for a spec-level data contract and is inconsistent with the architecture scan, so the design is not coherently placed."
+    },
+    {
+      "key": "2503f25d9f00",
+      "runId": "run-83bf691d-75b5-4848-a182-6e66dcb6b857",
+      "rubricId": "cumulative_design_coherent",
+      "justification": "The cumulative diff implements one recognizable flow—parse rubric_extra, normalize items as non-destructive, append them to the standing per-step rubric, and remove rubric_packs—but leaves the core TaskSpec contract dependent on a judge-owned type. This cross-layer placement prevents the whole design from being architecturally coherent even though the runtime threading itself composes consistently."
+    },
+    {
+      "key": "ff09c9110f7f",
+      "runId": "run-8b00e28a-3abf-4f91-bd92-4438c79087b0",
+      "rubricId": "design_serves_overall_goal",
+      "justification": "The live-path enrichment is implemented as a local adapter in chain-loop, while the consumed advanceChain seam still loses the marker when passed the real readNodeResult outcome. AC-1 demonstrates that this design does not establish the required general equality between live folding and journal reconstruction."
+    },
+    {
+      "key": "650171f7448f",
+      "runId": "run-908510d8-d90d-4711-a88f-39ea7bf6482e",
+      "rubricId": "design_serves_overall_goal",
+      "justification": "Although seal-time command execution is correctly routed through existing seams, the new deterministic item is added unconditionally to STANDING_RUBRIC and COMPLETION_REVIEW_RUBRIC. When no regressionSuiteRun exists, applyCheckOverrides falls through to the model-provided answer. Thus per-step records—and all records for specs omitting the optional field—can still be model-settled, changing omitted-field behavior and contradicting the design requirement that this machine-settled item's recorded answer never come from the model."
+    },
+    {
+      "key": "858ffa287cb8",
+      "runId": "run-908510d8-d90d-4711-a88f-39ea7bf6482e",
+      "rubricId": "design_serves_overall_goal",
+      "justification": "The design removes the deterministic item from both exported rubric arrays and injects it dynamically only inside runner activities. This leaves DETERMINISTIC_RUBRIC_IDS naming an item in no declared rubric and, as the real-loop check demonstrates, fails to make a nonzero suite block SUCCESS. Thus the visible design does not coherently implement the repository-health seal gate."
+    },
+    {
+      "key": "3186f6205a70",
+      "runId": "run-a8fe46f3-b5e1-4f83-961c-2142220daa12",
+      "rubricId": "design_serves_overall_goal",
+      "justification": "The inventory-only design detects newly created ignored files cheaply, but it cannot detect in-place modification of a pre-existing ignored file and explicitly declines to restore a pre-existing ignored file deleted by a check. Therefore it does not satisfy the overall requirement that all pre-existing ignored content remain present byte-for-byte after the batch, despite passing the narrower oracle."
+    },
+    {
+      "key": "0de94f8616e5",
+      "runId": "run-a8fe46f3-b5e1-4f83-961c-2142220daa12",
+      "rubricId": "design_serves_overall_goal",
+      "justification": "The design inventories ignored path names without preserving their contents. Consequently, an in-place modification of a pre-existing ignored file is invisible because the path exists in both snapshots, while deletion is explicitly excluded from restoration when content is unavailable. This violates the overall requirement that all pre-existing ignored content remain present byte-for-byte after the batch."
+    },
+    {
+      "key": "6318e0b64a8c",
+      "runId": "run-a8fe46f3-b5e1-4f83-961c-2142220daa12",
+      "rubricId": "escalation_concerns_adjudicated",
+      "justification": "The standing concern is upheld by the delivered code: ignored entries are recorded only as paths with status \"!!\", without hashes or saved content, and the planner deliberately does nothing when such a pre-existing ignored path is deleted. Thus modification or deletion of pre-existing ignored content is a real unfulfilled requirement."
+    },
+    {
+      "key": "0e0d23c772c6",
+      "runId": "run-ac06b2bf-f6bb-4489-9c18-8da7d963075a",
+      "rubricId": "design_serves_overall_goal",
+      "justification": "The production design coherently centralizes the floor in blockingConcerns and reuses it at both call sites, but the committed workflow test duplicates the accumulation loop in a local helper instead of driving agentLoop's real accumulation path. That test can remain green if the production call site later regresses, directly undermining the goal's required durable protection."
+    },
+    {
+      "key": "40b5fc7498cd",
+      "runId": "run-ac06b2bf-f6bb-4489-9c18-8da7d963075a",
+      "rubricId": "design_serves_overall_goal",
+      "justification": "The production design correctly centralizes the severity floor in blockingConcerns and reuses it in computeVerdict and agentLoop. However, the new standing-concerns test copies the accumulation loop into a local helper instead of exercising agentLoop's real accumulation path. It therefore does not pin the explicitly required call site and can remain green if that production integration regresses."
+    },
+    {
+      "key": "92954b63df6b",
+      "runId": "run-ac06b2bf-f6bb-4489-9c18-8da7d963075a",
+      "rubricId": "cumulative_design_coherent",
+      "justification": "The production changes compose coherently, but the workflow test duplicates the standingConcerns accumulation logic rather than testing or extracting the real implementation. This creates a parallel test-only implementation that can diverge from production, violating the rubric's requirement that duplicated logic be consolidated."
+    },
+    {
+      "key": "031b5db79ae6",
+      "runId": "run-ac06b2bf-f6bb-4489-9c18-8da7d963075a",
+      "rubricId": "escalation_concerns_adjudicated",
+      "justification": "The standing finding is upheld by the cumulative diff: accumulateStandingConcerns is a test-local reproduction of the agent-loop logic, and no test drives the actual agentLoop accumulation path. This is an unfulfilled durability requirement in the delivered work, not merely missing process evidence."
+    },
+    {
+      "key": "39be29eedb28",
+      "runId": "run-c1f1b066-d59e-4f8e-848f-2b1508b2ba7b",
+      "rubricId": "cumulative_design_coherent",
+      "justification": "The diff computes const summary = normalizeWorkspaceRefs(...) but then independently invokes normalizeWorkspaceRefs(...) again when constructing base instead of reusing summary. Later branches and claimsComplete reuse the variable, so the second call is unnecessary duplicated logic and leaves the cumulative implementation internally inconsistent with its intended single normalization flow."
+    },
+    {
+      "key": "19c82e86a96d",
+      "runId": "run-c857c058-8358-4fc3-a2bc-3fc94a455636",
+      "rubricId": "design_serves_overall_goal",
+      "justification": "The standing prompt constant is placed in the workflow layer and imported by the executor layer, producing the reported architecture violation. Additionally, isAskingSummary treats every summary containing '?' as an approval request, which is broader than the stated permission-or-approval classification and can intercept unrelated empty-diff questions."
+    },
+    {
+      "key": "701734bf880a",
+      "runId": "run-de555224-1de9-491b-b809-6c063e621f86",
+      "rubricId": "design_serves_overall_goal",
+      "justification": "The design passes the generated new-versus-repeated scenarios, but it regresses established sealing behavior: the declared suite reports an existing repair test receiving three review hits instead of the expected bounded two. Thus the integration does not coherently preserve the overall completion-review contract."
+    },
+    {
+      "key": "a51d6241745a",
+      "runId": "run-de555224-1de9-491b-b809-6c063e621f86",
+      "rubricId": "design_serves_overall_goal",
+      "justification": "The integration passes `attemptedFindings` as an always-defined array, while the original cap is enforced only when `attempted === undefined`. Consequently the normal agent-loop path bypasses `MAX_COMPLETION_REVIEWS` even when the array is empty, explaining the reported third review hit and regressing the established bounded-review behavior."
+    },
+    {
+      "key": "95e2cad7f49d",
+      "runId": "run-de555224-1de9-491b-b809-6c063e621f86",
+      "rubricId": "cumulative_design_coherent",
+      "justification": "The design retains the constant review cap but conditionally disables it for the primary caller, while separate paths apply different bounds and headroom checks. These mechanisms contradict rather than compose into one coherent completion-review policy."
+    },
+    {
+      "key": "b57001122a7c",
+      "runId": "run-de555224-1de9-491b-b809-6c063e621f86",
+      "rubricId": "escalation_concerns_adjudicated",
+      "justification": "The standing concern is upheld: the diff itself exposes the cap-bypass condition, and the reported existing repair test receives three review hits instead of the established two. No passing trusted regression result clears this defect."
+    },
+    {
+      "key": "5b8436c48aa2",
+      "runId": "run-de555224-1de9-491b-b809-6c063e621f86",
+      "rubricId": "design_serves_overall_goal",
+      "justification": "The revised cap condition treats an absent or empty attempted-findings history as exhausted once the review count reaches the cap. The regression check demonstrates that this design incorrectly seals FAILED after a stalled repair step that should not consume a grant, preventing the subsequent real repair from reaching SUCCESS."
+    },
+    {
+      "key": "f30a631a3ab4",
+      "runId": "run-de555224-1de9-491b-b809-6c063e621f86",
+      "rubricId": "design_serves_overall_goal",
+      "justification": "The diff makes cap enforcement conditional on attempted findings being absent or empty, while nonempty history bypasses the fixed review-attempt cap. It also treats an empty history at the cap as exhausted. These choices do not coherently preserve the existing bounded sealing contract and can prematurely stop stalled repairs or permit extra reviews."
+    },
+    {
+      "key": "5be9cc13e184",
+      "runId": "run-de555224-1de9-491b-b809-6c063e621f86",
+      "rubricId": "cumulative_design_coherent",
+      "justification": "The design maintains both attemptedReviewFindings and lastRepairFindings, but decideCompletionReview selects them with nullish coalescing, so an explicitly supplied empty attemptedFindings array suppresses lastAttemptedFindings. This makes the histories compose inconsistently and contributes to contradictory cap behavior."
+    },
+    {
+      "key": "3e889a360c20",
+      "runId": "run-de555224-1de9-491b-b809-6c063e621f86",
+      "rubricId": "escalation_concerns_adjudicated",
+      "justification": "The standing empty-history concern is upheld directly by the diff: when attempted is undefined or empty and reviewAttemptsUsed reaches the cap, the function skips regardless of whether the preceding stalled repair should consume a grant. Therefore not every standing delivery concern is cleared."
+    },
+    {
+      "key": "595276840995",
+      "runId": "run-ec5c4bb8-de16-4c28-beba-a8cd09795fa1",
+      "rubricId": "design_serves_overall_goal",
+      "justification": "Although the design passes the named fixtures and bounds reads, it does not reliably preserve original bytes or report every unpreserved corruption. Preserved files are converted from Buffer to UTF-8 strings and later written as strings, which can corrupt non-UTF-8 ignored files. More seriously, the added unit test confirms deletion of an unpreserved ignored file produces no restore entry, so applyCleanupPlan neither restores nor warns about it. For modified unpreserved files, reporting is only console.warn and is not added to the batch CheckRun output. Thus budget-exceeded corruption can still be silently passed off by the batch, contrary to the overall goal."
+    },
+    {
+      "key": "33fd1786d69a",
+      "runId": "run-ec5c4bb8-de16-4c28-beba-a8cd09795fa1",
+      "rubricId": "design_serves_overall_goal",
+      "justification": "The diff contains concrete goal-breaking defects. Preserved ignored-file bytes are converted from Buffer to UTF-8 text and restored with writeFile(string), so non-UTF-8 files are not byte-preserved. For an ignored file excluded by the preservation budget and then deleted, the committed planner test explicitly expects no restore entry; applyCleanupPlan therefore neither restores it nor reports it. Modified unpreserved files only produce console.warn output, with no mechanism shown for adding the warning to the batch CheckRun output required by the goal."
+    },
+    {
+      "key": "483c658c9fa4",
+      "runId": "run-ec5c4bb8-de16-4c28-beba-a8cd09795fa1",
+      "rubricId": "cumulative_design_coherent",
+      "justification": "The snapshot, planner, and cleanup abstractions do not compose coherently for budget-exceeded files: snapshotWorkspace records metadata-only ignored entries, planCheckSideEffectCleanup drops deleted metadata-only entries, and applyCleanupPlan can warn only about paths that reach toRestore. The design therefore has no end-to-end representation or reporting path for one of the corruption cases it intentionally introduces through preservation budgeting."
+    },
+    {
+      "key": "65e2d9075685",
+      "runId": "run-ec5c4bb8-de16-4c28-beba-a8cd09795fa1",
+      "rubricId": "escalation_concerns_adjudicated",
+      "justification": "The standing concern is upheld by the cumulative diff. Binary content is stored and restored through UTF-8 strings; the added unit test proves deletion of an unpreserved ignored file yields no cleanup action; and the only warning for modified unpreserved files is console.warn rather than batch CheckRun output. These are delivered-code defects and unfulfilled requirements, not missing process evidence."
+    },
+    {
+      "key": "55eb25b21e5c",
+      "runId": "run-ec5c4bb8-de16-4c28-beba-a8cd09795fa1",
+      "rubricId": "design_serves_overall_goal",
+      "justification": "The design bounds ignored-file reads and propagates unrestored-path warnings, but aggregate-budget selection is performed inside 64 concurrent stat workers using shared totalPreservedBytes. Completion order can differ between the before and after snapshots, so an untouched boundary file may receive a content hash in one snapshot and a stat hash in the other. The planner then treats it as modified and may rewrite it or emit a false corruption warning, violating the explicit requirement that untouched ignored files not be rewritten."
+    },
+    {
+      "key": "e4de7048254c",
+      "runId": "run-eef8a03d-c6b6-4165-9738-d002cef3d56d",
+      "rubricId": "design_serves_overall_goal",
+      "justification": "Although the required examples pass, the design still decides sameness through broad similarity cutoffs and high-risk shortcuts rather than a sound representation of what the objection is about. In particular, sharing any nontrivial code entity returns true immediately, so two different defects concerning the same symbol—for example, `flushBatchWriter` dropping a tail versus duplicating completed chunks—would be collapsed as one objection on the same rubric id. The later bigram and token-overlap rules also use fixed thresholds (two shared bigrams, 0.30/0.60 overlap). This is the explicitly warned plausible-but-wrong threshold approach and does not generally preserve the requirement that genuinely different objections remain new."
+    },
+    {
+      "key": "e1dfdb533d54",
+      "runId": "run-eef8a03d-c6b6-4165-9738-d002cef3d56d",
+      "rubricId": "design_serves_overall_goal",
+      "justification": "The diff still determines sameness through broad shortcuts and fixed similarity thresholds. In particular, one shared nontrivial code entity immediately returns true, so distinct defects involving the same symbol—such as `flushBatchWriter` dropping a tail versus duplicating chunks—would be collapsed. The shared-bigram and 0.30/0.60 token-overlap cutoffs are also similarity thresholds. This directly conflicts with the goal of deciding what an objection is about while preserving genuinely different objections as new."
+    },
+    {
+      "key": "8b8363770d39",
+      "runId": "run-eef8a03d-c6b6-4165-9738-d002cef3d56d",
+      "rubricId": "escalation_concerns_adjudicated",
+      "justification": "The standing design concern is upheld by the delivered code itself: the code-entity shortcut and explicit bigram/token thresholds can classify different defects about the same code as identical. The supplied tests cover selected pairs but do not eliminate this demonstrated false-positive path."
+    },
+    {
+      "key": "d15d0b1a6e30",
+      "runId": "run-eef8a03d-c6b6-4165-9738-d002cef3d56d",
+      "rubricId": "design_serves_overall_goal",
+      "justification": "The comparator remains an ad hoc lexical-classification system rather than a sound representation of what an objection is about. For example, two objections sharing a code entity and one stemmed defect action return true regardless of whether the action describes different failures; likewise, one shared defect bigram is sufficient, and another branch uses a fixed minimum of two shared non-entity tokens. The added categories handle selected counterexamples such as loss versus duplication, but do not generally prevent distinct defects involving the same symbol and action from collapsing. This is a real unfulfilled requirement because genuinely different objections must remain new, not merely the supplied examples."
+    },
+    {
+      "key": "f2b7bed35e09",
+      "runId": "run-eef8a03d-c6b6-4165-9738-d002cef3d56d",
+      "rubricId": "escalation_concerns_adjudicated",
+      "justification": "The standing concern is upheld in substance. Although its claim that any shared code entity immediately returns true overstates the current branches, the delivered comparator still uses broad fixed lexical sufficiency rules, including any shared defect bigram and a two-token overlap condition. These rules can classify distinct same-symbol defects as repeats, so the concern identifies a real design defect rather than missing process evidence."
+    },
+    {
+      "key": "d757d18dd1b2",
+      "runId": "run-eef8a03d-c6b6-4165-9738-d002cef3d56d",
+      "rubricId": "design_serves_overall_goal",
+      "justification": "Although the graded examples pass, the comparator still includes the explicitly cautioned similarity-cutoff design: sharedMechanismTokens.length/minMechanismSize >= 0.5. Its earlier shortcut can also return true merely from a shared target, one shared condition term, and a compatible broad defect category. Thus two distinct defects on the same target that share a generic condition such as final, retry, or format can be collapsed without establishing that they are about the same proposition. The added cases demonstrate selected examples but do not remove this structural lexical-threshold weakness."
+    },
+    {
+      "key": "75017dfb825b",
+      "runId": "run-eef8a03d-c6b6-4165-9738-d002cef3d56d",
+      "rubricId": "design_serves_overall_goal",
+      "justification": "The comparator remains a hand-built lexical-similarity heuristic rather than a sound representation of the objection proposition. It can return true from a shared target plus one shared condition and defect category, and its fallback explicitly uses fixed cutoffs of at least three shared mechanism tokens and 50% overlap. Distinct defects involving the same symbol, generic condition, and broad category can therefore be collapsed. This is the threshold/shortcut design the goal explicitly warns against, even though the selected examples pass."
+    },
+    {
+      "key": "6a6dc42e8b1e",
+      "runId": "run-eef8a03d-c6b6-4165-9738-d002cef3d56d",
+      "rubricId": "escalation_concerns_adjudicated",
+      "justification": "The standing structural concern is upheld. Although the claim that a shared entity alone immediately returns true does not match the final code, the final comparator still accepts shared-target/shared-condition/shared-category shortcuts and a 0.5 mechanism-overlap cutoff. Those rules can merge genuinely different objections without establishing that they express the same proposition, so not every standing finding is cleared."
+    },
+    {
+      "key": "b2f1753e4c4e",
+      "runId": "run-eef8a03d-c6b6-4165-9738-d002cef3d56d",
+      "rubricId": "design_serves_overall_goal",
+      "justification": "The implementation removes the stated numeric thresholds, but still equates objections using a hand-built lexical profile that can collapse distinct propositions. For example, same-rubric objections that say `flushBatchWriter` “drops metadata on retry” and “loses checksum on retry” share a code entity, the LOSS_OR_OMISSION category, and the retry condition; neither metadata nor checksum is represented as a distinguishing focus or attribute. The final hasSharedFocus/hasSharedMechanism test therefore returns true even though the objections concern different lost data. This is a concrete structural failure of the goal that genuinely different objections remain new."
+    },
+    {
+      "key": "f68974705532",
+      "runId": "run-eef8a03d-c6b6-4165-9738-d002cef3d56d",
+      "rubricId": "escalation_concerns_adjudicated",
+      "justification": "The earlier immediate shared-entity return and numeric overlap thresholds are absent from the delivered comparator, clearing those portions of the findings. However, the substantive shortcut remains: a shared entity supplies hasSharedFocus, while one shared generic condition supplies hasSharedMechanism after only broad category compatibility. As demonstrated by distinct retry-time data-loss complaints about the same symbol, this can still return true without establishing the same defect proposition. At least one standing delivery concern is therefore upheld."
+    },
+    {
+      "key": "8cbdc6ffdb60",
+      "runId": "run-f3d47cf8-6d56-4c7b-85d1-fcfe185badef",
+      "rubricId": "design_serves_overall_goal",
+      "justification": "The probe generally reuses ensureGitWorkspace and verifyBaseGreen and isolates refs correctly, but its published workspace-path handling catches publishableRepoPath failures and deliberately falls back to raw absolute workspace paths; it also falls back to raw paths if the published values coincide. This directly conflicts with the explicit requirement that every published or reported path go through publishableRepoPath and never use a raw argument."
+    },
+    {
+      "key": "c7d2b3b72287",
+      "runId": "run-f3d47cf8-6d56-4c7b-85d1-fcfe185badef",
+      "rubricId": "design_serves_overall_goal",
+      "justification": "The probe module generally centralizes the workflow and reuses ensureGitWorkspace and verifyBaseGreen, but its workspace reporting catches publishableRepoPath failures and deliberately falls back to raw absolute workspace paths. That directly contradicts the goal-wide design invariant that every published or reported path must go through publishableRepoPath and never use a raw argument."
+    },
+    {
+      "key": "89fa495cee86",
+      "runId": "run-f3d47cf8-6d56-4c7b-85d1-fcfe185badef",
+      "rubricId": "cumulative_design_coherent",
+      "justification": "The cumulative diff mostly composes task parsing, probe execution, exports, and CLI presentation coherently, but the path-publication abstraction is internally contradicted: publishableRepoPath is called and then bypassed on error or equal results by restoring raw paths. This fallback is retained in the final design rather than enforcing the shared publication boundary, so the cumulative design is not fully coherent."
+    },
+    {
+      "key": "cc4c6bb4b88e",
+      "runId": "run-f3d47cf8-6d56-4c7b-85d1-fcfe185badef",
+      "rubricId": "design_serves_overall_goal",
+      "justification": "Although the change consistently applies `publishableRepoPath`, it removes the collision handling that kept the two reported workspace values distinct. The AC-1 result proves the resulting probe.json reports equal base and fix workspace values, undermining the overall requirement to provide mechanical evidence of isolated workspaces."
+    },
+    {
+      "key": "4e3be7aa51d2",
+      "runId": "run-f57c3f17-a3d7-4273-b62f-82beb8c63a03",
+      "rubricId": "design_serves_overall_goal",
+      "justification": "The render-site strategy is coherent and preserves the single accumulator and raw suite evidence, but renderCompletionReviewConcerns does not actually guarantee its documented strict character budget for arbitrary inputs. A single concern is returned intact without any length check, and the overflow path always returns the oldest and newest entries intact even when those entries alone exceed maxChars. Because the function accepts unrestricted strings, the completion-review rendering remains unbounded for those cases, contrary to the overall requirement that no rendered evidence-path string be unbounded."
+    }
+  ]
+}

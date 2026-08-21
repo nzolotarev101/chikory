@@ -1,0 +1,93 @@
+{
+  "meta": {
+    "what": "Hand-labelled objection pairs, read at the dogfood-164 review from the runs' own journals.",
+    "how": "Each pair cites two `key`s in objection-corpus.json. A POSITIVE is one complaint restated in different words by the same run; a HARD NEGATIVE is two genuinely different complaints raised by the SAME run under the SAME rubric id — the collision population a cross-run corpus can never contain (F-432).",
+    "incumbentMeasured": {
+      "recallOnPositives": "4/8",
+      "crossFamilyFalsePositiveRate": "1.53% (23 of 1501 pairs)",
+      "hardNegativeFalsePositives": "0/3"
+    },
+    "outOfScope": "Two pairs restate one complaint under DIFFERENT rubric ids (run-de555224 a51d6241745a/95e2cad7f49d and run-12dfe421 6e879fb414c7/f70eeacf14c3). `areMateriallySameObjections` gates on `a.id !== b.id` first and this WP does NOT change that gate — crossing it would need its own negative population over cross-id pairs. Recorded here so the next WP inherits the evidence, deliberately NOT graded."
+  },
+  "positives": [
+    {
+      "a": "af9a7595e61c",
+      "b": "f947341c6ad9",
+      "run": "run-75794008",
+      "why": "the decision still depends on hand-authored word lists — restated in a second vocabulary",
+      "incumbent": "SAME"
+    },
+    {
+      "a": "af9a7595e61c",
+      "b": "69f6adb8baab",
+      "run": "run-75794008",
+      "why": "same complaint, the list NAMES changed (BOILERPLATE/SYNONYMS -> META_TOKENS/DEFECT_CATEGORIES)",
+      "incumbent": "SAME"
+    },
+    {
+      "a": "f947341c6ad9",
+      "b": "69f6adb8baab",
+      "run": "run-75794008",
+      "why": "same complaint, different list names",
+      "incumbent": "SAME"
+    },
+    {
+      "a": "5b8436c48aa2",
+      "b": "f30a631a3ab4",
+      "run": "run-de555224",
+      "why": "the revised cap treats an absent/empty attempted-history as exhausted — restated",
+      "incumbent": "SAME"
+    },
+    {
+      "a": "69f6adb8baab",
+      "b": "9d9e95bfaf68",
+      "run": "run-75794008",
+      "why": "same vocabulary-dependence complaint; the second ALSO adds the `at` suffix point, so it is a superset restatement",
+      "incumbent": "DIFF"
+    },
+    {
+      "a": "f947341c6ad9",
+      "b": "9d9e95bfaf68",
+      "run": "run-75794008",
+      "why": "same complaint, superset restatement",
+      "incumbent": "DIFF"
+    },
+    {
+      "a": "af9a7595e61c",
+      "b": "9d9e95bfaf68",
+      "run": "run-75794008",
+      "why": "same complaint, superset restatement",
+      "incumbent": "DIFF"
+    },
+    {
+      "a": "54e35ee5823e",
+      "b": "be70df5ea03d",
+      "run": "run-75794008",
+      "why": "the standing concern upheld for the same reason, twice, on escalation_concerns_adjudicated",
+      "incumbent": "DIFF"
+    }
+  ],
+  "hardNegatives": [
+    {
+      "a": "20bf6b856aab",
+      "b": "6916a0bca6da",
+      "run": "run-75794008",
+      "why": "brittle numeric token rules (freq>=2, vocab>=6) vs the widened `at` stemming suffix over-stemming `format`/`compat` — different defects, different fixes",
+      "incumbent": "DIFF"
+    },
+    {
+      "a": "5be9cc13e184",
+      "b": "95e2cad7f49d",
+      "run": "run-de555224",
+      "why": "two parallel finding arrays selected inconsistently vs the cap being disabled for the primary caller",
+      "incumbent": "DIFF"
+    },
+    {
+      "a": "701734bf880a",
+      "b": "5b8436c48aa2",
+      "run": "run-de555224",
+      "why": "a suite regression (three review hits) vs the cap condition on empty attempted-history",
+      "incumbent": "DIFF"
+    }
+  ]
+}

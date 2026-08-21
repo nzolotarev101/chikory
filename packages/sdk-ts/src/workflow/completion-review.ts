@@ -9,7 +9,7 @@
  * and zero passes when the sealing verdict already covered the cumulative
  * diff (a first-verdict seal).
  */
-import { RUBRIC_PRE_EXISTING_SUITE_GREEN } from "../judge/rubric.js";
+import { DETERMINISTIC_RUBRIC_IDS, RUBRIC_PRE_EXISTING_SUITE_GREEN } from "../judge/rubric.js";
 import type { JudgeForm } from "../types.js";
 
 /** Initial review + one re-review after the bounded design-fix retry. */
@@ -654,13 +654,35 @@ export function decideCompletionReview(
 
 /**
  * Union the design objections the SEALING verdict raised with the ones the
- * completion review raised, deduped by rubric id, sealing-verdict-first.
+ * completion review raised, deduped by rubric id, sealing-verdict-first,
+ * with authoritative reconciliation for machine-settled (deterministic) rows.
  *
- * Without this the F-180 fix is only half wired: a first-verdict seal with a
- * failing rubric would fire the review, and then — if that second, independent
- * review came back clean — drop the original objection and seal, having paid an
- * extra judge pass to change nothing (the goal's trap C). Every objection
- * raised at seal time reaches the executor's brief.
+ * For LLM-judged design rows (e.g. `design_serves_overall_goal`,
+ * `cumulative_design_coherent`), the union is preserved (trap C / F-180):
+ * a second, independent review coming back clean must NOT silently drop an
+ * objection the sealing verdict raised.
+ *
+ * For deterministic rows (`DETERMINISTIC_RUBRIC_IDS`: `no_architecture_violations`,
+ * `no_secrets_introduced`, `pre_existing_suite_still_green`), the completion
+ * review measures the whole cumulative diff (run base -> final state) with
+ * deterministic code oracles, making its measurement authoritative:
+ *
+ * 1. Sealing FAIL, Review PASS:
+ *    The review re-measured the cumulative delivery and found no violation.
+ *    Any step-scoped finding (e.g. restoring a pre-existing import, or a temporary
+ *    step artifact reverted before completion) is acquitted, clearing the
+ *    sealing pass's FAIL for that same row.
+ *
+ * 2. Sealing PASS, Review FAIL:
+ *    The sealing pass passed (or measured only a localized step diff that missed
+ *    an earlier introduced violation), but the completion review re-measured the
+ *    full cumulative diff and found a deterministic violation. The review's FAIL
+ *    is authoritative and is included in the merged findings so the run does not
+ *    seal with a cumulative defect.
+ *
+ * 3. Both FAIL:
+ *    The deterministic finding failed on both passes and is included in the
+ *    merged findings.
  */
 export function mergeDesignFindings(
   sealingRubric: ReadonlyArray<RubricResult>,
@@ -668,11 +690,42 @@ export function mergeDesignFindings(
 ): RubricResult[] {
   const merged: RubricResult[] = [];
   const seen = new Set<string>();
-  for (const result of [...sealingRubric, ...reviewRubric]) {
-    if (result.pass || seen.has(result.id)) continue;
+
+  const reviewMap = new Map<string, RubricResult>();
+  for (const result of reviewRubric) {
+    reviewMap.set(result.id, result);
+  }
+
+  for (const result of sealingRubric) {
+    if (result.pass || seen.has(result.id)) {
+      continue;
+    }
+
+    if (DETERMINISTIC_RUBRIC_IDS.has(result.id)) {
+      const reviewResult = reviewMap.get(result.id);
+      if (reviewResult !== undefined && reviewResult.pass) {
+        // Acquitted! The completion review re-measured this deterministic row
+        // over the cumulative diff and found it passing. Clear the sealing FAIL.
+        seen.add(result.id);
+        continue;
+      }
+      seen.add(result.id);
+      merged.push(reviewResult && !reviewResult.pass ? reviewResult : result);
+      continue;
+    }
+
     seen.add(result.id);
     merged.push(result);
   }
+
+  for (const result of reviewRubric) {
+    if (result.pass || seen.has(result.id)) {
+      continue;
+    }
+    seen.add(result.id);
+    merged.push(result);
+  }
+
   return merged;
 }
 

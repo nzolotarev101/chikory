@@ -5,16 +5,16 @@ This is the complete operating manual for executing Phase 2+ work packages
 task spec for a WP (every field explained), how to launch, supervise, and
 recover a run, and how to land the result as a normal PR.
 
-**Status (2026-08-20, bounded — update discipline: REPLACE this block, ≤15 lines;
+**Status (2026-08-21, bounded — update discipline: REPLACE this block, ≤15 lines;
 displaced prose moves verbatim to [`PLAN-HISTORY.md`](PLAN-HISTORY.md); per-run detail:
 `docs/reports/`; queue + course correction: `plan.md` §6/§7).**
-🟢 **dogfood-163 / WP-645 + WP-646 (a crashed step cannot overwrite finished work) DELIVERED AND LANDED** — `run-12dfe421-7633-4199-9e3c-18bc32a410c5`, 2 steps, $0.2189/$20.00, 21m 52s, AC **3/3** re-run green, harvest byte-**IDENTICAL 10/10**, declared suite **1,788 passed** (baseline 1,782, floor 1,786) (`docs/reports/dogfood-163.md`).
-🔴 **…and the loop sealed it FAILED on evidence it had already retracted.** Judge pass #4 reported *"deterministic architecture scan found no layering violations"* with all 5 rubric rows green; 17 ms later the run sealed `completion review: deterministic rubric failure — no_architecture_violations`, with **4 of 6 steps and 98.9% of budget unspent**.
-🔴 **F-429 (§8) → WP-648** — a deterministic rubric row cannot be retracted. `mergeDesignFindings` (`packages/sdk-ts/src/workflow/completion-review.ts:665`) skips passing rows outright (`:672`), so the review's re-measurement on a WIDER diff can never clear the sealing pass's FAIL, and `sealFromRubricFails` (`packages/sdk-ts/src/workflow/agent-loop.ts:375`) seals FAILED with no appeal. The stale row also read as a repeated objection (`completion-review.ts:613`), so the anti-oscillation bound denied a grant for a finding already **fixed**.
-🔴 **F-430 (§8) → WP-649** — `scanDiffForLayeringViolations` (`packages/sdk-ts/src/judge/scan-layering.ts:93`) reads added lines only (`:100`) with no baseline, so RESTORING a line already on HEAD scores as a new forbidden edge. Measured over all 146 committed `src/**/*.ts`: **11 pre-existing forbidden lines in 6 files**, including `packages/sdk-ts/src/workflow/agent-loop.ts:47` — the file the campaign edits most.
-🟡 **F-428 (§8) recurred a 3rd time, now costed** — the goal forbade backgrounding a suite *verbatim*; step 1's entire summary is three "I have launched … I will wait" lines including the full declared suite, and it was killed at `606.7s` of a `600s` cap for 129 output tokens: **10m 7s of a 21m 52s run**. That churn is what F-430 turned into a fatal seal.
-**Standing lesson: a gate that cannot take yes for an answer is not a stricter gate.** It converts every true positive into a permanent one — a compounding-error mechanism inside the loop built to remove them. This is the 4th consecutive FAILED seal and the first that is not defensible: 160/161/162 failed on findings that were real and unfixed; 163 failed on one it had fixed and re-measured.
-**NEXT HEADLINE = `dogfood-164` / WP-648 + WP-649** — a deterministic gate must be able to clear its own re-measurement. Gate ✅ PROGRESSING (harness-meta 0/3, cap intact); P3 rung-5's remainder is still WP-304's operator-run benchmark arm. WP-644 + WP-647 slip to `dogfood-165`.
+🟢 **dogfood-164 / WP-648 + WP-649 (a quality gate must be able to take yes for an answer) DELIVERED AND LANDED** — `run-be874c29-6b55-4cb6-a9cc-9784170c64f5`, terminal **SUCCESS**, 1 step, $0.113/$20.00 (0.5%), 8m 8s, AC **3/3** re-run green, harvest byte-**IDENTICAL 5/5**, declared suite **1,806 passed** (baseline 1,788, floor 1,792) (`docs/reports/dogfood-164.md`). The 4-run FAILED streak is broken.
+🟢 **WP-648 is right as delivered** — a deterministic rubric row the completion review re-measures as PASS now clears the sealing pass's FAIL (`packages/sdk-ts/src/workflow/completion-review.ts:704`); the LLM-row union survives (trap C rejected); the reverse disagreement is decided in code; and the acquittal reaches the real seal (single call site `packages/sdk-ts/src/workflow/agent-loop.ts:1387` → `sealFromRubricFails` `:375`).
+🔴 **F-431 (§8) hand-fixed at the review — WP-649 bought its false-positive fix with a false negative.** The exoneration keyed on the layer-pair LABEL, so a genuinely new forbidden import went SILENT whenever another import of the same pair sat in the hunk as `git diff -U3` context. Measured on a real diff adding `../runner/worker.js` to `agent-loop.ts`: HEAD `["workflow→runner"]`, as-delivered `[]`. Blast radius over 158 `git ls-files` sources: **7 files, 12 lines**. Re-keyed on the resolved import PATH (`packages/sdk-ts/src/judge/scan-layering.ts:181`), 3 committed tests RED pre-fix.
+🟡 **F-432 (§8) → folded into WP-647** — the acceptance oracle graded a false-positive ceiling and a recall floor over the same enumerated corpus, but every recall case used one `X→cli` probe edge the corpus can never hold, so the two floors could never collide on the KEY the delivery suppresses on. **Enumerate the suppression KEY, not just the corpus.**
+🟡 **F-433 (§8, judge-KPI datum)** — judge pass #2 passed `design_serves_overall_goal` asserting the scanner was *"retaining detection of genuinely new edges"*, false for 7 of 158 files. Run scored **1 true positive** (a delivered test titled "full src/ corpus" that enumerates 9 hand-picked files) **and 1 false negative on its central semantics**.
+**Standing lesson: a fix that removes false positives must be graded on recall in the SAME check, on inputs where the suppressing evidence and the thing to be caught share the suppression key.** F-431 passed every one of its own ceiling cases and its own recall floor.
+**NEXT HEADLINE = `dogfood-165` / WP-644 + WP-647 — SPEC WRITTEN, ⛔ NOT LAUNCHABLE (armed RED 3/3, GREEN 0/3).** Five throwaway reference variants were measured; none clears the recall floor, the 1.67% cross-family ceiling and the 0/3 within-run collision ceiling at once — the binding constraint is a single hard-negative pair. Operator decision before launch: lower the recall floor to ≥6/8 with evidence, or re-examine that label. Gate ✅ PROGRESSING (harness-meta 0/3, cap intact); P3 rung-5's remainder is still WP-304's operator-run benchmark arm.
 
 Related docs: [`docs/spec/task-spec.md`](spec/task-spec.md) (schema
 reference) · [`docs/TASK-PROTOCOL.md`](TASK-PROTOCOL.md) (WP etiquette, §7 is
@@ -2311,3 +2311,58 @@ broken (a false-green, not a follow-on fix).
   violate its declared layer order — but a gate that condemns a step for not
   deleting a pre-existing violation is unsatisfiable by any step that touches the
   file. **A diff-scoped rule needs the pre-image, not an allowlist.**
+  ✅ **FIXED — dogfood-164 (WP-649), `packages/sdk-ts/src/judge/scan-layering.ts:35`.**
+
+- **🔴 A SUPPRESSION KEYED ONE LEVEL TOO COARSE IS A GATE WITH A HOLE IN IT** (F-431,
+  hand-fixed at the dogfood-164 review). WP-649's delivered fix gave the scanner the
+  diff's own pre-image and then keyed the exoneration on the **layer-pair label**
+  (`workflow→runner`) rather than on the **resolved import path**. Because `git diff`
+  emits 3 lines of context and imports cluster, a genuinely new forbidden import lands
+  in the same hunk as an existing one — which then arrives as a context line and
+  acquits it. Measured on a real `git diff` adding
+  `import { brandNewEscape } from "../runner/worker.js";` to
+  `packages/sdk-ts/src/workflow/agent-loop.ts`: HEAD reported `["workflow→runner"]`,
+  the delivery reported `[]`. Same hole for a diff that removes one forbidden import
+  and adds a different one of the same pair. Blast radius over `git ls-files
+  packages/sdk-ts/src` (158 files): **7 files carry a forbidden edge, 12 lines** —
+  `agent-loop.ts` (5), `executors/prompt.ts` (2), `judge/harness.ts`,
+  `planner/plan-repair.ts`, `runner.ts`, `runner/branch.ts`, `workflow/index.ts`.
+  Re-keyed on the resolved import path (`packages/sdk-ts/src/judge/scan-layering.ts:181`),
+  pinned by `packages/sdk-ts/test/judge/scan-layering.test.ts:308`/`:324`/`:337`.
+  **Rule: when a fix ADDS a suppression, name the key it suppresses on and ask what
+  else shares that key.** A label shared by 12 committed lines is not an identity.
+
+- **🟡 A RECALL FLOOR AND A FALSE-POSITIVE CEILING MUST BE ABLE TO COLLIDE** (F-432 →
+  WP-647, dogfood-164). Grading both floors in one check over one enumerated corpus is
+  necessary but not sufficient. dogfood-164's AC-1 ran both over every file `git
+  ls-files` reports — the FILE population was right — but every recall case appended the
+  same probe import, `src/cli/__ac1_probe_target.js`, while the recall corpus excludes
+  `src/cli/`. So every recall edge was `X→cli`, an edge no file's pre-image can hold, and
+  no case ever put suppressing evidence and a catchable violation on the same key. It
+  missed F-431 by six lines: `packages/sdk-ts/src/runner/branch.ts:9` does carry
+  `runner→cli`, the probe's own pair, but the recall diff's context window is the file's
+  first 3 lines. **Enumerate the suppression KEY, not just the corpus** — build at least
+  one negative where the exonerating evidence and the thing to be caught share it.
+
+- **🔴 AN ARMING TABLE MUST SCORE EACH COLUMN AGAINST ITS OWN EXPECTATION** (F-434, hand-fixed at
+  the dogfood-164 review). `scripts/dogfood-arm.sh` rendered both passes with one `cell()` that
+  treated **exit 1 as ✅**. Exit 1 is the PASS in the RED column and the FAILURE in the GREEN
+  column, so an AC whose green pass failed printed `✅ exit **1**` — and the "NOT verified in both
+  directions" warning tested only `r !== undefined && !brokenCheck`, never the exit code, so that
+  AC was left out of the warning as well. The table is what an operator reads before spending a
+  run, and it said "armed" for an AC that had just failed its green pass five times. Fixed by
+  passing the column's expected exit into both `cell(r, wantExit)` and `ok(r, wantExit)`
+  (`scripts/dogfood-arm.sh:141`, `:167`), verified in both directions: dogfood-165's state now
+  reports 0/3, and dogfood-164's stored genuine 3/3 still prints ✅ on all six cells.
+  **This is dogfood-133's lesson one column over** — and the comment warning against exactly this
+  sits directly above the bug (`scripts/dogfood-arm.sh:135`). When a checker encodes an
+  expectation, check that the expectation is PER CASE, not global.
+
+- **🟡 A JUDGE THAT READS A DIFF WILL AFFIRM THE PROPERTY THE DIFF INTENDS** (F-433,
+  dogfood-164). Judge pass #2 passed `design_serves_overall_goal` with *"The scanner
+  compares added forbidden edges against the same file's pre-image edges, retaining
+  detection of genuinely new edges."* Accurate about the code's intent, false about its
+  behaviour on 7 of 158 files. Both deterministic passes also reported "no layering
+  violations" — true, on a diff that introduced none. A judge reasoning from a diff
+  cannot discover an input family the diff does not instantiate; only a check that
+  DRIVES the function with that family can.

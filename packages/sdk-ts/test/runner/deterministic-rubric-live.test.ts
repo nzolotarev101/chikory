@@ -221,4 +221,137 @@ describe.skipIf(address === null)("WP-607: a machine-settled finding gates the s
       journal.close();
     }
   }, 180_000);
+
+  test("Scenario 4: Scenario A dogfood-163 replay — temporary violation and widened import restored on step 2 seals SUCCESS", async () => {
+    let stepCount = 0;
+    const wire = await startFakeJudgeWire(
+      [
+        judgeForm({ criteria: { "AC-1": true } }),
+        judgeForm({ criteria: { "AC-1": true } }),
+      ],
+      {
+        reviewForms: [
+          completionReviewForm({ rubricFails: [] }),
+        ],
+      },
+    );
+    cleanups.push(() => wire.close());
+
+    const tmp = await mkdtemp(join(tmpdir(), "chikory-det-rubric-"));
+    cleanups.push(() => rm(tmp, { recursive: true, force: true }));
+
+    const repoUrl = await initSourceRepo(join(tmp, "src"), {});
+    const srcWorkflow = join(tmp, "src", "src", "workflow");
+    await mkdir(srcWorkflow, { recursive: true });
+    await writeFile(
+      join(srcWorkflow, "agent-loop.ts"),
+      'import { advanceStrikeCount } from "../runner/strike-accounting.js";\nexport const loop = 1;\n',
+    );
+    const srcTypes = join(tmp, "src", "src");
+    await writeFile(join(srcTypes, "types.ts"), "export type Clean = string;\n");
+    const { execFile } = await import("node:child_process");
+    const { promisify } = await import("node:util");
+    const execFileAsync = promisify(execFile);
+    await execFileAsync("git", ["-C", join(tmp, "src"), "add", "-A"]);
+    await execFileAsync("git", ["-C", join(tmp, "src"), "commit", "-m", "seed initial"]);
+
+    const dataDir = join(tmp, "data");
+    const taskQueue = `tq-${randomUUID()}`;
+
+    const worker = await createRunnerWorker({
+      adapters: {
+        scripted: (ctx) => ({
+          name: "scripted",
+          modelFamily: "anthropic" as const,
+          async runStep(input) {
+            stepCount += 1;
+            if (stepCount === 1) {
+              await writeFile(
+                join(input.workspaceDir, "src/types.ts"),
+                'import type { X } from "./judge/harness.js";\nexport type Clean = X;\n',
+              );
+              await writeFile(
+                join(input.workspaceDir, "src/workflow/agent-loop.ts"),
+                'import { advanceStrikeCount, extra } from "../runner/strike-accounting.js";\nexport const loop = 1;\n',
+              );
+            } else {
+              await writeFile(join(input.workspaceDir, "src/types.ts"), "export type Clean = string;\n");
+              await writeFile(
+                join(input.workspaceDir, "src/workflow/agent-loop.ts"),
+                'import { advanceStrikeCount } from "../runner/strike-accounting.js";\nexport const loop = 1;\n',
+              );
+            }
+            const [diffRef, transcriptRef] = await Promise.all([
+              ctx.store.put(`step ${stepCount} diff`, { kind: "diff", summary: "diff" }),
+              ctx.store.put(`step ${stepCount} transcript`, { kind: "transcript", summary: "t" }),
+            ]);
+            return {
+              status: "SUCCESS" as const,
+              diffRef,
+              transcriptRef,
+              claimsComplete: true,
+              summary: `step ${stepCount}`,
+              toolCalls: 1,
+              tokens: { input: 100, output: 50 },
+              costUsd: 0.01,
+              costEstimated: false,
+              durationMs: 0,
+            };
+          },
+        }),
+      },
+      address: address!,
+      taskQueue,
+      dataDir,
+      workflowBundlePath: bundlePath!,
+      routerOptions: { baseUrls: { "openai-compat": wire.url } },
+    });
+    const workerDone = worker.run();
+    const runner = createTemporalRunner({ address: address!, taskQueue, dataDir });
+    cleanups.push(async () => {
+      worker.shutdown();
+      await workerDone;
+      await runner.close();
+    });
+
+    const handle = await runner.start(makeJudgedSpec({ repoUrl, cadence: 1, maxSteps: 4 }));
+    const report = await awaitTerminal(handle);
+
+    expect(report.status).toBe("SUCCESS");
+  }, 180_000);
+
+  test("Scenario 5: Scenario C — LLM-judged rubric row failing at sealing pass survives all-green completion review and is named in FAILED seal", async () => {
+    const wire = await startFakeJudgeWire(
+      [
+        judgeForm({
+          criteria: { "AC-1": true },
+          rubricFails: [RUBRIC_DESIGN_SERVES_OVERALL_GOAL],
+        }),
+      ],
+      {
+        reviewForms: [
+          completionReviewForm({ rubricFails: [] }),
+        ],
+      },
+    );
+    cleanups.push(() => wire.close());
+    const { repoUrl, dataDir, runner } = await setup(wire, CLEAN_IMPORT);
+
+    const handle = await runner.start(makeJudgedSpec({ repoUrl, cadence: 1, maxSteps: 1 }));
+    const report = await awaitTerminal(handle);
+
+    expect(report.status).toBe("FAILED");
+
+    const journal = new Journal(journalPath(dataDir, handle.runId));
+    try {
+      const terminal = journal.entries("terminal").at(-1)!.payload as {
+        status: string;
+        reason?: string;
+      };
+      expect(terminal.status).toBe("FAILED");
+      expect(terminal.reason).toContain(RUBRIC_DESIGN_SERVES_OVERALL_GOAL);
+    } finally {
+      journal.close();
+    }
+  }, 180_000);
 });

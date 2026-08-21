@@ -142,10 +142,18 @@ const cap = Number(process.env.CAP);
 const ids = [...new Set([...Object.keys(s.red ?? {}), ...Object.keys(s.green ?? {})])].sort();
 // dogfood-133: a BROKEN check exits 1 like a genuine RED. It must never render
 // as a verified direction — that is the failure mode that burns a run.
-const cell = (r) =>
+//
+// F-434 (dogfood-164 review): the expectation is PER COLUMN. A RED pass wants
+// exit 1; a GREEN pass wants exit 0, and exit 1 there means the AC did NOT pass
+// against the reference. Rendering both as ✅ told the operator an AC was
+// verified in both directions when its GREEN pass had failed — the same class
+// of miss as dogfood-133, one column over.
+const cell = (r, wantExit) =>
   !r ? "—"
     : r.brokenCheck ? `⛔ BROKEN (exit ${r.exit}), **${r.seconds}s**`
-    : `${r.exit === 1 ? "✅ exit **1**" : r.exit === 0 ? "✅ exit 0" : `⛔ exit ${r.exit}`}, **${r.seconds}s**`;
+    : r.exit === wantExit
+      ? `✅ exit **${r.exit}**, **${r.seconds}s**`
+      : `⛔ exit ${r.exit} (wanted ${wantExit}), **${r.seconds}s**`;
 console.log("| AC | RED on HEAD | GREEN vs reference | % of 120 s cap |");
 console.log("|---|---|---|---|");
 let worst = 0;
@@ -153,12 +161,12 @@ for (const id of ids) {
   const red = s.red?.[id], green = s.green?.[id];
   const secs = Math.max(red?.seconds ?? 0, green?.seconds ?? 0);
   worst = Math.max(worst, secs);
-  console.log(`| ${id} | ${cell(red)} | ${cell(green)} | ${Math.round((secs / cap) * 100)} % |`);
+  console.log(`| ${id} | ${cell(red, 1)} | ${cell(green, 0)} | ${Math.round((secs / cap) * 100)} % |`);
 }
 console.log();
 console.log(`Worst case **${worst}s = ${Math.round((worst / cap) * 100)}% of the ${cap}s judge cap**.`);
-const ok = (r) => r !== undefined && r.brokenCheck !== true;
-const missing = ids.filter((id) => !ok(s.red?.[id]) || !ok(s.green?.[id]));
+const ok = (r, wantExit) => r !== undefined && r.brokenCheck !== true && r.exit === wantExit;
+const missing = ids.filter((id) => !ok(s.red?.[id], 1) || !ok(s.green?.[id], 0));
 if (missing.length) {
   console.log();
   console.log(`⚠️  NOT verified in both directions: ${missing.join(", ")} — an AC proven one way, or whose check DIED instead of judging, may be unsatisfiable. Do not launch on it.`);

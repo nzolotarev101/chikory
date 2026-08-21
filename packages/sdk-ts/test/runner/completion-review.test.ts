@@ -285,6 +285,58 @@ describe("mergeDesignFindings (trap C: the sealing objection must survive a clea
     } as unknown as JudgeForm);
     expect(brief).toContain("design_serves_overall_goal is unsound");
   });
+
+  it("clears a deterministic rubric failure when completion review re-measures as PASS", () => {
+    const merged = mergeDesignFindings(
+      [fail("no_architecture_violations")],
+      [pass("no_architecture_violations")],
+    );
+    expect(merged).toEqual([]);
+  });
+
+  it("clears no_secrets_introduced and pre_existing_suite_still_green when review re-measures as PASS", () => {
+    const merged = mergeDesignFindings(
+      [fail("no_secrets_introduced"), fail("pre_existing_suite_still_green")],
+      [pass("no_secrets_introduced"), pass("pre_existing_suite_still_green")],
+    );
+    expect(merged).toEqual([]);
+  });
+
+  it("fails a deterministic rubric row when completion review fails it, even if sealing passed", () => {
+    const merged = mergeDesignFindings(
+      [pass("no_architecture_violations")],
+      [fail("no_architecture_violations")],
+    );
+    expect(merged.map((r) => r.id)).toEqual(["no_architecture_violations"]);
+  });
+
+  it("keeps deterministic failure when both sealing pass and completion review fail it", () => {
+    const merged = mergeDesignFindings(
+      [fail("no_architecture_violations")],
+      [fail("no_architecture_violations")],
+    );
+    expect(merged.map((r) => r.id)).toEqual(["no_architecture_violations"]);
+  });
+
+  it("acquits deterministic row while keeping LLM-judged design objection when review is otherwise clean", () => {
+    const merged = mergeDesignFindings(
+      [fail("no_architecture_violations"), fail("design_serves_overall_goal")],
+      [pass("no_architecture_violations"), pass("design_serves_overall_goal")],
+    );
+    expect(merged.map((r) => r.id)).toEqual(["design_serves_overall_goal"]);
+  });
+
+  it("unions LLM-judged findings and adopts authoritative deterministic review failure", () => {
+    const merged = mergeDesignFindings(
+      [fail("design_serves_overall_goal"), pass("no_architecture_violations")],
+      [fail("cumulative_design_coherent"), fail("no_architecture_violations")],
+    );
+    expect(merged.map((r) => r.id)).toEqual([
+      "design_serves_overall_goal",
+      "cumulative_design_coherent",
+      "no_architecture_violations",
+    ]);
+  });
 });
 
 describe("buildCompletionReviewBrief", () => {
