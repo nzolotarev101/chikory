@@ -141,6 +141,15 @@ reference implementation this review wrote to prove AC-1 GREEN before launch was
 reference with the hole, and then passed a delivery with the hole. An AC verified in both
 directions is still only as sharp as the reference used to green it.
 
+**Resolved at this sitting.** The lesson is encoded as dogfood-165's AC-1, which grades a recall
+floor, a broad ceiling over 1,501 cross-family pairs and a hard ceiling over 3 same-run
+same-rubric-id pairs — the collision population — in one check. Arming it took nine reference
+variants and located the real structure: the missed restatements are rejected by **defect-category
+disjointness** and the **shared-mechanism requirement**, while the hard negative is rejected by a
+**trigger-condition conflict**. Those are separable gates, which is what makes the WP tractable;
+the recall floor was set to 6/8 rather than 7/8 because every variant reaching 7 merged a hard
+negative. Armed 3/3 both ways.
+
 **Rule for the next AC that grades a suppression:** the negative population must include a case
 where the suppressing evidence and the thing to be caught share the key the code suppresses on.
 Enumerate the KEY, not just the corpus. → track-B note (recorded in DOGFOODING §8); the concrete

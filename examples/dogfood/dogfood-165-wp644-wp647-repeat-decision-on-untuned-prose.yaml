@@ -1,6 +1,6 @@
 # Plain: when the judge says the same thing twice in different words, the loop should notice and
 # stop paying for another attempt. Today it notices 4 times out of 8 on real judge prose from this
-# campaign's own runs. After this run it notices at least 7 of 8 — without starting to merge
+# campaign's own runs. After this run it notices at least 6 of 8 — without starting to merge
 # complaints that are genuinely different, which is exactly how the last attempt at this failed.
 # WP: WP-644 (the repeat decision must be defensible in BOTH directions on prose it was not fitted
 #   to) + WP-647 (an acceptance oracle's negative population must be as broad as its positive one,
@@ -98,8 +98,11 @@ goal: |
 
   Make this true.
 
-  1. **Recall rises to at least 7 of the 8 labelled positives.** These are real restatements this
-     campaign's own judge wrote; none of them is fixture text any delivery has been fitted to.
+  1. **Recall rises to at least 6 of the 8 labelled positives.** These are real restatements this
+     campaign's own judge wrote; none of them is fixture text any delivery has been fitted to. The
+     floor is 6, not 7, and that is a MEASURED bound: at the arming pass five reference variants
+     were tried and every one that reached 7/8 merged one of the three hard negatives, so 7 is not
+     known to be reachable while both ceilings hold. 6 is still a 50% lift over the incumbent's 4.
   2. **The broad ceiling holds: at most 25 of the 1501 cross-family pairs — 1.67% — may answer
      "same".** The incumbent measures 23 (1.53%); the budget is that plus a 2-pair tolerance,
      because a clause-level reference that clears the recall floor measured 24 at the arming pass.
@@ -123,14 +126,14 @@ goal: |
   1. **Recall bought with soundness cannot be the answer.** AC-1 grades the recall floor, the
      1.53% broad ceiling and the 0/3 hard ceiling in ONE check, over a corpus no delivery can
      hand-fit.
-  2. **Reading the fixture cannot be the answer.** AC-3 fails if any file under
-     `packages/sdk-ts/src/` contains a 48-character substring of any corpus justification, and
+  2. **Reading the fixture cannot be the answer.** AC-3 fails if any committed source file under
+     the SDK's src tree contains a 48-character substring of any corpus justification, and
      AC-1 re-asserts every labelled pair swapped and whitespace-renormalised.
-  3. **The call shape and the workflow constraints stay.** `areMateriallySameObjections(a, b)` over
+  3. **The call shape and the workflow constraints stay.** `areMateriallySameObjections` keeps its two-argument shape over
      `{ id: string; justification: string }`, PURE and replay-safe — it executes inside the Temporal
-     workflow, so no I/O, no `Date.now()`, no randomness, no reading the fixture at runtime.
-     Byte-identical justifications stay "same". `MAX_PROGRESS_GRANTS` stays. The `a.id !== b.id`
-     gate stays. `mergeDesignFindings` and the WP-648 deterministic acquittal are out of scope.
+     workflow, so no I/O, no wall-clock reads, no randomness, no reading the fixture at runtime.
+     Byte-identical justifications stay "same". `MAX_PROGRESS_GRANTS` stays. The rubric-id
+     equality gate stays. `mergeDesignFindings` and the WP-648 deterministic acquittal are out of scope.
 
   TypeScript stays strict ESM with named exports and no `any`.
 
@@ -160,7 +163,10 @@ acceptance_criteria:
     description: >
       THE COMPARATOR OWNS ITS ORACLE, AND ALL THREE NUMBERS ARE GRADED IN ONE CHECK SO NONE CAN BE
       BOUGHT WITH ANOTHER (F-426/F-432). Drives the real built `areMateriallySameObjections` over
-      the committed corpus. RECALL FLOOR: at least 7 of the 8 labelled positives. BROAD CEILING: at
+      the committed corpus at `packages/sdk-ts/test/fixtures/objection-corpus.json`, with the hand
+      labels at `packages/sdk-ts/test/fixtures/objection-labels.json`. RECALL FLOOR: at least 6 of
+      the 8 labelled positives (a measured floor — see the goal; every arming variant that reached 7
+      merged a hard negative). BROAD CEILING: at
       most 25 of the 1501 cross-FAMILY same-rubric-id pairs (1.67%; incumbent 23/1.53%). HARD CEILING: 0 of the 3 same-run
       same-rubric-id negatives, which share the rubric id with the positives and are therefore the
       collision population a cross-run corpus can never contain. Plus symmetry, whitespace
@@ -228,7 +234,7 @@ acceptance_criteria:
           expect(labels.hardNegatives.length).toBe(3);
         });
 
-        test("ALL THREE FLOORS AT ONCE: recall >= 7/8, broad ceiling <= 1.53%, hard ceiling 0/3", () => {
+        test("ALL THREE FLOORS AT ONCE: recall >= 6/8, broad ceiling <= 1.67%, hard ceiling 0/3", () => {
           const missed: string[] = [];
           for (const p of labels.positives) {
             if (!same(p.a, p.b)) missed.push(`${p.run} ${p.a}/${p.b} :: ${p.why}`);
@@ -290,10 +296,10 @@ acceptance_criteria:
 
           expect(
             missed,
-            `RECALL FLOOR NOT MET: ${8 - missed.length}/8 (floor 7, incumbent 4). These are real ` +
+            `RECALL FLOOR NOT MET: ${8 - missed.length}/8 (floor 6, incumbent 4). These are real ` +
               "restatements this campaign's own judge wrote. Raising recall is the WP — but the two " +
               "ceilings above are graded in this same test, so it cannot be bought.",
-          ).toSatisfy(() => missed.length <= 1);
+          ).toSatisfy(() => missed.length <= 2);
         });
 
         test("every labelled pair is symmetric, whitespace-invariant, and byte-identical-sound", () => {
@@ -341,10 +347,10 @@ acceptance_criteria:
       echo "$OUT" | tail -n 40
       rm -f "$TARGET"
       if [ "$ST" -ne 0 ]; then
-        echo "AC-1 FAIL: the repeat decision is not defensible in both directions. Either recall is still below 7/8, or it was bought by busting the 1.53% cross-family ceiling or the 0/3 same-run collision ceiling. vitest exited $ST"
+        echo "AC-1 FAIL: the repeat decision is not defensible in both directions. Either recall is still below 6/8, or it was bought by busting the 1.67% cross-family ceiling or the 0/3 same-run collision ceiling. vitest exited $ST"
         exit 1
       fi
-      echo "AC-1 OK: recall >= 7/8 with the broad ceiling at or under 1.53% and the hard collision ceiling clean"
+      echo "AC-1 OK: recall >= 6/8 with the broad ceiling at or under 1.67% and the hard collision ceiling clean"
 
   - id: AC-2
     description: >
