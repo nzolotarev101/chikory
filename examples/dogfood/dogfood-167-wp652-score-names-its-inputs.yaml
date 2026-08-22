@@ -147,7 +147,7 @@ goal: |
   tokens — 34% of that run's wall clock and 14% of its spend, for nothing. It was the fourth run in
   a row to do this after being told not to (F-421/F-345/F-428/F-444). Run each verification command
   in the foreground and read its output. Do NOT run a benchmark arm and do NOT run
-  `chikory-bench probe` — it clones and installs real repositories.
+  chikory-bench probe — it clones and installs real repositories.
 
 repos:
   - url: /Users/nikitazolotarev/repos/chikory
@@ -174,7 +174,8 @@ acceptance_criteria:
       ROOT="$(git rev-parse --show-toplevel)"
       W="$(mktemp -d)"
       trap 'rm -rf "$W"' EXIT
-      fails=""
+      FAILS="$W/fails"
+      : > "$FAILS"
 
       run_validate() { ( cd "$ROOT/benchmarks/harness" && pnpm run bench validate "$1" ) 2>&1; }
 
@@ -182,8 +183,7 @@ acceptance_criteria:
       CTRL="$(run_validate "$ROOT/benchmarks/tasks")"; CTRL_ST=$?
       echo "$CTRL" | tail -n 4
       if [ "$CTRL_ST" -ne 0 ]; then
-        fails="$fails
-- CONTROL FAILED: the committed corpus no longer validates. Every refusal below can be bought by refusing everything; this is the check that stops that."
+        echo "- CONTROL FAILED: the committed corpus no longer validates. Every refusal below can be bought by refusing everything; this is the check that stops that." >> "$FAILS"
       fi
 
       echo "== (a) UNPROBED: a scored requirement the ledger has never seen =="
@@ -202,11 +202,9 @@ acceptance_criteria:
       UNP="$(run_validate "$W/unprobed")"; UNP_ST=$?
       echo "$UNP" | tail -n 6
       if [ "$UNP_ST" -eq 0 ]; then
-        fails="$fails
-- (a) UNPROBED WAS ADMITTED (exit 0). brownfield-004 R5 is declared SCORED and the committed ledger has no entry for it. The scorer already refuses this task outright (denominator 5 -> 4, verified tasks 4 -> 3); validate must say so FIRST. Growing the corpus is the whole point of this rung — today it shrinks the published number."
+        echo "- (a) UNPROBED WAS ADMITTED (exit 0). brownfield-004 R5 is declared SCORED and the committed ledger has no entry for it. The scorer already refuses this task outright (denominator 5 -> 4, verified tasks 4 -> 3); validate must say so FIRST. Growing the corpus is the whole point of this rung — today it shrinks the published number." >> "$FAILS"
       elif ! printf %s "$UNP" | grep -q "brownfield-004" || ! printf %s "$UNP" | grep -q "R5"; then
-        fails="$fails
-- (a) UNPROBED was refused but NOT NAMED. The message must carry both the task id (brownfield-004) and the requirement id (R5); an author cannot act on an unnamed refusal."
+        echo "- (a) UNPROBED was refused but NOT NAMED. The message must carry both the task id (brownfield-004) and the requirement id (R5); an author cannot act on an unnamed refusal." >> "$FAILS"
       fi
 
       echo "== (b) DEMOTED: a ledger-discriminating requirement declared kind: guard =="
@@ -223,11 +221,9 @@ acceptance_criteria:
       DEM="$(run_validate "$W/demoted")"; DEM_ST=$?
       echo "$DEM" | tail -n 6
       if [ "$DEM_ST" -eq 0 ]; then
-        fails="$fails
-- (b) DEMOTED WAS ADMITTED (exit 0). brownfield-003 R2 is classified discriminating in benchmarks/results/discrimination.json and is declared a guard. The label is a claim and the ledger is the measurement — disagreement is disagreement in BOTH directions. Measured cost of admitting it: the 95% interval floor drops 56.6% to 51.0% with no signal."
+        echo "- (b) DEMOTED WAS ADMITTED (exit 0). brownfield-003 R2 is classified discriminating in benchmarks/results/discrimination.json and is declared a guard. The label is a claim and the ledger is the measurement — disagreement is disagreement in BOTH directions. Measured cost of admitting it: the 95% interval floor drops 56.6% to 51.0% with no signal." >> "$FAILS"
       elif ! printf %s "$DEM" | grep -q "R2"; then
-        fails="$fails
-- (b) DEMOTED was refused but the requirement (R2) is not named in the output."
+        echo "- (b) DEMOTED was refused but the requirement (R2) is not named in the output." >> "$FAILS"
       fi
 
       echo "== (c) INCUMBENT: scored-but-non-discriminating still refuses =="
@@ -244,12 +240,12 @@ acceptance_criteria:
       INCO="$(run_validate "$W/incumbent")"; INCO_ST=$?
       echo "$INCO" | tail -n 6
       if [ "$INCO_ST" -eq 0 ]; then
-        fails="$fails
-- (c) REGRESSION: the incumbent refusal stopped firing. A requirement declared scored that the ledger classifies non-discriminating was admitted; WP-651 built that refusal and this run may not trade it away."
+        echo "- (c) REGRESSION: the incumbent refusal stopped firing. A requirement declared scored that the ledger classifies non-discriminating was admitted; WP-651 built that refusal and this run may not trade it away." >> "$FAILS"
       fi
 
-      if [ -n "$fails" ]; then
-        echo "AC-1 FAIL:$fails"
+      if [ -s "$FAILS" ]; then
+        echo "AC-1 FAIL:"
+        cat "$FAILS"
         exit 1
       fi
       echo "AC-1 OK: unprobed refused and named, demoted refused and named, incumbent intact, the real corpus still clean"

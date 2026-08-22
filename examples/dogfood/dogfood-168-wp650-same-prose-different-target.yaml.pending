@@ -1,9 +1,11 @@
+# RENUMBERED 167 -> 168 at the dogfood-166 review (2026-08-22): the progression gate stayed
+# bound to the P3 ladder rung, so dogfood-167 is WP-652 and this spec parks one slot further.
 # PARKED 2026-08-22 (dogfood-165 review). ARMED 3/3 BOTH WAYS against `b5eee63` — AC-1 RED 3s /
 # GREEN 2s · AC-2 RED 1s / GREEN 2s · AC-3 RED 106s / GREEN 93s (88% of the 120s judge cap, 59% of
 # this spec's 180s check_timeout_ms). Parked because the progression gate flipped to ⛔ STALLED when
 # dogfood-165's ledger row landed, which binds the next headline to the P3 ladder rung (dogfood-166,
 # WP-651). BEFORE LAUNCHING: re-measure AC-3's suite floor — it is 1819 against a 1815 baseline, and
-# dogfood-166 will move that baseline.
+# dogfood-166 moved it to 1815 and dogfood-167 will move it again.
 # Plain: when the judge complains about two DIFFERENT pieces of code in the same words, the loop
 # currently thinks it has been told the same thing twice — 60 times out of 120, on complaints built
 # from this campaign's own judge prose. It then refuses to pay for the second repair. After this run
@@ -69,7 +71,7 @@
 #     workflow — no I/O, no clock, no randomness, no reading a fixture at runtime), and
 #     byte-identical justifications must stay "same". `MAX_PROGRESS_GRANTS` stays.
 
-name: dogfood-167-wp650-same-prose-different-target
+name: dogfood-168-wp650-same-prose-different-target
 wp: WP-650
 
 goal: |

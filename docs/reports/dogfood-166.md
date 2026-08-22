@@ -301,7 +301,22 @@ definitions it was scored against.**
 **AC arming evidence** — every check re-run by `scripts/dogfood-arm.sh`, which runs
 VERIFY-SUITE checks the launch preflight will not dry-run:
 
-ARMING_TABLE_PLACEHOLDER
+| AC | RED on HEAD | GREEN vs reference | % of 120 s cap |
+|---|---|---|---|
+| AC-1 | ✅ exit **1**, **3s** | ✅ exit **0**, **3s** | 3 % |
+| AC-2 | ✅ exit **1**, **3s** | ✅ exit **0**, **3s** | 3 % |
+| AC-3 | ✅ exit **1**, **4s** | ✅ exit **0**, **10s** | 8 % |
+
+**Armed 3/3 both ways. Worst check 10 s = 8% of the 120 s judge cap.** All three
+are classed VERIFY-SUITE (they shell into `pnpm`/`vitest`/`tsc`), so
+`scripts/dogfood.sh` will NOT dry-run them — every one was run by hand in both
+directions by `dogfood-arm.sh`.
+
+Each RED prints its own assertion text, not a death signature:
+
+- **AC-1** — `(a) UNPROBED WAS ADMITTED (exit 0)` and `(b) DEMOTED WAS ADMITTED (exit 0)`. Sub-cases (c) INCUMBENT and (d) CONTROL are already correct on HEAD and stayed silent, so the RED comes only from the new work. Against the reference all four behave: `UNPROBED brownfield-004 R5: … the discrimination ledger has no entry for it`, `MISLABEL brownfield-003 R2: declared guard but discrimination ledger classifies it as discriminating`, the incumbent `MISLABEL brownfield-004 R1` still fires, and the real corpus prints `5 valid, 0 invalid`.
+- **AC-2** — `THE SUMMARY DOES NOT NAME THE TASK DEFINITIONS IT SCORED AGAINST` (the check passes `--tasks` at a **temp** path, so a hardcoded `"benchmarks/tasks"` cannot satisfy it) and `A SILENT ZERO … resummarize exited 0 and published "0/0 verified requirements satisfied, I-SR 0.0%"`.
+- **AC-3** — `the resummarize usage entry does not document the flag that selects the task definitions`. Note the clause is scoped to the `resummarize` block of `USAGE`: a bare grep for the flag is **green on HEAD** because `probe` and `run` already document it (F-436's lesson). The suite floor (236 vs a measured baseline of 232) is AC-3's second, independent RED source.
 
 ```sh
 devbox run -- bash scripts/dogfood.sh --run
