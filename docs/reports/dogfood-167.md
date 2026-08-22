@@ -268,17 +268,21 @@ reviewer in the dependency tree.**
 |---|---|---|---|
 | AC-1 | ✅ exit **1**, **1s** | ✅ exit **0**, **1s** | 1 % |
 | AC-2 | ✅ exit **1**, **0s** | ✅ exit **0**, **1s** | 1 % |
-| AC-3 | ✅ exit **1**, **0s** | VERIFY-SUITE — see below | 0 % |
+| AC-3 | ✅ exit **1**, **0s** | ✅ exit **0**, **82s** | 68 % |
+
+Worst case **82 s = 68 % of the 120 s judge cap**; the spec sets `check_timeout_ms: 420000`.
 
 AC-1 and AC-2 are verified in **both** directions against a throwaway reference implementation
 (an ignored-file sweep with a standing exclusion list and a byte budget, applied to both branches),
 which was reverted by name afterwards — `git diff` over
 `packages/sdk-ts/src/judge/evidence.ts` is empty. Their RED output is genuine, not a died-before-
 judging exit: it prints the check's own assertion text (`(a) SINGLE-ROOT: the evidence never names
-results/fabricated.json`). AC-3 is the VERIFY-SUITE criterion the preflight does not dry-run; it
-was hand-run and its non-suite half (the `benchmarks/` freeze trap, the `collectPerRepoDiffs`
-export, the WP-589 half (1) pins) is exercised, with the declared SDK suite floor set at **1819**
-over a **measured 1815** baseline (71.9 s wall clock, `check_timeout_ms: 420000`).
+results/fabricated.json`). AC-3 is the VERIFY-SUITE criterion the preflight does not dry-run, so it was hand-run in **both**
+directions after this review's own commit landed (its `benchmarks/` freeze trap correctly tripped
+on the uncommitted F-446 fix beforehand): RED exit 1, then GREEN exit 0 in **82 s** against a
+reference that also added 4 committed tests — `committed SDK tests passing: 1819 (floor 1819,
+measured baseline 1815)`. The reference implementation and its test file were reverted by name;
+`git status --short` is empty.
 
 ⚠️ Arming this spec surfaced **F-451**, hand-fixed this sitting: the launch preflight's AC dry-run
 flattened every check with `.replace(/\s+/g, " ")` before executing it
