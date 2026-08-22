@@ -544,6 +544,17 @@ acceptance_criteria:
       fi
       echo "AC-3 OK: strict typecheck and lint green, corpus not quoted in src, out-of-scope surfaces intact, DECLARED suite green AND larger"
 
-max_steps: 6
 budget_usd: 20
-escalation: seal_resumable_failed
+max_steps: 6
+
+agent_classes:
+  executor: executor-default
+  judge: judge-default
+
+judge:
+  cadence: 1
+
+# F-322 (dogfood-135): without this, a converged out-of-rubric escalation parks overnight for a
+# human instead of auto-sealing.
+unattended:
+  escalation: seal_resumable_failed

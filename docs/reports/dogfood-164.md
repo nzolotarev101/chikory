@@ -198,6 +198,45 @@ expected exit (`scripts/dogfood-arm.sh:141`, `:167`). Verified both ways: the do
 now reports 0/3 verified, and re-rendering dogfood-164's own stored state — a genuine 3/3 — still
 prints ✅ on all six cells with no warning.
 
+### F-435 🔴 — the $0 preflight could not see a spec that does not parse
+
+Found by launching, not by reviewing. `devbox run run-dogfood` on the armed dogfood-165 spec ran
+the progression report, the spec lint, the SDK rebuild, an ephemeral Temporal server and the
+`cli-judge-proxy`, then died before step 1:
+
+```
+chikory: Invalid task spec:
+  - judge: Required
+  - (root): Unrecognized key(s) in object: 'escalation'
+```
+
+**The spec was mine** — I hand-wrote its tail during this review and omitted the `judge:` block,
+put `escalation:` at the root instead of under `unattended:`, and omitted `agent_classes:`
+entirely. That third one had not even been reported yet: with neither `agent_classes` nor an
+`executor:` block there is **no default** (`packages/sdk-ts/src/taskspec.ts:401`), so it would
+have failed the next launch too.
+
+**The defect is that preflight passed it.** `CHIKORY_PREFLIGHT_ONLY=1` printed
+`✅ Preflight OK … spec lint, AC dry-run, env contract, window sizing, and agent class liveness
+all pass` (`scripts/dogfood.sh:321`) for a spec that cannot launch. Every guard in that script
+reads the spec with awk/grep; `parseTaskSpec` appeared only in a comment
+(`scripts/dogfood.sh:140`). That comment is the tell — step 1c-ter reimplements the routed-provider
+KEY contract in awk *specifically* because the real refusal comes too late, and it says so. Nobody
+can reimplement zod the same way, so the schema half stayed uncovered. Preflight even printed the
+symptom, `[probe] … names no agent_classes — nothing to probe`, and treated it as informational.
+
+**Hand-fixed this sitting.** New `scripts/preflight-parse-spec.mjs` runs the real `parseTaskSpec`
+before the preflight-only exit (`scripts/dogfood.sh:329`), neutralising two ordering artifacts:
+`OPENAI_COMPAT_BASE_URL` (which the launcher itself exports later, at step 4) and a missing
+`dist/` (the preflight runs before the rebuild by design — warn and skip, the same convention the
+WP-257 literal lint uses). Verified in both directions end-to-end: broken spec on disk → exit 4
+with the parser's own two messages and no `Preflight OK`; fixed spec → exit 0.
+
+Pinned by 4 new cases in `scripts/test-dogfood-ac-preflight.sh` (24/24 green). The 7 pre-existing
+fixtures are deliberately minimal probes of one guard each and were never whole specs, so they
+opt out via `CHIKORY_ALLOW_UNPARSEABLE_SPEC=1` exported at the top of that file — exactly the
+pattern `CHIKORY_ALLOW_LOW_DISK=1` already uses two lines above.
+
 ## Friction disposition
 
 | F-n | severity | defect | disposition |
@@ -206,6 +245,7 @@ prints ✅ on all six cells with no warning.
 | F-432 | 🟡 | AC-1's recall probe is always an `X→cli` edge, so ceiling and recall cases can never collide on the key the code suppresses on | **track-B note** — DOGFOODING §8 rule; regression pinned by F-431's tests |
 | F-433 | 🟡 | judge passed `design_serves_overall_goal` asserting "retaining detection of genuinely new edges" — false for 7 files | **track-B note** — covered by the standing input-family rule; logged as a judge-KPI datum |
 | F-434 | 🔴 | the arming table printed ✅ for a GREEN pass that exited 1, and left that AC out of the "not verified" warning — it reads "armed" for an AC that failed | **HAND-FIXED THIS SITTING** — `scripts/dogfood-arm.sh:141`, `:167` now take the column's expected exit; verified both ways against dogfood-165 (0/3) and dogfood-164's stored 3/3 state |
+| F-435 | 🔴 | a `$0` preflight printed `✅ Preflight OK` for a spec that fails schema validation; the launch died after the rebuild, Temporal and the proxy were up | **HAND-FIXED THIS SITTING** — `scripts/preflight-parse-spec.mjs` runs the real `parseTaskSpec` at `scripts/dogfood.sh:329`; 4 new cases in `scripts/test-dogfood-ac-preflight.sh` (24/24 green), verified both directions end-to-end |
 
 ## Verdict on the thesis
 

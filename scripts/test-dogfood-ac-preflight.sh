@@ -17,6 +17,11 @@ trap 'rm -rf "$TMPDIR_FIXTURES"' EXIT
 # here and driven explicitly by its own cases at the bottom of this file.
 export CHIKORY_ALLOW_LOW_DISK=1
 
+# F-435: same reasoning for the spec-schema gate. Every fixture below is a minimal
+# probe of ONE guard, not a whole TaskSpec — the schema is not the property under
+# test, so the gate is neutered here and driven by its own cases at the bottom.
+export CHIKORY_ALLOW_UNPARSEABLE_SPEC=1
+
 FAILURES=0
 check() { # <name> <expected-exit> <actual-exit>
   if [ "$3" -eq "$2" ]; then
@@ -214,6 +219,67 @@ else
   echo "FAIL: the disk gate did not apply the --chain floor of 40 GiB"
   FAILURES=$((FAILURES + 1))
 fi
+
+# ── F-435: the spec-schema gate ─────────────────────────────────────────────
+# dogfood-165 shipped with `escalation:` at the root and no `judge:` block, passed a
+# green preflight, and died in `chikory run` AFTER the rebuild, Temporal and the proxy
+# were up. The launcher's other guards read the spec with awk/grep and cannot
+# reimplement zod, so the schema went unchecked until it cost a launch.
+#
+# `allow_same_family` is set only because this fixture routes both stages at the same
+# keyless provider; it is not part of what the gate is being tested for.
+cat > "$TMPDIR_FIXTURES/schema-valid.yaml" <<'EOF'
+name: fixture-schema-gate
+goal: >
+  Deliver an outcome whose only AC is absent on HEAD, so the launch reaches the
+  schema gate rather than being refused earlier.
+acceptance_criteria:
+  - id: AC-1
+    description: net-new symbol absent on HEAD
+    check: grep -rq 'thisSymbolDoesNotExistAnywhereOnHead' packages/sdk-ts/src/
+repos:
+  - url: .
+    writable: true
+budget_usd: 1
+executor:
+  adapter: native
+  family: openai-compat
+judge:
+  family: openai-compat
+  cadence: 1
+  allow_same_family: true
+EOF
+
+# The exact shape that cost the dogfood-165 launch: no `judge:` block, and
+# `escalation:` at the root instead of under `unattended:`.
+sed -e '/^judge:/,$d' "$TMPDIR_FIXTURES/schema-valid.yaml" > "$TMPDIR_FIXTURES/schema-broken.yaml"
+printf 'escalation: seal_resumable_failed\n' >> "$TMPDIR_FIXTURES/schema-broken.yaml"
+
+env -u CHIKORY_ALLOW_UNPARSEABLE_SPEC CHIKORY_PREFLIGHT_ONLY=1 \
+  bash scripts/dogfood.sh --run "$TMPDIR_FIXTURES/schema-valid.yaml" >/dev/null 2>&1
+check "the schema gate passes a spec that parses (F-435)" 0 $?
+
+env -u CHIKORY_ALLOW_UNPARSEABLE_SPEC CHIKORY_PREFLIGHT_ONLY=1 \
+  bash scripts/dogfood.sh --run "$TMPDIR_FIXTURES/schema-broken.yaml" >/dev/null 2>&1
+check "the schema gate refuses a spec that does not parse, at \$0 (F-435)" 4 $?
+
+CHIKORY_ALLOW_UNPARSEABLE_SPEC=1 CHIKORY_PREFLIGHT_ONLY=1 \
+  bash scripts/dogfood.sh --run "$TMPDIR_FIXTURES/schema-broken.yaml" >/dev/null 2>&1
+check "CHIKORY_ALLOW_UNPARSEABLE_SPEC=1 overrides the schema gate (F-435)" 0 $?
+
+# The refusal must name the parser's OWN messages — a bare exit 4 tells the operator
+# nothing, and the whole point is that these are the lines `chikory run` would print.
+SCHEMA_OUT=$(env -u CHIKORY_ALLOW_UNPARSEABLE_SPEC CHIKORY_PREFLIGHT_ONLY=1 \
+  bash scripts/dogfood.sh --run "$TMPDIR_FIXTURES/schema-broken.yaml" 2>&1 || true)
+if echo "$SCHEMA_OUT" | grep -q 'judge: Required' \
+  && echo "$SCHEMA_OUT" | grep -q "Unrecognized key(s) in object: 'escalation'" \
+  && ! echo "$SCHEMA_OUT" | grep -q 'Preflight OK'; then
+  echo "PASS: the schema refusal quotes the parser's own messages and suppresses 'Preflight OK' (F-435)"
+else
+  echo "FAIL: the schema refusal did not name the parser's messages, or still printed 'Preflight OK'"
+  FAILURES=$((FAILURES + 1))
+fi
+
 set -e
 
 echo

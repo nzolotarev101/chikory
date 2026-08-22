@@ -113,7 +113,7 @@ fi
 # Any CHIKORY_* env the spec text names is therefore a LAUNCH CONTRACT: every one must be
 # exported in the launching shell or the launch is refused at zero LLM cost.
 # Deliberate exception: CHIKORY_ALLOW_MISSING_ENV=1.
-LAUNCHER_INTERNAL_ENVS='^CHIKORY_(ALLOW_LOOSE_AC_HAZARD|ALLOW_MISSING_ENV|ALLOW_UNARMED_HEAL|ALLOW_WINDOW_SIZE|ALLOW_LOW_DISK|MIN_FREE_GIB|PREFLIGHT_ONLY|CHAIN_MAX_REPLANS)$'
+LAUNCHER_INTERNAL_ENVS='^CHIKORY_(ALLOW_LOOSE_AC_HAZARD|ALLOW_MISSING_ENV|ALLOW_UNARMED_HEAL|ALLOW_UNPARSEABLE_SPEC|ALLOW_WINDOW_SIZE|ALLOW_LOW_DISK|MIN_FREE_GIB|PREFLIGHT_ONLY|CHAIN_MAX_REPLANS)$'
 SPEC_ENVS=$(grep -oE 'CHIKORY_[A-Z0-9_]+' "$SPEC_FILE" | sort -u | grep -vE "$LAUNCHER_INTERNAL_ENVS" || true)
 MISSING_ENVS=""
 for VAR in $SPEC_ENVS; do
@@ -314,14 +314,32 @@ else
   fi
 fi
 
+# 1d-sexies. F-435 (dogfood-164 review) — the SCHEMA, checked by the real parser.
+#
+# Every guard above reads the spec with awk/grep. 1c-ter approximates the routed-provider
+# KEY contract that way because it is a short fixed list; nothing can approximate zod. So
+# the most basic way a spec is broken went unchecked until `chikory run`, i.e. after the
+# rebuild, an ephemeral Temporal server and the proxy were all up — and after a green
+# "✅ Preflight OK". dogfood-165 died exactly there on a missing `judge:` block and a
+# root-level `escalation:`. Same refusal, same messages, at $0. Runs BEFORE the
+# preflight-only exit so a $0 preflight covers it.
+# The override exists for the guard-fixture specs in
+# scripts/test-dogfood-ac-preflight.sh, which are deliberately minimal probes of ONE
+# guard each and were never whole specs. Never set it for a real launch.
+if [ "${CHIKORY_ALLOW_UNPARSEABLE_SPEC:-}" = "1" ]; then
+  echo "ℹ️  spec schema: SKIPPED (CHIKORY_ALLOW_UNPARSEABLE_SPEC=1)."
+elif ! node scripts/preflight-parse-spec.mjs "$SPEC_FILE"; then
+  exit 4
+fi
+
 # 1e. Preflight-only mode: run every launch guard above, then stop WITHOUT building,
 # starting Temporal/proxy, or spending a cent. The one-command answer to "is the next
 # run's hypothesis + challenge actually armed?":
 #   CHIKORY_PREFLIGHT_ONLY=1 [spec envs...] devbox run run-dogfood
 if [ "${CHIKORY_PREFLIGHT_ONLY:-}" = "1" ]; then
   echo
-  echo "✅ Preflight OK (CHIKORY_PREFLIGHT_ONLY=1) — spec lint, AC dry-run, env contract,"
-  echo "   window sizing, and agent class liveness all pass. Not launching."
+  echo "✅ Preflight OK (CHIKORY_PREFLIGHT_ONLY=1) — spec lint, schema parse, AC dry-run,"
+  echo "   env contract, window sizing, and agent class liveness all pass. Not launching."
   exit 0
 fi
 

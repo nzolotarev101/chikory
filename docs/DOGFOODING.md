@@ -14,7 +14,7 @@ displaced prose moves verbatim to [`PLAN-HISTORY.md`](PLAN-HISTORY.md); per-run 
 🟡 **F-432 (§8) → folded into WP-647** — the acceptance oracle graded a false-positive ceiling and a recall floor over the same enumerated corpus, but every recall case used one `X→cli` probe edge the corpus can never hold, so the two floors could never collide on the KEY the delivery suppresses on. **Enumerate the suppression KEY, not just the corpus.**
 🟡 **F-433 (§8, judge-KPI datum)** — judge pass #2 passed `design_serves_overall_goal` asserting the scanner was *"retaining detection of genuinely new edges"*, false for 7 of 158 files. Run scored **1 true positive** (a delivered test titled "full src/ corpus" that enumerates 9 hand-picked files) **and 1 false negative on its central semantics**.
 **Standing lesson: a fix that removes false positives must be graded on recall in the SAME check, on inputs where the suppressing evidence and the thing to be caught share the suppression key.** F-431 passed every one of its own ceiling cases and its own recall floor.
-**NEXT HEADLINE = `dogfood-165` / WP-644 + WP-647 — ARMED 3/3 BOTH WAYS, READY TO LAUNCH.** AC-1 grades recall ≥6/8, a ≤1.67% cross-family ceiling over 1501 pairs and 0/3 within-run collisions in ONE check. The 6/8 floor is MEASURED: nine reference variants were tried and every one reaching 7/8 merged a hard negative. Arming located the real gates — category disjointness and the shared-mechanism requirement reject the restatements; a trigger-condition conflict rejects the hard negative. Worst check 94s = 78% of the 120s cap. Gate ✅ PROGRESSING (harness-meta 0/3, cap intact); P3 rung-5's remainder is still WP-304's operator-run benchmark arm.
+**NEXT HEADLINE = `dogfood-165` / WP-644 + WP-647 — ARMED 3/3 BOTH WAYS, READY TO LAUNCH.** (Its first launch attempt died on a spec-tail defect of mine — see F-435; the spec is fixed and the $0 preflight now runs the real parser.) AC-1 grades recall ≥6/8, a ≤1.67% cross-family ceiling over 1501 pairs and 0/3 within-run collisions in ONE check. The 6/8 floor is MEASURED: nine reference variants were tried and every one reaching 7/8 merged a hard negative. Arming located the real gates — category disjointness and the shared-mechanism requirement reject the restatements; a trigger-condition conflict rejects the hard negative. Worst check 94s = 78% of the 120s cap. Gate ✅ PROGRESSING (harness-meta 0/3, cap intact); P3 rung-5's remainder is still WP-304's operator-run benchmark arm.
 
 Related docs: [`docs/spec/task-spec.md`](spec/task-spec.md) (schema
 reference) · [`docs/TASK-PROTOCOL.md`](TASK-PROTOCOL.md) (WP etiquette, §7 is
@@ -2343,6 +2343,24 @@ broken (a false-green, not a follow-on fix).
   `runner→cli`, the probe's own pair, but the recall diff's context window is the file's
   first 3 lines. **Enumerate the suppression KEY, not just the corpus** — build at least
   one negative where the exonerating evidence and the thing to be caught share it.
+
+- **🔴 A $0 GATE THAT CANNOT PARSE THE SPEC IS NOT A GATE** (F-435, hand-fixed at the dogfood-164
+  review). `CHIKORY_PREFLIGHT_ONLY=1` printed `✅ Preflight OK … spec lint, AC dry-run, env
+  contract, window sizing, and agent class liveness all pass` for a dogfood-165 spec that
+  `chikory run` then refused outright — `judge: Required`, plus `escalation:` at the root instead
+  of under `unattended:` — after the SDK rebuild, an ephemeral Temporal server and the
+  cli-judge-proxy were all up. Every guard in `scripts/dogfood.sh` reads the spec with awk/grep;
+  `parseTaskSpec` appeared only in a comment. Step 1c-ter reimplements the routed-provider KEY
+  contract in awk **precisely because** the real refusal comes too late, and says so in its own
+  comment — but nobody can reimplement zod that way, so the schema half was never covered.
+  Preflight even printed the symptom (`[probe] … names no agent_classes — nothing to probe`) as
+  informational, when a spec with neither `agent_classes` nor an `executor:` block cannot parse at
+  all (`packages/sdk-ts/src/taskspec.ts:401`). Fixed by `scripts/preflight-parse-spec.mjs`, run
+  before the preflight-only exit (`scripts/dogfood.sh:329`); it neutralises the two ordering
+  artifacts — `OPENAI_COMPAT_BASE_URL`, which the launcher exports later at step 4, and a missing
+  `dist/`, since preflight runs before the rebuild. Override for the guard fixtures only:
+  `CHIKORY_ALLOW_UNPARSEABLE_SPEC=1`. **Rule: when a cheap gate approximates an expensive one,
+  write down what it CANNOT see — that gap is where the next launch dies.**
 
 - **🔴 AN ARMING TABLE MUST SCORE EACH COLUMN AGAINST ITS OWN EXPECTATION** (F-434, hand-fixed at
   the dogfood-164 review). `scripts/dogfood-arm.sh` rendered both passes with one `cell()` that
