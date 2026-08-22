@@ -57,13 +57,16 @@ goal: |
   call site) and no test outside the account-CRUD area may need to change.
 requirements:
   - id: R1
+    kind: guard
     description: dependencies install clean (pnpm workspace, frozen lockfile)
     check: npx -y pnpm@11.9.0 install --frozen-lockfile
   - id: R2
+    kind: guard
     description: full pre-existing test suite is green (every existing consumer's observable behavior is unchanged)
     prerequisites: [R1]
     check: npx -y pnpm@11.9.0 exec vitest run
   - id: R3
+    kind: guard
     description: project typechecks clean (tsc --noEmit over the whole src tree)
     prerequisites: [R1]
     check: |
@@ -71,6 +74,7 @@ requirements:
       rm -f tsconfig.tsbuildinfo
       npx -y pnpm@11.9.0 exec tsc --noEmit -p tsconfig.json
   - id: R4
+    kind: discriminator
     description: the legacy AuthState type and all 5 free functions (addAccount, removeAccount, hasAccounts, hasMultipleAccounts, getPrimaryAccountHostname) are genuinely gone — not aliased, not re-exported, not left as dead stubs
     prerequisites: [R1]
     check: |

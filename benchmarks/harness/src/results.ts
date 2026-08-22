@@ -7,8 +7,9 @@ import { existsSync, mkdirSync, readFileSync, realpathSync, writeFileSync } from
 import { dirname, join, relative, resolve, sep } from "node:path";
 
 import type { AdapterResult } from "./adapter.js";
-import type { TaskGradeReport } from "./grade.js";
+import { dependencySatisfiedIds, type TaskGradeReport } from "./grade.js";
 import type { VerifyBaseGreenResult } from "./base-verify.js";
+import type { BenchmarkTask } from "./task.js";
 
 export interface DiscriminationRequirementEntry {
   id: string;
@@ -163,6 +164,7 @@ export function readDiscriminationLedger(path: string): DiscriminationLedger {
 export function isTaskDiscriminationVerified(
   result: TaskResult,
   ledger?: DiscriminationLedger | DiscriminationLedgerEntry[],
+  task?: BenchmarkTask,
 ): { verified: boolean; reason?: string } {
   if (!ledger) {
     return { verified: true };
@@ -186,12 +188,48 @@ export function isTaskDiscriminationVerified(
       reason: `Task probed at ref ${entry.baseRef}, but scored at ref ${result.repoRef} (stale proof)`,
     };
   }
-  if (entry.verdict !== "discriminating") {
+
+  const reqs = task
+    ? task.requirements.map((r) => ({ id: r.id, kind: r.kind ?? "discriminator" }))
+    : result.grading.grades.map((g) => ({ id: g.requirementId, kind: g.kind ?? "discriminator" }));
+
+  const scoredReqs = reqs.filter((r) => r.kind !== "guard");
+  if (reqs.length > 0 && scoredReqs.length === 0) {
+    return {
+      verified: false,
+      reason: `Task ${result.taskId} has no scored requirements (every requirement is declared a guard)`,
+    };
+  }
+  if (scoredReqs.length === 0) {
+    return {
+      verified: false,
+      reason: `Task ${result.taskId} has no scored requirements`,
+    };
+  }
+
+  if (entry.requirements && entry.requirements.length > 0) {
+    for (const req of scoredReqs) {
+      const ledgerReq = entry.requirements.find((lr) => lr.id === req.id);
+      if (!ledgerReq) {
+        return {
+          verified: false,
+          reason: `Requirement ${req.id} was not probed in ledger`,
+        };
+      }
+      if (ledgerReq.classification !== "discriminating") {
+        return {
+          verified: false,
+          reason: `Requirement ${req.id} is declared scored but discrimination ledger classifies it as '${ledgerReq.classification}'`,
+        };
+      }
+    }
+  } else if (entry.verdict !== "discriminating") {
     return {
       verified: false,
       reason: `Task discrimination verdict was '${entry.verdict}' (not discriminating)`,
     };
   }
+
   return { verified: true };
 }
 
@@ -207,7 +245,15 @@ export function summarize(
   endedAt: string,
   results: TaskResult[],
   ledger?: DiscriminationLedger | DiscriminationLedgerEntry[],
+  tasks?: Map<string, BenchmarkTask> | BenchmarkTask[],
 ): SuiteSummary {
+  const tasksMap =
+    tasks instanceof Map
+      ? tasks
+      : Array.isArray(tasks)
+        ? new Map(tasks.map((t) => [t.id, t]))
+        : undefined;
+
   const requirementsTotal = results.reduce((s, r) => s + r.grading.total, 0);
   const requirementsSatisfied = results.reduce((s, r) => s + r.grading.satisfied, 0);
 
@@ -215,13 +261,53 @@ export function summarize(
   const verifiedResults: TaskResult[] = [];
   const perTaskInfo: SuiteSummary["perTask"] = [];
 
+  let verifiedScoredTotal = 0;
+  let verifiedScoredSatisfied = 0;
+  let verifiedScoredDepSatisfied = 0;
+
   for (const r of results) {
+    const task = tasksMap?.get(r.taskId);
+    if (task) {
+      for (const g of r.grading.grades) {
+        if (!g.kind) {
+          const req = task.requirements.find((req) => req.id === g.requirementId);
+          if (req) {
+            g.kind = req.kind ?? "discriminator";
+          }
+        }
+      }
+    }
+
     const baseVerified = isTaskVerified(r);
-    const discCheck = isTaskDiscriminationVerified(r, ledger);
+    const discCheck = isTaskDiscriminationVerified(r, ledger, task);
     const discriminationVerified = discCheck.verified;
+
+    const guardGrades = r.grading.grades.filter((g) => g.kind === "guard");
+    const scoredGrades = r.grading.grades.filter((g) => g.kind !== "guard");
+    const guardsPassed = guardGrades.every((g) => g.satisfied);
+
+    let taskScoredSatisfied = 0;
+    let taskScoredDepSatisfied = 0;
+
+    if (guardsPassed) {
+      taskScoredSatisfied = scoredGrades.filter((g) => g.satisfied).length;
+      if (task) {
+        const gradeById = new Map(r.grading.grades.map((g) => [g.requirementId, g.satisfied]));
+        const depOk = dependencySatisfiedIds(task, gradeById);
+        taskScoredDepSatisfied = scoredGrades.filter((g) => depOk.has(g.requirementId)).length;
+      } else {
+        taskScoredDepSatisfied = taskScoredSatisfied;
+      }
+    } else {
+      taskScoredSatisfied = 0;
+      taskScoredDepSatisfied = 0;
+    }
 
     if (baseVerified && discriminationVerified) {
       verifiedResults.push(r);
+      verifiedScoredTotal += scoredGrades.length;
+      verifiedScoredSatisfied += taskScoredSatisfied;
+      verifiedScoredDepSatisfied += taskScoredDepSatisfied;
     } else {
       let reason: string;
       if (!baseVerified) {
@@ -245,12 +331,22 @@ export function summarize(
     });
   }
 
-  const verifiedTotal = verifiedResults.reduce((s, r) => s + r.grading.total, 0);
-  const verifiedSatisfied = verifiedResults.reduce((s, r) => s + r.grading.satisfied, 0);
-  const verifiedDependencySatisfied = verifiedResults.reduce((s, r) => s + r.grading.dependencySatisfied, 0);
+  const hasKinds = results.some((r) => r.grading.grades.some((g) => g.kind === "guard"));
+  const finalVerifiedTotal =
+    hasKinds || ledger !== undefined
+      ? verifiedScoredTotal
+      : verifiedResults.reduce((s, r) => s + r.grading.total, 0);
+  const finalVerifiedSatisfied =
+    hasKinds || ledger !== undefined
+      ? verifiedScoredSatisfied
+      : verifiedResults.reduce((s, r) => s + r.grading.satisfied, 0);
+  const finalVerifiedDepSatisfied =
+    hasKinds || ledger !== undefined
+      ? verifiedScoredDepSatisfied
+      : verifiedResults.reduce((s, r) => s + r.grading.dependencySatisfied, 0);
 
-  const iSrCi = wilsonScoreInterval(verifiedSatisfied, verifiedTotal);
-  const dSrCi = wilsonScoreInterval(verifiedDependencySatisfied, verifiedTotal);
+  const iSrCi = wilsonScoreInterval(finalVerifiedSatisfied, finalVerifiedTotal);
+  const dSrCi = wilsonScoreInterval(finalVerifiedDepSatisfied, finalVerifiedTotal);
 
   return {
     suite,
@@ -262,11 +358,11 @@ export function summarize(
     unverifiedTasks,
     requirementsTotal,
     requirementsSatisfied,
-    requirementsVerifiedTotal: verifiedTotal,
-    requirementsVerifiedSatisfied: verifiedSatisfied,
-    dependencyVerifiedSatisfied: verifiedDependencySatisfied,
-    iSr: verifiedTotal > 0 ? verifiedSatisfied / verifiedTotal : 0,
-    dSr: verifiedTotal > 0 ? verifiedDependencySatisfied / verifiedTotal : 0,
+    requirementsVerifiedTotal: finalVerifiedTotal,
+    requirementsVerifiedSatisfied: finalVerifiedSatisfied,
+    dependencyVerifiedSatisfied: finalVerifiedDepSatisfied,
+    iSr: finalVerifiedTotal > 0 ? finalVerifiedSatisfied / finalVerifiedTotal : 0,
+    dSr: finalVerifiedTotal > 0 ? finalVerifiedDepSatisfied / finalVerifiedTotal : 0,
     iSrCi,
     iSrRange: { low: iSrCi.lower, high: iSrCi.upper },
     dSrCi,

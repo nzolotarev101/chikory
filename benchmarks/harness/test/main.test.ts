@@ -483,4 +483,92 @@ requirements:
     expect(await main(["probe", "--tasks", "x"], io())).toBe(1);
     expect(await main(["probe", "--tasks", "x", "--task", "y", "--record", "z"], io())).toBe(1);
   });
+
+  describe("validate discrimination gating & requirement kinds (WP-651 / AC-2)", () => {
+    const TASKS_DIR = join(import.meta.dirname, "..", "..", "tasks");
+    const LEDGER_PATH = join(import.meta.dirname, "..", "..", "results", "discrimination.json");
+
+    it("validate: positive control over benchmarks/tasks exits 0", async () => {
+      const o = io();
+      const code = await main(["validate", TASKS_DIR, "--discrimination-ledger", LEDGER_PATH], o);
+      expect(code).toBe(0);
+      expect(o.lines.out.join("\n")).toContain("valid");
+    });
+
+    it("validate: refuses a task whose every requirement is declared a guard (Trap A)", async () => {
+      const dir = mkdtempSync(join(tmpdir(), "bench-cli-allguard-"));
+      writeFileSync(
+        join(dir, "brownfield-999.yaml"),
+        `id: brownfield-999
+class: brownfield
+status: pinned
+repo:
+  url: https://example.invalid/repo
+  ref: ${"a".repeat(40)}
+  fix_ref: ${"b".repeat(40)}
+goal: |
+  fixture
+requirements:
+  - id: R1
+    kind: guard
+    description: r1
+    check: "true"
+  - id: R2
+    kind: guard
+    description: r2
+    check: "true"
+`,
+      );
+      const o = io();
+      const code = await main(["validate", dir, "--discrimination-ledger", LEDGER_PATH], o);
+      expect(code).toBe(1);
+      expect(o.lines.err.join("\n")).toContain("task brownfield-999 has no scored requirements");
+    });
+
+    it("validate: refuses a task declaring a scored requirement that the ledger classifies non-discriminating (Trap B)", async () => {
+      const dir = mkdtempSync(join(tmpdir(), "bench-cli-mislabel-"));
+      writeFileSync(
+        join(dir, "brownfield-002.yaml"),
+        `id: brownfield-002
+class: brownfield
+status: pinned
+repo:
+  url: https://example.invalid/repo
+  ref: a061eaa112fa18885dd4de0cea6c0e51094cad0c
+  fix_ref: 8043b106324a5148e7a5ff82e11895f10677abd9
+goal: |
+  fixture
+requirements:
+  - id: R1
+    kind: discriminator
+    description: r1
+    check: "true"
+  - id: R4
+    kind: discriminator
+    description: r4
+    check: "true"
+`,
+      );
+      const o = io();
+      const code = await main(["validate", dir, "--discrimination-ledger", LEDGER_PATH], o);
+      expect(code).toBe(1);
+      expect(o.lines.err.join("\n")).toContain("MISLABEL brownfield-002 R1: declared scored/discriminator but discrimination ledger classifies it as non-discriminating");
+    });
+  });
+
+  describe("resummarize CLI (WP-651 / AC-1)", () => {
+    const LEDGER_PATH = join(import.meta.dirname, "..", "..", "results", "discrimination.json");
+
+    it("resummarize: refuses when no results are found in the directory", async () => {
+      const dir = mkdtempSync(join(tmpdir(), "bench-cli-resummarize-empty-"));
+      const outDir = mkdtempSync(join(tmpdir(), "bench-cli-resummarize-out-"));
+      const o = io();
+      const code = await main(
+        ["resummarize", "--results", dir, "--discrimination-ledger", LEDGER_PATH, "--out", outDir],
+        o,
+      );
+      expect(code).toBe(1);
+      expect(o.lines.err.join("\n")).toContain("no stored task results found");
+    });
+  });
 });

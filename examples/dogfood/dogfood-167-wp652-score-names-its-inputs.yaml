@@ -1,0 +1,505 @@
+# Plain: dogfood-166 made the benchmark's score computable — 5 real requirements over 4 tasks
+# instead of 0 over 0. It also left three ways to make that number quietly SMALLER, and all three
+# were measured by driving the real CLI. Adding one new scored requirement to a task deletes that
+# whole task from the published number while `chikory-bench validate` says "5 valid, 0 invalid".
+# Declaring a requirement the probe proved discriminating as a mere "guard" also passes clean and
+# throws its evidence away. And `resummarize` guesses where the task files live, records nothing
+# about that guess, and returns "I-SR 0.0%" when the guess is wrong — indistinguishable from the
+# real result. After this run each of those is a REFUSAL that names what is wrong, and the summary
+# says which task definitions it scored against.
+# WP: WP-652 (the published score must refuse every input that would silently shrink it) —
+#   the corpus half of P3-rung-5, continued. It BLOCKS WP-304's operator arm.
+# Ladder-rung: 5 (P3 EXIT GATE, WP-530 §7 — published DevAI-extended ranges + a live leaderboard.
+#   The rung's remaining agent-runnable work is this; the arm half is WP-304 and is operator-run.)
+# Thesis-KPI: the moat is measured, not asserted. Measured as: every input that changes the
+#   published I-SR is either refused by name or recorded in the artifact that publishes it.
+#
+# THE MEASURED PREMISE — measured at the dogfood-166 review, on committed evidence, no network
+#   (F-203/F-342: measured, never transcribed). Each was produced by copying `benchmarks/tasks`,
+#   editing the copy, and driving the REAL CLI over it.
+#
+#   (a) F-441. Append ONE requirement the probe sweep never saw — `id: R5`, `kind: discriminator`
+#       — to a copy of `brownfield-004`:
+#         chikory-bench validate <copy>      -> "<copy>: 5 valid, 0 invalid"   exit 0
+#         chikory-bench resummarize --tasks <copy> ...
+#           -> "3/5 verified tasks, 4/4 verified requirements satisfied (I-SR 100.0%)"
+#              unverifiedTasks += {"taskId":"brownfield-004",
+#                                  "reason":"Requirement R5 was not probed in ledger"}
+#       Verified tasks 4 -> 3. Denominator 5 -> 4. The scorer is RIGHT to refuse an unprobed
+#       requirement (`benchmarks/harness/src/results.ts:216`); the bug is that `validate` cannot
+#       see it, because its mislabel loop only inspects requirements ALREADY IN the ledger
+#       (`benchmarks/harness/src/main.ts:250`), and the author's only signal is a row inside a
+#       JSON file. Growing the corpus is the ONE thing P3-rung-5 needs. Today it shrinks the number.
+#
+#   (b) F-442. Relabel `brownfield-003` R2 — which the committed ledger classifies
+#       `discriminating` — as `kind: guard`:
+#         chikory-bench validate <copy>      -> "<copy>: 5 valid, 0 invalid"   exit 0
+#         chikory-bench resummarize --tasks <copy> ...
+#           -> "4/5 verified tasks, 4/4 verified requirements satisfied (I-SR 100.0%)"
+#       I-SR is unchanged at 100.0% and the 95% Wilson interval FLOOR drops 56.6% -> 51.0%.
+#       The RATE is not gameable this way (demoting a FAILING discriminator trips the guard gate
+#       and zeroes the whole task — that part of WP-651 works). What is lost is measurement power,
+#       silently, on the one axis the exit gate is blocked on.
+#
+#   (c) F-443. Point `--tasks` at an empty directory — same arm, same ledger:
+#         -> "0/5 verified tasks, 0/0 verified requirements satisfied (I-SR 0.0%)"   exit 0
+#       Byte-indistinguishable from the genuine pre-WP-651 result. `resummarize` resolves its task
+#       directory by guessing `resolve("benchmarks/tasks")` RELATIVE TO THE CURRENT WORKING
+#       DIRECTORY, else `resolve(import.meta.dirname, "../../tasks")`
+#       (`benchmarks/harness/src/main.ts:846`-`:851`); it prints nothing about the choice, writes
+#       nothing into `summary.json`, and `--tasks` does not appear in `USAGE` (`:97`).
+#       Latent sibling, same root: when a task definition is unavailable,
+#       `benchmarks/harness/src/results.ts:299` substitutes the scored I-SR count for D-SR instead
+#       of the `dependencySatisfied` recorded at grade time.
+#
+#   * THE FIRST TRAP IS WARNING INSTEAD OF REFUSING. A `validate` that prints a note and exits 0
+#     changes nothing: the author still finds out from a JSON field after the number is wrong.
+#     AC-1 requires a NON-ZERO exit that NAMES the task and the requirement.
+#   * THE SECOND TRAP IS FIXING THE PRETTY HALF. (b) is a one-line symmetric condition next to
+#     code that already exists. (a) is the half that actually bites the rung, and it needs the
+#     check to reason about requirements that are ABSENT from the ledger. AC-1 grades both, and
+#     the report of dogfood-166 predicts (b)-only as the likely delivery.
+#   * THE THIRD TRAP IS AUTO-DEMOTING. "Solving" (a) by silently reclassifying an unprobed
+#     requirement as a guard shrinks the denominator exactly as before, with a green validate.
+#     AC-2 pins the denominator at exactly 5 over the LABELLED corpus and AC-1 requires a refusal.
+#   * THE FOURTH TRAP IS READMITTING EVERYTHING. Dropping the ledger gate so unprobed requirements
+#     score makes the denominator 19 and republishes F-252. AC-2 pins 5, and 4 verified tasks with
+#     `brownfield-001` still excluded BY NAME.
+#   * THE FIFTH TRAP IS A HARDCODED PROVENANCE STRING. Recording a constant "benchmarks/tasks"
+#     records nothing. AC-2 runs `resummarize` against an EXPLICIT copy at a temp path and reads
+#     that exact path back out of the emitted `summary.json`.
+#   * NOT IN SCOPE: re-running any arm; editing `benchmarks/results/` (the stored arms and the
+#     probe ledger are evidence, read-only); `benchmarks/publications/p3-rung-4/`,
+#     `p3-rung-4-corrected/` and `leaderboard/` (byte-frozen — a recomputed publication goes to a
+#     NEW directory); `chikory-bench probe` itself (WP-593/596); the SDK under `packages/sdk-ts/`.
+
+name: dogfood-167-wp652-score-names-its-inputs
+wp: WP-652
+
+goal: |
+  Every input that can change the benchmark's published satisfaction rate must be refused by name
+  or recorded in the artifact that publishes the rate. Nothing may shrink it silently.
+
+  Measured at the dogfood-166 review by driving the real CLI over copies of `benchmarks/tasks`:
+
+  - Appending ONE requirement the probe sweep never saw (`id: R5`, `kind: discriminator`) to
+    `brownfield-004` makes `chikory-bench validate` print **"5 valid, 0 invalid"** and exit 0,
+    while `chikory-bench resummarize` drops from **4/5 verified tasks and a denominator of 5** to
+    **3/5 tasks and a denominator of 4**. Growing the corpus is the one thing this rung needs.
+  - Relabelling `brownfield-003` R2 — which the committed ledger classifies `discriminating` — as
+    `kind: guard` also passes validate clean, and drops the 95% interval floor **56.6% to 51.0%**.
+  - Pointing `--tasks` at an empty directory returns **"0/5 verified tasks, 0/0 verified
+    requirements satisfied (I-SR 0.0%)"** and exit 0 — indistinguishable from the genuine
+    pre-WP-651 result. `resummarize` resolves that directory by guessing from the current working
+    directory, prints nothing about the choice, and records nothing in `summary.json`.
+
+  Make this true.
+
+  1. **The ledger agreement is checked in BOTH directions, and over requirements the ledger has
+     never seen.** `chikory-bench validate` already refuses a requirement declared SCORED that the
+     ledger classifies `non-discriminating`. It must also refuse (a) a scored requirement with NO
+     ledger entry at all, and (b) a requirement declared `guard` that the ledger classifies
+     `discriminating`. Each refusal exits non-zero and names the task and the requirement, so the
+     author finds out at authoring time rather than from a field in a published JSON file.
+  2. **A refusal, never a silent reclassification.** An unprobed scored requirement must not be
+     quietly demoted to a guard, dropped, or scored. The corpus that IS correctly labelled must
+     still validate clean and still score exactly as it does today.
+  3. **The published summary names the task definitions it was scored against.** The artifact
+     `resummarize` writes must record the task directory actually resolved — the real path, not a
+     constant — so a published number can be reproduced from what it says about itself. Document
+     the flag that controls it in the CLI usage text.
+  4. **An unresolvable input is a loud failure, not a zero.** When `resummarize` is given results
+     it cannot match to a task definition, it must say so, naming what it could not resolve,
+     instead of emitting a summary whose denominator is 0. A denominator of 0 is the exact state
+     WP-651 existed to end; it must never again be reachable by accident.
+  5. **The dependency-adjusted rate stops guessing.** When a task definition is unavailable the
+     scorer must not substitute the independent count for the dependency-adjusted one. Honour what
+     was recorded at grade time, or refuse — do not invent.
+
+  Beware an additive field that dies on the way out: whatever records the provenance must survive
+  being written and read back by the real writer, and `compare` and `leaderboard` must still work
+  on a bundle that carries it (F-380 — sweep for re-constructors and parsers, not just readers).
+
+  Three things must NOT change, and each is a trap this run is graded on:
+
+  1. **The score over the labelled corpus is exactly what it is today.** 5 verified requirements
+     over 4 verified tasks, `brownfield-001` excluded and NAMED, I-SR 100.0%. Not 0, not 19.
+  2. **The corpus must not get smaller and the evidence is read-only.** No requirement's `id`,
+     `description` or `check` may change by a byte in any of the five task files; nothing under
+     `benchmarks/results/` may change; `benchmarks/publications/p3-rung-4/`,
+     `p3-rung-4-corrected/` and `leaderboard/` stay byte-identical.
+  3. **WP-651's and WP-600's guards stay.** A failed guard still zeroes its task's scored
+     satisfaction; an all-guard task is still refused; a stored arm that records no `repoRef` is
+     still refused ("stale proof"); `isTaskDiscriminationVerified` and `runProbe` stay exported.
+
+  TypeScript stays strict ESM with named exports and no `any`.
+
+  Pin your work with tests that live in the repo, beside the files they cover — a behaviour proved
+  only by the acceptance checks that grade this run is not pinned at all (F-356). At least one
+  committed test must drive a case these acceptance criteria do not name.
+
+  Verify your work with FAST checks only: the harness typecheck (`pnpm run typecheck` — NOT bare
+  tsc --noEmit, which does not cover the test/ tree, F-382), eslint over the files you touched, and
+  vitest over the directories you actually wrote into.
+
+  DO NOT background a command and wait for it. dogfood-166's step 1 launched a build-and-test in
+  the background, waited, and was killed at 723.7s against a 600s cap having produced ZERO output
+  tokens — 34% of that run's wall clock and 14% of its spend, for nothing. It was the fourth run in
+  a row to do this after being told not to (F-421/F-345/F-428/F-444). Run each verification command
+  in the foreground and read its output. Do NOT run a benchmark arm and do NOT run
+  `chikory-bench probe` — it clones and installs real repositories.
+
+repos:
+  - url: /Users/nikitazolotarev/repos/chikory
+    writable: true
+
+# The harness suite is both the surface this run edits and the gate it must not break.
+# MEASURE it at the launch commit rather than trusting this line (F-342, dogfood-140).
+regression_suite: pnpm --filter @chikory/benchmarks exec vitest run
+check_timeout_ms: 180000
+
+acceptance_criteria:
+  - id: AC-1
+    description: >
+      THE REFUSALS ARE REAL, IN BOTH DIRECTIONS, AND OVER REQUIREMENTS THE LEDGER HAS NEVER SEEN.
+      Drives the REAL `chikory-bench validate` over copies of the committed corpus. (a) UNPROBED:
+      a scored requirement with no ledger entry must exit NON-ZERO naming the task and the
+      requirement — this is the half that bites the rung, and a delivery that fixes only (b) fails
+      here. (b) DEMOTED: a requirement the ledger classifies `discriminating` declared `kind: guard`
+      must exit NON-ZERO naming the requirement. (c) INCUMBENT: the existing
+      scored-but-non-discriminating refusal still fires. (d) CONTROL: the real committed corpus
+      still validates clean, so none of this was bought by refusing everything.
+    check: |
+      cd "$(git rev-parse --show-toplevel)" || exit 1
+      ROOT="$(git rev-parse --show-toplevel)"
+      W="$(mktemp -d)"
+      trap 'rm -rf "$W"' EXIT
+      fails=""
+
+      run_validate() { ( cd "$ROOT/benchmarks/harness" && pnpm run bench validate "$1" ) 2>&1; }
+
+      echo "== (d) CONTROL: the real committed corpus must validate CLEAN =="
+      CTRL="$(run_validate "$ROOT/benchmarks/tasks")"; CTRL_ST=$?
+      echo "$CTRL" | tail -n 4
+      if [ "$CTRL_ST" -ne 0 ]; then
+        fails="$fails
+- CONTROL FAILED: the committed corpus no longer validates. Every refusal below can be bought by refusing everything; this is the check that stops that."
+      fi
+
+      echo "== (a) UNPROBED: a scored requirement the ledger has never seen =="
+      cp -R "$ROOT/benchmarks/tasks" "$W/unprobed"
+      UNPROBED="$W/unprobed/brownfield-004.yaml" node --input-type=module -e '
+      import { readFileSync, writeFileSync } from "node:fs";
+      const p = process.env.UNPROBED;
+      const s = readFileSync(p, "utf8");
+      const anchor = "\n  - id: R4\n";
+      const i = s.indexOf(anchor);
+      if (i < 0) { console.log("FIXTURE BROKEN: brownfield-004 has no R4 block"); process.exit(2); }
+      const add = "\n  - id: R5\n    kind: discriminator\n    description: a scored requirement added after the last probe sweep\n    check: pnpm type\n    prerequisites: [R1]\n";
+      writeFileSync(p, s.slice(0, i) + add + s.slice(i));
+      console.log("appended an unprobed scored R5 to brownfield-004");
+      ' || exit 1
+      UNP="$(run_validate "$W/unprobed")"; UNP_ST=$?
+      echo "$UNP" | tail -n 6
+      if [ "$UNP_ST" -eq 0 ]; then
+        fails="$fails
+- (a) UNPROBED WAS ADMITTED (exit 0). brownfield-004 R5 is declared SCORED and the committed ledger has no entry for it. The scorer already refuses this task outright (denominator 5 -> 4, verified tasks 4 -> 3); validate must say so FIRST. Growing the corpus is the whole point of this rung — today it shrinks the published number."
+      elif ! printf %s "$UNP" | grep -q "brownfield-004" || ! printf %s "$UNP" | grep -q "R5"; then
+        fails="$fails
+- (a) UNPROBED was refused but NOT NAMED. The message must carry both the task id (brownfield-004) and the requirement id (R5); an author cannot act on an unnamed refusal."
+      fi
+
+      echo "== (b) DEMOTED: a ledger-discriminating requirement declared kind: guard =="
+      cp -R "$ROOT/benchmarks/tasks" "$W/demoted"
+      DEMOTED="$W/demoted/brownfield-003-bug-archaeology.yaml" node --input-type=module -e '
+      import { readFileSync, writeFileSync } from "node:fs";
+      const p = process.env.DEMOTED;
+      const s = readFileSync(p, "utf8");
+      const from = "  - id: R2\n    kind: discriminator\n";
+      if (!s.includes(from)) { console.log("FIXTURE BROKEN: brownfield-003 R2 is not declared kind: discriminator"); process.exit(2); }
+      writeFileSync(p, s.replace(from, "  - id: R2\n    kind: guard\n"));
+      console.log("demoted brownfield-003 R2 (ledger: discriminating) to kind: guard");
+      ' || exit 1
+      DEM="$(run_validate "$W/demoted")"; DEM_ST=$?
+      echo "$DEM" | tail -n 6
+      if [ "$DEM_ST" -eq 0 ]; then
+        fails="$fails
+- (b) DEMOTED WAS ADMITTED (exit 0). brownfield-003 R2 is classified discriminating in benchmarks/results/discrimination.json and is declared a guard. The label is a claim and the ledger is the measurement — disagreement is disagreement in BOTH directions. Measured cost of admitting it: the 95% interval floor drops 56.6% to 51.0% with no signal."
+      elif ! printf %s "$DEM" | grep -q "R2"; then
+        fails="$fails
+- (b) DEMOTED was refused but the requirement (R2) is not named in the output."
+      fi
+
+      echo "== (c) INCUMBENT: scored-but-non-discriminating still refuses =="
+      cp -R "$ROOT/benchmarks/tasks" "$W/incumbent"
+      INC="$W/incumbent/brownfield-004.yaml" node --input-type=module -e '
+      import { readFileSync, writeFileSync } from "node:fs";
+      const p = process.env.INC;
+      const s = readFileSync(p, "utf8");
+      const from = "  - id: R1\n    kind: guard\n";
+      if (!s.includes(from)) { console.log("FIXTURE BROKEN: brownfield-004 R1 is not declared kind: guard"); process.exit(2); }
+      writeFileSync(p, s.replace(from, "  - id: R1\n    kind: discriminator\n"));
+      console.log("promoted brownfield-004 R1 (ledger: non-discriminating) to kind: discriminator");
+      ' || exit 1
+      INCO="$(run_validate "$W/incumbent")"; INCO_ST=$?
+      echo "$INCO" | tail -n 6
+      if [ "$INCO_ST" -eq 0 ]; then
+        fails="$fails
+- (c) REGRESSION: the incumbent refusal stopped firing. A requirement declared scored that the ledger classifies non-discriminating was admitted; WP-651 built that refusal and this run may not trade it away."
+      fi
+
+      if [ -n "$fails" ]; then
+        echo "AC-1 FAIL:$fails"
+        exit 1
+      fi
+      echo "AC-1 OK: unprobed refused and named, demoted refused and named, incumbent intact, the real corpus still clean"
+
+  - id: AC-2
+    description: >
+      THE PUBLISHED NUMBER OWNS ITS ORACLE AND NAMES ITS INPUTS, ALL GRADED IN ONE CHECK SO NONE
+      CAN BE BOUGHT WITH ANOTHER. Drives the REAL `chikory-bench resummarize` over the COMMITTED
+      stored arm and the COMMITTED probe ledger. UNCHANGED SCORE: exactly 5 verified requirements
+      over 4 verified tasks with `brownfield-001` named — not 0, not 19, and not 4 (auto-demoting
+      an unprobed requirement is the same silent shrink). PROVENANCE: the emitted `summary.json`
+      records the REAL task directory it scored against, proven by pointing `--tasks` at a copy in
+      a temp path and reading that exact path back out. NO SILENT ZERO: `--tasks` at an empty
+      directory must be a loud failure, never a summary reading I-SR 0.0% over 0 requirements.
+      STALE PROOF INTACT: the ref-less stored original is still refused.
+    check: |
+      cd "$(git rev-parse --show-toplevel)" || exit 1
+      ROOT="$(git rev-parse --show-toplevel)"
+      W="$(mktemp -d)"
+      trap 'rm -rf "$W"' EXIT
+      LEDGER="$ROOT/benchmarks/results/discrimination.json"
+
+      ARM=""
+      for d in "$ROOT"/benchmarks/results/p3-rung-4/chikory/*/; do
+        [ -f "$d/brownfield-004.json" ] && ARM="$d"
+      done
+      if [ -z "$ARM" ]; then
+        echo "AC-2 FAIL: no stored chikory arm run carries per-task results — the committed evidence moved"
+        exit 1
+      fi
+      mkdir -p "$W/refless" "$W/real" "$W/empty"
+      cp "$ARM"/*.json "$W/refless/" || exit 1
+      cp "$ARM"/*.json "$W/real/" || exit 1
+      cp -R "$ROOT/benchmarks/tasks" "$W/corpus" || exit 1
+
+      # The stored arms predate `repoRef` (WP-600 trap G refuses them for that reason alone, and
+      # that guard is NOT in scope). Stamp each result with the ref the committed ledger says it
+      # was probed at, so the SCORING RULE is what gets graded here.
+      SRC="$W/real" LEDGER="$LEDGER" node --input-type=module -e '
+      import { readFileSync, writeFileSync, readdirSync } from "node:fs";
+      import { join } from "node:path";
+      const ledger = JSON.parse(readFileSync(process.env.LEDGER, "utf8"));
+      let stamped = 0;
+      for (const f of readdirSync(process.env.SRC)) {
+        if (!f.endsWith(".json") || f === "summary.json") continue;
+        const p = join(process.env.SRC, f);
+        const j = JSON.parse(readFileSync(p, "utf8"));
+        const entry = ledger[j.taskId];
+        if (!entry) continue;
+        j.repoRef = entry.baseRef;
+        writeFileSync(p, JSON.stringify(j, null, 2));
+        stamped += 1;
+      }
+      if (stamped < 4) { console.log("AC-2 FAIL: could only stamp " + stamped + " task results with a probed ref"); process.exit(1); }
+      console.log("stamped " + stamped + " task results with the ledger baseRef");
+      ' || exit 1
+
+      run_rs() {
+        ( cd "$ROOT/benchmarks/harness" && pnpm run bench resummarize \
+            --results "$1" --discrimination-ledger "$LEDGER" --tasks "$2" --out "$3" ) 2>&1
+      }
+
+      echo "== 1. the real arm, the real ledger, the real corpus at an EXPLICIT temp path =="
+      MAIN="$(run_rs "$W/real" "$W/corpus" "$W/mainout")"; MAIN_ST=$?
+      echo "$MAIN" | tail -n 3
+      if [ "$MAIN_ST" -ne 0 ] || [ ! -f "$W/mainout/summary.json" ]; then
+        echo "AC-2 FAIL: resummarize produced no summary over the committed arm and an explicit --tasks dir"
+        exit 1
+      fi
+
+      echo "== 2. --tasks at an EMPTY directory must be a LOUD failure =="
+      EMPTY="$(run_rs "$W/real" "$W/empty" "$W/emptyout")"; EMPTY_ST=$?
+      echo "$EMPTY" | tail -n 4
+
+      echo "== 3. the ref-LESS original must still be refused (WP-600 trap G stays) =="
+      REFLESS="$(run_rs "$W/refless" "$W/corpus" "$W/reflessout")"
+      echo "$REFLESS" | tail -n 2
+
+      echo "== 4. grade every number =="
+      MAINS="$W/mainout/summary.json" TASKSDIR="$W/corpus" \
+      EMPTYS="$W/emptyout/summary.json" EMPTY_ST="$EMPTY_ST" EMPTY_OUT="$EMPTY" \
+      REFLESSS="$W/reflessout/summary.json" node --input-type=module -e '
+      import { readFileSync, existsSync, realpathSync } from "node:fs";
+      const fails = [];
+      const s = JSON.parse(readFileSync(process.env.MAINS, "utf8"));
+      console.log("main: verified tasks=" + s.tasksVerified + " denominator=" + s.requirementsVerifiedTotal + " numerator=" + s.requirementsVerifiedSatisfied + " iSr=" + s.iSr);
+
+      if (s.requirementsVerifiedTotal !== 5) fails.push("DENOMINATOR is " + s.requirementsVerifiedTotal + ", expected exactly 5. 0 is the pre-WP-651 state, 19 means the discrimination gate was dropped (F-252 republished), and 4 is what auto-demoting or dropping an unprobed requirement produces — the silent shrink this WP exists to stop.");
+      if (s.tasksVerified !== 4) fails.push("VERIFIED TASKS is " + s.tasksVerified + ", expected 4.");
+      if (s.requirementsVerifiedSatisfied !== 5) fails.push("NUMERATOR is " + s.requirementsVerifiedSatisfied + ", expected 5.");
+      if (!Array.isArray(s.unverifiedTasks) || !s.unverifiedTasks.some((t) => JSON.stringify(t).includes("brownfield-001"))) fails.push("brownfield-001 is not NAMED in unverifiedTasks — an excluded task must stay visible, never silently dropped.");
+
+      // PROVENANCE: some recorded string must BE the task directory actually used. A hardcoded
+      // "benchmarks/tasks" records nothing, so this compares against a temp path.
+      const want = realpathSync(process.env.TASKSDIR);
+      const seen = [];
+      const walk = (v) => {
+        if (typeof v === "string") { seen.push(v); return; }
+        if (Array.isArray(v)) { v.forEach(walk); return; }
+        if (v && typeof v === "object") { Object.values(v).forEach(walk); }
+      };
+      walk(s);
+      const hit = seen.find((x) => { try { return x.length > 0 && realpathSync(x) === want; } catch { return false; } });
+      if (!hit) fails.push("THE SUMMARY DOES NOT NAME THE TASK DEFINITIONS IT SCORED AGAINST. resummarize was given --tasks " + want + " and no string in the emitted summary.json resolves to it. The scored kinds come from those files, so the same command over the same evidence produces a different published number depending on a directory the artifact never mentions. A constant like \"benchmarks/tasks\" does not satisfy this — the path here is a temp dir.");
+      else console.log("provenance recorded: " + hit);
+
+      // NO SILENT ZERO
+      const est = Number(process.env.EMPTY_ST);
+      const eOut = process.env.EMPTY_OUT || "";
+      if (existsSync(process.env.EMPTYS)) {
+        const e = JSON.parse(readFileSync(process.env.EMPTYS, "utf8"));
+        console.log("empty-tasks: exit=" + est + " verified tasks=" + e.tasksVerified + " denominator=" + e.requirementsVerifiedTotal);
+        if (est === 0 && e.requirementsVerifiedTotal === 0) {
+          fails.push("A SILENT ZERO. Given results it cannot match to any task definition, resummarize exited 0 and published \"0/0 verified requirements satisfied, I-SR 0.0%\" — byte-indistinguishable from the genuine pre-WP-651 result. An unresolvable input must FAIL LOUDLY and name what it could not resolve.");
+        }
+      } else if (est === 0) {
+        fails.push("resummarize exited 0 over an empty --tasks directory and wrote no summary at all; it must exit non-zero and say what it could not resolve.");
+      }
+      if (est !== 0 && !/brownfield/.test(eOut)) {
+        fails.push("resummarize refused the empty --tasks directory but named nothing it could not resolve; the operator has to be told WHICH results had no task definition.");
+      }
+
+      // STALE PROOF
+      if (existsSync(process.env.REFLESSS)) {
+        const r = JSON.parse(readFileSync(process.env.REFLESSS, "utf8"));
+        console.log("ref-less: verified tasks=" + r.tasksVerified + " denominator=" + r.requirementsVerifiedTotal);
+        if (r.requirementsVerifiedTotal !== 0) fails.push("THE STALE-PROOF GUARD WAS WEAKENED. The stored p3-rung-4 arms record no repoRef; WP-600 trap G refuses them for that reason alone and this WP does not change it. Denominator over the ref-less arm must stay 0, not " + r.requirementsVerifiedTotal + ".");
+      }
+
+      if (fails.length > 0) { console.log("AC-2 FAIL:\n- " + fails.join("\n- ")); process.exit(1); }
+      console.log("denominator 5 over 4 tasks, brownfield-001 named, provenance recorded, no silent zero, stale-proof guard intact");
+      ' || exit 1
+      echo "AC-2 OK: the score is unchanged, the summary names its inputs, and an unresolvable input fails loudly"
+
+  - id: AC-3
+    description: >
+      THE FROZEN THINGS STAY FROZEN, THE INHERITED GUARDS STAY, THE USAGE TEXT DOCUMENTS THE FLAG,
+      TYPECHECK AND LINT ARE GREEN, AND THE DECLARED SUITE IS GREEN AND LARGER. No requirement's
+      `id`, `description` or `check` may change by a byte in any of the five task files; nothing
+      under `benchmarks/results/`; the three published bundles byte-identical. WP-651's guard gate
+      and all-guard refusal, WP-595's `isTaskDiscriminationVerified` and WP-593's `runProbe` all
+      stay exported. Suite floor 236 (measured baseline 232).
+    check: |
+      cd "$(git rev-parse --show-toplevel)" || exit 1
+
+      if ! git diff --quiet -- benchmarks/results/; then
+        echo "AC-3 FAIL: trap — benchmarks/results/ changed. The stored arm and the probe ledger are EVIDENCE, read-only. A delivery that edits the measurement it is graded against has proved nothing."
+        git diff --stat -- benchmarks/results/
+        exit 1
+      fi
+      if ! git diff --quiet -- benchmarks/publications/p3-rung-4/ benchmarks/publications/p3-rung-4-corrected/ benchmarks/publications/leaderboard/; then
+        echo "AC-3 FAIL: trap — a published bundle changed. These are byte-frozen; a recomputed publication goes to a NEW directory."
+        git diff --stat -- benchmarks/publications/
+        exit 1
+      fi
+
+      node --input-type=module -e '
+      import { execFileSync } from "node:child_process";
+      import { readFileSync } from "node:fs";
+      import YAML from "./benchmarks/harness/node_modules/yaml/dist/index.js";
+      const files = execFileSync("git", ["ls-files", "benchmarks/tasks"], { encoding: "utf8" })
+        .split("\n").filter((f) => f.endsWith(".yaml"));
+      const fails = [];
+      let checked = 0;
+      for (const f of files) {
+        const head = YAML.parse(execFileSync("git", ["show", "HEAD:" + f], { encoding: "utf8" }));
+        const now = YAML.parse(readFileSync(f, "utf8"));
+        const a = head.requirements ?? [];
+        const b = now.requirements ?? [];
+        if (a.length !== b.length) { fails.push(f + ": requirement COUNT changed " + a.length + " -> " + b.length + " — the corpus may not get smaller"); continue; }
+        for (let i = 0; i < a.length; i += 1) {
+          checked += 1;
+          for (const field of ["id", "description", "check", "kind"]) {
+            if (String(a[i][field] ?? "") !== String(b[i][field] ?? "")) {
+              fails.push(f + " " + a[i].id + ": `" + field + "` changed — the corpus labelling landed in dogfood-166 and is not this run to re-cut");
+            }
+          }
+        }
+      }
+      if (checked < 16) fails.push("only " + checked + " requirements were compared; the corpus should carry at least 16");
+      if (fails.length > 0) { console.log("AC-3 FAIL:\n- " + fails.join("\n- ")); process.exit(1); }
+      console.log("all " + checked + " requirement ids/descriptions/checks/kinds byte-unchanged across " + files.length + " task files");
+      ' || exit 1
+
+      cd benchmarks/harness || exit 1
+      pnpm run typecheck || { echo "AC-3 FAIL: strict typecheck is red (this covers test/ too — F-382)"; exit 1; }
+      pnpm exec eslint src/ || { echo "AC-3 FAIL: eslint is red on the harness src tree"; exit 1; }
+
+      grep -qE 'export function isTaskDiscriminationVerified' src/results.ts || {
+        echo "AC-3 FAIL: trap — WP-595's discrimination gate was removed rather than refined."
+        exit 1
+      }
+      grep -qE 'export (async )?function runProbe' src/probe.ts || {
+        echo "AC-3 FAIL: trap — WP-593's probe was disturbed. Out of scope."
+        exit 1
+      }
+      grep -qE 'has no scored requirements' src/task.ts || {
+        echo "AC-3 FAIL: trap — WP-651's all-guard refusal was removed from the authoring validator."
+        exit 1
+      }
+      grep -qE 'guardGrades' src/results.ts || {
+        echo "AC-3 FAIL: trap — WP-651's guard gate is gone from the scorer. A failed guard must still zero its task."
+        exit 1
+      }
+      node --input-type=module -e '
+      import { readFileSync } from "node:fs";
+      const src = readFileSync("src/main.ts", "utf8");
+      const i = src.indexOf("resummarize --results");
+      if (i < 0) { console.log("AC-3 FAIL: the resummarize entry is gone from the CLI usage text"); process.exit(1); }
+      const rest = src.slice(i);
+      const end = rest.indexOf("exit codes:");
+      const block = end > 0 ? rest.slice(0, end) : rest.slice(0, 800);
+      if (!/--tasks/.test(block)) {
+        console.log("AC-3 FAIL: the resummarize usage entry does not document the flag that selects the task definitions. That flag already appears in USAGE for probe and run, so it must be documented in the resummarize block specifically. A published number that depends on an undocumented input is not reproducible.");
+        process.exit(1);
+      }
+      console.log("resummarize usage documents its task-definitions flag");
+      ' || exit 1
+
+      OUT=$(pnpm --filter @chikory/benchmarks exec vitest run 2>&1)
+      ST=$?
+      echo "$OUT" | grep -nE '(^|[[:space:]])(FAIL|×|✕|AssertionError)' | head -n 20
+      echo "$OUT" | tail -6
+      if [ "$ST" -ne 0 ]; then
+        echo "AC-3 FAIL: the DECLARED regression suite is RED (vitest exited $ST)"
+        exit 1
+      fi
+      N=$(echo "$OUT" | grep -oE "Tests +[0-9]+ passed" | grep -oE "[0-9]+" | head -1)
+      echo "committed harness tests passing: ${N:-UNPARSEABLE} (floor 236, measured baseline 232)"
+      if [ -z "$N" ]; then
+        echo "AC-3 FAIL: could not read a test count out of the vitest summary"
+        exit 1
+      fi
+      if [ "$N" -lt 236 ]; then
+        echo "AC-3 FAIL: durability floor not met — the harness suite did not grow by at least 4 tests. A behaviour proved only by the checks that grade this run is not pinned at all (F-356)."
+        exit 1
+      fi
+      echo "AC-3 OK: frozen things frozen, inherited guards intact, flag documented, typecheck+lint green, DECLARED suite green AND larger"
+
+budget_usd: 20
+max_steps: 6
+
+agent_classes:
+  executor: executor-default
+  judge: judge-default
+
+judge:
+  cadence: 1
+
+# F-322 (dogfood-135): without this, a converged out-of-rubric escalation parks overnight for a
+# human instead of auto-sealing.
+unattended:
+  escalation: seal_resumable_failed

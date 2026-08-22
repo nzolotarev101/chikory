@@ -41,12 +41,19 @@ goal: |
   justification each. No new deprecation warnings at startup.
 requirements:               # each independently checkable
   - id: R1                  # R<n>, unique within the task
+    kind: guard             # guard | discriminator (default: discriminator / scored)
     description: dependency at target major; install clean
     check: grep -q '"fastify": "\^5' package.json && npm ci
   - id: R2
+    kind: guard
     description: full pre-existing test suite green
     check: npm test
     prerequisites: [R1]     # optional; feeds dependency-adjusted scoring (D-SR)
+  - id: R3
+    kind: discriminator
+    description: v5-specific routing behavior is verified
+    check: npm test test/v5-routing.test.js
+    prerequisites: [R1]
 metrics_notes: |            # what this task stresses (see ../README.md metrics)
   Per-step reliability over ~20 edit sites; recovery after a mid-upgrade break.
 tags: [dependency-upgrade]  # optional
@@ -57,6 +64,11 @@ Field rules the validator enforces:
 - `id` matches `^(brownfield|greenfield)-\d{3}$` and agrees with `class`.
 - Requirement ids are unique `R<n>`; `prerequisites` must reference existing
   ids and must not form a cycle.
+- `kind`: optional, `guard` | `discriminator` | `scored` (defaults to `discriminator`).
+  - **`guard`**: mandatory prerequisite/sanity check (install clean, pre-existing suite green, typecheck clean). Guards are **required but not scored**: they must pass for the task to count, but contribute to neither the numerator nor the denominator of I-SR or D-SR. If any guard fails, the task's scored satisfaction is 0.
+  - **`discriminator`** (or `scored`): active scored requirement that discriminates a good delivery from a bad one (fails at base, passes on fix).
+  - Every task must have **at least one scored requirement** (a task with only guards is refused).
+  - The declared kind must agree with evidence in `benchmarks/results/discrimination.json`. A requirement declared scored that the discrimination ledger classifies `non-discriminating` is refused by `chikory-bench validate`.
 - Brownfield tasks must carry a `repo` block.
 - A `pinned` task may contain **no TBDs**: `repo.ref` is a full 40-hex commit
   sha and every `check` is executable. A pinned brownfield task is expected to

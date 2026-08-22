@@ -28,9 +28,11 @@ goal: |
   the exact type reported in the issue.
 requirements:
   - id: R1
+    kind: guard
     description: dependencies install clean (pnpm workspace, frozen lockfile)
     check: npx -y pnpm@10.12.1 install --frozen-lockfile
   - id: R2
+    kind: discriminator
     description: a new or modified test reproduces the reported Map-default sharing bug and passes on the final code
     prerequisites: [R1]
     check: |
@@ -40,10 +42,12 @@ requirements:
       test -n "$NEW"
       for f in $NEW; do npx -y pnpm@10.12.1 exec vitest run --project zod "$f"; done
   - id: R3
+    kind: guard
     description: full pre-existing zod test suite is green (no other observable behavior changed)
     prerequisites: [R1]
     check: npx -y pnpm@10.12.1 exec vitest run --project zod
   - id: R4
+    kind: discriminator
     description: the fix is root-cause, not a narrow Map-only patch — the same shared-state bug is independently verified fixed for Set-typed defaults too, which the issue never reported
     prerequisites: [R1]
     check: |

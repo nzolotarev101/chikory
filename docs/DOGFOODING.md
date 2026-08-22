@@ -8,13 +8,14 @@ recover a run, and how to land the result as a normal PR.
 **Status (2026-08-22, bounded — update discipline: REPLACE this block, ≤15 lines;
 displaced prose moves verbatim to [`PLAN-HISTORY.md`](PLAN-HISTORY.md); per-run detail:
 `docs/reports/`; queue + course correction: `plan.md` §6/§7).**
-🟢 **dogfood-165 / WP-644 + WP-647 (the loop now spots a reworded complaint 7 times out of 8) DELIVERED AND LANDED** — `run-99c6aad9-fee6-47cb-abcb-80737959032e`, terminal **SUCCESS**, 1 step, **$0.0954/$20.00** (0.5%, judge share 100%), 11m 45s, AC **3/3** re-run green, harvest byte-**IDENTICAL 2/2**, declared suite **1,810** (baseline 1,806) → **1,815** after the review's hand-fix. `docs/reports/dogfood-165.md`.
-🟢 **The delivery is right, and every number was re-measured at the review rather than transcribed.** `areMateriallySameObjections` answers "same" on **7 of 8** labelled restatements (incumbent 4), holds **0/3** on the same-run collision negatives, and sits at **25/1501 (1.67%)** on the cross-family population. Ablation: the clause-level pass alone 4/8 · the loosened sub-token counts alone 4/8 · together **7/8** · without the `BOILERPLATE` acceptance-criterion words the ceiling busts at 28/1501. Nothing in the diff is decoration.
-🟢 **WP-647's rule earned its keep.** dogfood-162 failed this same WP at **44.06%** cross-run false positives while passing every criterion it had. Grading the recall floor and BOTH ceilings in ONE check, over 1,512 real pairs the delivery cannot enumerate, cost this delivery **+2 pairs for +3 recall**.
-🟡 **F-436 (§8) hand-fixed at the review — an AC clause that was GREEN ON HEAD.** `grep -rlqE 'objection-corpus\.json' test/` was meant to force a COMMITTED test to read the corpus; it matched `packages/sdk-ts/test/fixtures/objection-labels.json:4`, a FIXTURE. The arming pass could not see it because AC-3 as a whole was RED elsewhere. **Rule: a grep that must find a TEST is scoped to test files, never a `test/` tree that also holds fixtures.**
-🟠 **F-437 (§8) → WP-650** — "same prose, different target" objections merge: **60 of 120 (50.0%)** of a locus-substitution population generated from `git grep '^export function' -- src`, measured **identical on the incumbent**, so the hole predates WP-643/WP-644; the narrow `AC-1` vs `AC-2` case is what this run newly added. 🟡 **F-439 (§8)** — the ceiling is **saturated at exactly 25/25**. ℹ️ **F-438** — the corpus claimed 86 unique justifications; 83 across 86 rows (hand-fixed).
-**Standing lesson: prove every CLAUSE of a multi-clause AC red on HEAD, not just the AC.** A clause that is already satisfied rides a RED verdict the rest of the check earned, and grades nothing.
-**NEXT HEADLINE = `dogfood-166` / WP-651 — ARMED 3/3 BOTH WAYS.** `examples/dogfood/dogfood-166-wp651-guards-do-not-score.yaml`. The gate FLIPPED to ⛔ STALLED when this run's ledger row landed, binding the headline to the P3 ladder rung; WP-650 is parked as `dogfood-167-…yaml.pending`. MEASURED: `chikory-bench resummarize` over the stored arm and the committed probe ledger reports **0/5 verified tasks, 0/0 verified requirements, I-SR 0.0%** — 11 of 16 requirements are `non-discriminating` guards that pass at the pinned base, and a task counts only when EVERY requirement discriminates. AC-1 grades the new denominator (exactly 5 over 4 tasks), a failed guard still biting, and the stale-proof guard still refusing the ref-less original, in ONE check. The designed trap is making the corpus SMALLER. Reference reached 5/5 requirements, I-SR 100.0%; worst check 10s = 8% of the 120s cap.
+🟢 **dogfood-166 / WP-651 (the benchmark's score stopped being zero-over-zero) DELIVERED AND LANDED** — `run-89bbcd8d-8ddd-4600-a450-ad1720174bbc`, terminal **SUCCESS**, 4 steps, **$0.3227/$20.00** (1.6%, judge share 100%), 35m 26s, AC **3/3** re-run green, harvest byte-**IDENTICAL 13/13**, declared suite **232 passed** (baseline 221, floor 225), `docs/reports/dogfood-166.md`.
+🟢 **Re-measured at the review, not transcribed.** `chikory-bench resummarize` over the stored `p3-rung-4/chikory` arm + the committed probe ledger now reports **4/5 verified tasks, 5/5 verified requirements satisfied, I-SR 100.0% [56.6%, 100.0%]** — it reported **0/5 tasks, 0/0, I-SR 0.0%** before. Guards (install clean / suite green / typechecks) stay mandatory and score nothing; all 19 requirement `id`/`description`/`check` fields byte-unchanged.
+🟢 **The judge earned its keep — probe-confirmed.** Step 2 passed **3/3 acceptance checks** on a diff that had deleted `resummarize`'s empty-results refusal (step-2 diff artifact `161bb5222686`, lines 144-145). ROLLBACK to base on `no_unrelated_deletions`; step 3 rebuilt the work and kept the refusal; a committed test now pins it. **No AC covered it.**
+🔴 **P3-rung-5 STILL NOT CLIMBED (ledger `rung=4`)** — nothing published moved. `benchmarks/publications/p3-rung-4-corrected/chikory-summary.json` still reads `tasksVerified 0, iSr 0`: the stored arms predate `repoRef`, so WP-600 trap G refuses them for a second, independent reason. Re-running them is **WP-304, operator work**; a rung is satisfied only when its proof is whole (dogfood-124's precedent).
+🔴 **F-441 / 🟠 F-442 / 🟠 F-443 (§8) → WP-652** — three MEASURED ways to make the new number silently smaller: an unprobed scored requirement deletes its whole task while `validate` exits 0; a ledger-`discriminating` requirement declared `guard` passes clean and drops the interval floor 56.6% → 51.0%; `resummarize` guesses its tasks dir from cwd and records nothing (empty dir → I-SR 0.0%, indistinguishable from the real result).
+🟡 **F-444 (§8) — a verbatim goal prohibition failed for the 4th consecutive run, and the cap itself is loose.** Step 1 was killed **123.7 s past its 600 s cap (1.21×**, up from 1.01× in dogfood-163) waiting on a backgrounded suite, with 0 output tokens: 34.1% of wall clock, 13.7% of spend. Prompt-channel prohibitions are measurably not the fix.
+**Standing lesson: growing a corpus is a scoring-rule change.** Any requirement added after the last probe sweep is, to the scorer, an unprobed requirement — and today that silently removes its entire task from the published denominator.
+**NEXT HEADLINE = `dogfood-167` / WP-652 — the P3-rung-5 corpus half, continued.** `examples/dogfood/dogfood-167-wp652-score-names-its-inputs.yaml`. **WP-304's operator arm must not run until this lands** — re-running arms against a corpus that silently deletes tasks would publish a number nobody can reproduce.
 
 Related docs: [`docs/spec/task-spec.md`](spec/task-spec.md) (schema
 reference) · [`docs/TASK-PROTOCOL.md`](TASK-PROTOCOL.md) (WP etiquette, §7 is
@@ -2422,3 +2423,64 @@ broken (a false-green, not a follow-on fix).
   pair fails that criterion before its own work is read — and a copied-forward budget makes
   the successor spec unlaunchable. **Re-measure a ceiling from the LANDED artifact before
   reusing it, never from the arithmetic that produced it.**
+
+- **🔴 GROWING A CORPUS IS A SCORING-RULE CHANGE — AN UNPROBED REQUIREMENT DELETES
+  ITS WHOLE TASK** (F-441, dogfood-166). WP-651 made the benchmark score over
+  requirements that can actually discriminate. It also made the scorer refuse a
+  task whose scored requirement is absent from `benchmarks/results/discrimination.json`
+  (`benchmarks/harness/src/results.ts:216`) — correct in spirit, and invisible at
+  authoring time, because `chikory-bench validate`'s mislabel loop only inspects
+  requirements that are ALREADY in the ledger
+  (`benchmarks/harness/src/main.ts:250`). Measured: one unprobed
+  `kind: discriminator` R5 appended to a copy of `brownfield-004` →
+  `validate` exits 0 (`5 valid, 0 invalid`) while `resummarize` drops from
+  **4/5 verified tasks, denominator 5** to **3/5 tasks, denominator 4**, with the
+  only signal a row inside `unverifiedTasks`. **Re-run `chikory-bench probe` for
+  any task you add a scored requirement to, in the same sitting, or the corpus
+  gets smaller instead of larger.** The durable fix is **WP-652**.
+
+- **🟠 A LABEL CHECK THAT RUNS ONE DIRECTION IS HALF A CHECK** (F-442, dogfood-166).
+  `validate` refuses a requirement declared SCORED that the ledger calls
+  `non-discriminating`. It says nothing about the inverse — a ledger-`discriminating`
+  requirement declared `kind: guard`. Measured: demoting `brownfield-003` R2 leaves
+  I-SR at 100.0% and drops the interval FLOOR **56.6% → 51.0%**, with a clean
+  `5 valid, 0 invalid`. The rate is not gameable this way (demoting a FAILING
+  discriminator trips the guard gate and zeroes the task) — what is lost is
+  measurement power, silently. **When an AC says "the label must agree with the
+  evidence", enumerate BOTH directions of disagreement and grade each.**
+
+- **🟠 A PUBLISHED NUMBER MUST NAME EVERY INPUT IT USED** (F-443, dogfood-166).
+  `chikory-bench resummarize` needs task definitions to attach requirement kinds
+  and finds them by guessing: `resolve("benchmarks/tasks")` **relative to the
+  current working directory**, else `resolve(import.meta.dirname, "../../tasks")`
+  (`benchmarks/harness/src/main.ts:846`–`:851`). Nothing is printed, nothing lands
+  in `summary.json`, and `--tasks` is absent from `USAGE`
+  (`benchmarks/harness/src/main.ts:97`). Measured: the same arm and the same ledger,
+  with `--tasks` pointed at an empty directory, returns **`0/5 verified tasks,
+  0/0 verified requirements satisfied (I-SR 0.0%)`** — byte-indistinguishable from
+  the genuine pre-WP-651 result. Latent sibling: when a task is not found,
+  `benchmarks/harness/src/results.ts:299` substitutes the scored I-SR count for
+  D-SR instead of the `dependencySatisfied` recorded at grade time. **WP-652.**
+
+- **🟡 THE STEP CAP IS SOFT, AND A VERBATIM PROHIBITION IN THE GOAL IS NOT A
+  MECHANISM** (F-444, dogfood-166 — F-421/F-345/F-428, 4th consecutive run).
+  dogfood-166's goal quoted the prior failure by id and by number ("do NOT
+  background a full suite and wait for it — dogfood-163's step 1 … was killed at
+  606.7s of its 600s cap"). Step 1 did it anyway and was killed at
+  **723.7 s against `maxSeconds=600` — 1.21× the cap**, up from 1.01× in
+  dogfood-163: the kill is 123.7 s LATE, so the cap does not bound the step it
+  names. Zero output tokens, 0-byte diff, **34.1% of the run's wall clock and
+  13.7% of its spend**. Step 3's summary still opens with eight
+  `I have started X and will wait for it to complete.` lines. **Write the goal's
+  verification instructions as fast, named commands; do not expect a prohibition
+  to bind, and do not treat `maxSeconds` as a tight bound when budgeting a run.**
+
+- **ℹ️ A CHECK THAT DIED IS RENDERED AS A GENUINE RED** (F-445, dogfood-166). On
+  step 1 all three acceptance checks exited 1 from
+  `code: 'ERR_MODULE_NOT_FOUND', url: '…/workspace/benchmarks/harness/node_modules/@chikory/sdk/dist/index.js'`
+  — the workspace SDK was simply not built yet. The judge printed
+  ``✗ AC-1 — judge-executed check `AC-1` exited 1`` with no distinction from a
+  check that ran and failed. `scripts/dogfood-arm.sh` grew exactly this
+  died-before-judging detector after dogfood-133; the judge path never did. Fails
+  safe (a dead check reads as unsatisfied), but **read the criterion's OUTPUT in
+  the trace, not its exit code, before concluding a step produced nothing.**

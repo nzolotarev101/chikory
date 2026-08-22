@@ -6,6 +6,7 @@ import { describe, expect, it } from "vitest";
 import type { SuiteSummary, TaskResult } from "../src/results.js";
 import {
   compareSummaries,
+  isTaskDiscriminationVerified,
   isTaskVerified,
   parseDiscriminationLedger,
   publishableRepoPath,
@@ -30,6 +31,7 @@ function mockTaskResult(overrides: Partial<TaskResult> & { taskId: string }): Ta
       grades: [],
     },
     baseVerification: overrides.baseVerification,
+    repoRef: overrides.repoRef,
   };
 }
 
@@ -529,5 +531,280 @@ describe("p3-rung-4 arm replay (F-252)", () => {
   it("surfaces the three tasks whose runs never sealed", () => {
     const unsealed = summary.perTask.filter((t) => !t.sealed).map((t) => t.taskId);
     expect(unsealed).toEqual(["brownfield-001", "brownfield-002", "brownfield-005"]);
+  });
+});
+
+describe("guard-aware discrimination scoring (WP-651)", () => {
+  const ledger = readDiscriminationLedger(join(import.meta.dirname, "..", "..", "results", "discrimination.json"));
+
+  const tasksMap = new Map([
+    [
+      "brownfield-002",
+      {
+        id: "brownfield-002",
+        source: "authored" as const,
+        class: "brownfield" as const,
+        status: "pinned" as const,
+        goal: "goal",
+        requirements: [
+          { id: "R1", description: "d", prerequisites: [], grading: { kind: "check" as const, command: "c" }, kind: "guard" as const },
+          { id: "R2", description: "d", prerequisites: ["R1"], grading: { kind: "check" as const, command: "c" }, kind: "guard" as const },
+          { id: "R3", description: "d", prerequisites: ["R1"], grading: { kind: "check" as const, command: "c" }, kind: "guard" as const },
+          { id: "R4", description: "d", prerequisites: ["R1"], grading: { kind: "check" as const, command: "c" }, kind: "discriminator" as const },
+        ],
+        preferences: [],
+        tags: [],
+        flags: {},
+      },
+    ],
+    [
+      "brownfield-003",
+      {
+        id: "brownfield-003",
+        source: "authored" as const,
+        class: "brownfield" as const,
+        status: "pinned" as const,
+        goal: "goal",
+        requirements: [
+          { id: "R1", description: "d", prerequisites: [], grading: { kind: "check" as const, command: "c" }, kind: "guard" as const },
+          { id: "R2", description: "d", prerequisites: ["R1"], grading: { kind: "check" as const, command: "c" }, kind: "discriminator" as const },
+          { id: "R3", description: "d", prerequisites: ["R1"], grading: { kind: "check" as const, command: "c" }, kind: "guard" as const },
+          { id: "R4", description: "d", prerequisites: ["R1"], grading: { kind: "check" as const, command: "c" }, kind: "discriminator" as const },
+        ],
+        preferences: [],
+        tags: [],
+        flags: {},
+      },
+    ],
+    [
+      "brownfield-004",
+      {
+        id: "brownfield-004",
+        source: "authored" as const,
+        class: "brownfield" as const,
+        status: "pinned" as const,
+        goal: "goal",
+        requirements: [
+          { id: "R1", description: "d", prerequisites: [], grading: { kind: "check" as const, command: "c" }, kind: "guard" as const },
+          { id: "R2", description: "d", prerequisites: ["R1"], grading: { kind: "check" as const, command: "c" }, kind: "guard" as const },
+          { id: "R3", description: "d", prerequisites: ["R1"], grading: { kind: "check" as const, command: "c" }, kind: "guard" as const },
+          { id: "R4", description: "d", prerequisites: ["R1"], grading: { kind: "check" as const, command: "c" }, kind: "discriminator" as const },
+        ],
+        preferences: [],
+        tags: [],
+        flags: {},
+      },
+    ],
+    [
+      "brownfield-005",
+      {
+        id: "brownfield-005",
+        source: "authored" as const,
+        class: "brownfield" as const,
+        status: "pinned" as const,
+        goal: "goal",
+        requirements: [
+          { id: "R1", description: "d", prerequisites: [], grading: { kind: "check" as const, command: "c" }, kind: "guard" as const },
+          { id: "R2", description: "d", prerequisites: ["R1"], grading: { kind: "check" as const, command: "c" }, kind: "guard" as const },
+          { id: "R3", description: "d", prerequisites: ["R1"], grading: { kind: "check" as const, command: "c" }, kind: "guard" as const },
+          { id: "R4", description: "d", prerequisites: ["R1"], grading: { kind: "check" as const, command: "c" }, kind: "discriminator" as const },
+        ],
+        preferences: [],
+        tags: [],
+        flags: {},
+      },
+    ],
+  ]);
+
+  function makeRefArm(): TaskResult[] {
+    return [
+      mockTaskResult({
+        taskId: "brownfield-001",
+        grading: {
+          total: 3,
+          satisfied: 3,
+          dependencySatisfied: 3,
+          grades: [
+            { requirementId: "R1", satisfied: true, detail: "ok" },
+            { requirementId: "R2", satisfied: true, detail: "ok" },
+            { requirementId: "R3", satisfied: true, detail: "ok" },
+          ],
+        },
+        baseVerification: { green: true, reason: "ok", testsPassed: 1, testsFailed: 0 },
+        repoRef: "6e6f3b3dbc3fdd62bc2c043efbdcd0254823fcb4",
+      }),
+      mockTaskResult({
+        taskId: "brownfield-002",
+        grading: {
+          total: 4,
+          satisfied: 4,
+          dependencySatisfied: 4,
+          grades: [
+            { requirementId: "R1", satisfied: true, detail: "ok", kind: "guard" },
+            { requirementId: "R2", satisfied: true, detail: "ok", kind: "guard" },
+            { requirementId: "R3", satisfied: true, detail: "ok", kind: "guard" },
+            { requirementId: "R4", satisfied: true, detail: "ok", kind: "discriminator" },
+          ],
+        },
+        baseVerification: { green: true, reason: "ok", testsPassed: 1, testsFailed: 0 },
+        repoRef: "a061eaa112fa18885dd4de0cea6c0e51094cad0c",
+      }),
+      mockTaskResult({
+        taskId: "brownfield-003",
+        grading: {
+          total: 4,
+          satisfied: 4,
+          dependencySatisfied: 4,
+          grades: [
+            { requirementId: "R1", satisfied: true, detail: "ok", kind: "guard" },
+            { requirementId: "R2", satisfied: true, detail: "ok", kind: "discriminator" },
+            { requirementId: "R3", satisfied: true, detail: "ok", kind: "guard" },
+            { requirementId: "R4", satisfied: true, detail: "ok", kind: "discriminator" },
+          ],
+        },
+        baseVerification: { green: true, reason: "ok", testsPassed: 1, testsFailed: 0 },
+        repoRef: "b6b1288277e6ca87dab0ad1c7251b92612b7445c",
+      }),
+      mockTaskResult({
+        taskId: "brownfield-004",
+        grading: {
+          total: 4,
+          satisfied: 4,
+          dependencySatisfied: 4,
+          grades: [
+            { requirementId: "R1", satisfied: true, detail: "ok", kind: "guard" },
+            { requirementId: "R2", satisfied: true, detail: "ok", kind: "guard" },
+            { requirementId: "R3", satisfied: true, detail: "ok", kind: "guard" },
+            { requirementId: "R4", satisfied: true, detail: "ok", kind: "discriminator" },
+          ],
+        },
+        baseVerification: { green: true, reason: "ok", testsPassed: 1, testsFailed: 0 },
+        repoRef: "d96c5ceef12cb53266ce1ae5e65fba301a31fe57",
+      }),
+      mockTaskResult({
+        taskId: "brownfield-005",
+        grading: {
+          total: 4,
+          satisfied: 4,
+          dependencySatisfied: 4,
+          grades: [
+            { requirementId: "R1", satisfied: true, detail: "ok", kind: "guard" },
+            { requirementId: "R2", satisfied: true, detail: "ok", kind: "guard" },
+            { requirementId: "R3", satisfied: true, detail: "ok", kind: "guard" },
+            { requirementId: "R4", satisfied: true, detail: "ok", kind: "discriminator" },
+          ],
+        },
+        baseVerification: { green: true, reason: "ok", testsPassed: 1, testsFailed: 0 },
+        repoRef: "cdbc28049889a9da9ea2abb6bd6519afe2279ead",
+      }),
+    ];
+  }
+
+  it("computes exactly 5 verified requirements over 4 verified tasks when ref is present", () => {
+    const results = makeRefArm();
+    const summary = summarize("benchmarks/tasks", "chikory", "s", "e", results, ledger, tasksMap);
+
+    expect(summary.tasksVerified).toBe(4);
+    expect(summary.requirementsVerifiedTotal).toBe(5);
+    expect(summary.requirementsVerifiedSatisfied).toBe(5);
+    expect(summary.dependencyVerifiedSatisfied).toBe(5);
+    expect(summary.iSr).toBe(1.0);
+    expect(summary.dSr).toBe(1.0);
+    expect(summary.unverifiedTasks).toHaveLength(1);
+    expect(summary.unverifiedTasks[0]!.taskId).toBe("brownfield-001");
+    expect(summary.unverifiedTasks[0]!.reason).toMatch(/never probed/);
+  });
+
+  it("preserves WP-600 trap G: ref-less arm produces 0 verified tasks", () => {
+    const results = makeRefArm().map((r) => {
+      const copy = { ...r };
+      delete copy.repoRef;
+      return copy;
+    });
+    const summary = summarize("benchmarks/tasks", "chikory", "s", "e", results, ledger, tasksMap);
+
+    expect(summary.tasksVerified).toBe(0);
+    expect(summary.requirementsVerifiedTotal).toBe(0);
+    expect(summary.iSr).toBe(0);
+  });
+
+  it("guards still bite: failing a guard drops that task's scored requirements to 0", () => {
+    const results = makeRefArm();
+    // In brownfield-004, flip guard R1 to failed
+    const bf004 = results.find((r) => r.taskId === "brownfield-004")!;
+    bf004.grading.grades.find((g) => g.requirementId === "R1")!.satisfied = false;
+
+    const summary = summarize("benchmarks/tasks", "chikory", "s", "e", results, ledger, tasksMap);
+
+    // Denominator remains 5, but brownfield-004 scores 0 satisfied instead of 1
+    expect(summary.tasksVerified).toBe(4);
+    expect(summary.requirementsVerifiedTotal).toBe(5);
+    expect(summary.requirementsVerifiedSatisfied).toBe(4);
+    expect(summary.iSr).toBe(4 / 5);
+  });
+
+  it("refuses a task whose every requirement is a guard (never scores 0/0)", () => {
+    const allGuardTask = {
+      id: "brownfield-002",
+      source: "authored" as const,
+      class: "brownfield" as const,
+      status: "pinned" as const,
+      goal: "g",
+      requirements: [
+        { id: "R1", description: "d", prerequisites: [], grading: { kind: "check" as const, command: "c" }, kind: "guard" as const },
+      ],
+      preferences: [],
+      tags: [],
+      flags: {},
+    };
+    const res = mockTaskResult({
+      taskId: "brownfield-002",
+      grading: {
+        total: 1,
+        satisfied: 1,
+        dependencySatisfied: 1,
+        grades: [{ requirementId: "R1", satisfied: true, detail: "ok", kind: "guard" }],
+      },
+      repoRef: "a061eaa112fa18885dd4de0cea6c0e51094cad0c",
+    });
+
+    const check = isTaskDiscriminationVerified(res, ledger, allGuardTask);
+    expect(check.verified).toBe(false);
+    expect(check.reason).toMatch(/no scored requirements/);
+  });
+
+  it("refuses a task where a scored requirement is classified non-discriminating in ledger", () => {
+    const mislabeledTask = {
+      id: "brownfield-002",
+      source: "authored" as const,
+      class: "brownfield" as const,
+      status: "pinned" as const,
+      goal: "g",
+      requirements: [
+        // R1 is non-discriminating in ledger, but declared scored here
+        { id: "R1", description: "d", prerequisites: [], grading: { kind: "check" as const, command: "c" }, kind: "discriminator" as const },
+        { id: "R4", description: "d", prerequisites: [], grading: { kind: "check" as const, command: "c" }, kind: "discriminator" as const },
+      ],
+      preferences: [],
+      tags: [],
+      flags: {},
+    };
+    const res = mockTaskResult({
+      taskId: "brownfield-002",
+      grading: {
+        total: 2,
+        satisfied: 2,
+        dependencySatisfied: 2,
+        grades: [
+          { requirementId: "R1", satisfied: true, detail: "ok", kind: "discriminator" },
+          { requirementId: "R4", satisfied: true, detail: "ok", kind: "discriminator" },
+        ],
+      },
+      repoRef: "a061eaa112fa18885dd4de0cea6c0e51094cad0c",
+    });
+
+    const check = isTaskDiscriminationVerified(res, ledger, mislabeledTask);
+    expect(check.verified).toBe(false);
+    expect(check.reason).toMatch(/Requirement R1 is declared scored but discrimination ledger classifies it as 'non-discriminating'/);
   });
 });

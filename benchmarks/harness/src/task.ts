@@ -20,6 +20,8 @@ export type RequirementGrading =
   | { kind: "check"; command: string }
   | { kind: "judge"; criteria: string };
 
+export type RequirementKind = "guard" | "discriminator" | "scored";
+
 export interface BenchmarkRequirement {
   id: string;
   description: string;
@@ -27,6 +29,7 @@ export interface BenchmarkRequirement {
   prerequisites: string[];
   grading: RequirementGrading;
   category?: string;
+  kind?: RequirementKind;
 }
 
 /** DevAI soft preferences — reported, never part of the satisfaction rate. */
@@ -86,6 +89,7 @@ const AuthoredRequirementYaml = z
     description: z.string().min(1),
     check: z.string().min(1),
     prerequisites: z.array(z.string()).optional(),
+    kind: z.enum(["guard", "discriminator", "scored"]).optional(),
   })
   .strict();
 
@@ -222,11 +226,17 @@ export function validateAuthoredTask(
     issues.push("blocked_reason is only valid on a blocked task");
   }
 
+  const allGuards = t.requirements.every((r) => r.kind === "guard");
+  if (allGuards) {
+    issues.push(`task ${t.id} has no scored requirements (every requirement is declared a guard)`);
+  }
+
   const requirements: BenchmarkRequirement[] = t.requirements.map((r) => ({
     id: r.id,
     description: r.description,
     prerequisites: r.prerequisites ?? [],
     grading: { kind: "check", command: r.check },
+    kind: r.kind ?? "discriminator",
   }));
 
   const cycleMember = findCycle(requirements);

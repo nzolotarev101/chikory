@@ -132,4 +132,23 @@ describe("authored task format v1 (WP-301 freeze)", () => {
     const { issues } = validateAuthoredTask(dual, "dual.yaml");
     expect(issues.join()).toMatch(/task cannot declare both repo.fix_ref and repo.fix_patch/);
   });
+
+  it("accepts tasks with guard and discriminator requirement kinds", () => {
+    const yaml = VALID_PINNED.replace(
+      "requirements:\n  - id: R1\n    description: lockfile at target major\n    check: grep -q dep-at-5 package-lock.json\n  - id: R2\n    description: suite green\n    check: npm test\n    prerequisites: [R1]",
+      "requirements:\n  - id: R1\n    kind: guard\n    description: lockfile at target major\n    check: grep -q dep-at-5 package-lock.json\n  - id: R2\n    kind: discriminator\n    description: suite green\n    check: npm test\n    prerequisites: [R1]",
+    );
+    const task = parseAuthoredTask(yaml, "kinds.yaml");
+    expect(task.requirements[0]!.kind).toBe("guard");
+    expect(task.requirements[1]!.kind).toBe("discriminator");
+  });
+
+  it("refuses a task where every requirement is declared a guard", () => {
+    const allGuards = VALID_PINNED.replace(
+      "requirements:\n  - id: R1\n    description: lockfile at target major\n    check: grep -q dep-at-5 package-lock.json\n  - id: R2\n    description: suite green\n    check: npm test\n    prerequisites: [R1]",
+      "requirements:\n  - id: R1\n    kind: guard\n    description: lockfile at target major\n    check: grep -q dep-at-5 package-lock.json\n  - id: R2\n    kind: guard\n    description: suite green\n    check: npm test\n    prerequisites: [R1]",
+    );
+    const { issues } = validateAuthoredTask(allGuards, "all-guards.yaml");
+    expect(issues.join()).toMatch(/task brownfield-004 has no scored requirements/);
+  });
 });

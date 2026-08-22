@@ -8,7 +8,7 @@
  */
 import { DEFAULT_CHECK_TIMEOUT_MS, runBounded, scrubExecutorEnv } from "@chikory/sdk";
 
-import type { BenchmarkRequirement, BenchmarkTask } from "./task.js";
+import type { BenchmarkRequirement, BenchmarkTask, RequirementKind } from "./task.js";
 import { type ProvisioningDecision } from "./engine.js";
 
 
@@ -18,6 +18,7 @@ export interface RequirementGrade {
   /** Set when the requirement could not actually be graded (counts unsatisfied). */
   skipped?: "no-judge-configured";
   detail: string;
+  kind?: RequirementKind;
 }
 
 export interface JudgeVerdict {
@@ -75,12 +76,14 @@ async function gradeOne(
   ctx: GradeContext,
 ): Promise<RequirementGrade> {
   const timeoutMs = ctx.timeoutMs ?? DEFAULT_CHECK_TIMEOUT_MS;
+  const kind = req.kind ?? "discriminator";
   if (req.grading.kind === "check") {
     const { code, output } = await runCheck(req.grading.command, ctx.workspaceDir, timeoutMs);
     return {
       requirementId: req.id,
       satisfied: code === 0,
       detail: `check exit ${code}${output ? `: ${output.slice(0, 500)}` : ""}`,
+      kind,
     };
   }
   if (!ctx.judge) {
@@ -89,14 +92,15 @@ async function gradeOne(
       satisfied: false,
       skipped: "no-judge-configured",
       detail: "judge-graded requirement but no judge configured (counts unsatisfied)",
+      kind,
     };
   }
   const verdict = await ctx.judge({ criteria: req.grading.criteria, workspaceDir: ctx.workspaceDir });
-  return { requirementId: req.id, satisfied: verdict.satisfied, detail: verdict.rationale };
+  return { requirementId: req.id, satisfied: verdict.satisfied, detail: verdict.rationale, kind };
 }
 
 /** Transitively: this requirement and every prerequisite satisfied. */
-function dependencySatisfiedIds(task: BenchmarkTask, gradeById: Map<string, boolean>): Set<string> {
+export function dependencySatisfiedIds(task: BenchmarkTask, gradeById: Map<string, boolean>): Set<string> {
   const byId = new Map(task.requirements.map((r) => [r.id, r]));
   const memo = new Map<string, boolean>();
   const ok = (id: string): boolean => {

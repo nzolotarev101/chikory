@@ -207,7 +207,7 @@ export async function runSuite(opts: RunSuiteOptions): Promise<{ summary: SuiteS
     );
   }
 
-  const summary = summarize(opts.suite, opts.adapter.name, startedAt, now().toISOString(), results, opts.ledger);
+  const summary = summarize(opts.suite, opts.adapter.name, startedAt, now().toISOString(), results, opts.ledger, opts.tasks);
   writeSuiteSummary(outDir, summary);
   return { summary, outDir };
 }

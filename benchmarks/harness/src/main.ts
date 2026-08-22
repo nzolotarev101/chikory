@@ -17,10 +17,12 @@ import {
 import { commandComplete, makeJudgeGrader } from "./judge-grader.js";
 import {
   compareSummaries,
+  getLedgerEntry,
   readDiscriminationLedger,
   summarize,
   writeSuiteSummary,
   type DiscriminationLedger,
+  type DiscriminationRequirementEntry,
   type SuiteSummary,
   type TaskResult,
 } from "./results.js";
@@ -28,7 +30,7 @@ import { writeLeaderboard } from "./leaderboard.js";
 import { runProbe, runProbeSweep } from "./probe.js";
 import { acquireSuiteLock, SuiteAlreadyRunningError } from "./suite-lock.js";
 import { loadTaskDir, runSuite } from "./suite.js";
-import { isRunnable } from "./task.js";
+import { isRunnable, type BenchmarkRequirement, type BenchmarkTask } from "./task.js";
 
 const USAGE = `usage: chikory-bench <command> [options]
 
@@ -39,6 +41,9 @@ commands:
                              probed, naming each task and the field it lacks
                              (a pinned brownfield task needs repo.fix_ref or repo.fix_patch —
                              the gold patch, see benchmarks/tasks/AUTHORING.md)
+      [--discrimination-ledger <file>]
+                             validate task requirement kind declarations against
+                             discrimination ledger; exit 1 if scored requirement is non-discriminating
   list <task-dir>...       list loaded tasks (id, class, status, requirements)
   probe --task <file> [--out <dir>] [--record <file>]
                            probe task requirement discrimination (red@base, green@fix)
@@ -144,7 +149,7 @@ export function pickClassRefs(
 }
 
 /** Every flag `validate`/`list` accepts. Anything else is a typo (F-285). */
-const VALIDATE_FLAGS = new Set(["require-probeable"]);
+const VALIDATE_FLAGS = new Set(["require-probeable", "discrimination-ledger"]);
 const BOOLEAN_FLAGS = new Set(["require-probeable"]);
 
 function parseFlags(argv: string[]): Flags {
@@ -202,6 +207,31 @@ export async function main(argv: string[], io = { out: console.log, err: console
       return 1;
     }
     const requireProbeable = values["require-probeable"] === "true";
+    const explicitLedger = values["discrimination-ledger"];
+    let ledgerPath: string | undefined = explicitLedger;
+    if (!ledgerPath) {
+      if (existsSync(resolve("benchmarks/results/discrimination.json"))) {
+        ledgerPath = resolve("benchmarks/results/discrimination.json");
+      } else if (existsSync(resolve(import.meta.dirname, "../../results/discrimination.json"))) {
+        ledgerPath = resolve(import.meta.dirname, "../../results/discrimination.json");
+      }
+    }
+    let ledger: DiscriminationLedger | undefined;
+    if (ledgerPath) {
+      const resolvedLedger = resolve(ledgerPath);
+      if (existsSync(resolvedLedger)) {
+        try {
+          ledger = readDiscriminationLedger(resolvedLedger);
+        } catch (err) {
+          io.err(`chikory-bench validate: ${err instanceof Error ? err.message : String(err)}`);
+          return 1;
+        }
+      } else if (explicitLedger !== undefined) {
+        io.err(`chikory-bench validate: --discrimination-ledger not found: ${resolvedLedger}`);
+        return 1;
+      }
+    }
+
     let bad = 0;
     for (const dir of positionals) {
       const { tasks, invalid } = loadTaskDir(resolve(dir));
@@ -209,6 +239,21 @@ export async function main(argv: string[], io = { out: console.log, err: console
         bad++;
         io.err(`INVALID ${join(dir, file)}`);
         for (const issue of issues) io.err(`  - ${issue}`);
+      }
+      if (command === "validate" && ledger !== undefined) {
+        for (const t of tasks) {
+          const ledgerEntry = getLedgerEntry(ledger, t.id);
+          if (ledgerEntry && ledgerEntry.requirements) {
+            for (const r of t.requirements) {
+              const isGuard = r.kind === "guard";
+              const ledgerReq = ledgerEntry.requirements.find((lr: DiscriminationRequirementEntry) => lr.id === r.id);
+              if (!isGuard && ledgerReq && ledgerReq.classification === "non-discriminating") {
+                bad++;
+                io.err(`MISLABEL ${t.id} ${r.id}: declared scored/discriminator but discrimination ledger classifies it as non-discriminating`);
+              }
+            }
+          }
+        }
       }
       if (command === "validate" && requireProbeable) {
         for (const t of tasks) {
@@ -798,7 +843,35 @@ export async function main(argv: string[], io = { out: console.log, err: console
       return 1;
     }
 
-    const summary = summarize(suite, adapter, startedAt, endedAt, taskResults, ledger);
+    let tasksDirPath = values["tasks"];
+    if (!tasksDirPath) {
+      if (existsSync(resolve("benchmarks/tasks"))) {
+        tasksDirPath = resolve("benchmarks/tasks");
+      } else if (existsSync(resolve(import.meta.dirname, "../../tasks"))) {
+        tasksDirPath = resolve(import.meta.dirname, "../../tasks");
+      }
+    }
+    const tasksDir = tasksDirPath ? resolve(tasksDirPath) : undefined;
+    let tasksMap: Map<string, BenchmarkTask> | undefined;
+    if (tasksDir && existsSync(tasksDir)) {
+      const { tasks } = loadTaskDir(tasksDir);
+      tasksMap = new Map(tasks.map((t) => [t.id, t]));
+      for (const tr of taskResults) {
+        const task = tasksMap.get(tr.taskId);
+        if (task) {
+          for (const grade of tr.grading.grades) {
+            if (!grade.kind) {
+              const req = task.requirements.find((r: BenchmarkRequirement) => r.id === grade.requirementId);
+              if (req) {
+                grade.kind = req.kind ?? "discriminator";
+              }
+            }
+          }
+        }
+      }
+    }
+
+    const summary = summarize(suite, adapter, startedAt, endedAt, taskResults, ledger, tasksMap);
     const resolvedOutDir = resolve(outDir);
     const canonical = writeSuiteSummary(resolvedOutDir, summary);
     io.out(

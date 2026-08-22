@@ -39,17 +39,21 @@ goal: |
   Ensure that unsubscribing from an active `httpBatchStreamLink` observable cancels the in-flight fetch request, without cancelling a request that has already completed and without discarding an AbortSignal the caller supplied on the operation. Maintain type safety, keep all existing tests passing, and pass project typechecks (`pnpm typecheck-packages`).
 requirements:
   - id: R1
+    kind: guard
     description: dependencies install clean (pnpm workspace, frozen lockfile)
     check: pnpm install --frozen-lockfile
   - id: R2
+    kind: guard
     description: pre-existing tRPC client links test suite passes green
     prerequisites: [R1]
     check: pnpm vitest run packages/tests/server/links.test.ts
   - id: R3
+    kind: guard
     description: project package typechecks clean (pnpm typecheck-packages)
     prerequisites: [R1]
     check: pnpm typecheck-packages
   - id: R4
+    kind: discriminator
     description: "root-cause probe: httpBatchStreamLink unsubscribe aborts in-flight fetch request"
     prerequisites: [R1]
     check: |

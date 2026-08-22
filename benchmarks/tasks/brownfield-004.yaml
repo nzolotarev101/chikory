@@ -34,9 +34,11 @@ goal: |
   The project must type-check cleanly (`pnpm type` / `tsc --noEmit`). No external API contracts or unrelated behaviors may be broken.
 requirements:
   - id: R1
+    kind: guard
     description: dependencies install clean (pnpm workspace, frozen lockfile)
     check: pnpm install --frozen-lockfile
   - id: R2
+    kind: guard
     description: full pre-existing react-hook-form test suite is green (>= 1208 tests pass)
     prerequisites: [R1]
     check: |
@@ -62,10 +64,12 @@ requirements:
       }
       "
   - id: R3
+    kind: guard
     description: project typechecks clean (tsc --noEmit)
     prerequisites: [R1]
     check: pnpm type
   - id: R4
+    kind: discriminator
     description: "root-cause probe: argument-less clearErrors() resets internal _formState.errors and getFieldState invalid status"
     prerequisites: [R1]
     check: |
