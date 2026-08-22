@@ -146,6 +146,17 @@ Every requirement in [`project.md`](../project.md), assigned a stable ID, mapped
 | ST-4 | Unit/usage pricing, generous free tier, $29–199 mid-tiers, enterprise SSO/audit | WP-405–407 | P4 | planned |
 | ST-5 | Stage 3 vertical with measurable SLOs | WP-501–507 (design: components/vertical-agent.md; vertical choice = ADR-004, data-gated on Stage 2) | P5 | planned |
 
+**ST-1 review update — dogfood-168 / WP-653 (2026-08-22):** the first ignored-write evidence
+attempt correctly sealed `FAILED` (`run-401db164-b1fa-41cd-b902-14cc99da1803`; 3 steps;
+$0.3312/$20; AC 3/3 green; harvest 5/5 byte-identical then reverted). It inferred the executor
+window from mutable Git/filesystem timestamps. Review probes proved a preserved-mtime post-base
+write yields 0 evidence bytes (F-452), the full artifact can contain path + `3680` while the actual
+24,000-character judge prompt contains neither (F-453), and 2,000 excluded paths can silently lose
+their tail with no complete manifest (F-454). **ST-1 remains blocked; WP-304 must not run.** The
+WP-653 retry is `dogfood-169-wp653-baseline-reaches-the-judge.yaml`, armed 3/3 both directions:
+durable pre-step content baseline, real execute/judge seam, bounded actual prompt, complete durable
+manifest. See `docs/reports/dogfood-168.md`.
+
 ## Non-functional constraints (spec §4, §11, CLAUDE.md)
 
 | ID | Constraint | Enforced by |

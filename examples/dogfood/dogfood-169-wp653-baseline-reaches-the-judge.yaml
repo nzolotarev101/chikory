@@ -1,0 +1,446 @@
+# Plain: the first attempt taught the reviewer to look at ignored files, but guessed when they were
+# written from timestamps and then placed them behind a prompt cutoff. The judge stopped that code
+# from landing. This retry records what existed before the agent runs, compares after it runs, and
+# proves the changed ignored file reaches the actual judge prompt without hiding ordinary diffs.
+# WP: WP-653 (an acceptance oracle the executor can write is not an oracle) — second attempt.
+# Ladder-rung: 5 (P3 exit gate, WP-530 — trustworthy evidence before the operator benchmark arm).
+# Thesis-KPI: judge true-positives pre-land; every executor write is visible or auditable.
+# Format: loose — the goal fixes outcomes and invariants; implementation structure is delegated.
+
+name: dogfood-169-wp653-baseline-reaches-the-judge
+wp: WP-653
+
+goal: |
+  Make ignored-file evidence measure what the executor wrote, and make that evidence reach the
+  reviewer that decides the verdict.
+
+  dogfood-168 correctly sealed FAILED even though all three acceptance checks passed. Its delivery
+  inferred a step boundary from filesystem and Git-object timestamps. That is not a boundary:
+  the post-run review wrote `results/fabricated.json` after the base commit, preserved its mtime at
+  the Unix epoch, and the delivered collector returned 0 bytes. The same review put that ignored
+  write behind a >24,000-character tracked diff: the full artifact contained the path and `3680`,
+  while the text handed to the judge contained neither. Finally, 2,000 excluded writes filled the
+  evidence budget and silently dropped `dist/artifact-1999.js` without naming it or emitting a
+  usable audit manifest.
+
+  Make these outcomes true:
+
+  1. Capture a durable ignored-file baseline BEFORE each executor step. Compare the post-step tree
+     to that baseline; do not reconstruct the boundary from commit, reflog, object, index or file
+     timestamps. A new or modified project-owned ignored file must be detected even when its mtime
+     and size are preserved. An ignored file that existed before the step and did not change must
+     stay out.
+  2. The baseline must survive the activity boundary and be journal/audit reachable. A retry or
+     judge activity must consume the baseline captured for the window it is judging, not take a new
+     snapshot after the write. The rule must work for both single-root and per-repo workspaces.
+  3. The ACTUAL judge prompt must carry the ignored path and enough content to judge it even beside
+     a tracked diff larger than the prompt excerpt cap. Ordinary tracked evidence must remain
+     visible too. Storing a full artifact while handing the model a blind excerpt is not a fix.
+  4. Keep the prompt bounded without making exclusions silent. Project-owned ignored writes get
+     path-specific evidence while space permits. A standing toolchain exclusion may be summarized
+     by exact path class and exact count (for example, `dist/**: 2000 writes`) rather than listing
+     2,000 names in the model prompt, but the durable evidence refs must retain a full path manifest
+     so a human can audit the omission. If names themselves exceed the prompt budget, say so and
+     point at that manifest; never drop the tail silently.
+  5. Preserve the incumbent tracked diff and WP-589 half (1)'s chain-handover ignored-file sweep.
+     A clean step stays clean. No benchmark source, corpus, result, publication or stored arm moves.
+
+  The designed traps are:
+
+  - repeat dogfood-168's timestamp heuristic;
+  - collect the ignored value but let the prompt's head clamp erase it;
+  - prepend ignored evidence so a large ignored channel erases the tracked diff instead;
+  - fix only the single-root or only the per-repo branch;
+  - call an after-step snapshot the baseline;
+  - name only a count in the prompt while retaining no full path manifest;
+  - force-add every ignored byte and drown the reviewer;
+  - weaken or replace WP-589 half (1).
+
+  TypeScript stays strict ESM with named exports and no `any`. Every LLM/tool call keeps its OTel
+  span, and every tool response keeps an explicit SUCCESS/FAILED terminal state. Add committed
+  tests beside the surfaces they cover, including a case the acceptance checks do not name.
+
+  Use foreground verification only. Run focused typecheck/lint/tests while iterating and the full
+  SDK suite once at the end. Do not run a benchmark arm and do not run chikory-bench probe.
+
+repos:
+  - url: /Users/nikitazolotarev/repos/chikory
+    writable: true
+
+regression_suite: pnpm --filter @chikory/sdk exec vitest run
+check_timeout_ms: 420000
+
+acceptance_criteria:
+  - id: AC-1
+    description: >
+      THE PRE-STEP BASELINE REACHES THE REAL JUDGE IN BOTH WORKSPACE SHAPES. The check drives the
+      real executeStep activity and then the real judgeStep activity. Before execution it creates
+      an unchanged ignored file. The executor then creates a second ignored result, backdates it to
+      the Unix epoch, and writes a tracked change larger than the prompt excerpt cap. In both the
+      single-root and two-repo shapes, the captured judge request must contain the tracked sentinel,
+      the new ignored path and `3680`, must omit the unchanged pre-step file, and the journal must
+      retain a baseline artifact. A timestamp reconstruction, an after-step snapshot, a one-branch
+      fix, or a full-artifact-only fix fails.
+    check: |
+      cd "$(git rev-parse --show-toplevel)" || exit 1
+      ROOT="$(git rev-parse --show-toplevel)"
+      W="$(mktemp -d)"
+      trap 'rm -rf "$W"' EXIT
+
+      cat > "$W/driver.mts" <<'TS'
+      import { execFileSync } from "node:child_process";
+      import { mkdirSync, mkdtempSync, rmSync, utimesSync, writeFileSync } from "node:fs";
+      import { tmpdir } from "node:os";
+      import { join } from "node:path";
+
+      const sdkModule = process.env.SDK_MODULE as string;
+      const helpersModule = process.env.HELPERS_MODULE as string;
+      const {
+        Journal,
+        collectWorkspaceRepos,
+        createRunnerActivities,
+        journalPath,
+        workspaceDir,
+      } = await import(sdkModule);
+      const { initSourceRepo, judgeForm, makeSpec, startFakeJudgeWire } = await import(helpersModule);
+
+      function git(dir: string, args: string[]): string {
+        return execFileSync("git", ["-C", dir, ...args], { encoding: "utf8" });
+      }
+
+      async function runShape(shape: "single" | "multi"): Promise<string[]> {
+        const root = mkdtempSync(join(tmpdir(), `wp653-${shape}-`));
+        const runId = `run-wp653-${shape}`;
+        const repoA = await initSourceRepo(join(root, "repo-a"));
+        writeFileSync(join(repoA, ".gitignore"), "results/\n");
+        git(repoA, ["add", "-A"]);
+        git(repoA, ["commit", "-q", "-m", "ignore results"]);
+        const repos = [{ url: repoA, writable: true }];
+        if (shape === "multi") {
+          const repoB = await initSourceRepo(join(root, "repo-b"));
+          writeFileSync(join(repoB, ".gitignore"), "results/\n");
+          git(repoB, ["add", "-A"]);
+          git(repoB, ["commit", "-q", "-m", "ignore results"]);
+          repos.push({ url: repoB, writable: true });
+        }
+
+        const judgeModel = { provider: "openai-compat" as const, model: "fake-judge" };
+        const codeModel = { provider: "anthropic" as const, model: "fake-executor" };
+        const spec = makeSpec({
+          repoUrl: repoA,
+          name: `wp653-${shape}`,
+          repos,
+          acceptanceCriteria: [{ id: "AC-1", description: "evidence reaches the judge" }],
+          executor: { adapter: "scripted", family: "anthropic" },
+          judge: { family: "openai-compat", cadence: 1 },
+          routing: {
+            stages: { plan: codeModel, code: codeModel, review: codeModel, judge: judgeModel },
+          },
+        });
+        const resolved = collectWorkspaceRepos(spec.repos);
+        const target = resolved.writable[resolved.writable.length - 1];
+        if (!target) throw new Error("fixture has no writable target");
+
+        const wire = await startFakeJudgeWire([judgeForm({ criteria: { "AC-1": true } })]);
+        const dataDir = join(root, "data");
+        const adapters = {
+          scripted: (ctx: { store: { put(value: string, meta: object): Promise<unknown> } }) => ({
+            name: "scripted",
+            modelFamily: "anthropic",
+            async runStep(input: { workspaceDir: string }) {
+              const repoDir = target.relativePath === "."
+                ? input.workspaceDir
+                : join(input.workspaceDir, target.relativePath);
+              writeFileSync(
+                join(repoDir, "README.md"),
+                `TRACKED_SENTINEL_${shape}\n${"tracked context\n".repeat(2600)}`,
+              );
+              mkdirSync(join(repoDir, "results"), { recursive: true });
+              const resultPath = join(repoDir, "results", "fabricated.json");
+              writeFileSync(resultPath, '{"testsPassed":3680}\n');
+              utimesSync(resultPath, new Date(0), new Date(0));
+              const diffRef = await ctx.store.put("scripted diff", { kind: "diff", summary: "scripted diff" });
+              const transcriptRef = await ctx.store.put("scripted transcript", { kind: "transcript", summary: "scripted transcript" });
+              return {
+                status: "SUCCESS" as const,
+                diffRef,
+                transcriptRef,
+                summary: "wrote tracked and ignored evidence",
+                toolCalls: 2,
+                tokens: { input: 10, output: 5 },
+                costUsd: 0.01,
+                costEstimated: false,
+                durationMs: 1,
+              };
+            },
+          }),
+        };
+
+        const activities = createRunnerActivities({
+          dataDir,
+          adapters,
+          routerOptions: { baseUrls: { "openai-compat": wire.url } },
+        });
+        const prepared = await activities.prepareRun({ runId, spec });
+        const liveWorkspace = workspaceDir(dataDir, runId);
+        const liveRepo = target.relativePath === "."
+          ? liveWorkspace
+          : join(liveWorkspace, target.relativePath);
+        mkdirSync(join(liveRepo, "results"), { recursive: true });
+        writeFileSync(join(liveRepo, "results", "pre-existing.json"), '{"before":true}\n');
+
+        await activities.executeStep({
+          runId,
+          stepIndex: 0,
+          instruction: spec.goal,
+          context: {
+            goal: spec.goal,
+            acceptanceCriteria: spec.acceptanceCriteria,
+            planItem: spec.goal,
+            notes: {},
+            recentSteps: [],
+            injections: [],
+            memoryRefs: [],
+          },
+          limits: { maxSeconds: 60 },
+        });
+        await activities.judgeStep({
+          runId,
+          judgeIndex: 0,
+          atStep: 0,
+          criteria: spec.acceptanceCriteria,
+          sinceCommit: prepared.baseCommit,
+        });
+
+        const request = wire.requests[0] ?? "";
+        const journal = new Journal(journalPath(dataDir, runId));
+        const baselineRefs = journal.entries()
+          .flatMap((entry: { artifactRefs: Array<{ summary: string }> }) => entry.artifactRefs)
+          .filter((ref: { summary: string }) => /ignored.*baseline/i.test(ref.summary));
+        journal.close();
+        await wire.close();
+        rmSync(root, { recursive: true, force: true });
+
+        const failures: string[] = [];
+        if (!request.includes(`TRACKED_SENTINEL_${shape}`)) failures.push(`${shape}: ordinary tracked evidence disappeared from the actual judge request`);
+        if (!request.includes("results/fabricated.json") || !request.includes("3680")) failures.push(`${shape}: the backdated ignored write did not reach the actual judge request with content`);
+        if (request.includes("results/pre-existing.json")) failures.push(`${shape}: an unchanged pre-step ignored file was misattributed to the executor`);
+        if (baselineRefs.length === 0) failures.push(`${shape}: no ignored-file baseline artifact is journal/audit reachable`);
+        return failures;
+      }
+
+      const failures = [...await runShape("single"), ...await runShape("multi")];
+      if (failures.length > 0) {
+        console.log("AC-1 FAIL:\n- " + failures.join("\n- "));
+        process.exit(1);
+      }
+      console.log("AC-1 OK: a durable pre-step baseline carries a backdated ignored write into the real judge request in both workspace shapes, beside tracked evidence");
+      TS
+
+      SDK_MODULE="$ROOT/packages/sdk-ts/src/index.js" \
+        HELPERS_MODULE="$ROOT/packages/sdk-ts/test/runner/helpers.js" \
+        pnpm --filter @chikory/sdk exec tsx "$W/driver.mts"
+
+  - id: AC-2
+    description: >
+      THE MODEL PROMPT IS BOUNDED, THE TRACKED DIFF SURVIVES, AND THE AUDIT TRAIL IS COMPLETE. The
+      real executor activity creates 2,000 ignored `dist/` files plus a tracked sentinel, then the
+      real judge activity runs. The model-facing user message must remain under 60,000 UTF-8 bytes,
+      contain the tracked sentinel, and state the exact `dist/**` exclusion class and exact count.
+      The judge's durable evidence refs must retain a manifest containing both the first and last
+      withheld paths. Listing until the cap and silently dropping the tail, naming only a count with
+      no manifest, or prepending so much ignored evidence that the tracked diff disappears all fail.
+    check: |
+      cd "$(git rev-parse --show-toplevel)" || exit 1
+      ROOT="$(git rev-parse --show-toplevel)"
+      W="$(mktemp -d)"
+      trap 'rm -rf "$W"' EXIT
+
+      cat > "$W/driver.mts" <<'TS'
+      import { execFileSync } from "node:child_process";
+      import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+      import { tmpdir } from "node:os";
+      import { join } from "node:path";
+
+      const sdkModule = process.env.SDK_MODULE as string;
+      const helpersModule = process.env.HELPERS_MODULE as string;
+      const {
+        Journal,
+        artifactsDir,
+        createLocalArtifactStore,
+        createRunnerActivities,
+        journalPath,
+      } = await import(sdkModule);
+      const { initSourceRepo, judgeForm, makeSpec, startFakeJudgeWire } = await import(helpersModule);
+      const root = mkdtempSync(join(tmpdir(), "wp653-bounded-"));
+      const repo = await initSourceRepo(join(root, "repo"));
+      writeFileSync(join(repo, ".gitignore"), "dist/\n");
+      execFileSync("git", ["-C", repo, "add", "-A"]);
+      execFileSync("git", ["-C", repo, "commit", "-q", "-m", "ignore dist"]);
+
+      const judgeModel = { provider: "openai-compat" as const, model: "fake-judge" };
+      const codeModel = { provider: "anthropic" as const, model: "fake-executor" };
+      const spec = makeSpec({
+        repoUrl: repo,
+        name: "wp653-bounded",
+        acceptanceCriteria: [{ id: "AC-2", description: "bounded ignored evidence" }],
+        executor: { adapter: "scripted", family: "anthropic" },
+        judge: { family: "openai-compat", cadence: 1 },
+        routing: { stages: { plan: codeModel, code: codeModel, review: codeModel, judge: judgeModel } },
+      });
+      const wire = await startFakeJudgeWire([judgeForm({ criteria: { "AC-2": true } })]);
+      const dataDir = join(root, "data");
+      const adapters = {
+        scripted: (ctx: { store: { put(value: string, meta: object): Promise<unknown> } }) => ({
+          name: "scripted",
+          modelFamily: "anthropic",
+          async runStep(input: { workspaceDir: string }) {
+            writeFileSync(join(input.workspaceDir, "README.md"), "TRACKED_SURVIVES_IGNORED_OVERFLOW\n");
+            mkdirSync(join(input.workspaceDir, "dist"), { recursive: true });
+            for (let index = 0; index < 2_000; index += 1) {
+              writeFileSync(join(input.workspaceDir, "dist", `artifact-${String(index).padStart(4, "0")}.js`), `// ${index}\n`);
+            }
+            const diffRef = await ctx.store.put("scripted diff", { kind: "diff", summary: "scripted diff" });
+            const transcriptRef = await ctx.store.put("scripted transcript", { kind: "transcript", summary: "scripted transcript" });
+            return {
+              status: "SUCCESS" as const,
+              diffRef,
+              transcriptRef,
+              summary: "wrote a bounded exclusion population",
+              toolCalls: 2,
+              tokens: { input: 10, output: 5 },
+              costUsd: 0.01,
+              costEstimated: false,
+              durationMs: 1,
+            };
+          },
+        }),
+      };
+      const activities = createRunnerActivities({
+        dataDir,
+        adapters,
+        routerOptions: { baseUrls: { "openai-compat": wire.url } },
+      });
+      const runId = "run-wp653-bounded";
+      const prepared = await activities.prepareRun({ runId, spec });
+      await activities.executeStep({
+        runId,
+        stepIndex: 0,
+        instruction: spec.goal,
+        context: {
+          goal: spec.goal,
+          acceptanceCriteria: spec.acceptanceCriteria,
+          planItem: spec.goal,
+          notes: {},
+          recentSteps: [],
+          injections: [],
+          memoryRefs: [],
+        },
+        limits: { maxSeconds: 60 },
+      });
+      await activities.judgeStep({
+        runId,
+        judgeIndex: 0,
+        atStep: 0,
+        criteria: spec.acceptanceCriteria,
+        sinceCommit: prepared.baseCommit,
+      });
+
+      const body = JSON.parse(wire.requests[0] ?? "{}") as { messages?: Array<{ role: string; content: string }> };
+      const userMessage = body.messages?.find((message) => message.role === "user")?.content ?? "";
+      const journal = new Journal(journalPath(dataDir, runId));
+      const judgePayload = journal.entries("judge")[0]?.payload as { evidenceRefs?: Array<{ id: string }> } | undefined;
+      journal.close();
+      const store = createLocalArtifactStore(artifactsDir(dataDir, runId));
+      const evidenceTexts: string[] = [];
+      for (const ref of judgePayload?.evidenceRefs ?? []) {
+        const value = await store.get(ref);
+        evidenceTexts.push(Buffer.from(value).toString("utf8"));
+      }
+      const durableEvidence = evidenceTexts.join("\n");
+      const failures: string[] = [];
+      const promptBytes = Buffer.byteLength(userMessage, "utf8");
+      if (promptBytes > 60_000) failures.push(`model-facing user message is ${promptBytes} bytes, over the 60000-byte bound`);
+      if (!userMessage.includes("TRACKED_SURVIVES_IGNORED_OVERFLOW")) failures.push("ordinary tracked evidence disappeared behind the ignored channel");
+      if (!/dist\/\*\*[^\n]*2000|2000[^\n]*dist\/\*\*/i.test(userMessage)) failures.push("prompt does not state the `dist/**: 2000 writes` class/count semantics");
+      if (!/standing exclusion|toolchain artifact/i.test(userMessage)) failures.push("prompt does not state why dist/** was withheld");
+      if (!durableEvidence.includes("dist/artifact-0000.js") || !durableEvidence.includes("dist/artifact-1999.js")) failures.push("durable evidence refs do not retain the full first-to-last withheld path manifest");
+      console.log(`prompt bytes=${promptBytes} durable evidence bytes=${Buffer.byteLength(durableEvidence, "utf8")}`);
+      await wire.close();
+      rmSync(root, { recursive: true, force: true });
+      if (failures.length > 0) {
+        console.log("AC-2 FAIL:\n- " + failures.join("\n- "));
+        process.exit(1);
+      }
+      console.log("AC-2 OK: the prompt stays bounded and explicit while durable refs retain the complete path manifest and tracked evidence survives");
+      TS
+
+      SDK_MODULE="$ROOT/packages/sdk-ts/src/index.js" \
+        HELPERS_MODULE="$ROOT/packages/sdk-ts/test/runner/helpers.js" \
+        pnpm --filter @chikory/sdk exec tsx "$W/driver.mts"
+
+  - id: AC-3
+    description: >
+      THE TIMESTAMP GUESS IS GONE, THE INHERITED HALF SURVIVES, AND THE DECLARED SUITE IS GREEN AND
+      LARGER. Nothing under benchmarks changes. Production ignored-write detection must not infer
+      the step boundary from mtime or Git metadata. WP-589 half (1) remains. Strict typecheck and
+      eslint pass, and the declared SDK suite grows by at least six committed tests over the
+      measured 1,815-test launch baseline.
+    check: |
+      cd "$(git rev-parse --show-toplevel)" || exit 1
+
+      if ! git diff --quiet -- benchmarks/; then
+        echo "AC-3 FAIL: benchmarks/ changed; this run fixes reviewer evidence and does not touch the corpus, stored arms or publications"
+        git diff --stat -- benchmarks/
+        exit 1
+      fi
+      if rg -n 'getBaseCommitTimeMs|mtimeMs[^\n]*(sinceCommit|baseCommit)|(?:sinceCommit|baseCommit)[^\n]*mtimeMs' packages/sdk-ts/src >/tmp/wp653-timestamp-hits.txt; then
+        echo "AC-3 FAIL: production code still reconstructs the executor boundary from timestamps"
+        sed -n '1,20p' /tmp/wp653-timestamp-hits.txt
+        exit 1
+      fi
+      grep -qE 'publishChainHandoff' packages/sdk-ts/src/runner/activities.ts || {
+        echo "AC-3 FAIL: WP-589 half (1) disappeared"
+        exit 1
+      }
+      grep -qE '\-\-ignored' packages/sdk-ts/src/runner/activities.ts || {
+        echo "AC-3 FAIL: WP-589 half (1)'s ignored-file stream disappeared"
+        exit 1
+      }
+      grep -qE 'export async function collectPerRepoDiffs' packages/sdk-ts/src/judge/evidence.ts || {
+        echo "AC-3 FAIL: collectPerRepoDiffs is no longer exported"
+        exit 1
+      }
+
+      cd packages/sdk-ts || exit 1
+      pnpm run typecheck || { echo "AC-3 FAIL: strict typecheck is red"; exit 1; }
+      pnpm exec eslint src/ || { echo "AC-3 FAIL: eslint is red on the SDK source tree"; exit 1; }
+      cd "$(git rev-parse --show-toplevel)" || exit 1
+      OUT=$(pnpm --filter @chikory/sdk exec vitest run 2>&1)
+      ST=$?
+      echo "$OUT" | grep -nE '(^|[[:space:]])(FAIL|×|✕|AssertionError)' | head -n 20
+      echo "$OUT" | tail -6
+      if [ "$ST" -ne 0 ]; then
+        echo "AC-3 FAIL: the declared SDK regression suite exited $ST"
+        exit 1
+      fi
+      N=$(echo "$OUT" | grep -oE "Tests +[0-9]+ passed" | grep -oE "[0-9]+" | head -1)
+      echo "committed SDK tests passing: ${N:-UNPARSEABLE} (floor 1821, measured baseline 1815)"
+      if [ -z "$N" ] || [ "$N" -lt 1821 ]; then
+        echo "AC-3 FAIL: the durability floor is not met; at least six committed tests must pin the new cross-activity evidence path"
+        exit 1
+      fi
+      echo "AC-3 OK: benchmarks frozen, timestamp guess absent, inherited half intact, strict checks green, and the declared suite grew"
+
+budget_usd: 20
+max_steps: 6
+
+agent_classes:
+  executor: executor-default
+  judge: judge-default
+
+judge:
+  cadence: 1
+
+unattended:
+  escalation: seal_resumable_failed

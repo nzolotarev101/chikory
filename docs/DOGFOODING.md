@@ -8,16 +8,12 @@ recover a run, and how to land the result as a normal PR.
 **Status (2026-08-22, bounded — update discipline: REPLACE this block, ≤15 lines;
 displaced prose moves verbatim to [`PLAN-HISTORY.md`](PLAN-HISTORY.md); per-run detail:
 `docs/reports/`; queue + course correction: `plan.md` §6/§7).**
-🟢 **dogfood-167 / WP-652 (the published score refuses every input that used to shrink it silently) DELIVERED AND LANDED** — `run-e3b49314-86b4-47dc-9d1a-73ad4bd468be`, terminal **SUCCESS**, 3 steps, **$0.2345/$20.00** (1.1%, judge share 100%), 12m 40s, AC **3/3** re-run green, harvest byte-**IDENTICAL 4/4**, declared suite **240 passed** (baseline 232, floor 236) → **241** after the review hand-fix (`docs/reports/dogfood-167.md`).
-🟢 **Re-measured at the review over corpus copies, driving the real CLI — not transcribed.** An unprobed scored requirement on a probed task now exits **1** naming task+requirement (was `5 valid, 0 invalid` exit 0) · a ledger-`discriminating` requirement declared `guard` exits **1** · `resummarize --tasks <empty dir>` exits **1** naming every unmatched task (was `I-SR 0.0%` exit 0) · `summary.json` records the resolved `tasksDir`. **F-441/F-442/F-443 CLOSED.**
-🟢 **The judge earned its keep for the 5th run running.** Step 2's `cumulative_design_coherent ✗` named duplicated `--tasks` resolution; step 3 consolidated it for 2,214 bytes and the next pass returned ✓.
-🔴 **F-447 (§8) → WP-653 — the executor fabricated the evidence its own acceptance check reads.** `benchmarks/results/**` is gitignored (`benchmarks/results/.gitignore:3`, a bare `*`), so the HEAD-cloned workspace had no stored arm and step 1's AC-2 failed correctly. Step 2 wrote **6 fabricated arm-result JSONs** (783–1,505 bytes; real ones 1,743–4,268 bytes plus 5 per-task subdirectories) whose `summary.json` asserts `requirementsVerifiedTotal: 19`, `iSr: 1`, `testsPassed: 3680`. **Four guards read clean:** step diff **0 bytes** · AC-3's `git diff --quiet -- benchmarks/results/` freeze trap · the F-11 empty-diff probe metric · the judge (PROCEED 3/3). Nothing fabricated landed.
-🟠 **F-448 (§8) → WP-653 — the proximate cause was the SPEC.** AC-2 read gitignored host state from inside the workspace, against a standing rule. An AC whose input the workspace cannot contain leaves the executor two options: fail, or manufacture it.
-🔴 **F-446 HAND-FIXED this sitting** — WP-652's grade-time D-SR fallback mixed populations (`benchmarks/harness/src/grade.ts:141` counts every requirement; the denominator is the scored subset). Measured `dSr 1.5` / interval `[null, null]` vs HEAD `0.5` / `[0.0945, 0.9055]`. Fixed `benchmarks/harness/src/results.ts:306`, pinned `benchmarks/harness/test/results.test.ts:870`.
-🔴 **P3-rung-5 STILL NOT CLIMBED (ledger `rung=4`)** — the gate is hardened, the corpus has not grown, and **F-449 (§8) → WP-654** shows the next growth attempt still goes silent: the refusals sit inside `if (ledgerEntry && ...)` (`benchmarks/harness/src/main.ts:247`), so a wholly unprobed task validates `6 valid, 0 invalid` exit 0.
-🟡 **F-450 (§8) — the anti-backgrounding prohibition failed for the 5th consecutive run** (steps 1 and 2 both narrate "I have launched … and will wait"). No cap kill this time; cost zero. A prohibition that has failed five runs running is not a prompt problem.
-**Standing lesson: an acceptance oracle must not read state the workspace cannot contain.** If HEAD does not carry it, the run can only fail or fabricate it — and when it lives under a gitignored path, the diff, the freeze trap, the probe metric and the judge all report clean.
-**NEXT HEADLINE = `dogfood-168` / WP-653 — an acceptance oracle the executor can write is not an oracle.** `examples/dogfood/dogfood-168-wp653-oracle-the-executor-cannot-write.yaml`. **WP-304's operator arm must not run until this lands.**
+🔴 **dogfood-168 / WP-653 sealed FAILED; nothing landed** — `run-401db164-b1fa-41cd-b902-14cc99da1803`, 3 steps, 31m 47s, **$0.3312/$20**, judge share 100%, 1 rollback, AC 3/3 green on the harvested tree, harvest 5/5 byte-identical then reverted (`docs/reports/dogfood-168.md`).
+🟢 **The judge stopped a real defect after the owned oracle went green.** It caught a secret-shaped fixture, a layering violation and the core design error: post-step Git/filesystem timestamps are not an execution boundary.
+🔴 **F-452/F-453/F-454 (§8):** backdated post-base ignored write → 0 evidence bytes; full artifact sees path+`3680` while the actual >24k-clamped judge prompt sees neither; 2,000 excluded paths silently lose the tail with no complete manifest.
+🔴 **P3-rung-5 remains unclimbed (`rung=4`).** WP-304's operator arm stays blocked until workspace writes are visible to the deciding judge or durably auditable.
+🟡 **F-450 recurred for the 6th run:** foreground-only prose still produced background-task narration; step-3 transcript 33,368 B / 8.3k output tokens. Track-B, no new id.
+**NEXT HEADLINE = dogfood-169 / WP-653 retry, ARMED 3/3 BOTH WAYS.** `examples/dogfood/dogfood-169-wp653-baseline-reaches-the-judge.yaml`: durable pre-step baseline → real execute/judge seam → bounded actual prompt + complete manifest; worst 82s = 68% of cap. WP-650 is parked as dogfood-170.
 
 Related docs: [`docs/spec/task-spec.md`](spec/task-spec.md) (schema
 reference) · [`docs/TASK-PROTOCOL.md`](TASK-PROTOCOL.md) (WP etiquette, §7 is
@@ -2534,3 +2530,35 @@ broken (a false-green, not a follow-on fix).
   and will wait for it to complete.`, and step 2's carries three such lines. No
   cap kill resulted (5m 32s / 2m 45s / 1m 9s against a 600 s cap), so the cost
   was zero this time. **Stop paying for it in prompt text; it needs a mechanism.**
+
+- **🔴 A TIMESTAMP RECONSTRUCTED AFTER THE STEP IS NOT A PRE-STEP BOUNDARY** (F-452,
+  dogfood-168 → WP-653 retry). The first WP-653 attempt asked commit/tree object, reflog, index,
+  commit-second and file mtimes to answer whether an ignored file was written by the executor.
+  Review created `results/fabricated.json` after the base commit, preserved its mtime at Unix epoch,
+  and the delivered collector returned exactly
+  `{"evidenceBytes":0,"pathVisible":false,"contentVisible":false}`. Copies, archives, generators,
+  timestamp resolution and clock skew can reproduce the same false negative without malice.
+  **Capture the baseline before execution, persist it across the activity boundary, and compare
+  content identity — never reconstruct an event boundary from mutable metadata after the event.**
+
+- **🔴 A FULL ARTIFACT DOES NOT HELP A VERDICT MADE FROM A BLIND EXCERPT** (F-453,
+  dogfood-168 → WP-653 retry). The delivery appended ignored evidence after the tracked diff and
+  stored the combined artifact, but `collectEvidence` still clamps the text handed to the model at
+  24,000 characters (`packages/sdk-ts/src/judge/evidence.ts:39`, `:472`). Review placed the ignored
+  write behind a larger tracked diff: the full artifact contained `results/fabricated.json` and
+  `3680`; the actual judge request contained neither (`promptBytes:24028`). **Grade the consumed
+  model request, not the producer's return value. Traceability after the verdict is not evidence
+  available to the verdict.**
+
+- **🟠 A BOUNDED EXCLUSION NEEDS A COMPLETE DURABLE MANIFEST** (F-454, dogfood-168 →
+  WP-653 retry). With 2,000 ignored `dist/` writes, the attempted channel emitted 131,007 bytes,
+  named `dist/artifact-0000.js`, silently omitted `dist/artifact-1999.js`, and retained no complete
+  first-to-last manifest. A bounded prompt may summarize a standing class (`dist/**: 2000 writes`),
+  but a durable referenced artifact must retain every omitted path. **A count without an auditable
+  population is a silent drop with nicer prose.**
+
+- **🟡 FOREGROUND-ONLY PROSE HAS NOW FAILED SIX RUNS RUNNING** (F-450 recurrence,
+  dogfood-168 — F-421/F-345/F-428/F-444). The goal again cited the full failure history and banned
+  background waits. Steps 1 and 2 still narrated launched background verification; step 3's full
+  transcript was **33,368 bytes / 8.3k output tokens**, dominated by task notifications. No cap kill
+  this time. **Do not add a seventh warning to the next goal; this needs an execution mechanism.**
