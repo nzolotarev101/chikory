@@ -314,15 +314,28 @@ if [ -n "$SPEC" ]; then
   # challenge — the F-121 lesson generalized (a challenge that silently isn't armed).
   echo
   echo "### AC dry-run against the current tree (WP-266 dynamic)"
+  # F-451 (dogfood-167 review): an AC `check` IS a shell script — the same contract F-410
+  # established for the judge path (`packages/sdk-ts/src/judge/evidence.ts:205` runs it verbatim
+  # through `/bin/sh -c`). This dry-run used to flatten it with `.replace(/\s+/g, " ")` before
+  # executing, which destroys every construct whose meaning depends on a line break: a heredoc
+  # terminator stops being a line of its own ("here-document delimited by end-of-file"), and a
+  # `#` comment swallows the rest of the script. A sound check was reported ⛔ BROKEN and the
+  # launch preflight REFUSED it. Each body now goes to a file and runs from there, newlines intact.
   AC_TSV=""
+  AC_BODY_DIR=""
   if command -v node >/dev/null 2>&1; then
-    AC_TSV=$(node -e '
+    AC_BODY_DIR=$(mktemp -d)
+    AC_TSV=$(AC_BODY_DIR="$AC_BODY_DIR" node -e '
       const fs = require("fs"), path = require("path");
       const yaml = require(path.resolve("packages/sdk-ts/node_modules/yaml"));
       const spec = yaml.parse(fs.readFileSync(process.argv[1], "utf8"));
+      const dir = process.env.AC_BODY_DIR;
       for (const ac of spec.acceptance_criteria ?? []) {
-        const check = String(ac.check ?? "").replace(/\s+/g, " ").trim();
-        if (check) console.log(`${ac.id}\t${check}`);
+        const check = String(ac.check ?? "");
+        if (!check.trim()) continue;
+        const file = path.join(dir, `${String(ac.id).replace(/[^A-Za-z0-9_.-]/g, "_")}.sh`);
+        fs.writeFileSync(file, check);
+        console.log(`${ac.id}\t${file}`);
       }' "$SPEC" 2>/dev/null || true)
   fi
   if [ -z "$AC_TSV" ]; then
@@ -330,8 +343,9 @@ if [ -n "$SPEC" ]; then
   else
     RED_ACS=0
     EXECUTED_ACS=0
-    while IFS="$(printf '\t')" read -r AC_ID AC_CHECK; do
+    while IFS="$(printf '\t')" read -r AC_ID AC_BODY; do
       [ -z "$AC_ID" ] && continue
+      AC_CHECK=$(cat "$AC_BODY" 2>/dev/null)
       if printf '%s' "$AC_CHECK" | grep -qE '(vitest|tsc --noEmit|eslint|pnpm (run|exec|-r)|pytest|ruff)'; then
         echo "ℹ️  $AC_ID: VERIFY-SUITE — not dry-run (minutes-long; legitimately green pre-delivery)."
         continue
@@ -339,7 +353,7 @@ if [ -n "$SPEC" ]; then
       ERR_FILE=$(mktemp)
       set +e
       # alarm(2) survives execve, so the 60s watchdog rides into bash; SIGALRM → exit 142.
-      perl -e 'alarm 60; exec "bash", "-c", $ARGV[0]' "$AC_CHECK" >/dev/null 2>"$ERR_FILE"
+      perl -e 'alarm 60; exec "bash", $ARGV[0]' "$AC_BODY" >/dev/null 2>"$ERR_FILE"
       AC_RC=$?
       set -e
       EXECUTED_ACS=$((EXECUTED_ACS + 1))

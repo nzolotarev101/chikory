@@ -89,6 +89,7 @@ export interface SuiteSummary {
      */
     sealed: boolean;
   }[];
+  tasksDir?: string;
 }
 
 /**
@@ -246,6 +247,7 @@ export function summarize(
   results: TaskResult[],
   ledger?: DiscriminationLedger | DiscriminationLedgerEntry[],
   tasks?: Map<string, BenchmarkTask> | BenchmarkTask[],
+  tasksDir?: string,
 ): SuiteSummary {
   const tasksMap =
     tasks instanceof Map
@@ -296,7 +298,15 @@ export function summarize(
         const depOk = dependencySatisfiedIds(task, gradeById);
         taskScoredDepSatisfied = scoredGrades.filter((g) => depOk.has(g.requirementId)).length;
       } else {
-        taskScoredDepSatisfied = taskScoredSatisfied;
+        // No task definition available. `grading.dependencySatisfied` was recorded at grade
+        // time over EVERY requirement, guards included, while this numerator feeds a
+        // denominator that is the SCORED subset only. Honour the recorded count when the two
+        // populations coincide; otherwise fall back to the scored-satisfied count rather than
+        // emit a rate above 1.0 with a null Wilson interval (F-446).
+        taskScoredDepSatisfied =
+          guardGrades.length === 0
+            ? Math.min(r.grading.dependencySatisfied, scoredGrades.length)
+            : taskScoredSatisfied;
       }
     } else {
       taskScoredSatisfied = 0;
@@ -368,6 +378,7 @@ export function summarize(
     dSrCi,
     dSrRange: { low: dSrCi.lower, high: dSrCi.upper },
     perTask: perTaskInfo,
+    ...(tasksDir !== undefined ? { tasksDir } : {}),
   };
 }
 
@@ -424,6 +435,7 @@ export interface ArmComparisonDetail {
    * present when one was supplied.
    */
   rawResultsDir?: string;
+  tasksDir?: string;
 }
 
 export interface SuiteComparisonResult {
@@ -594,6 +606,7 @@ function buildArmDetail(
     ...(reference !== undefined && reference.length > 0
       ? { rawResultsDir: publishableRawResultsDir(reference) }
       : {}),
+    ...(summary.tasksDir !== undefined ? { tasksDir: summary.tasksDir } : {}),
   };
 }
 

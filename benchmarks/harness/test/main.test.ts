@@ -525,23 +525,66 @@ requirements:
       expect(o.lines.err.join("\n")).toContain("task brownfield-999 has no scored requirements");
     });
 
-    it("validate: refuses a task declaring a scored requirement that the ledger classifies non-discriminating (Trap B)", async () => {
-      const dir = mkdtempSync(join(tmpdir(), "bench-cli-mislabel-"));
+    it("validate: refuses a task declaring a scored requirement with no ledger entry (WP-652 / AC-1)", async () => {
+      const dir = mkdtempSync(join(tmpdir(), "bench-cli-unprobed-"));
       writeFileSync(
-        join(dir, "brownfield-002.yaml"),
-        `id: brownfield-002
+        join(dir, "brownfield-004.yaml"),
+        `id: brownfield-004
 class: brownfield
 status: pinned
 repo:
   url: https://example.invalid/repo
-  ref: a061eaa112fa18885dd4de0cea6c0e51094cad0c
-  fix_ref: 8043b106324a5148e7a5ff82e11895f10677abd9
+  ref: d96c5ceef12cb53266ce1ae5e65fba301a31fe57
+  fix_ref: 69da9545b222aceb5fc8ea15e851cab83b1c84f6
 goal: |
   fixture
 requirements:
   - id: R1
-    kind: discriminator
+    kind: guard
     description: r1
+    check: "true"
+  - id: R4
+    kind: discriminator
+    description: r4
+    check: "true"
+  - id: R5
+    kind: discriminator
+    description: r5 unprobed
+    check: "true"
+`,
+      );
+      const o = io();
+      const code = await main(["validate", dir, "--discrimination-ledger", LEDGER_PATH], o);
+      expect(code).toBe(1);
+      expect(o.lines.err.join("\n")).toContain("UNPROBED brownfield-004 R5");
+      expect(o.lines.err.join("\n")).toContain("has no discrimination ledger entry");
+    });
+
+    it("validate: refuses a task declaring kind: guard for a discriminating requirement (WP-652 / AC-1)", async () => {
+      const dir = mkdtempSync(join(tmpdir(), "bench-cli-demoted-"));
+      writeFileSync(
+        join(dir, "brownfield-003.yaml"),
+        `id: brownfield-003
+class: brownfield
+status: pinned
+repo:
+  url: https://example.invalid/repo
+  ref: b6b1288277e6ca87dab0ad1c7251b92612b7445c
+  fix_ref: 34f601590351e5d3a57fe20c001155940ba65324
+goal: |
+  fixture
+requirements:
+  - id: R1
+    kind: guard
+    description: r1
+    check: "true"
+  - id: R2
+    kind: guard
+    description: r2 demoted
+    check: "true"
+  - id: R3
+    kind: guard
+    description: r3
     check: "true"
   - id: R4
     kind: discriminator
@@ -552,12 +595,14 @@ requirements:
       const o = io();
       const code = await main(["validate", dir, "--discrimination-ledger", LEDGER_PATH], o);
       expect(code).toBe(1);
-      expect(o.lines.err.join("\n")).toContain("MISLABEL brownfield-002 R1: declared scored/discriminator but discrimination ledger classifies it as non-discriminating");
+      expect(o.lines.err.join("\n")).toContain("MISLABEL brownfield-003 R2");
+      expect(o.lines.err.join("\n")).toContain("declared guard but discrimination ledger classifies it as discriminating");
     });
   });
 
-  describe("resummarize CLI (WP-651 / AC-1)", () => {
+  describe("resummarize CLI (WP-651 / WP-652 / AC-2)", () => {
     const LEDGER_PATH = join(import.meta.dirname, "..", "..", "results", "discrimination.json");
+    const TASKS_DIR = join(import.meta.dirname, "..", "..", "tasks");
 
     it("resummarize: refuses when no results are found in the directory", async () => {
       const dir = mkdtempSync(join(tmpdir(), "bench-cli-resummarize-empty-"));
@@ -569,6 +614,130 @@ requirements:
       );
       expect(code).toBe(1);
       expect(o.lines.err.join("\n")).toContain("no stored task results found");
+    });
+
+    it("resummarize: records tasksDir provenance in emitted summary.json", async () => {
+      const resultsDir = mkdtempSync(join(tmpdir(), "bench-cli-rs-prov-res-"));
+      const outDir = mkdtempSync(join(tmpdir(), "bench-cli-rs-prov-out-"));
+      const taskResult = {
+        taskId: "brownfield-004",
+        source: "brownfield-004.yaml",
+        class: "brownfield",
+        adapter: "chikory",
+        startedAt: "2026-01-01T00:00:00.000Z",
+        endedAt: "2026-01-01T00:01:00.000Z",
+        repoRef: "d96c5ceef12cb53266ce1ae5e65fba301a31fe57",
+        run: { exitCode: 0, wallClockMs: 100, artifacts: [], notes: [] },
+        grading: {
+          grades: [
+            { requirementId: "R1", satisfied: true, detail: "ok", kind: "guard" },
+            { requirementId: "R2", satisfied: true, detail: "ok", kind: "guard" },
+            { requirementId: "R3", satisfied: true, detail: "ok", kind: "guard" },
+            { requirementId: "R4", satisfied: true, detail: "ok", kind: "discriminator" },
+          ],
+          total: 4,
+          satisfied: 4,
+          dependencySatisfied: 4,
+        },
+        baseVerification: { green: true, reason: "ok", testsPassed: 1, testsFailed: 0 },
+      };
+      writeFileSync(join(resultsDir, "brownfield-004.json"), JSON.stringify(taskResult, null, 2));
+
+      const o = io();
+      const code = await main(
+        [
+          "resummarize",
+          "--results",
+          resultsDir,
+          "--discrimination-ledger",
+          LEDGER_PATH,
+          "--tasks",
+          TASKS_DIR,
+          "--out",
+          outDir,
+        ],
+        o,
+      );
+      expect(code).toBe(0);
+      const summaryJson = JSON.parse(readFileSync(join(outDir, "summary.json"), "utf8"));
+      expect(summaryJson.tasksDir).toBe(TASKS_DIR);
+    });
+
+    it("resummarize: refuses loud and names missing task IDs when --tasks has no matching definitions", async () => {
+      const resultsDir = mkdtempSync(join(tmpdir(), "bench-cli-rs-missing-res-"));
+      const emptyTasksDir = mkdtempSync(join(tmpdir(), "bench-cli-rs-missing-tasks-"));
+      const outDir = mkdtempSync(join(tmpdir(), "bench-cli-rs-missing-out-"));
+
+      const taskResult = {
+        taskId: "brownfield-004",
+        source: "brownfield-004.yaml",
+        class: "brownfield",
+        adapter: "chikory",
+        startedAt: "2026-01-01T00:00:00.000Z",
+        endedAt: "2026-01-01T00:01:00.000Z",
+        repoRef: "d96c5ceef12cb53266ce1ae5e65fba301a31fe57",
+        run: { exitCode: 0, wallClockMs: 100, artifacts: [], notes: [] },
+        grading: {
+          grades: [{ requirementId: "R1", satisfied: true, detail: "ok" }],
+          total: 1,
+          satisfied: 1,
+          dependencySatisfied: 1,
+        },
+      };
+      writeFileSync(join(resultsDir, "brownfield-004.json"), JSON.stringify(taskResult, null, 2));
+
+      const o = io();
+      const code = await main(
+        [
+          "resummarize",
+          "--results",
+          resultsDir,
+          "--discrimination-ledger",
+          LEDGER_PATH,
+          "--tasks",
+          emptyTasksDir,
+          "--out",
+          outDir,
+        ],
+        o,
+      );
+      expect(code).toBe(1);
+      expect(o.lines.err.join("\n")).toContain("cannot match 1 task result(s) to task definitions");
+      expect(o.lines.err.join("\n")).toContain("brownfield-004");
+    });
+
+    it("resummarize: refuses when --tasks path does not exist", async () => {
+      const resultsDir = mkdtempSync(join(tmpdir(), "bench-cli-rs-notfound-res-"));
+      const outDir = mkdtempSync(join(tmpdir(), "bench-cli-rs-notfound-out-"));
+      const nonExistentTasksDir = join(tmpdir(), "non-existent-tasks-dir-" + Date.now());
+
+      const o = io();
+      const code = await main(
+        [
+          "resummarize",
+          "--results",
+          resultsDir,
+          "--discrimination-ledger",
+          LEDGER_PATH,
+          "--tasks",
+          nonExistentTasksDir,
+          "--out",
+          outDir,
+        ],
+        o,
+      );
+      expect(code).toBe(1);
+      expect(o.lines.err.join("\n")).toContain("--tasks path not found");
+    });
+
+    it("usage documents --tasks under resummarize", async () => {
+      const o = io();
+      expect(await main(["--help"], o)).toBe(0);
+      const text = o.lines.out.join("\n");
+      const resummarizeIdx = text.indexOf("resummarize --results");
+      expect(resummarizeIdx).toBeGreaterThan(0);
+      const resummarizeBlock = text.slice(resummarizeIdx, text.indexOf("exit codes:"));
+      expect(resummarizeBlock).toContain("--tasks");
     });
   });
 });

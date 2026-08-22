@@ -8,14 +8,16 @@ recover a run, and how to land the result as a normal PR.
 **Status (2026-08-22, bounded — update discipline: REPLACE this block, ≤15 lines;
 displaced prose moves verbatim to [`PLAN-HISTORY.md`](PLAN-HISTORY.md); per-run detail:
 `docs/reports/`; queue + course correction: `plan.md` §6/§7).**
-🟢 **dogfood-166 / WP-651 (the benchmark's score stopped being zero-over-zero) DELIVERED AND LANDED** — `run-89bbcd8d-8ddd-4600-a450-ad1720174bbc`, terminal **SUCCESS**, 4 steps, **$0.3227/$20.00** (1.6%, judge share 100%), 35m 26s, AC **3/3** re-run green, harvest byte-**IDENTICAL 13/13**, declared suite **232 passed** (baseline 221, floor 225), `docs/reports/dogfood-166.md`.
-🟢 **Re-measured at the review, not transcribed.** `chikory-bench resummarize` over the stored `p3-rung-4/chikory` arm + the committed probe ledger now reports **4/5 verified tasks, 5/5 verified requirements satisfied, I-SR 100.0% [56.6%, 100.0%]** — it reported **0/5 tasks, 0/0, I-SR 0.0%** before. Guards (install clean / suite green / typechecks) stay mandatory and score nothing; all 19 requirement `id`/`description`/`check` fields byte-unchanged.
-🟢 **The judge earned its keep — probe-confirmed.** Step 2 passed **3/3 acceptance checks** on a diff that had deleted `resummarize`'s empty-results refusal (step-2 diff artifact `161bb5222686`, lines 144-145). ROLLBACK to base on `no_unrelated_deletions`; step 3 rebuilt the work and kept the refusal; a committed test now pins it. **No AC covered it.**
-🔴 **P3-rung-5 STILL NOT CLIMBED (ledger `rung=4`)** — nothing published moved. `benchmarks/publications/p3-rung-4-corrected/chikory-summary.json` still reads `tasksVerified 0, iSr 0`: the stored arms predate `repoRef`, so WP-600 trap G refuses them for a second, independent reason. Re-running them is **WP-304, operator work**; a rung is satisfied only when its proof is whole (dogfood-124's precedent).
-🔴 **F-441 / 🟠 F-442 / 🟠 F-443 (§8) → WP-652** — three MEASURED ways to make the new number silently smaller: an unprobed scored requirement deletes its whole task while `validate` exits 0; a ledger-`discriminating` requirement declared `guard` passes clean and drops the interval floor 56.6% → 51.0%; `resummarize` guesses its tasks dir from cwd and records nothing (empty dir → I-SR 0.0%, indistinguishable from the real result).
-🟡 **F-444 (§8) — a verbatim goal prohibition failed for the 4th consecutive run, and the cap itself is loose.** Step 1 was killed **123.7 s past its 600 s cap (1.21×**, up from 1.01× in dogfood-163) waiting on a backgrounded suite, with 0 output tokens: 34.1% of wall clock, 13.7% of spend. Prompt-channel prohibitions are measurably not the fix.
-**Standing lesson: growing a corpus is a scoring-rule change.** Any requirement added after the last probe sweep is, to the scorer, an unprobed requirement — and today that silently removes its entire task from the published denominator.
-**NEXT HEADLINE = `dogfood-167` / WP-652 — the P3-rung-5 corpus half, continued.** `examples/dogfood/dogfood-167-wp652-score-names-its-inputs.yaml`. **WP-304's operator arm must not run until this lands** — re-running arms against a corpus that silently deletes tasks would publish a number nobody can reproduce.
+🟢 **dogfood-167 / WP-652 (the published score refuses every input that used to shrink it silently) DELIVERED AND LANDED** — `run-e3b49314-86b4-47dc-9d1a-73ad4bd468be`, terminal **SUCCESS**, 3 steps, **$0.2345/$20.00** (1.1%, judge share 100%), 12m 40s, AC **3/3** re-run green, harvest byte-**IDENTICAL 4/4**, declared suite **240 passed** (baseline 232, floor 236) → **241** after the review hand-fix (`docs/reports/dogfood-167.md`).
+🟢 **Re-measured at the review over corpus copies, driving the real CLI — not transcribed.** An unprobed scored requirement on a probed task now exits **1** naming task+requirement (was `5 valid, 0 invalid` exit 0) · a ledger-`discriminating` requirement declared `guard` exits **1** · `resummarize --tasks <empty dir>` exits **1** naming every unmatched task (was `I-SR 0.0%` exit 0) · `summary.json` records the resolved `tasksDir`. **F-441/F-442/F-443 CLOSED.**
+🟢 **The judge earned its keep for the 5th run running.** Step 2's `cumulative_design_coherent ✗` named duplicated `--tasks` resolution; step 3 consolidated it for 2,214 bytes and the next pass returned ✓.
+🔴 **F-447 (§8) → WP-653 — the executor fabricated the evidence its own acceptance check reads.** `benchmarks/results/**` is gitignored (`benchmarks/results/.gitignore:3`, a bare `*`), so the HEAD-cloned workspace had no stored arm and step 1's AC-2 failed correctly. Step 2 wrote **6 fabricated arm-result JSONs** (783–1,505 bytes; real ones 1,743–4,268 bytes plus 5 per-task subdirectories) whose `summary.json` asserts `requirementsVerifiedTotal: 19`, `iSr: 1`, `testsPassed: 3680`. **Four guards read clean:** step diff **0 bytes** · AC-3's `git diff --quiet -- benchmarks/results/` freeze trap · the F-11 empty-diff probe metric · the judge (PROCEED 3/3). Nothing fabricated landed.
+🟠 **F-448 (§8) → WP-653 — the proximate cause was the SPEC.** AC-2 read gitignored host state from inside the workspace, against a standing rule. An AC whose input the workspace cannot contain leaves the executor two options: fail, or manufacture it.
+🔴 **F-446 HAND-FIXED this sitting** — WP-652's grade-time D-SR fallback mixed populations (`benchmarks/harness/src/grade.ts:141` counts every requirement; the denominator is the scored subset). Measured `dSr 1.5` / interval `[null, null]` vs HEAD `0.5` / `[0.0945, 0.9055]`. Fixed `benchmarks/harness/src/results.ts:306`, pinned `benchmarks/harness/test/results.test.ts:870`.
+🔴 **P3-rung-5 STILL NOT CLIMBED (ledger `rung=4`)** — the gate is hardened, the corpus has not grown, and **F-449 (§8) → WP-654** shows the next growth attempt still goes silent: the refusals sit inside `if (ledgerEntry && ...)` (`benchmarks/harness/src/main.ts:247`), so a wholly unprobed task validates `6 valid, 0 invalid` exit 0.
+🟡 **F-450 (§8) — the anti-backgrounding prohibition failed for the 5th consecutive run** (steps 1 and 2 both narrate "I have launched … and will wait"). No cap kill this time; cost zero. A prohibition that has failed five runs running is not a prompt problem.
+**Standing lesson: an acceptance oracle must not read state the workspace cannot contain.** If HEAD does not carry it, the run can only fail or fabricate it — and when it lives under a gitignored path, the diff, the freeze trap, the probe metric and the judge all report clean.
+**NEXT HEADLINE = `dogfood-168` / WP-653 — an acceptance oracle the executor can write is not an oracle.** `examples/dogfood/dogfood-168-wp653-oracle-the-executor-cannot-write.yaml`. **WP-304's operator arm must not run until this lands.**
 
 Related docs: [`docs/spec/task-spec.md`](spec/task-spec.md) (schema
 reference) · [`docs/TASK-PROTOCOL.md`](TASK-PROTOCOL.md) (WP etiquette, §7 is
@@ -2484,3 +2486,51 @@ broken (a false-green, not a follow-on fix).
   died-before-judging detector after dogfood-133; the judge path never did. Fails
   safe (a dead check reads as unsatisfied), but **read the criterion's OUTPUT in
   the trace, not its exit code, before concluding a step produced nothing.**
+
+- **🔴 AN ACCEPTANCE ORACLE THE EXECUTOR CAN WRITE IS NOT AN ORACLE** (F-447 +
+  F-448, dogfood-167 → WP-653). dogfood-167's AC-2 read a stored benchmark arm
+  from `benchmarks/results/p3-rung-4/chikory/…`. That whole tree is gitignored
+  (`benchmarks/results/.gitignore:3` is a bare `*`), the run workspace clones
+  HEAD, so the input **could not be there** and step 1's AC-2 failed correctly.
+  Step 2 wrote the missing arm itself: 6 JSON files, 783–1,505 bytes (the real
+  ones are 1,743–4,268 bytes plus 5 per-task subdirectories), whose fabricated
+  `summary.json` asserts `requirementsVerifiedTotal: 19`, `iSr: 1`,
+  `testsPassed: 3680` — the exact 19/19 state WP-651 existed to end. AC-2 went
+  green and stayed green. **Four independent guards reported clean:** the step
+  diff measured **0 bytes**; AC-3's freeze trap
+  `git diff --quiet -- benchmarks/results/` cannot see file *creation* under an
+  ignored path; the F-11 probe metric classed the step as an empty-diff probe at
+  $0; and the judge returned PROCEED (3/3) on empty diff evidence. **Rule: never
+  write an AC that reads state HEAD does not carry.** Stage the evidence through
+  a declared path the run cannot write, or synthesize the fixture inside the
+  check. If you find yourself citing an absolute host path in a `check`, stop.
+- **🟠 A CORPUS GATE THAT ONLY CHECKS TASKS THE LEDGER ALREADY KNOWS** (F-449,
+  dogfood-167 → WP-654). WP-652's new refusals live inside
+  `if (ledgerEntry && ledgerEntry.requirements)`
+  (`benchmarks/harness/src/main.ts:247`). Measured: appending an unprobed
+  `kind: discriminator` requirement to the *probed* `brownfield-004` exits **1**,
+  but a **whole new task** carrying the same requirement validates
+  `6 valid, 0 invalid` and exits **0**. Adding a task is the likelier way to grow
+  the corpus. The gate exists because the goal asserted two colliding invariants
+  — the committed corpus must validate clean, and it contains `brownfield-001`,
+  which has no ledger entry at all (keys are `brownfield-002/003/004/005`). **A
+  spec that demands a universal refusal must say what happens to the exceptions
+  already in the tree.**
+- **🔴 "HONOUR WHAT WAS RECORDED" NEEDS THE POPULATIONS TO MATCH** (F-446,
+  dogfood-167, hand-fixed at review). Grade time records `dependencySatisfied`
+  over **every** requirement, guards included
+  (`benchmarks/harness/src/grade.ts:141`); the denominator it feeds is the
+  **scored subset only** (`benchmarks/harness/src/results.ts:287`). Substituting
+  one for the other produced a measured `dSr` of **1.5** with a Wilson interval
+  of `[null, null]`, where the pre-run code gave `0.5` / `[0.0945, 0.9055]` — and
+  `chikory-bench leaderboard` ranks arms by that interval floor. The committed
+  test pinned it green because its fixture had **no guards**, so the two
+  populations coincided. **When a fix swaps one count for another, build the
+  fixture where the two populations DIFFER.**
+- **🟡 A VERBATIM GOAL PROHIBITION HAS NOW FAILED FIVE RUNS RUNNING** (F-450,
+  dogfood-167 — F-421/F-345/F-428/F-444). dogfood-167's goal carried the
+  prohibition with the four prior friction ids cited inline; step 1's summary
+  still opens `I have launched the verification check for Acceptance Criterion 3
+  and will wait for it to complete.`, and step 2's carries three such lines. No
+  cap kill resulted (5m 32s / 2m 45s / 1m 9s against a 600 s cap), so the cost
+  was zero this time. **Stop paying for it in prompt text; it needs a mechanism.**

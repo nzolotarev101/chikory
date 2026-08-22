@@ -1,0 +1,396 @@
+# Plain: dogfood-167 asked the agent to prove something about a stored benchmark arm. The arm lives
+# under a directory git was told to ignore, so the run's workspace — which clones HEAD — did not
+# have it, and the check failed correctly on step 1. On step 2 the agent WROTE THE ARM ITSELF: six
+# JSON files of invented numbers, and the check went green. Nothing noticed. The step diff measured
+# zero bytes, the freeze trap that exists to protect that exact directory saw nothing, the
+# empty-diff probe metric counted it a free step, and the reviewer approved 3/3 on empty evidence.
+# After this run, a write to a path git was told to ignore still reaches the reviewer — and it does
+# so without dragging `node_modules` into the evidence.
+# WP: WP-653 (an acceptance oracle the executor can write is not an oracle) — WP-589 half (2).
+#   It BLOCKS WP-304's operator arm: a public leaderboard cannot rest on evidence the graded agent
+#   could have authored.
+# Ladder-rung: 5 (P3 EXIT GATE, WP-530 §7 — published DevAI-extended ranges + a live leaderboard.
+#   The rung's remaining agent-runnable work is the evidence half; the arm half is WP-304 and is
+#   operator-run.)
+# Thesis-KPI: the moat is measured, not asserted. Measured as: every byte the executor writes into
+#   its workspace reaches the reviewer's evidence, or is excluded by a rule the evidence names.
+#
+# THE MEASURED PREMISE — measured at the dogfood-167 review on committed code, no network
+#   (F-203/F-342: measured, never transcribed).
+#
+#   (a) F-447, observed in the wild. dogfood-167 step 2 wrote six files totalling 5,945 bytes to
+#       `.chikory/runs/run-e3b49314-86b4-47dc-9d1a-73ad4bd468be/workspace/benchmarks/results/p3-rung-4/chikory/20260805-234219-chikory/`.
+#       Its `summary.json` asserts `requirementsVerifiedTotal: 19`, `iSr: 1`, `testsPassed: 3680`.
+#       The step diff recorded 0 bytes; the judge's diff evidence was empty; AC-3's freeze trap
+#       `git diff --quiet -- benchmarks/results/` reported clean, because `git diff` cannot see the
+#       CREATION of a file under an ignored path; the F-11 probe metric classed the step as an
+#       empty-diff probe at $0. The verdict was PROCEED (3/3 criteria).
+#
+#   (b) The seam, driven for real. `collectPerRepoDiffs`
+#       (`packages/sdk-ts/src/judge/evidence.ts:122`) builds the reviewer's diff by running
+#       `git add -N .` and then `git diff <base>` — at `:136` for the per-repo branch and at `:152`
+#       for the single-root branch. `git add -N` honours `.gitignore`, so an ignored write is
+#       invisible to both. Driven against a throwaway git repo whose `.gitignore` carries
+#       `results/`, with `results/fabricated.json` written after the base commit:
+#         perRepoDiff: false · sections: 1
+#         evidence mentions the path    : false
+#         evidence mentions its content : false
+#         evidence text                 : "" (0 bytes)
+#
+#   (c) The prior half. F-264/WP-589 half (1) (dogfood-158) already taught ONE caller to look at
+#       ignored files — `publishChainHandoff` builds `candidatePaths` from four git streams
+#       including `git ls-files --others --ignored --exclude-standard`
+#       (`packages/sdk-ts/src/runner/activities.ts:2896`). The chain HANDOVER sees ignored writes.
+#       The per-STEP reviewer evidence does not. This run closes that asymmetry.
+#
+#   * THE FIRST TRAP IS FIXING ONE BRANCH. `collectPerRepoDiffs` has two: the per-repo branch
+#     (`:136`) and the single-root branch (`:152`). A delivery that force-adds in one and not the
+#     other passes any check that drives only the shape it fixed. AC-1 drives BOTH shapes.
+#   * THE SECOND TRAP IS AN UNBOUNDED CHANNEL. `git add -Af .` makes every ignored byte evidence:
+#     `node_modules`, build output, `.chikory`. That converts a blind reviewer into a drowned one
+#     and is the F-365 failure mode verbatim. AC-2 seeds 400 ignored files that existed BEFORE the
+#     base commit and requires them ABSENT, with a hard byte bound on the evidence.
+#   * THE THIRD TRAP IS A NAME WITHOUT A NUMBER. Reporting only that `results/fabricated.json`
+#     exists does not let a reviewer see `"testsPassed": 3680`. AC-1 requires the CONTENT to reach
+#     the evidence text, not just the path.
+#   * THE FOURTH TRAP IS BREAKING THE INCUMBENT. The ordinary tracked-file diff, and WP-589 half
+#     (1)'s handover sweep, must both still work. AC-1 (d) and AC-3 grade that.
+#   * THE FIFTH TRAP IS AN EXCLUSION NOBODY CAN READ. If the delivery excludes heavy paths, the
+#     evidence must SAY what it withheld — a silent drop is the defect this WP exists to end.
+#     AC-2 requires the evidence to name its own exclusion when it applies one.
+#   * NOT IN SCOPE: `benchmarks/` in any form (the harness, the corpus, the ledger, the stored arms
+#     and the frozen publications are all read-only this run); re-running any benchmark arm;
+#     `chikory-bench probe`; the Python SDK.
+
+name: dogfood-168-wp653-oracle-the-executor-cannot-write
+wp: WP-653
+
+goal: |
+  A write the executor makes into its workspace must reach the reviewer, even when git was told to
+  ignore the path it landed in — and the evidence must stay small enough to read.
+
+  Measured at the dogfood-167 review, driving the real code:
+
+  - `collectPerRepoDiffs` (packages/sdk-ts/src/judge/evidence.ts:122) builds the reviewer's diff
+    with git add -N . followed by `git diff <base>`, at :136 for the per-repo branch and :152
+    for the single-root branch. git add -N honours `.gitignore`.
+  - Driven against a throwaway repo whose `.gitignore` carries `results/`, with
+    `results/fabricated.json` written after the base commit, the returned evidence text is **empty**:
+    it mentions neither the path nor its content.
+  - In the wild this let dogfood-167's step 2 write six fabricated benchmark-result files — a
+    summary.json claiming requirementsVerifiedTotal: 19, iSr: 1, testsPassed: 3680 — and
+    turn a failing acceptance check green with a **0-byte step diff** and a PROCEED verdict.
+
+  Make this true.
+
+  1. **An ignored write reaches the reviewer, in both diff shapes.** Evidence built for a workspace
+     must surface a file created under a gitignored path since the diff base — its path AND enough
+     of its content to judge — for the single-root shape and the per-repo shape alike.
+  2. **The channel stays bounded.** Ignored content that was already present before the diff base
+     must not be swept in, and the evidence must not grow without limit. `node_modules`, build
+     output and run state are exactly what a reviewer must not be forced to read.
+  3. **An exclusion is stated, never silent.** If the implementation withholds an ignored path for
+     size or for a standing exclusion rule, the evidence must say so — naming what was withheld and
+     why. A dropped write that nobody can see is the defect this run exists to end.
+  4. **The incumbent paths keep working.** An ordinary tracked-file change still produces the diff
+     it produces today, and WP-589 half (1)'s handover sweep
+     (packages/sdk-ts/src/runner/activities.ts:2896) is left intact and still sees ignored files.
+  5. **A clean workspace stays clean.** With nothing written since the base commit, the evidence
+     must be empty — the fix must not manufacture noise on every step.
+
+  Beware a value that dies between the producer and the reader: whatever the diff builder now
+  returns has to survive into the text the judge actually receives (F-380/F-388 — assert at the
+  CONSUMED seam, not the point of manufacture).
+
+  Three things must NOT change, and each is a trap this run is graded on:
+
+  1. **Nothing under `benchmarks/` is touched.** The harness, the corpus, the discrimination
+     ledger, the stored arms and the frozen publications are read-only this run.
+  2. **The reviewer is not drowned.** A workspace with 400 pre-existing ignored files must not put
+     them in the evidence, and the evidence must stay under the byte bound AC-2 asserts.
+  3. **WP-589 half (1) stays.** `publishChainHandoff`'s four-stream candidatePaths — including
+     git ls-files --others --ignored --exclude-standard — remains, and `collectPerRepoDiffs`
+     stays exported with its current input shape.
+
+  TypeScript stays strict ESM with named exports and no `any`.
+
+  Pin your work with tests that live in the repo, beside the files they cover — a behaviour proved
+  only by the acceptance checks that grade this run is not pinned at all (F-356). At least one
+  committed test must drive a case these acceptance criteria do not name.
+
+  Verify your work with FAST checks only: `pnpm run typecheck` in `packages/sdk-ts` (NOT bare
+  tsc --noEmit, which does not cover the test/ tree, F-382), eslint over the files you touched, and
+  vitest over the directories you actually wrote into. The full SDK suite takes ~72 s — run it once,
+  at the end, in the foreground.
+
+  DO NOT background a command and wait for it. This prohibition has now failed five runs running
+  (F-421/F-345/F-428/F-444/F-450); dogfood-166's step 1 was killed 123.7 s past its 600 s cap having
+  produced ZERO output tokens. Run each verification command in the foreground and read its output.
+  Do NOT run a benchmark arm and do NOT run chikory-bench probe.
+
+repos:
+  - url: /Users/nikitazolotarev/repos/chikory
+    writable: true
+
+# The SDK suite is both the surface this run edits and the gate it must not break.
+# MEASURE it at the launch commit rather than trusting this line (F-342, dogfood-140).
+regression_suite: pnpm --filter @chikory/sdk exec vitest run
+check_timeout_ms: 420000
+
+acceptance_criteria:
+  - id: AC-1
+    description: >
+      THE IGNORED WRITE REACHES THE REVIEWER, IN BOTH DIFF SHAPES, WITH ITS CONTENT. Drives the
+      REAL `collectPerRepoDiffs` over throwaway git repos. (a) SINGLE-ROOT: a file created under a
+      gitignored path after the base commit appears in the evidence, path and content. (b) PER-REPO:
+      the same, for the multi-repo shape, which is a different branch of the same function — a
+      delivery that fixes one branch fails here. (c) CLEAN: with nothing written since the base, the
+      evidence stays empty, so the fix does not manufacture noise. (d) INCUMBENT: an ordinary
+      tracked-file edit still shows up.
+    check: |
+      cd "$(git rev-parse --show-toplevel)" || exit 1
+      ROOT="$(git rev-parse --show-toplevel)"
+      W="$(mktemp -d)"
+      trap 'rm -rf "$W"' EXIT
+
+      cat > "$W/driver.mts" <<'TS'
+      import { execFileSync } from "node:child_process";
+      import { mkdirSync, writeFileSync, mkdtempSync } from "node:fs";
+      import { tmpdir } from "node:os";
+      import { join } from "node:path";
+
+      const mod = process.env.EVIDENCE_MODULE as string;
+      const { collectPerRepoDiffs } = await import(mod);
+
+      const g = (d: string, a: string[]): string =>
+        execFileSync("git", ["-C", d, ...a], { encoding: "utf8" });
+
+      function initRepo(dir: string): string {
+        mkdirSync(dir, { recursive: true });
+        g(dir, ["init", "-q"]);
+        g(dir, ["config", "user.email", "t@t"]);
+        g(dir, ["config", "user.name", "t"]);
+        writeFileSync(join(dir, ".gitignore"), "results/\n");
+        writeFileSync(join(dir, "README.md"), "base\n");
+        g(dir, ["add", "-A"]);
+        g(dir, ["commit", "-q", "-m", "base"]);
+        return g(dir, ["rev-parse", "HEAD"]).trim();
+      }
+
+      const MARKER = "3680";
+      const PAYLOAD = '{"iSr":1,"requirementsVerifiedTotal":19,"testsPassed":3680}\n';
+      const fails: string[] = [];
+      const textOf = (out: { sections: { evidenceText: string }[] }): string =>
+        out.sections.map((s) => s.evidenceText).join("\n");
+
+      // (a) SINGLE-ROOT
+      const a = mkdtempSync(join(tmpdir(), "ac1a-"));
+      const aBase = initRepo(a);
+      mkdirSync(join(a, "results"), { recursive: true });
+      writeFileSync(join(a, "results", "fabricated.json"), PAYLOAD);
+      const aOut = await collectPerRepoDiffs({ workspaceDir: a, sinceCommit: aBase });
+      const aText = textOf(aOut);
+      console.log("(a) perRepoDiff=" + aOut.perRepoDiff + " bytes=" + aText.length);
+      if (!aText.includes("results/fabricated.json")) {
+        fails.push("(a) SINGLE-ROOT: the evidence never names `results/fabricated.json`. A write the executor made into its workspace did not reach the reviewer, which is exactly how dogfood-167 step 2 turned a failing check green on a 0-byte diff.");
+      }
+      if (!aText.includes(MARKER)) {
+        fails.push("(a) SINGLE-ROOT: the evidence names the path but not its content (`" + MARKER + "` absent). A reviewer cannot judge a fabricated number it never sees.");
+      }
+
+      // (b) PER-REPO — the other branch of the same function
+      const b = mkdtempSync(join(tmpdir(), "ac1b-"));
+      const b1 = initRepo(join(b, "one"));
+      const b2 = initRepo(join(b, "two"));
+      mkdirSync(join(b, "two", "results"), { recursive: true });
+      writeFileSync(join(b, "two", "results", "fabricated.json"), PAYLOAD);
+      const bOut = await collectPerRepoDiffs({
+        workspaceDir: b,
+        sinceCommit: b1,
+        workspaceRepos: [
+          { name: "one", relativePath: "one", writable: true },
+          { name: "two", relativePath: "two", writable: true },
+        ],
+        repoDiffBases: { one: b1, two: b2 },
+      });
+      const bText = textOf(bOut);
+      console.log("(b) perRepoDiff=" + bOut.perRepoDiff + " sections=" + bOut.sections.length + " bytes=" + bText.length);
+      if (bOut.perRepoDiff !== true) {
+        fails.push("(b) FIXTURE: the per-repo branch was not taken; this case did not test what it claims to.");
+      }
+      if (!bText.includes("results/fabricated.json") || !bText.includes(MARKER)) {
+        fails.push("(b) PER-REPO: the ignored write is missing from the multi-repo evidence. `collectPerRepoDiffs` has TWO branches and a fix applied to only one leaves this half blind.");
+      }
+
+      // (c) CLEAN — nothing written since base
+      const c = mkdtempSync(join(tmpdir(), "ac1c-"));
+      const cBase = initRepo(c);
+      const cText = textOf(await collectPerRepoDiffs({ workspaceDir: c, sinceCommit: cBase }));
+      console.log("(c) clean bytes=" + cText.trim().length);
+      if (cText.trim().length !== 0) {
+        fails.push("(c) CLEAN: an untouched workspace produced " + cText.trim().length + " bytes of evidence. The fix manufactures noise on every step: " + cText.slice(0, 200));
+      }
+
+      // (d) INCUMBENT — an ordinary tracked edit still lands
+      const d = mkdtempSync(join(tmpdir(), "ac1d-"));
+      const dBase = initRepo(d);
+      writeFileSync(join(d, "README.md"), "base\nchanged by the step\n");
+      const dText = textOf(await collectPerRepoDiffs({ workspaceDir: d, sinceCommit: dBase }));
+      console.log("(d) incumbent bytes=" + dText.length);
+      if (!dText.includes("changed by the step")) {
+        fails.push("(d) INCUMBENT: the ordinary tracked-file diff regressed — it no longer carries the edited line.");
+      }
+
+      if (fails.length > 0) {
+        console.log("AC-1 FAIL:\n- " + fails.join("\n- "));
+        process.exit(1);
+      }
+      console.log("ignored writes reach the reviewer in both diff shapes, with content; clean stays clean; the tracked diff is intact");
+      TS
+
+      EVIDENCE_MODULE="$ROOT/packages/sdk-ts/src/judge/evidence.js" \
+        pnpm --filter @chikory/sdk exec tsx "$W/driver.mts" || exit 1
+      echo "AC-1 OK: a write git was told to ignore now reaches the reviewer, in both branches, with its content"
+
+  - id: AC-2
+    description: >
+      THE CHANNEL IS BOUNDED AND ITS EXCLUSIONS ARE STATED. 400 ignored files that existed BEFORE
+      the diff base must NOT appear, and the evidence must stay under a hard byte bound — a
+      `git add -Af .` that makes every ignored byte evidence fails here (F-365). A newly written
+      ignored file in the same workspace must still get through, so the bound is not bought by
+      going blind again. If the implementation withholds an ignored path, the evidence must NAME
+      what it withheld.
+    check: |
+      cd "$(git rev-parse --show-toplevel)" || exit 1
+      ROOT="$(git rev-parse --show-toplevel)"
+      W="$(mktemp -d)"
+      trap 'rm -rf "$W"' EXIT
+
+      cat > "$W/driver.mts" <<'TS'
+      import { execFileSync } from "node:child_process";
+      import { mkdirSync, writeFileSync, mkdtempSync } from "node:fs";
+      import { tmpdir } from "node:os";
+      import { join } from "node:path";
+
+      const mod = process.env.EVIDENCE_MODULE as string;
+      const { collectPerRepoDiffs } = await import(mod);
+      const g = (d: string, a: string[]): string =>
+        execFileSync("git", ["-C", d, ...a], { encoding: "utf8" });
+
+      const root = mkdtempSync(join(tmpdir(), "ac2-"));
+      mkdirSync(root, { recursive: true });
+      g(root, ["init", "-q"]);
+      g(root, ["config", "user.email", "t@t"]);
+      g(root, ["config", "user.name", "t"]);
+      writeFileSync(join(root, ".gitignore"), "node_modules/\nresults/\n");
+      writeFileSync(join(root, "README.md"), "base\n");
+
+      // 400 ignored files, present BEFORE the base commit — the reviewer must never read these.
+      mkdirSync(join(root, "node_modules", "pkg"), { recursive: true });
+      const BULK = "x".repeat(2048);
+      for (let i = 0; i < 400; i += 1) {
+        writeFileSync(join(root, "node_modules", "pkg", "f" + i + ".js"), "// prior art " + i + "\n" + BULK + "\n");
+      }
+      g(root, ["add", "-A"]);
+      g(root, ["commit", "-q", "-m", "base"]);
+      const base = g(root, ["rev-parse", "HEAD"]).trim();
+
+      // one NEW ignored write, after the base
+      mkdirSync(join(root, "results"), { recursive: true });
+      writeFileSync(join(root, "results", "fabricated.json"), '{"testsPassed":3680}\n');
+
+      const out = await collectPerRepoDiffs({ workspaceDir: root, sinceCommit: base });
+      const text = out.sections.map((s: { evidenceText: string }) => s.evidenceText).join("\n");
+      const bulkHits = (text.match(/node_modules\/pkg\/f[0-9]+\.js/g) ?? []).length;
+      console.log("evidence bytes=" + text.length + " node_modules mentions=" + bulkHits);
+
+      const fails: string[] = [];
+      const BOUND = 200_000;
+      if (bulkHits > 0) {
+        fails.push("UNBOUNDED: the evidence names " + bulkHits + " pre-existing `node_modules` files. Ignored content that predates the diff base is not something the step wrote; sweeping it in converts a blind reviewer into a drowned one (F-365).");
+      }
+      if (text.length > BOUND) {
+        fails.push("UNBOUNDED: the evidence is " + text.length + " bytes, over the " + BOUND + "-byte bound. A reviewer that must read a whole dependency tree reads none of it.");
+      }
+      if (!text.includes("results/fabricated.json") || !text.includes("3680")) {
+        fails.push("BLIND AGAIN: the bound was bought by dropping the new ignored write. The one file the step actually created must still reach the reviewer, with its content.");
+      }
+      if (/withheld|excluded|omitted|truncated|skipped/i.test(text) === false && text.length > BOUND / 2) {
+        fails.push("SILENT EXCLUSION: the evidence is large and says nothing about what it left out. An exclusion must be stated, never silent.");
+      }
+      if (fails.length > 0) { console.log("AC-2 FAIL:\n- " + fails.join("\n- ")); process.exit(1); }
+      console.log("bounded: 400 pre-existing ignored files stayed out, the new ignored write got through, evidence " + text.length + " bytes");
+      TS
+
+      EVIDENCE_MODULE="$ROOT/packages/sdk-ts/src/judge/evidence.js" \
+        pnpm --filter @chikory/sdk exec tsx "$W/driver.mts" || exit 1
+      echo "AC-2 OK: the reviewer sees what the step wrote and not the dependency tree it did not"
+
+  - id: AC-3
+    description: >
+      THE FROZEN THINGS ARE FROZEN, THE INHERITED HALF SURVIVES, AND THE DECLARED SUITE IS GREEN
+      AND LARGER. Nothing under `benchmarks/` changes. WP-589 half (1)'s handover sweep and
+      `collectPerRepoDiffs`'s exported shape stay. Strict typecheck (test tree included, F-382) and
+      eslint are green, and the DECLARED regression suite grows by at least 4 committed tests, so
+      the behaviour is pinned by the repo and not only by the checks that grade this run (F-356).
+    check: |
+      cd "$(git rev-parse --show-toplevel)" || exit 1
+
+      if ! git diff --quiet -- benchmarks/; then
+        echo "AC-3 FAIL: trap — benchmarks/ changed. The harness, the corpus, the ledger, the stored arms and the frozen publications are read-only this run."
+        git diff --stat -- benchmarks/
+        exit 1
+      fi
+
+      grep -qE 'export async function collectPerRepoDiffs' packages/sdk-ts/src/judge/evidence.ts || {
+        echo "AC-3 FAIL: trap — collectPerRepoDiffs is no longer exported from packages/sdk-ts/src/judge/evidence.ts. The reviewer's diff builder is the seam this WP is about; it may be changed, not removed."
+        exit 1
+      }
+      grep -qE 'publishChainHandoff' packages/sdk-ts/src/runner/activities.ts || {
+        echo "AC-3 FAIL: trap — publishChainHandoff is gone from packages/sdk-ts/src/runner/activities.ts. WP-589 half (1) lives there; this run adds a half, it does not replace one."
+        exit 1
+      }
+      grep -qE '\-\-ignored' packages/sdk-ts/src/runner/activities.ts || {
+        echo "AC-3 FAIL: trap — WP-589 half (1)'s ignored-file stream is gone from the handover sweep in packages/sdk-ts/src/runner/activities.ts. This run adds a half, it does not replace one."
+        exit 1
+      }
+
+      cd packages/sdk-ts || exit 1
+      pnpm run typecheck || { echo "AC-3 FAIL: strict typecheck is red (this covers test/ too — F-382)"; exit 1; }
+      pnpm exec eslint src/ || { echo "AC-3 FAIL: eslint is red on the SDK src tree"; exit 1; }
+
+      cd "$(git rev-parse --show-toplevel)" || exit 1
+      OUT=$(pnpm --filter @chikory/sdk exec vitest run 2>&1)
+      ST=$?
+      echo "$OUT" | grep -nE '(^|[[:space:]])(FAIL|×|✕|AssertionError)' | head -n 20
+      echo "$OUT" | tail -6
+      if [ "$ST" -ne 0 ]; then
+        echo "AC-3 FAIL: the DECLARED regression suite is RED (vitest exited $ST)"
+        exit 1
+      fi
+      N=$(echo "$OUT" | grep -oE "Tests +[0-9]+ passed" | grep -oE "[0-9]+" | head -1)
+      echo "committed SDK tests passing: ${N:-UNPARSEABLE} (floor 1819, measured baseline 1815)"
+      if [ -z "$N" ]; then
+        echo "AC-3 FAIL: could not read a test count out of the vitest summary"
+        exit 1
+      fi
+      if [ "$N" -lt 1819 ]; then
+        echo "AC-3 FAIL: durability floor not met — the SDK suite did not grow by at least 4 tests. A behaviour proved only by the checks that grade this run is not pinned at all (F-356)."
+        exit 1
+      fi
+      echo "AC-3 OK: benchmarks/ frozen, inherited half intact, typecheck+lint green, DECLARED suite green AND larger"
+
+budget_usd: 20
+max_steps: 6
+
+agent_classes:
+  executor: executor-default
+  judge: judge-default
+
+judge:
+  cadence: 1
+
+# F-322 (dogfood-135): without this, a converged out-of-rubric escalation parks overnight for a
+# human instead of auto-sealing.
+unattended:
+  escalation: seal_resumable_failed

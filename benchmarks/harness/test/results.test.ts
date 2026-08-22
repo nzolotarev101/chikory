@@ -807,4 +807,105 @@ describe("guard-aware discrimination scoring (WP-651)", () => {
     expect(check.verified).toBe(false);
     expect(check.reason).toMatch(/Requirement R1 is declared scored but discrimination ledger classifies it as 'non-discriminating'/);
   });
+
+  it("refuses a task where a scored requirement is not in the ledger at all (WP-652)", () => {
+    const unprobedTask = {
+      id: "brownfield-004",
+      source: "authored" as const,
+      class: "brownfield" as const,
+      status: "pinned" as const,
+      goal: "g",
+      requirements: [
+        { id: "R1", description: "d", prerequisites: [], grading: { kind: "check" as const, command: "c" }, kind: "guard" as const },
+        { id: "R4", description: "d", prerequisites: [], grading: { kind: "check" as const, command: "c" }, kind: "discriminator" as const },
+        { id: "R5", description: "d", prerequisites: [], grading: { kind: "check" as const, command: "c" }, kind: "discriminator" as const },
+      ],
+      preferences: [],
+      tags: [],
+      flags: {},
+    };
+    const res = mockTaskResult({
+      taskId: "brownfield-004",
+      grading: {
+        total: 3,
+        satisfied: 3,
+        dependencySatisfied: 3,
+        grades: [
+          { requirementId: "R1", satisfied: true, detail: "ok", kind: "guard" },
+          { requirementId: "R4", satisfied: true, detail: "ok", kind: "discriminator" },
+          { requirementId: "R5", satisfied: true, detail: "ok", kind: "discriminator" },
+        ],
+      },
+      repoRef: "d96c5ceef12cb53266ce1ae5e65fba301a31fe57",
+    });
+
+    const check = isTaskDiscriminationVerified(res, ledger, unprobedTask);
+    expect(check.verified).toBe(false);
+    expect(check.reason).toMatch(/Requirement R5 was not probed in ledger/);
+  });
+
+  it("summarize: honours grade-time dependencySatisfied when task definition is unavailable (WP-652)", () => {
+    const res = mockTaskResult({
+      taskId: "greenfield-001",
+      grading: {
+        total: 2,
+        satisfied: 2,
+        dependencySatisfied: 1, // grade time recorded 1 dep satisfied
+        grades: [
+          { requirementId: "R1", satisfied: true, detail: "ok" },
+          { requirementId: "R2", satisfied: true, detail: "ok" },
+        ],
+      },
+    });
+
+    // No task definition supplied (task Map is empty/undefined)
+    const summary = summarize("suite", "adapter", "start", "end", [res]);
+    expect(summary.requirementsSatisfied).toBe(2);
+    expect(summary.requirementsVerifiedSatisfied).toBe(2);
+    // Must honour the 1 recorded at grade time, NOT guess 2
+    expect(summary.dependencyVerifiedSatisfied).toBe(1);
+    expect(summary.dSr).toBe(0.5);
+  });
+
+  it("summarize: a guarded task with no definition never scores a D-SR above its denominator (F-446)", () => {
+    // Grade time counted dependency satisfaction over ALL 4 requirements (3 held);
+    // the scored denominator is the 2 non-guard requirements. The two populations differ.
+    const res = mockTaskResult({
+      taskId: "greenfield-001",
+      repoRef: "abc123",
+      grading: {
+        total: 4,
+        satisfied: 3,
+        dependencySatisfied: 3,
+        grades: [
+          { requirementId: "R1", satisfied: true, detail: "ok", kind: "guard" },
+          { requirementId: "R2", satisfied: true, detail: "ok", kind: "discriminator" },
+          { requirementId: "R3", satisfied: true, detail: "ok", kind: "guard" },
+          { requirementId: "R4", satisfied: false, detail: "no", kind: "discriminator" },
+        ],
+      },
+    });
+
+    const summary = summarize("suite", "adapter", "start", "end", [res]);
+
+    const denominator = summary.requirementsVerifiedTotal ?? 0;
+    const depNumerator = summary.dependencyVerifiedSatisfied ?? 0;
+    expect(denominator).toBe(2);
+    expect(depNumerator).toBeLessThanOrEqual(denominator);
+    expect(summary.dSr).toBeLessThanOrEqual(1);
+    const ci = summary.dSrCi;
+    expect(ci).toBeDefined();
+    expect(ci?.lower).not.toBeNull();
+    expect(ci?.upper).not.toBeNull();
+  });
+
+  it("summarize: records tasksDir provenance when supplied (WP-652)", () => {
+    const res = mockTaskResult({
+      taskId: "greenfield-001",
+      grading: { total: 1, satisfied: 1, dependencySatisfied: 1, grades: [] },
+    });
+
+    const summary = summarize("suite", "adapter", "start", "end", [res], undefined, undefined, "/custom/tasks/dir");
+    expect(summary.tasksDir).toBe("/custom/tasks/dir");
+  });
 });

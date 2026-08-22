@@ -30,7 +30,7 @@ import { writeLeaderboard } from "./leaderboard.js";
 import { runProbe, runProbeSweep } from "./probe.js";
 import { acquireSuiteLock, SuiteAlreadyRunningError } from "./suite-lock.js";
 import { loadTaskDir, runSuite } from "./suite.js";
-import { isRunnable, type BenchmarkRequirement, type BenchmarkTask } from "./task.js";
+import { isRunnable, type BenchmarkRequirement } from "./task.js";
 
 const USAGE = `usage: chikory-bench <command> [options]
 
@@ -96,6 +96,7 @@ commands:
                            build a ranked summary across published bundles ordered by 95% CI lower bound
   resummarize --results <dir-or-file> --discrimination-ledger <file> --out <dir>
                            re-summarize a stored suite from per-task evidence through a discrimination ledger
+      [--tasks <dir>]        task definitions directory (default benchmarks/tasks)
 
 exit codes: 0 ok · 1 invalid input or failed run
 `;
@@ -247,9 +248,17 @@ export async function main(argv: string[], io = { out: console.log, err: console
             for (const r of t.requirements) {
               const isGuard = r.kind === "guard";
               const ledgerReq = ledgerEntry.requirements.find((lr: DiscriminationRequirementEntry) => lr.id === r.id);
-              if (!isGuard && ledgerReq && ledgerReq.classification === "non-discriminating") {
+              if (!isGuard) {
+                if (!ledgerReq) {
+                  bad++;
+                  io.err(`UNPROBED ${t.id} ${r.id}: declared scored/discriminator but has no discrimination ledger entry`);
+                } else if (ledgerReq.classification !== "discriminating") {
+                  bad++;
+                  io.err(`MISLABEL ${t.id} ${r.id}: declared scored/discriminator but discrimination ledger classifies it as ${ledgerReq.classification}`);
+                }
+              } else if (isGuard && ledgerReq && ledgerReq.classification === "discriminating") {
                 bad++;
-                io.err(`MISLABEL ${t.id} ${r.id}: declared scored/discriminator but discrimination ledger classifies it as non-discriminating`);
+                io.err(`MISLABEL ${t.id} ${r.id}: declared guard but discrimination ledger classifies it as discriminating`);
               }
             }
           }
@@ -680,6 +689,25 @@ export async function main(argv: string[], io = { out: console.log, err: console
       return 1;
     }
 
+    let tasksDir: string | undefined;
+    if (values["tasks"] !== undefined) {
+      const resolvedTasks = resolve(values["tasks"]);
+      if (!existsSync(resolvedTasks)) {
+        io.err(`chikory-bench resummarize: --tasks path not found: ${resolvedTasks}`);
+        return 1;
+      }
+      tasksDir = resolvedTasks;
+    } else if (existsSync(resolve("benchmarks/tasks"))) {
+      tasksDir = resolve("benchmarks/tasks");
+    } else if (existsSync(resolve(import.meta.dirname, "../../tasks"))) {
+      tasksDir = resolve(import.meta.dirname, "../../tasks");
+    }
+
+    if (!tasksDir) {
+      io.err(`chikory-bench resummarize: no task definitions directory found (supply --tasks <dir>)`);
+      return 1;
+    }
+
     let ledger: DiscriminationLedger;
     try {
       ledger = readDiscriminationLedger(resolvedLedger);
@@ -843,35 +871,38 @@ export async function main(argv: string[], io = { out: console.log, err: console
       return 1;
     }
 
-    let tasksDirPath = values["tasks"];
-    if (!tasksDirPath) {
-      if (existsSync(resolve("benchmarks/tasks"))) {
-        tasksDirPath = resolve("benchmarks/tasks");
-      } else if (existsSync(resolve(import.meta.dirname, "../../tasks"))) {
-        tasksDirPath = resolve(import.meta.dirname, "../../tasks");
+    const { tasks, invalid } = loadTaskDir(tasksDir);
+    if (Object.keys(invalid).length > 0) {
+      for (const [file, issues] of Object.entries(invalid)) {
+        io.err(`INVALID ${file}: ${issues.join("; ")}`);
       }
+      return 1;
     }
-    const tasksDir = tasksDirPath ? resolve(tasksDirPath) : undefined;
-    let tasksMap: Map<string, BenchmarkTask> | undefined;
-    if (tasksDir && existsSync(tasksDir)) {
-      const { tasks } = loadTaskDir(tasksDir);
-      tasksMap = new Map(tasks.map((t) => [t.id, t]));
-      for (const tr of taskResults) {
-        const task = tasksMap.get(tr.taskId);
-        if (task) {
-          for (const grade of tr.grading.grades) {
-            if (!grade.kind) {
-              const req = task.requirements.find((r: BenchmarkRequirement) => r.id === grade.requirementId);
-              if (req) {
-                grade.kind = req.kind ?? "discriminator";
-              }
+
+    const tasksMap = new Map(tasks.map((t) => [t.id, t]));
+    const unresolvable = taskResults.filter((tr) => !tasksMap.has(tr.taskId));
+    if (unresolvable.length > 0) {
+      io.err(
+        `chikory-bench resummarize: cannot match ${unresolvable.length} task result(s) to task definitions in ${tasksDir}: ${unresolvable.map((tr) => tr.taskId).join(", ")}`,
+      );
+      return 1;
+    }
+
+    for (const tr of taskResults) {
+      const task = tasksMap.get(tr.taskId);
+      if (task) {
+        for (const grade of tr.grading.grades) {
+          if (!grade.kind) {
+            const req = task.requirements.find((r: BenchmarkRequirement) => r.id === grade.requirementId);
+            if (req) {
+              grade.kind = req.kind ?? "discriminator";
             }
           }
         }
       }
     }
 
-    const summary = summarize(suite, adapter, startedAt, endedAt, taskResults, ledger, tasksMap);
+    const summary = summarize(suite, adapter, startedAt, endedAt, taskResults, ledger, tasksMap, tasksDir);
     const resolvedOutDir = resolve(outDir);
     const canonical = writeSuiteSummary(resolvedOutDir, summary);
     io.out(
