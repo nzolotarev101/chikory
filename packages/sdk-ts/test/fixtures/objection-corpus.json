@@ -1,6 +1,6 @@
 {
   "meta": {
-    "what": "Every FAILING judge rubric justification (>=120 chars, deduped) this campaign has produced.",
+    "what": "Every FAILING judge rubric justification (>=120 chars) this campaign has produced: 86 rows over 83 unique justifications — 3 rows are branch-run replays of a parent row and carry identical text under the same key, which the runFamily collapse below removes from every negative population.",
     "why": "The negative population for the repeat-objection comparator (WP-647). Two objections from DIFFERENT run families are never the same objection, so every cross-family pair is a labelled negative the delivery cannot enumerate or hand-fit.",
     "extractedAt": "2026-08-21 (dogfood-164 review)",
     "source": ".chikory/runs/*/journal.db — kind in ('judge','verdict'), form.rubricResults where pass === false",

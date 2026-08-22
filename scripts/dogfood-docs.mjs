@@ -210,6 +210,9 @@ function cmdIndex() {
   if (cols.length < 4) die(`unexpected README column count (${cols.length}) on the dogfood-${nnn} row`);
   cols[2] = readFileSync(resolve(flags.outcome), "utf8").trim();
   cols[3] = `[dogfood-${nnn}.md](../../docs/reports/dogfood-${nnn}.md) |`;
+  // F-440: an existing outcome cell may itself contain " | " (the arming table the skill tells
+  // you to paste here), so `cols` can be longer than 4. Drop the tail or the row grows columns.
+  cols.length = 4;
   lines[rowIdx] = cols.join(" | ");
   writeFileSync(file, lines.join("\n"));
   console.log(`✅ README: updated the dogfood-${nnn} outcome + report link`);

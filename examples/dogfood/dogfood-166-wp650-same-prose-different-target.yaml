@@ -1,0 +1,638 @@
+# Plain: when the judge complains about two DIFFERENT pieces of code in the same words, the loop
+# currently thinks it has been told the same thing twice — 60 times out of 120, on complaints built
+# from this campaign's own judge prose. It then refuses to pay for the second repair. After this run
+# it makes that mistake at most 6 times out of 120, without forgetting how to recognise a genuine
+# restatement (7 of 8 today) and without merging any of the pairs it already keeps apart.
+# WP: WP-650 (a distinguishing identifier must beat a count of shared sub-tokens) — F-437, and
+#   WP-647's rule (a negative population must be able to COLLIDE with the positive one) applied to
+#   the fix WP-647 itself graded.
+# Ladder-rung: 0 (off-ladder — P3 rung-5's remaining half is WP-304, an operator-run quota-bound
+#   benchmark arm, not expressible as a spec. The gate reads PROGRESSING, so the rung does not bind.)
+# Thesis-KPI: Agent-as-a-Judge in the inner loop (CLAUDE.md). Measured as: the loop can tell "you
+#   already said that" from "that is the same problem somewhere else", in both directions.
+#
+# THE MEASURED PREMISE — measured at the dogfood-165 review against the comparator on `main`
+#   (F-203/F-342: measured, never transcribed). Reproduce the four numbers with AC-1 itself.
+#
+#   THE NEGATIVE POPULATION IS GENERATED FROM THE REPO, NOT FOUND IN A CORPUS. dogfood-165 proved
+#   the comparator on 1501 cross-family pairs, and this hole was invisible there because the corpus
+#   does not happen to contain "same complaint, different target" pairs. So AC-1 BUILDS them: for
+#   each of the 40 rows in `packages/sdk-ts/test/fixtures/objection-corpus.json` that name a
+#   lowerCamelCase code locus, every such locus is substituted for an exported SDK function drawn
+#   from `git grep '^export function' -- src` (322 symbols today), in 3 deterministic rounds → 120
+#   pairs. Each twin is the SAME complaint about a DIFFERENT piece of code, so every pair is a
+#   negative. The pool is read from the repo at grading time, so it cannot be memorised.
+#
+#   WHY lowerCamelCase AND NOT ALL IDENTIFIERS — this is the whole semantic content of the WP. An
+#   ALL_CAPS name in this campaign's judge prose is almost always an EXAMPLE of a class the objection
+#   faults (`META_TOKENS`, `CONDITION_TOKENS` — "the decision still depends on hand-authored word
+#   lists"), and three of the eight labelled positives are exactly one complaint restated with
+#   DIFFERENT LIST NAMES. A lowerCamelCase symbol is the LOCUS: the thing whose behaviour is wrong.
+#   Substituting a locus changes the objection; substituting an example does not.
+#
+#   MEASURED ON `main`:
+#     LOCUS SUBSTITUTION   60 of 120 pairs answered "same" — 50.0%. Measured IDENTICAL on the
+#                          pre-WP-644 comparator, so this hole predates dogfood-161/165 and is not a
+#                          regression they introduced. dogfood-165 added only the narrower case where
+#                          two objections differ solely in which acceptance criterion they fault.
+#     RECALL               7 of 8 labelled positives (WP-644, dogfood-165). MUST NOT REGRESS.
+#     BROAD CEILING        25 of 1501 cross-FAMILY same-rubric-id pairs (1.67%) — SATURATED at its
+#                          budget (F-439). The budget stays 25; the reference measured 21, so there
+#                          is real headroom for a delivery that gates on loci.
+#     HARD CEILING         0 of 3 — same run, same rubric id, genuinely different complaints.
+#
+#   * THE FIRST TRAP IS THE ONE-LINE FIX. Requiring a shared code entity in general — reverting
+#     dogfood-165's sub-token counts, or demanding non-empty entity overlap — takes the substitution
+#     merges to 0 AND DROPS RECALL FROM 7/8 TO 4/8, because the three list-name positives name
+#     DISJOINT ALL_CAPS lists. AC-1 grades all four numbers in ONE check, so it cannot be bought.
+#   * THE SECOND TRAP IS HARD-CODING. AC-3 fails if any committed file under `packages/sdk-ts/src/`
+#     contains a 48-character substring of any corpus justification, and the substitution pool is
+#     enumerated from `git grep` at grading time — a memorised symbol list cannot cover it.
+#   * THE THIRD TRAP IS GRADING THE PURE FUNCTION AND CALLING IT DONE. AC-2 drives
+#     `decideCompletionReview`, the reducer that turns the answer into a repair grant
+#     (`packages/sdk-ts/src/workflow/completion-review.ts:613`, spent at `agent-loop.ts:1387`): a
+#     complaint about a DIFFERENT locus must still earn `review`, while a genuine restatement must
+#     still answer `skip`.
+#   * NOT IN SCOPE: the `a.id !== b.id` rubric-id gate; `mergeDesignFindings` and the WP-648
+#     deterministic acquittal; `packages/sdk-ts/src/judge/scan-layering.ts` (WP-649);
+#     `heal/gate-repair.ts` routing (WP-542); `packages/sdk-ts/src/judge/hermeticity.ts`;
+#     `packages/sdk-ts/src/executors/infra-failure.ts`; the chain mirror; the Python mirror; the
+#     TaskSpec contract. The corpus and label fixtures are READ-ONLY — editing either is a fail.
+#   * THE EXPORTED CALL SHAPE STAYS: `areMateriallySameObjections(a, b)` over
+#     `{ id: string; justification: string }`, pure and replay-safe (it runs INSIDE the Temporal
+#     workflow — no I/O, no clock, no randomness, no reading a fixture at runtime), and
+#     byte-identical justifications must stay "same". `MAX_PROGRESS_GRANTS` stays.
+
+name: dogfood-166-wp650-same-prose-different-target
+wp: WP-650
+
+goal: |
+  The loop's answer to "have I already been told this?" must tell a RESTATEMENT from the SAME
+  COMPLAINT ABOUT A DIFFERENT PIECE OF CODE. Today it cannot: it merges half of them.
+
+  Measured at the dogfood-165 review against the comparator on `main`, over this campaign's own
+  judge prose committed at `packages/sdk-ts/test/fixtures/objection-corpus.json` (86 rows, 47
+  journals, 23 run families) and `objection-labels.json` (the hand labels and the reason for each).
+
+  - Take each of the **40 corpus rows that name a lowerCamelCase code locus** and substitute every
+    such locus for an exported SDK function drawn from `git grep '^export function' -- src` (322
+    symbols, 3 deterministic rounds → **120 pairs**). Each twin is the same complaint about a
+    DIFFERENT piece of code. `areMateriallySameObjections`
+    (`packages/sdk-ts/src/workflow/completion-review.ts:570`) answers "same" on **60 of 120 —
+    50.0%**. The pre-WP-644 comparator measures the same 60, so this is long-standing, not a
+    regression.
+  - On the 8 labelled restatements it answers "same" **7** times (WP-644, dogfood-165).
+  - On 1501 cross-family same-rubric-id pairs it answers "same" **25** times (1.67%).
+  - On the 3 same-run same-rubric-id negatives it answers "same" **0** times.
+
+  Make this true.
+
+  1. **At most 6 of the 120 locus-substitution pairs (5%) may answer "same"** — down from 60. A
+     reference implementation reached 0, so this floor is measured, not hoped for.
+  2. **Recall does not regress: at least 7 of the 8 labelled restatements still answer "same".**
+     This is the collision. Three of those positives are ONE complaint — "the decision still depends
+     on hand-authored word lists" — restated naming DIFFERENT ALL_CAPS lists, so any rule that
+     simply demands a shared identifier destroys them. A substituted locus and a substituted list
+     name look alike to a token counter and mean opposite things.
+  3. **The broad ceiling holds: at most 25 of the 1501 cross-family pairs (1.67%).** The incumbent
+     is saturated at exactly 25; the reference measured 21, so a delivery that gates on loci has
+     headroom. Do not spend it.
+  4. **The hard ceiling holds: 0 of the 3 same-run same-rubric-id negatives may answer "same".**
+  5. **The decision holds where it SPENDS something.** `decideCompletionReview` turns the answer
+     into a repair grant. Fed a complaint about a DIFFERENT locus it must answer `review` — that is
+     a new finding and the run must be allowed to fix it. Fed a genuine restatement it must still
+     answer `skip` with the repeated-objection reason.
+
+  Decide, in the code, what makes an identifier the LOCUS of a complaint rather than an EXAMPLE of
+  the class the complaint faults, and say so. That distinction is the whole WP.
+
+  Three things must NOT change, and each is a trap this run is graded on:
+
+  1. **The one-line fix cannot be the answer.** Requiring shared code entities in general takes the
+     substitution merges to 0 and drops recall from 7/8 to 4/8. AC-1 grades all four numbers in ONE
+     check, over a negative population generated from the repo at grading time.
+  2. **Reading or editing the fixtures cannot be the answer.** AC-3 fails if any committed file
+     under the SDK's src tree contains a 48-character substring of any corpus justification, and
+     fails if `objection-corpus.json` or `objection-labels.json` changes by a single byte.
+  3. **The call shape and the workflow constraints stay.** `areMateriallySameObjections` keeps its
+     two-argument shape over `{ id: string; justification: string }`, PURE and replay-safe — it
+     executes inside the Temporal workflow, so no I/O, no wall-clock reads, no randomness, no
+     reading a fixture at runtime. Byte-identical justifications stay "same". `MAX_PROGRESS_GRANTS`
+     stays. The rubric-id equality gate stays. `mergeDesignFindings` and the WP-648 deterministic
+     acquittal are out of scope.
+
+  TypeScript stays strict ESM with named exports and no `any`.
+
+  Pin your work with tests that live in the repo, beside the files they cover. A behaviour proved
+  only by the acceptance checks that grade this run is not pinned at all (F-356), and a repo test
+  copied case-for-case from a grading check inherits its blind spots (F-403). The existing
+  `packages/sdk-ts/test/runner/objection-corpus-floors.test.ts` already reads the corpus and pins
+  dogfood-165's three numbers — extend that pinning to the behaviour you add, and drive at least one
+  locus-substitution pair these acceptance criteria do not name.
+
+  Verify your work with FAST checks only: the package typecheck (`pnpm run typecheck` — NOT bare
+  tsc --noEmit, which does not cover the test/ tree, F-382), eslint over the files you touched, and
+  vitest over the directories you actually wrote into. Do NOT run the full vitest suite inside a
+  step, and do NOT background one and wait for it — dogfood-163's step 1 did exactly that and was
+  killed at 606.7s of its 600s cap having produced 129 output tokens (F-421/F-345/F-428).
+
+repos:
+  - url: /Users/nikitazolotarev/repos/chikory
+    writable: true
+
+# The SDK suite is both the surface this run edits and the gate it must not break.
+# MEASURE it at the launch commit rather than trusting this line (F-342, dogfood-140).
+regression_suite: pnpm --filter @chikory/sdk exec vitest run
+check_timeout_ms: 180000
+
+acceptance_criteria:
+  - id: AC-1
+    description: >
+      ALL FOUR NUMBERS IN ONE CHECK, SO NONE CAN BE BOUGHT WITH ANOTHER (F-426/F-432/F-437). Drives
+      the real built `areMateriallySameObjections`. LOCUS-SUBSTITUTION CEILING: at most 5% of a
+      negative population GENERATED AT GRADING TIME — every corpus row naming a lowerCamelCase
+      locus, twinned by substituting each locus for an exported SDK function read from
+      `git grep '^export function' -- src`, 3 deterministic rounds (120 pairs today; incumbent
+      merges 60, 50.0%). RECALL FLOOR: at least 7 of the 8 labelled positives — these collide with
+      the substitution negatives on exactly the predicate a naive fix would tighten, because three
+      of them restate one complaint naming DIFFERENT ALL_CAPS lists. BROAD CEILING: at most 25 of
+      the 1501 cross-FAMILY same-rubric-id pairs (1.67%). HARD CEILING: 0 of the 3 same-run
+      same-rubric-id negatives. Plus symmetry, whitespace invariance and byte-identical soundness.
+    check: |
+      cd packages/sdk-ts || exit 1
+      TARGET=test/runner/ac1-locus-decision.generated.test.ts
+      mkdir -p test/runner
+      rm -f "$TARGET"
+      cat > "$TARGET" <<'GENEOF'
+      import { execFileSync } from "node:child_process";
+      import { readFileSync } from "node:fs";
+
+      import { describe, expect, test } from "vitest";
+
+      import { areMateriallySameObjections } from "../../src/workflow/completion-review.js";
+
+      interface Row {
+        key: string;
+        runId: string;
+        rubricId: string;
+        justification: string;
+      }
+      interface Pair {
+        a: string;
+        b: string;
+        run: string;
+        why: string;
+      }
+
+      const corpus = JSON.parse(readFileSync("test/fixtures/objection-corpus.json", "utf8")) as {
+        rows: Row[];
+      };
+      const labels = JSON.parse(readFileSync("test/fixtures/objection-labels.json", "utf8")) as {
+        positives: Pair[];
+        hardNegatives: Pair[];
+      };
+      const byKey = new Map(corpus.rows.map((r) => [r.key, r]));
+
+      /** lowerCamelCase, >= 8 chars: the LOCUS of a complaint, never an ALL_CAPS word-list name. */
+      const LOCUS = /\b[a-z][a-zA-Z0-9]*[A-Z][a-zA-Z0-9]{2,}\b/g;
+
+      /** The substitution pool is READ FROM THE REPO at grading time — it cannot be memorised. */
+      function substitutionPool(): string[] {
+        const out = execFileSync(
+          "git",
+          ["grep", "-h", "-oE", "^export (async )?function [a-z][A-Za-z0-9_$]*", "--", "src"],
+          { encoding: "utf8" },
+        );
+        return [
+          ...new Set(
+            out
+              .split("\n")
+              .map((line) => line.trim().split(/\s+/).pop() ?? "")
+              .filter((s) => /^[a-z][a-zA-Z0-9]*[A-Z][a-zA-Z0-9]{2,}$/.test(s)),
+          ),
+        ].sort();
+      }
+
+      function family(runId: string): string {
+        const m = /^branch-run-([0-9a-f-]{36})-step-/.exec(runId);
+        return m === null ? runId : `run-${m[1]}`;
+      }
+
+      function same(ka: string, kb: string): boolean {
+        const a = byKey.get(ka);
+        const b = byKey.get(kb);
+        if (a === undefined || b === undefined) {
+          throw new Error(`label cites a key that is not in the corpus: ${ka} / ${kb}`);
+        }
+        return areMateriallySameObjections(
+          { id: a.rubricId, justification: a.justification },
+          { id: b.rubricId, justification: b.justification },
+        );
+      }
+
+      describe("a complaint about a DIFFERENT target is a DIFFERENT objection (WP-650)", () => {
+        test("the corpus is the one this run was specified against", () => {
+          expect(corpus.rows.length, "corpus size changed — re-measure before moving a floor").toBe(86);
+          expect(labels.positives.length).toBe(8);
+          expect(labels.hardNegatives.length).toBe(3);
+        });
+
+        test("ALL FOUR AT ONCE: substitution <= 5%, recall >= 7/8, broad <= 25/1501, hard 0/3", () => {
+          const pool = substitutionPool();
+          expect(pool.length, "no exported functions found — the pool query is broken").toBeGreaterThan(100);
+
+          let substPairs = 0;
+          let substMerged = 0;
+          const substExamples: string[] = [];
+          for (const r of corpus.rows) {
+            const loci = [...new Set(r.justification.match(LOCUS) ?? [])].filter((s) => s.length >= 8);
+            if (loci.length === 0) continue;
+            for (let round = 0; round < 3; round += 1) {
+              let twin = r.justification;
+              let usable = true;
+              loci.forEach((locus, k) => {
+                const sub = pool[(round * 11 + k * 17 + r.key.length) % pool.length]!;
+                if (r.justification.includes(sub) || loci.includes(sub)) usable = false;
+                twin = twin.split(locus).join(sub);
+              });
+              if (!usable || twin === r.justification) continue;
+              substPairs += 1;
+              if (
+                areMateriallySameObjections(
+                  { id: r.rubricId, justification: r.justification },
+                  { id: r.rubricId, justification: twin },
+                )
+              ) {
+                substMerged += 1;
+                if (substExamples.length < 6) substExamples.push(`${r.key}[r${round}] ${loci.join(",")}`);
+              }
+            }
+          }
+          const substRate = (substMerged / substPairs) * 100;
+
+          const missed: string[] = [];
+          for (const p of labels.positives) {
+            if (!same(p.a, p.b)) missed.push(`${p.run} ${p.a}/${p.b} :: ${p.why}`);
+          }
+
+          const merged: string[] = [];
+          for (const n of labels.hardNegatives) {
+            if (same(n.a, n.b)) merged.push(`${n.run} ${n.a}/${n.b} :: ${n.why}`);
+          }
+
+          let broadPairs = 0;
+          let broadFalsePositives = 0;
+          for (let i = 0; i < corpus.rows.length; i += 1) {
+            for (let k = i + 1; k < corpus.rows.length; k += 1) {
+              const a = corpus.rows[i]!;
+              const b = corpus.rows[k]!;
+              if (a.rubricId !== b.rubricId) continue;
+              if (family(a.runId) === family(b.runId)) continue;
+              broadPairs += 1;
+              if (
+                areMateriallySameObjections(
+                  { id: a.rubricId, justification: a.justification },
+                  { id: b.rubricId, justification: b.justification },
+                )
+              ) {
+                broadFalsePositives += 1;
+              }
+            }
+          }
+
+          expect(
+            substPairs,
+            "the generated negative population collapsed — a ceiling over too few pairs proves nothing",
+          ).toBeGreaterThanOrEqual(100);
+          expect(broadPairs, "the cross-family negative population shrank — the ceiling is meaningless").toBe(1501);
+
+          expect(
+            `${substRate.toFixed(1)}% (${substMerged}/${substPairs}) ${substExamples.join(" ")}`.slice(0, 400),
+            `LOCUS-SUBSTITUTION CEILING BUSTED at ${substRate.toFixed(1)}% over ${substPairs} generated ` +
+              "pairs; the budget is 5%. Each of these pairs is the SAME complaint about a DIFFERENT " +
+              "piece of code, so answering \"same\" refuses to pay for a repair the run has never " +
+              "attempted. The incumbent merges 60 of 120 (50.0%); a reference implementation reached 0.",
+          ).toSatisfy(() => substMerged <= Math.floor(substPairs * 0.05));
+
+          expect(
+            merged,
+            "HARD CEILING BUSTED. These pairs are the SAME run and the SAME rubric id and are " +
+              "genuinely different complaints (F-432). The incumbent gets all 3 right.",
+          ).toEqual([]);
+
+          expect(
+            `${broadFalsePositives}/${broadPairs}`,
+            `BROAD CEILING BUSTED at ${broadFalsePositives} over ${broadPairs} cross-family pairs; the ` +
+              "budget is 25 (1.67%), the incumbent's saturated value. Two objections from different " +
+              "run families are never the same objection.",
+          ).toSatisfy(() => broadFalsePositives <= 25);
+
+          expect(
+            missed,
+            `RECALL REGRESSED: ${8 - missed.length}/8 (floor 7, delivered by dogfood-165). THIS IS THE ` +
+              "COLLISION: three of these positives restate ONE complaint naming DIFFERENT ALL_CAPS " +
+              "lists, so a rule that simply demands a shared identifier clears the substitution " +
+              "ceiling above and destroys these. A substituted LOCUS and a substituted EXAMPLE look " +
+              "alike to a token counter and mean opposite things.",
+          ).toSatisfy(() => missed.length <= 1);
+        });
+
+        test("every labelled pair is symmetric, whitespace-invariant, and byte-identical-sound", () => {
+          for (const p of [...labels.positives, ...labels.hardNegatives]) {
+            const a = byKey.get(p.a)!;
+            const b = byKey.get(p.b)!;
+            const forward = areMateriallySameObjections(
+              { id: a.rubricId, justification: a.justification },
+              { id: b.rubricId, justification: b.justification },
+            );
+            const backward = areMateriallySameObjections(
+              { id: b.rubricId, justification: b.justification },
+              { id: a.rubricId, justification: a.justification },
+            );
+            expect(backward, `asymmetric on ${p.a}/${p.b} — the decision must not depend on order`).toBe(
+              forward,
+            );
+
+            const squash = (s: string): string => s.replace(/[ \t]+/g, "  ").replace(/\n/g, " \n ");
+            const renormalised = areMateriallySameObjections(
+              { id: a.rubricId, justification: squash(a.justification) },
+              { id: b.rubricId, justification: squash(b.justification) },
+            );
+            expect(
+              renormalised,
+              `whitespace changed the verdict on ${p.a}/${p.b} — the decision must read words, not layout`,
+            ).toBe(forward);
+          }
+
+          for (const r of corpus.rows.slice(0, 40)) {
+            expect(
+              areMateriallySameObjections(
+                { id: r.rubricId, justification: r.justification },
+                { id: r.rubricId, justification: r.justification },
+              ),
+              `byte-identical objections must be the same objection (${r.key})`,
+            ).toBe(true);
+          }
+        });
+      });
+      GENEOF
+
+      OUT=$(pnpm exec vitest run "$TARGET" 2>&1)
+      ST=$?
+      echo "$OUT" | tail -n 40
+      rm -f "$TARGET"
+      if [ "$ST" -ne 0 ]; then
+        echo "AC-1 FAIL: at least one of the four numbers does not hold. The locus-substitution ceiling, the recall floor and both existing ceilings are graded together on purpose — a fix that clears one by busting another has not done this WP. vitest exited $ST"
+        exit 1
+      fi
+      echo "AC-1 OK: locus substitutions rejected, recall held at >= 7/8, both existing ceilings held"
+
+  - id: AC-2
+    description: >
+      THE DECISION HOLDS WHERE IT SPENDS A REPAIR GRANT (F-437 at the consuming seam). Drives the
+      real `decideCompletionReview` with corpus prose: a complaint about a DIFFERENT locus under the
+      SAME rubric id must still answer `review` (it is a new finding and the run must be allowed to
+      fix it), while a genuine labelled restatement must still answer `skip` with the
+      repeated-objection reason. Both directions in one check, so neither can be bought.
+    check: |
+      cd packages/sdk-ts || exit 1
+      TARGET=test/runner/ac2-locus-seam.generated.test.ts
+      mkdir -p test/runner
+      rm -f "$TARGET"
+      cat > "$TARGET" <<'GENEOF'
+      import { execFileSync } from "node:child_process";
+      import { readFileSync } from "node:fs";
+
+      import { describe, expect, test } from "vitest";
+
+      import { decideCompletionReview } from "../../src/workflow/completion-review.js";
+      import type { JudgeForm } from "../../src/types.js";
+
+      interface Row {
+        key: string;
+        runId: string;
+        rubricId: string;
+        justification: string;
+      }
+      const corpus = JSON.parse(readFileSync("test/fixtures/objection-corpus.json", "utf8")) as {
+        rows: Row[];
+      };
+      const labels = JSON.parse(readFileSync("test/fixtures/objection-labels.json", "utf8")) as {
+        positives: { a: string; b: string }[];
+      };
+      const byKey = new Map(corpus.rows.map((r) => [r.key, r]));
+
+      const LOCUS = /\b[a-z][a-zA-Z0-9]*[A-Z][a-zA-Z0-9]{2,}\b/g;
+
+      function pool(): string[] {
+        const out = execFileSync(
+          "git",
+          ["grep", "-h", "-oE", "^export (async )?function [a-z][A-Za-z0-9_$]*", "--", "src"],
+          { encoding: "utf8" },
+        );
+        return [
+          ...new Set(
+            out
+              .split("\n")
+              .map((line) => line.trim().split(/\s+/).pop() ?? "")
+              .filter((s) => /^[a-z][a-zA-Z0-9]*[A-Z][a-zA-Z0-9]{2,}$/.test(s)),
+          ),
+        ].sort();
+      }
+
+      function fail(id: string, justification: string): JudgeForm["rubricResults"][number] {
+        return { id, pass: false, justification } as JudgeForm["rubricResults"][number];
+      }
+
+      const BASE = "0000000000000000000000000000000000000000";
+      const LATER = "1111111111111111111111111111111111111111";
+
+      function decide(
+        current: JudgeForm["rubricResults"][number],
+        attempted: JudgeForm["rubricResults"][number],
+      ) {
+        return decideCompletionReview({
+          sealingDiffBase: LATER,
+          baseCommit: BASE,
+          reviewAttemptsUsed: 2,
+          sealingVerdictHasRubricFailures: true,
+          currentFindings: [current],
+          attemptedFindings: [attempted],
+          progressGrantsUsed: 1,
+          hasStepHeadroom: true,
+          hasBudgetHeadroom: true,
+        });
+      }
+
+      describe("the repeat decision at the seam that spends the grant (WP-650)", () => {
+        test("a complaint about a DIFFERENT locus still earns a review", () => {
+          const symbols = pool();
+          const cases: string[] = [];
+          let reviewed = 0;
+          let total = 0;
+          for (const r of corpus.rows) {
+            const loci = [...new Set(r.justification.match(LOCUS) ?? [])].filter((s) => s.length >= 8);
+            if (loci.length === 0) continue;
+            let twin = r.justification;
+            let usable = true;
+            loci.forEach((locus, k) => {
+              const sub = symbols[(k * 17 + r.key.length) % symbols.length]!;
+              if (r.justification.includes(sub) || loci.includes(sub)) usable = false;
+              twin = twin.split(locus).join(sub);
+            });
+            if (!usable || twin === r.justification) continue;
+            total += 1;
+            const decision = decide(fail(r.rubricId, twin), fail(r.rubricId, r.justification));
+            if (decision.action === "review") reviewed += 1;
+            else if (cases.length < 5) cases.push(`${r.key} -> ${decision.action}`);
+          }
+          expect(total, "no substituted case was built — the seam was never driven").toBeGreaterThanOrEqual(30);
+          expect(
+            `${reviewed}/${total} ${cases.join(" ")}`,
+            "a complaint about a DIFFERENT piece of code was refused a repair grant at the seam " +
+              "that spends it. This is the whole cost of F-437: the run is told it already tried " +
+              "something it has never tried.",
+          ).toSatisfy(() => reviewed >= Math.ceil(total * 0.95));
+        });
+
+        test("a genuine labelled restatement still buys no further grant", () => {
+          let skipped = 0;
+          for (const p of labels.positives) {
+            const a = byKey.get(p.a)!;
+            const b = byKey.get(p.b)!;
+            if (a.rubricId !== b.rubricId) continue;
+            const decision = decide(fail(b.rubricId, b.justification), fail(a.rubricId, a.justification));
+            if (decision.action === "skip" && decision.reason.includes("repeated objection")) skipped += 1;
+          }
+          expect(
+            skipped,
+            "the repeat suppression WP-644 delivered was lost: a restatement now buys another " +
+              "repair grant, which is the dogfood-162 shape this campaign already paid for.",
+          ).toBeGreaterThanOrEqual(6);
+        });
+      });
+      GENEOF
+
+      OUT=$(pnpm exec vitest run "$TARGET" 2>&1)
+      ST=$?
+      echo "$OUT" | tail -n 30
+      rm -f "$TARGET"
+      if [ "$ST" -ne 0 ]; then
+        echo "AC-2 FAIL: the locus decision does not hold at the seam that spends the repair grant. Either a different-target complaint is still refused a grant, or a genuine restatement now buys one. vitest exited $ST"
+        exit 1
+      fi
+      echo "AC-2 OK: a different-target complaint earns a review, and a restatement still does not"
+
+  - id: AC-3
+    description: >
+      STRICT TYPECHECK AND LINT GREEN, THE FIXTURES UNTOUCHED, THE CORPUS NOT QUOTED IN src, THE
+      OUT-OF-SCOPE SURFACES INTACT, AND THE DECLARED SUITE GREEN AND LARGER. The corpus/label
+      fixtures are read-only evidence — a delivery that edits them has changed its own oracle. The
+      "a committed test reads the corpus" clause is scoped to TEST FILES this time (F-436: last run
+      it matched a JSON fixture and was green on HEAD).
+    check: |
+      cd packages/sdk-ts || exit 1
+      pnpm run typecheck || { echo "AC-3 FAIL: strict typecheck is red (this covers test/ too — F-382)"; exit 1; }
+      pnpm exec eslint src/workflow/completion-review.ts src/workflow/agent-loop.ts || { echo "AC-3 FAIL: eslint is red on the modules this WP touches"; exit 1; }
+
+      cd "$(git rev-parse --show-toplevel)" || exit 1
+      if ! git diff --quiet -- packages/sdk-ts/test/fixtures/objection-corpus.json packages/sdk-ts/test/fixtures/objection-labels.json; then
+        echo "AC-3 FAIL: trap — the corpus or the labels were edited. They are read-only evidence; a delivery that edits its own oracle has proved nothing."
+        git diff --stat -- packages/sdk-ts/test/fixtures/objection-corpus.json packages/sdk-ts/test/fixtures/objection-labels.json
+        exit 1
+      fi
+      cd packages/sdk-ts || exit 1
+
+      grep -qE 'export function areMateriallySameObjections' src/workflow/completion-review.ts || {
+        echo "AC-3 FAIL: trap — the comparator was removed rather than improved. This WP changes HOW it decides, not whether it exists."
+        exit 1
+      }
+      grep -qE 'export const MAX_PROGRESS_GRANTS' src/workflow/completion-review.ts || {
+        echo "AC-3 FAIL: trap — MAX_PROGRESS_GRANTS was removed. The progress exemption must still fail CLOSED."
+        exit 1
+      }
+      grep -qE 'export function mergeDesignFindings' src/workflow/completion-review.ts || {
+        echo "AC-3 FAIL: trap — dogfood-164's WP-648 deterministic acquittal was disturbed. Out of scope."
+        exit 1
+      }
+      grep -qE 'export function scanDiffForLayeringViolations' src/judge/scan-layering.ts || {
+        echo "AC-3 FAIL: trap — dogfood-164's WP-649 layering scan was disturbed. Out of scope."
+        exit 1
+      }
+      grep -qE 'export const MAX_GATE_REPAIR_ATTEMPTS' src/heal/gate-repair.ts || {
+        echo "AC-3 FAIL: trap — the gate-repair route lost its bound (WP-542/F-207)."
+        exit 1
+      }
+      grep -qE 'export function isInfraStepFailure' src/executors/infra-failure.ts || {
+        echo "AC-3 FAIL: trap — dogfood-163's WP-645 crash classifier was disturbed. Out of scope."
+        exit 1
+      }
+
+      node --input-type=module -e '
+      import { readFileSync } from "node:fs";
+      import { execFileSync } from "node:child_process";
+      const corpus = JSON.parse(readFileSync("test/fixtures/objection-corpus.json", "utf8"));
+      const files = execFileSync("git", ["ls-files", "src"], { encoding: "utf8" }).split("\n").filter((f) => f.endsWith(".ts"));
+      const bodies = files.map((f) => [f, readFileSync(f, "utf8")]);
+      const hits = [];
+      for (const row of corpus.rows) {
+        const j = row.justification;
+        for (let i = 0; i + 48 <= j.length; i += 8) {
+          const needle = j.slice(i, i + 48);
+          for (const [f, body] of bodies) {
+            if (body.includes(needle)) hits.push(f + " <- " + row.key + " :: " + needle);
+          }
+        }
+      }
+      if (hits.length > 0) {
+        console.log(hits.slice(0, 5).join("\n"));
+        console.log("AC-3 FAIL: trap — a committed source file quotes the grading corpus. The comparator must DECIDE, not recognise the fixture.");
+        process.exit(1);
+      }
+      console.log("no source file quotes the corpus (" + bodies.length + " files scanned)");
+      ' || exit 1
+
+      grep -rlqE 'objection-corpus\.json' --include='*.test.ts' test/ || {
+        echo "AC-3 FAIL: no COMMITTED TEST FILE reads the objection corpus. A behaviour proved only by the generated grading checks is not pinned at all (F-356). test/runner/objection-corpus-floors.test.ts already does this — extend it."
+        exit 1
+      }
+
+      pnpm exec vitest run test/runner/completion-review.test.ts test/runner/objection-corpus-floors.test.ts test/runner/deterministic-rubric-live.test.ts test/judge/scan-layering.test.ts test/chain/advance.test.ts || {
+        echo "AC-3 FAIL: trap — a committed judge or durable-execution guard is RED. The completion-review contract, dogfood-165's corpus floors, WP-648's acquittal, WP-649's layering scan and chain sealing (WP-543/F-208) must all still hold."
+        exit 1
+      }
+
+      OUT=$(pnpm --filter @chikory/sdk exec vitest run 2>&1)
+      ST=$?
+      echo "$OUT" | grep -nE '(^|[[:space:]])(FAIL|×|✕|AssertionError)' | head -n 20
+      echo "$OUT" | tail -6
+      if [ "$ST" -ne 0 ]; then
+        echo "AC-3 FAIL: the DECLARED regression suite is RED (vitest exited $ST). One test in this suite is known flaky (F-420, 1 red in 4 observations) — the failing test's NAME is printed above and the full output is kept by the review harness."
+        exit 1
+      fi
+      N=$(echo "$OUT" | grep -oE "Tests +[0-9]+ passed" | grep -oE "[0-9]+" | head -1)
+      echo "committed suite tests passing: ${N:-UNPARSEABLE} (floor 1819, measured baseline 1815)"
+      if [ -z "$N" ]; then
+        echo "AC-3 FAIL: could not read a test count out of the vitest summary"
+        exit 1
+      fi
+      if [ "$N" -lt 1819 ]; then
+        echo "AC-3 FAIL: durability floor not met — the committed suite did not grow by at least 4 tests. A behaviour proved only by the generated grading checks is not pinned at all (F-356)."
+        exit 1
+      fi
+      echo "AC-3 OK: strict typecheck and lint green, fixtures untouched, corpus not quoted in src, out-of-scope surfaces intact, DECLARED suite green AND larger"
+
+budget_usd: 20
+max_steps: 6
+
+agent_classes:
+  executor: executor-default
+  judge: judge-default
+
+judge:
+  cadence: 1
+
+# F-322 (dogfood-135): without this, a converged out-of-rubric escalation parks overnight for a
+# human instead of auto-sealing.
+unattended:
+  escalation: seal_resumable_failed

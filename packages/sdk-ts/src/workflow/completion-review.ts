@@ -137,7 +137,7 @@ const BOILERPLATE = new Set([
   "test", "tests", "unit", "suite", "committed", "step", "steps", "path", "paths",
   "also", "therefore", "instead", "rather", "objection", "objections", "finding", "findings",
   "review", "verdict", "check", "checks", "explanation", "explaining", "consequently",
-  "regressing", "normal", "original",
+  "regressing", "normal", "original", "ac", "ac-1", "ac-2", "ac-3", "ac1", "ac2", "ac3",
 ]);
 
 const GENERIC_EXTENSIONS = new Set([
@@ -387,12 +387,12 @@ function extractProfile(text: string): ObjectionProfile {
   // 1. Backtick spans
   for (const m of text.matchAll(/`([^`]+)`/g)) {
     const raw = m[1].trim();
-    if (raw.length > 1 && !GENERIC_EXTENSIONS.has(raw.toLowerCase())) {
+    if (raw.length > 1 && !GENERIC_EXTENSIONS.has(raw.toLowerCase()) && !BOILERPLATE.has(raw.toLowerCase())) {
       codeEntities.add(raw.toLowerCase());
     }
     const words = raw.match(/[a-zA-Z0-9_$]+/g) ?? [];
     for (const w of words) {
-      if (!/^\d+$/.test(w) && !GENERIC_EXTENSIONS.has(w.toLowerCase())) {
+      if (!/^\d+$/.test(w) && !GENERIC_EXTENSIONS.has(w.toLowerCase()) && !BOILERPLATE.has(w.toLowerCase())) {
         codeEntities.add(w.toLowerCase());
         splitIdentifier(w).forEach((t) => {
           codeSubTokens.add(t);
@@ -412,12 +412,12 @@ function extractProfile(text: string): ObjectionProfile {
       /\./.test(w) ||
       /\//.test(w)
     ) {
-      if (!GENERIC_EXTENSIONS.has(w.toLowerCase())) {
+      if (!GENERIC_EXTENSIONS.has(w.toLowerCase()) && !BOILERPLATE.has(w.toLowerCase())) {
         codeEntities.add(w.toLowerCase());
       }
       const parts = w.match(/[a-zA-Z0-9_$]+/g) ?? [];
       for (const p of parts) {
-        if (p.length > 1 && !/^\d+$/.test(p) && !GENERIC_EXTENSIONS.has(p.toLowerCase())) {
+        if (p.length > 1 && !/^\d+$/.test(p) && !GENERIC_EXTENSIONS.has(p.toLowerCase()) && !BOILERPLATE.has(p.toLowerCase())) {
           codeEntities.add(p.toLowerCase());
           splitIdentifier(p).forEach((t) => {
             codeSubTokens.add(t);
@@ -457,36 +457,8 @@ function extractProfile(text: string): ObjectionProfile {
   };
 }
 
-/** One filled rubric row of a judge form. */
-export type RubricResult = JudgeForm["rubricResults"][number];
-
-/**
- * Decides whether two objections are materially the same objection (WP-643).
- *
- * Compares what the objection is ABOUT rather than how it is worded:
- * 1. Soundness: identical trimmed text on the same rubric id is always a repeat.
- * 2. Rubric id check: different rubric ids are always different objections.
- * 3. Target Locus Alignment: both objections must identify the same code symbol,
- *    sub-tokens, primary domain target, or focus subject. Disjoint symbols return false.
- * 4. Defect Category Compatibility: disjoint defect categories (e.g. dropping chunks vs
- *    duplicating chunks on retry) targeting the same symbol return false.
- * 5. Focus Subject & Specific Attribute Alignment: both objections must address the same
- *    specific aspect/attribute (e.g. email vs phone, connection vs cert file descriptor).
- * 6. Trigger Condition & Defect Action Alignment: verifies matching operational triggers
- *    and compatible failure mechanisms without scalar similarity thresholds.
- */
-export function areMateriallySameObjections(
-  a: RubricResult | { id: string; justification: string },
-  b: RubricResult | { id: string; justification: string },
-): boolean {
-  // 1. Soundness & Rubric Check
-  if (a.id !== b.id) return false;
-  if (a.justification.trim() === b.justification.trim()) return true;
-
-  const fa = extractProfile(a.justification);
-  const fb = extractProfile(b.justification);
-
-  // 2. Target Locus Alignment
+function matchProfiles(fa: ObjectionProfile, fb: ObjectionProfile): boolean {
+  // Target Locus Alignment:
   // Both objections must identify the same code symbol, symbol sub-tokens, primary domain target, or focus subject.
   const sharedEntities = [...fa.codeEntities].filter((x) => fb.codeEntities.has(x));
   const sharedSubTokens = [...fa.codeSubTokens].filter((x) => fb.codeSubTokens.has(x));
@@ -517,7 +489,7 @@ export function areMateriallySameObjections(
     return false;
   }
 
-  // 3. Defect Category Compatibility
+  // Defect Category Compatibility:
   // If both objections identify categorized failure modes, they must not be disjoint.
   // E.g. LOSS_OR_OMISSION vs DUPLICATION, RESOURCE_LEAK vs CONCURRENCY_OR_TIMING,
   // LOGIC_STATE_CONDITION vs PERFORMANCE_DEFECT.
@@ -526,7 +498,7 @@ export function areMateriallySameObjections(
     return false;
   }
 
-  // 4. Focus Subject & Specific Attribute Alignment
+  // Focus Subject & Specific Attribute Alignment:
   // What specific aspect/attribute within the target locus is faulted?
   // E.g. connection vs cert, email vs phone, token/clock vs hmac/signature, profile vs phone, tail/chunk vs retry.
   if (
@@ -540,7 +512,7 @@ export function areMateriallySameObjections(
     return false;
   }
 
-  // 5. Trigger Condition & Defect Action Alignment
+  // Trigger Condition & Defect Action Alignment:
   // Evaluates whether both descriptions express the same operational trigger condition and defect action.
   const sharedConditions = [...fa.triggerConditions].filter((x) => fb.triggerConditions.has(x));
   const sharedActions = [...fa.defectActions].filter((x) => fb.defectActions.has(x));
@@ -553,11 +525,87 @@ export function areMateriallySameObjections(
   // Two objections express the same defect proposition when:
   // (a) They target the same locus (code symbol, domain entity, or focus subject)
   // (b) They focus on the same aspect/subject (e.g. connection pool, stream tail, jwt expiry, user profile)
-  // (c) They share an operational trigger condition OR a specific defect action under compatible categories.
-  const hasSharedFocus = sharedFocusSubjects.length > 0 || sharedEntities.length > 0;
-  const hasSharedMechanism = sharedConditions.length > 0 || sharedActions.length > 0;
+  // (c) They share an operational trigger condition OR a specific defect action OR multiple code entities/sub-tokens.
+  const hasSharedFocus = sharedFocusSubjects.length > 0 || sharedEntities.length > 0 || sharedSubTokens.length >= 3;
+  const hasSharedMechanism =
+    sharedConditions.length > 0 ||
+    sharedActions.length > 0 ||
+    sharedEntities.length >= 2 ||
+    sharedSubTokens.length >= 4;
 
   return hasSharedFocus && hasSharedMechanism;
+}
+
+function splitIntoSentences(text: string): string[] {
+  return text
+    .split(/(?<=[.!?])\s+|\n+/)
+    .map((s) => s.trim())
+    .filter((s) => s.length > 0);
+}
+
+/** One filled rubric row of a judge form. */
+export type RubricResult = JudgeForm["rubricResults"][number];
+
+/**
+ * Decides whether two objections are materially the same objection (WP-643/WP-647).
+ *
+ * Compares what the objection is ABOUT rather than how it is worded:
+ * 1. Soundness: identical trimmed text on the same rubric id is always a repeat.
+ * 2. Rubric id check: different rubric ids are always different objections.
+ * 3. Target Locus Alignment: both objections must identify the same code symbol,
+ *    sub-tokens, primary domain target, or focus subject. Disjoint symbols return false.
+ * 4. Defect Category Compatibility: disjoint defect categories (e.g. dropping chunks vs
+ *    duplicating chunks on retry) targeting the same symbol return false.
+ * 5. Focus Subject & Specific Attribute Alignment: both objections must address the same
+ *    specific aspect/attribute (e.g. email vs phone, connection vs cert file descriptor).
+ * 6. Trigger Condition & Defect Action Alignment: verifies matching operational triggers
+ *    and compatible failure mechanisms without scalar similarity thresholds.
+ * 7. Superset / Clause-Level Restatements:
+ *    When one objection is a strict SUPERSET of another (e.g. a second review repeats an
+ *    earlier complaint and adds an additional defect observation), the run must not earn
+ *    an extra repair grant to re-litigate the un-repaired complaint. If any anchored clause
+ *    of an objection restates a defect proposition from an earlier attempt, it is recognised
+ *    as a repeated objection.
+ */
+export function areMateriallySameObjections(
+  a: RubricResult | { id: string; justification: string },
+  b: RubricResult | { id: string; justification: string },
+): boolean {
+  // 1. Soundness & Rubric Check
+  if (a.id !== b.id) return false;
+  if (a.justification.trim() === b.justification.trim()) return true;
+
+  const fa = extractProfile(a.justification);
+  const fb = extractProfile(b.justification);
+
+  if (matchProfiles(fa, fb)) return true;
+
+  // 2. Superset / Clause-Level Restatement Check
+  // When an objection repeats a previously attempted defect proposition alongside
+  // new findings (strict superset), matching anchored clauses between the two objections
+  // identifies that the core complaint is a repeat.
+  const sentsA = splitIntoSentences(a.justification);
+  const sentsB = splitIntoSentences(b.justification);
+
+  if (sentsA.length > 1 || sentsB.length > 1) {
+    for (const sa of sentsA) {
+      const pa = extractProfile(sa);
+      for (const sb of sentsB) {
+        const pb = extractProfile(sb);
+        const sharedEnt = [...pa.codeEntities].filter((x) => pb.codeEntities.has(x));
+        const sharedSub = [...pa.codeSubTokens].filter((x) => pb.codeSubTokens.has(x));
+
+        // Clause-level matching requires anchored locus: explicit shared entity or >= 4 shared sub-tokens
+        if (sharedEnt.length >= 1 || sharedSub.length >= 4) {
+          if (matchProfiles(pa, pb)) {
+            return true;
+          }
+        }
+      }
+    }
+  }
+
+  return false;
 }
 
 /**

@@ -5,16 +5,16 @@ This is the complete operating manual for executing Phase 2+ work packages
 task spec for a WP (every field explained), how to launch, supervise, and
 recover a run, and how to land the result as a normal PR.
 
-**Status (2026-08-21, bounded — update discipline: REPLACE this block, ≤15 lines;
+**Status (2026-08-22, bounded — update discipline: REPLACE this block, ≤15 lines;
 displaced prose moves verbatim to [`PLAN-HISTORY.md`](PLAN-HISTORY.md); per-run detail:
 `docs/reports/`; queue + course correction: `plan.md` §6/§7).**
-🟢 **dogfood-164 / WP-648 + WP-649 (a quality gate must be able to take yes for an answer) DELIVERED AND LANDED** — `run-be874c29-6b55-4cb6-a9cc-9784170c64f5`, terminal **SUCCESS**, 1 step, $0.113/$20.00 (0.5%), 8m 8s, AC **3/3** re-run green, harvest byte-**IDENTICAL 5/5**, declared suite **1,806 passed** (baseline 1,788, floor 1,792) (`docs/reports/dogfood-164.md`). The 4-run FAILED streak is broken.
-🟢 **WP-648 is right as delivered** — a deterministic rubric row the completion review re-measures as PASS now clears the sealing pass's FAIL (`packages/sdk-ts/src/workflow/completion-review.ts:704`); the LLM-row union survives (trap C rejected); the reverse disagreement is decided in code; and the acquittal reaches the real seal (single call site `packages/sdk-ts/src/workflow/agent-loop.ts:1387` → `sealFromRubricFails` `:375`).
-🔴 **F-431 (§8) hand-fixed at the review — WP-649 bought its false-positive fix with a false negative.** The exoneration keyed on the layer-pair LABEL, so a genuinely new forbidden import went SILENT whenever another import of the same pair sat in the hunk as `git diff -U3` context. Measured on a real diff adding `../runner/worker.js` to `agent-loop.ts`: HEAD `["workflow→runner"]`, as-delivered `[]`. Blast radius over 158 `git ls-files` sources: **7 files, 12 lines**. Re-keyed on the resolved import PATH (`packages/sdk-ts/src/judge/scan-layering.ts:181`), 3 committed tests RED pre-fix.
-🟡 **F-432 (§8) → folded into WP-647** — the acceptance oracle graded a false-positive ceiling and a recall floor over the same enumerated corpus, but every recall case used one `X→cli` probe edge the corpus can never hold, so the two floors could never collide on the KEY the delivery suppresses on. **Enumerate the suppression KEY, not just the corpus.**
-🟡 **F-433 (§8, judge-KPI datum)** — judge pass #2 passed `design_serves_overall_goal` asserting the scanner was *"retaining detection of genuinely new edges"*, false for 7 of 158 files. Run scored **1 true positive** (a delivered test titled "full src/ corpus" that enumerates 9 hand-picked files) **and 1 false negative on its central semantics**.
-**Standing lesson: a fix that removes false positives must be graded on recall in the SAME check, on inputs where the suppressing evidence and the thing to be caught share the suppression key.** F-431 passed every one of its own ceiling cases and its own recall floor.
-**NEXT HEADLINE = `dogfood-165` / WP-644 + WP-647 — ARMED 3/3 BOTH WAYS, READY TO LAUNCH.** (Its first launch attempt died on a spec-tail defect of mine — see F-435; the spec is fixed and the $0 preflight now runs the real parser.) AC-1 grades recall ≥6/8, a ≤1.67% cross-family ceiling over 1501 pairs and 0/3 within-run collisions in ONE check. The 6/8 floor is MEASURED: nine reference variants were tried and every one reaching 7/8 merged a hard negative. Arming located the real gates — category disjointness and the shared-mechanism requirement reject the restatements; a trigger-condition conflict rejects the hard negative. Worst check 94s = 78% of the 120s cap. Gate ✅ PROGRESSING (harness-meta 0/3, cap intact); P3 rung-5's remainder is still WP-304's operator-run benchmark arm.
+🟢 **dogfood-165 / WP-644 + WP-647 (the loop now spots a reworded complaint 7 times out of 8) DELIVERED AND LANDED** — `run-99c6aad9-fee6-47cb-abcb-80737959032e`, terminal **SUCCESS**, 1 step, **$0.0954/$20.00** (0.5%, judge share 100%), 11m 45s, AC **3/3** re-run green, harvest byte-**IDENTICAL 2/2**, declared suite **1,810** (baseline 1,806) → **1,815** after the review's hand-fix. `docs/reports/dogfood-165.md`.
+🟢 **The delivery is right, and every number was re-measured at the review rather than transcribed.** `areMateriallySameObjections` answers "same" on **7 of 8** labelled restatements (incumbent 4), holds **0/3** on the same-run collision negatives, and sits at **25/1501 (1.67%)** on the cross-family population. Ablation: the clause-level pass alone 4/8 · the loosened sub-token counts alone 4/8 · together **7/8** · without the `BOILERPLATE` acceptance-criterion words the ceiling busts at 28/1501. Nothing in the diff is decoration.
+🟢 **WP-647's rule earned its keep.** dogfood-162 failed this same WP at **44.06%** cross-run false positives while passing every criterion it had. Grading the recall floor and BOTH ceilings in ONE check, over 1,512 real pairs the delivery cannot enumerate, cost this delivery **+2 pairs for +3 recall**.
+🟡 **F-436 (§8) hand-fixed at the review — an AC clause that was GREEN ON HEAD.** `grep -rlqE 'objection-corpus\.json' test/` was meant to force a COMMITTED test to read the corpus; it matched `packages/sdk-ts/test/fixtures/objection-labels.json:4`, a FIXTURE. The arming pass could not see it because AC-3 as a whole was RED elsewhere. **Rule: a grep that must find a TEST is scoped to test files, never a `test/` tree that also holds fixtures.**
+🟠 **F-437 (§8) → WP-650** — "same prose, different target" objections merge: **60 of 120 (50.0%)** of a locus-substitution population generated from `git grep '^export function' -- src`, measured **identical on the incumbent**, so the hole predates WP-643/WP-644; the narrow `AC-1` vs `AC-2` case is what this run newly added. 🟡 **F-439 (§8)** — the ceiling is **saturated at exactly 25/25**. ℹ️ **F-438** — the corpus claimed 86 unique justifications; 83 across 86 rows (hand-fixed).
+**Standing lesson: prove every CLAUSE of a multi-clause AC red on HEAD, not just the AC.** A clause that is already satisfied rides a RED verdict the rest of the check earned, and grades nothing.
+**NEXT HEADLINE = `dogfood-166` / WP-650 — SPEC WRITTEN, ARMING BELOW.** `examples/dogfood/dogfood-166-wp650-same-prose-different-target.yaml`. The negative population is GENERATED FROM THE REPO at grading time (`git grep '^export function' -- src`, 322 symbols → 120 pairs), because dogfood-165 proved this comparator on 1501 real pairs and the hole was invisible there. AC-1 grades four numbers in ONE check: substitution ≤5% (incumbent 50.0%), recall ≥7/8, cross-family ≤25/1501, hard 0/3. The designed trap is the one-line fix — demanding a shared code entity in general takes substitutions to 0 and recall to 4/8.
 
 Related docs: [`docs/spec/task-spec.md`](spec/task-spec.md) (schema
 reference) · [`docs/TASK-PROTOCOL.md`](TASK-PROTOCOL.md) (WP etiquette, §7 is
@@ -2384,3 +2384,41 @@ broken (a false-green, not a follow-on fix).
   violations" — true, on a diff that introduced none. A judge reasoning from a diff
   cannot discover an input family the diff does not instantiate; only a check that
   DRIVES the function with that family can.
+
+- **🟡 PROVE EVERY CLAUSE OF A MULTI-CLAUSE AC RED ON HEAD, NOT JUST THE AC** (F-436,
+  hand-fixed at the dogfood-165 review). dogfood-165's AC-3 tried to force the delivery to
+  pin its behaviour in the repo rather than only in the run's grading checks (F-356). Its
+  clause was `grep -rlqE 'objection-corpus\.json' test/`. That matched
+  `packages/sdk-ts/test/fixtures/objection-labels.json:4` — the LABELS fixture's own
+  `meta.how` prose names the corpus file — so the clause was **already green on HEAD**, and
+  it rode a RED verdict the rest of AC-3 earned on its suite-count floor. `dogfood-arm.sh`
+  scores an AC, not its clauses, so nothing flagged it. The delivery then satisfied the
+  requirement's spirit by PARAPHRASING three corpus rows into a test instead of reading
+  them (the real rows do behave as the paraphrase asserts — checked at the review, and now
+  pinned by `packages/sdk-ts/test/runner/objection-corpus-floors.test.ts`). **Two rules: a
+  grep that must find a TEST is scoped to test files, never a `test/` tree that also holds
+  fixtures; and when an AC has independent clauses, run each one on HEAD by hand.**
+
+- **🟡 A FIX THAT REMOVES A DISTINGUISHING TOKEN MERGES WHAT IT NAMED** (F-437 → WP-650,
+  dogfood-165). WP-644 raised recall from 4/8 to 7/8 by admitting sub-token COUNTS to the
+  shared-focus and shared-mechanism tests (`packages/sdk-ts/src/workflow/completion-review.ts:529`).
+  The cost: two objections that are word-for-word identical except for the identifier
+  naming WHICH thing is faulted now compare "same" — measured on `AC-1` vs `AC-2`, where
+  the incumbent said "different". That narrow case is new. **The hole it exposed is not.**
+  Building the negative population the ACs never had — for each of the 40 corpus rows that
+  name a lowerCamelCase locus, substitute every locus for an exported SDK function drawn
+  from `git grep '^export function' -- src` (322 symbols, 3 rounds → 120 pairs, each twin
+  the same complaint about a DIFFERENT piece of code) — both comparators merge **60 of 120,
+  50.0%, identical**. "Same prose, different target" predates WP-643 and WP-644, and it
+  cannot be bought back by reverting the counts, which drops recall to 4/8 and moves the
+  50% not at all. **When a delivery loosens a discriminator to raise recall, ask what the
+  loosened predicate used to distinguish, then GENERATE the negative population from the
+  repo rather than looking for it in a corpus that may not contain it.**
+
+- **🟡 A CEILING SATURATED AT ITS BUDGET IS NOT A CEILING FOR THE NEXT RUN** (F-439,
+  dogfood-165). dogfood-165's AC-1 budgeted 25 of 1501 cross-family pairs (1.67%), derived
+  as the incumbent's measured 23 plus a 2-pair tolerance. The delivery landed at **exactly
+  25**. Any successor WP on `areMateriallySameObjections` that merges one more cross-family
+  pair fails that criterion before its own work is read — and a copied-forward budget makes
+  the successor spec unlaunchable. **Re-measure a ceiling from the LANDED artifact before
+  reusing it, never from the arithmetic that produced it.**

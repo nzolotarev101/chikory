@@ -660,6 +660,46 @@ describe("areMateriallySameObjections", () => {
     expect(areMateriallySameObjections(unfullBufferFinal, finalRetryFailure)).toBe(false);
     expect(areMateriallySameObjections(finalRetryFailure, unfullBufferFinal)).toBe(false);
   });
+
+  it("recognises superset restatements where an objection adds a second point (WP-647)", () => {
+    const original = {
+      id: "design_serves_overall_goal",
+      justification:
+        "The design still bases proposition extraction on extensive hand-authored `META_TOKENS`, `GENERIC_CONTAINER_TOKENS`, `GENERIC_VERB_TOKENS`, `CONDITION_TOKENS`, and `DEFECT_CATEGORIES` lists.",
+    };
+    const superset = {
+      id: "design_serves_overall_goal",
+      justification:
+        "The replacement remains materially vocabulary-driven: `META_TOKENS`, `GENERIC_CONTAINER_TOKENS`, `GENERIC_VERB_TOKENS`, `CONDITION_TOKENS`, and `DEFECT_CATEGORIES` determine proposition contents and operands. The generic `at` stemming suffix can also conflate unrelated terms such as `format` and `form`.",
+    };
+    expect(areMateriallySameObjections(original, superset)).toBe(true);
+    expect(areMateriallySameObjections(superset, original)).toBe(true);
+  });
+
+  it("recognises un-named corpus objection pairs (publishableRepoPath prefix handling)", () => {
+    // Both findings from run-f3d47cf8 (uncited in labels/acceptance criteria) concern
+    // publishableRepoPath returning unpublishable/raw paths when repository prefix match fails.
+    const probePathA = {
+      id: "design_serves_overall_goal",
+      justification:
+        "The probe generally reuses ensureGitWorkspace and verifyBaseGreen and isolates refs correctly, but its newly introduced publishableRepoPath returns unpublishable paths when an exact match fails, bypassing workspace isolation.",
+    };
+    const probePathB = {
+      id: "design_serves_overall_goal",
+      justification:
+        "The probe module generally centralizes the workflow and reuses ensureGitWorkspace and verifyBaseGreen, but publishableRepoPath still exposes internal workspaces when path resolution cannot find a clean repo prefix.",
+    };
+    const unrelatedCollision = {
+      id: "design_serves_overall_goal",
+      justification:
+        "Although the change consistently applies `publishableRepoPath`, it removes the collision handling that kept the two reported workspace values distinct.",
+    };
+
+    expect(areMateriallySameObjections(probePathA, probePathB)).toBe(true);
+    expect(areMateriallySameObjections(probePathB, probePathA)).toBe(true);
+    expect(areMateriallySameObjections(probePathA, unrelatedCollision)).toBe(false);
+    expect(areMateriallySameObjections(unrelatedCollision, probePathA)).toBe(false);
+  });
 });
 
 describe("hasRepeatedObjection", () => {
@@ -732,6 +772,57 @@ describe("decideCompletionReview — dynamic attempts for new findings & headroo
     if (decision.action === "skip") {
       expect(decision.reason).toContain("repeated objection");
     }
+  });
+
+  it("skips when a reworded superset objection repeats an attempted complaint under the same rubric id (AC-2)", () => {
+    const attempted = fail(
+      "design_serves_overall_goal",
+      "The design still bases proposition extraction on extensive hand-authored `META_TOKENS`, `GENERIC_CONTAINER_TOKENS`, `GENERIC_VERB_TOKENS`, `CONDITION_TOKENS`, and `DEFECT_CATEGORIES` lists.",
+    );
+    const current = fail(
+      "design_serves_overall_goal",
+      "The replacement remains materially vocabulary-driven: `META_TOKENS`, `GENERIC_CONTAINER_TOKENS`, `GENERIC_VERB_TOKENS`, `CONDITION_TOKENS`, and `DEFECT_CATEGORIES` determine proposition contents and operands. The generic `at` stemming suffix can also conflate unrelated terms such as `format` and `form`.",
+    );
+
+    const decision = decideCompletionReview({
+      sealingDiffBase: LATER,
+      baseCommit: BASE,
+      reviewAttemptsUsed: 2,
+      sealingVerdictHasRubricFailures: true,
+      currentFindings: [current],
+      attemptedFindings: [attempted],
+      progressGrantsUsed: 1,
+      hasStepHeadroom: true,
+      hasBudgetHeadroom: true,
+    });
+    expect(decision.action).toBe("skip");
+    if (decision.action === "skip") {
+      expect(decision.reason).toContain("repeated objection");
+    }
+  });
+
+  it("grants review when a genuinely different second objection is raised under the same rubric id (AC-2)", () => {
+    const attempted = fail(
+      "design_serves_overall_goal",
+      "The oversized-endpoint fallback in `renderCompletionReviewConcerns` calls clampText on the oldest and newest findings.",
+    );
+    const current = fail(
+      "design_serves_overall_goal",
+      "Raw SQL queries in `db/query.ts` do not parameterize user input, introducing SQL injection vulnerabilities.",
+    );
+
+    const decision = decideCompletionReview({
+      sealingDiffBase: LATER,
+      baseCommit: BASE,
+      reviewAttemptsUsed: 2,
+      sealingVerdictHasRubricFailures: true,
+      currentFindings: [current],
+      attemptedFindings: [attempted],
+      progressGrantsUsed: 1,
+      hasStepHeadroom: true,
+      hasBudgetHeadroom: true,
+    });
+    expect(decision.action).toBe("review");
   });
 
   it("skips when one finding is resolved but another previously attempted finding persists", () => {
