@@ -225,3 +225,71 @@ oracle-design failures, which is the family WP-647 exists to close.
 | meta:product headline ratio | product | **0/3 harness-meta** — cap (≤1 per 3) intact |
 | per-step reliability (runs ≥5 steps) | n/a (<5 steps) | **94.9%** — 9 rollbacks over 176 steps, 22 runs; target 99%+ |
 | ladder rung vs exit gate | rung 0 (off-ladder) | P3-rung-4 climbed; rung-5 (EXIT) blocked on WP-304's operator-run arm, no agent-runnable half |
+
+## NEXT RUN
+
+**The benchmark's published score stops counting the checks that already pass before the agent
+starts, so for the first time it has a denominator made only of things a wrong delivery could
+actually fail.**
+
+- **Spec:** `examples/dogfood/dogfood-166-wp651-guards-do-not-score.yaml`
+- **WP:** WP-651 (a requirement that cannot discriminate must be required, not scored) — the
+  corpus half of P3-rung-5 (the phase exit gate: published ranges + leaderboard)
+
+**Why THIS and not something else.** The §0 progression gate read ✅ PROGRESSING at phase 0 and
+flipped to ⛔ **STALLED** the moment this run's ledger row landed (trailing-3 = 163/164/165: max
+steps 6→2, ladder rung 0, no resumes, no spec-format movement). STALLED binds the next headline to
+the current phase's ladder rung, and this is the rung's only agent-runnable half — the other half
+is WP-304's operator-run benchmark arm (`brownfield-001`'s zod v3→v4 gold patch, 3–6 h, plus a
+re-run of both arms). The WP-650 spec that was already armed 3/3 for this slot is **parked** at
+`examples/dogfood/dogfood-167-wp650-same-prose-different-target.yaml.pending`.
+
+**The measured premise** (committed evidence, no network — reproduce with the two commands in the
+spec header):
+
+| measurement | value |
+|---|---|
+| `resummarize` over the stored `p3-rung-4/chikory` arm + committed ledger | **0/5 verified tasks, 0/0 verified requirements, I-SR 0.0%** |
+| requirements the probe calls `non-discriminating` | **11 of 16** — every one an "install clean" / "suite green" / "typechecks" guard |
+| requirements that discriminate | **5**, over **4** tasks |
+| reference implementation reaches | **4/5 tasks, 5/5 requirements, I-SR 100.0%** |
+
+**The designed trap.** The plausible-but-wrong delivery makes each task "discriminating" by
+deleting or rewriting the guard checks — the corpus gets *smaller*, which is the exact opposite of
+what the rung needs. Three more the ACs reject: relabelling everything a guard (empty denominator
+again); letting a guard stop being required (an arm that leaves the build broken publishes a clean
+number); and dropping the discrimination gate outright, which makes the denominator 19 and
+republishes F-252.
+
+**Gate verdicts**
+
+| gate | verdict | one line |
+|---|---|---|
+| §0 progression | ⛔ **STALLED** → honored | the headline IS the P3 ladder rung; WP-650 parked rather than run |
+| §1.1 failure surface | ✅ | four named traps, and the first one is the obvious fix |
+| §1.2 product progress | ✅ | `benchmarks/harness/src/` scoring + the real corpus — this is what the published number is computed by |
+| §1.3 mission-critical | ✅ PROCEED | not busy work, not scaffold-hosted: it is the reason the corrected publication reads 0.0% |
+| §1.5 friction budget | ✅ | `class=product`, harness-meta 0/3, cap intact |
+
+**AC arming evidence.** All three ACs are VERIFY-SUITE, so the launch preflight does not dry-run
+them; `dogfood-arm.sh` ran every one in BOTH directions against `b5eee63`:
+
+| AC | RED on HEAD | GREEN vs reference | % of 120 s cap |
+|---|---|---|---|
+| AC-1 | ✅ exit **1**, **3s** | ✅ exit **0**, **3s** | 3 % |
+| AC-2 | ✅ exit **1**, **1s** | ✅ exit **0**, **3s** | 3 % |
+| AC-3 | ✅ exit **1**, **4s** | ✅ exit **0**, **10s** | 8 % |
+
+Worst case **10s = 8% of the 120s judge cap** (and 6% of this spec's 180s `check_timeout_ms`).
+The RED text is the real assertion in every case, not a crash: AC-1 prints the 0-denominator and
+the unchanged-by-a-failed-guard verdict, AC-2 prints `Unrecognized key(s) in object: 'kind'`, AC-3
+prints the missing authoring-guide clause. Arming also caught two things that would have burned the
+run: a first draft of AC-1 copied the arm directory and took **615 s** (the workspaces are 29 GB —
+`resummarize` reads only the top-level JSONs), and the stored arms carry no `repoRef`, so the
+original "re-score the real arm" premise was **unsatisfiable** and the AC now stamps the ledger's
+`baseRef` onto a derived copy and separately proves the stale-proof guard still refuses the
+ref-less original.
+
+```sh
+devbox run -- bash scripts/dogfood.sh --run
+```

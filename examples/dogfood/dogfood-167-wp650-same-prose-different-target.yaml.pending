@@ -1,3 +1,9 @@
+# PARKED 2026-08-22 (dogfood-165 review). ARMED 3/3 BOTH WAYS against `b5eee63` — AC-1 RED 3s /
+# GREEN 2s · AC-2 RED 1s / GREEN 2s · AC-3 RED 106s / GREEN 93s (88% of the 120s judge cap, 59% of
+# this spec's 180s check_timeout_ms). Parked because the progression gate flipped to ⛔ STALLED when
+# dogfood-165's ledger row landed, which binds the next headline to the P3 ladder rung (dogfood-166,
+# WP-651). BEFORE LAUNCHING: re-measure AC-3's suite floor — it is 1819 against a 1815 baseline, and
+# dogfood-166 will move that baseline.
 # Plain: when the judge complains about two DIFFERENT pieces of code in the same words, the loop
 # currently thinks it has been told the same thing twice — 60 times out of 120, on complaints built
 # from this campaign's own judge prose. It then refuses to pay for the second repair. After this run
@@ -63,7 +69,7 @@
 #     workflow — no I/O, no clock, no randomness, no reading a fixture at runtime), and
 #     byte-identical justifications must stay "same". `MAX_PROGRESS_GRANTS` stays.
 
-name: dogfood-166-wp650-same-prose-different-target
+name: dogfood-167-wp650-same-prose-different-target
 wp: WP-650
 
 goal: |
@@ -78,7 +84,7 @@ goal: |
     such locus for an exported SDK function drawn from `git grep '^export function' -- src` (322
     symbols, 3 deterministic rounds → **120 pairs**). Each twin is the same complaint about a
     DIFFERENT piece of code. `areMateriallySameObjections`
-    (`packages/sdk-ts/src/workflow/completion-review.ts:570`) answers "same" on **60 of 120 —
+    (packages/sdk-ts/src/workflow/completion-review.ts, line 570 today) answers "same" on **60 of 120 —
     50.0%**. The pre-WP-644 comparator measures the same 60, so this is long-standing, not a
     regression.
   - On the 8 labelled restatements it answers "same" **7** times (WP-644, dogfood-165).
@@ -115,7 +121,7 @@ goal: |
      under the SDK's src tree contains a 48-character substring of any corpus justification, and
      fails if `objection-corpus.json` or `objection-labels.json` changes by a single byte.
   3. **The call shape and the workflow constraints stay.** `areMateriallySameObjections` keeps its
-     two-argument shape over `{ id: string; justification: string }`, PURE and replay-safe — it
+     two-argument shape over the same { id, justification } pair, PURE and replay-safe — it
      executes inside the Temporal workflow, so no I/O, no wall-clock reads, no randomness, no
      reading a fixture at runtime. Byte-identical justifications stay "same". `MAX_PROGRESS_GRANTS`
      stays. The rubric-id equality gate stays. `mergeDesignFindings` and the WP-648 deterministic
@@ -126,7 +132,7 @@ goal: |
   Pin your work with tests that live in the repo, beside the files they cover. A behaviour proved
   only by the acceptance checks that grade this run is not pinned at all (F-356), and a repo test
   copied case-for-case from a grading check inherits its blind spots (F-403). The existing
-  `packages/sdk-ts/test/runner/objection-corpus-floors.test.ts` already reads the corpus and pins
+  `test/runner/objection-corpus-floors.test.ts` already reads the corpus and pins
   dogfood-165's three numbers — extend that pinning to the behaviour you add, and drive at least one
   locus-substitution pair these acceptance criteria do not name.
 
